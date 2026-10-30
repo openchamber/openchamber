@@ -291,13 +291,17 @@ macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS i
 
 ### Windows signing through SignPath
 
-The desktop smoke workflow (`sign_windows` input) signs the Windows build through SignPath; real releases stay unsigned for now. The signing policy, organization and project are the `env` block at the top of `release-desktop-smoke.yml`. `scripts/windows-signpath.mjs` drives the build in two passes, each followed by one signing request that holds both architectures, so a run needs two approvals in SignPath:
+`.github/workflows/windows-signed-build.yml` builds and signs the Windows app; the signing policy, organization and project are the `env` block at its top. Two workflows call it: the desktop smoke workflow (`sign_windows` input) and `release-windows.yml`, which adds the signed files to the draft release and publishes it. Releases still come unsigned from `release.yml` until the SignPath Foundation certificate is issued. `scripts/windows-signpath.mjs` drives the build in two passes, each followed by one signing request that holds both architectures, so a build needs two approvals in SignPath:
 
 1. `build-app` builds the app and stages `OpenChamber.exe` and the NSIS uninstaller. The request uses the `windows-app` artifact configuration.
 2. `build-installer` puts the signed `OpenChamber.exe` into the same unpacked app and builds the installer from it (`--prepackaged`), with the signed uninstaller in place. The request uses `windows-installer`.
 3. `finalize` regenerates the blockmap and `latest.yml`, which electron-builder computed from the unsigned installer.
 
 Only those executables are ours. Electron's DLLs, `elevate.exe`, the bundled OpenCode CLI, ripgrep and node-pty's binaries come from upstream projects, and SignPath Foundation's terms forbid signing them with our certificate; they ship unsigned inside the signed installer.
+
+#### Why Windows releases get their own workflow
+
+SignPath refuses a signing request from a run where any job ran on a runner other than GitHub-hosted, including jobs that never touched the Windows files. `release.yml` runs npm, macOS and Linux on Blacksmith runners, so signing inside it fails. `release-windows.yml` builds and signs in a run of its own. Re-signing the installers `release.yml` built is ruled out: SignPath vouches that a file was built from the source in the run that asks for the signature.
 
 #### Why the second pass reuses the unpacked app instead of building again
 

@@ -29,7 +29,7 @@ on:
         default: true
         type: boolean
       sign_windows:
-        description: Sign the Windows build through SignPath (each of its two signing requests waits for approval in SignPath)
+        description: Sign the Windows build through SignPath instead (builds the commit this workflow runs from; turn off macOS and Linux, SignPath refuses runs with Blacksmith jobs)
         required: false
         default: false
         type: boolean
@@ -46,12 +46,6 @@ on:
 
 permissions:
   contents: read
-
-env:
-  # test-signing signs with SignPath's untrusted test certificate.
-  SIGNPATH_SIGNING_POLICY: test-signing
-  SIGNPATH_ORGANIZATION_ID: 93af596b-78c4-47ad-a997-0a6ed795b76e
-  SIGNPATH_PROJECT: openchamber
 
 jobs:
   build-macos-electron:
@@ -197,7 +191,7 @@ jobs:
           retention-days: ${{ fromJSON(inputs.retention_days) }}
 
   build-windows-electron:
-    if: ${{ inputs.build_windows }}
+    if: ${{ inputs.build_windows && !inputs.sign_windows }}
     name: Build Windows Electron (${{ matrix.arch }})
     # Match the production release workflow. windows-latest currently resolves
     # to a runner with Visual Studio 18, which this Electron/node-gyp stack does
@@ -210,30 +204,15 @@ jobs:
           - arch: x64
             target: x86_64-pc-windows-msvc
             platform: win32-x64
-            unpacked: win-unpacked
           - arch: arm64
             target: aarch64-pc-windows-msvc
             platform: win32-arm64
-            unpacked: win-arm64-unpacked
-    outputs:
-      version: ${{ steps.app_version.outputs.version }}
     steps:
       - name: Checkout selected ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ inputs.repository || github.repository }}
           ref: ${{ inputs.ref || github.ref }}
-
-      # SignPath verifies the origin from this run, so a signed build must be
-      # the run's own commit, never another repository or ref.
-      - name: Require the run's own commit for signing
-        if: ${{ inputs.sign_windows }}
-        shell: bash
-        env:
-          REPOSITORY: ${{ inputs.repository || github.repository }}
-        run: |
-          test "$REPOSITORY" = "$GITHUB_REPOSITORY" || { echo "Signing builds only $GITHUB_REPOSITORY, got $REPOSITORY"; exit 1; }
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA" || { echo "Signing builds only the commit of this run ($GITHUB_SHA); set ref to the branch the workflow runs from"; exit 1; }
 
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -245,11 +224,6 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
-      - name: Get app version
-        id: app_version
-        shell: bash
-        run: echo "version=$(node -p "require('./packages/electron/package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Get bundled OpenCode CLI version
         id: opencode_cli_version
@@ -297,7 +271,6 @@ jobs:
         run: node ./scripts/rebuild-native.mjs
 
       - name: Build Windows app
-        if: ${{ !inputs.sign_windows }}
         working-directory: packages/electron
         shell: bash
         env:
@@ -308,7 +281,6 @@ jobs:
           bun run verify:opencode-cli:packaged
 
       - name: Upload Windows installable artifacts
-        if: ${{ !inputs.sign_windows }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-release-smoke-windows-${{ matrix.arch }}
@@ -319,217 +291,32 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ fromJSON(inputs.retention_days) }}
 
-      - name: Build Windows app for signing
-        if: ${{ inputs.sign_windows }}
-        working-directory: packages/electron
-        shell: bash
-        env:
-          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
-        run: |
-          node ./scripts/windows-signpath.mjs build-app ${{ matrix.arch }} dist/signpath/app
-          bun run verify:opencode-cli:packaged
-
-      - name: Upload executables to sign
-        if: ${{ inputs.sign_windows }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-app-${{ matrix.arch }}
-          path: packages/electron/dist/signpath/app
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload unpacked app
-        if: ${{ inputs.sign_windows }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-unpacked-${{ matrix.arch }}
-          path: packages/electron/dist/${{ matrix.unpacked }}
-          if-no-files-found: error
-          retention-days: 1
-
-  # Both architectures go into one signing request, so a run waits for two
-  # approvals in SignPath: the app executables, then the installers.
-  sign-windows-app:
-    needs: build-windows-electron
+  check-windows-signing-source:
     if: ${{ inputs.build_windows && inputs.sign_windows }}
-    name: Sign Windows app executables
+    name: Check what Windows signing builds
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
     steps:
-      - name: Download executables to sign
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: windows-app-*
-          path: signpath/unsigned
-
-      - name: Upload signing request artifact
-        id: unsigned
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: signpath-request-app
-          path: signpath/unsigned
-          if-no-files-found: error
-          retention-days: 1
-          overwrite: true
-
-      - name: Sign through SignPath
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ env.SIGNPATH_PROJECT }}
-          signing-policy-slug: ${{ env.SIGNPATH_SIGNING_POLICY }}
-          artifact-configuration-slug: windows-app
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signpath/signed
-          parameters: |
-            version: ${{ toJSON(needs.build-windows-electron.outputs.version) }}
-
-      - name: Upload signed executables
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: signpath-signed-app
-          path: signpath/signed
-          if-no-files-found: error
-          retention-days: 1
-          overwrite: true
-
-  build-windows-installer:
-    needs: sign-windows-app
-    name: Build signed Windows installer (${{ matrix.arch }})
-    runs-on: windows-2022
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x64, arm64]
-    steps:
-      - name: Checkout the run's commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Download unpacked app
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: windows-unpacked-${{ matrix.arch }}
-          path: packages/electron/dist/signpath/unpacked
-
-      - name: Download signed executables
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: signpath-signed-app
-          path: packages/electron/dist/signpath/signed
-
-      - name: Build installer from the signed app
-        working-directory: packages/electron
-        shell: bash
-        run: node ./scripts/windows-signpath.mjs build-installer ${{ matrix.arch }} dist/signpath/unpacked dist/signpath/signed/windows-app-${{ matrix.arch }}
-
-      - name: Upload installer to sign
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-installer-${{ matrix.arch }}
-          path: |
-            packages/electron/dist/*.exe
-            packages/electron/dist/latest.yml
-          if-no-files-found: error
-          retention-days: 1
-          overwrite: true
-
-  sign-windows-installer:
-    needs: [build-windows-electron, build-windows-installer]
-    name: Sign Windows installers
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-    env:
-      VERSION: ${{ needs.build-windows-electron.outputs.version }}
-    steps:
-      - name: Checkout the run's commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Download installers to sign
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: windows-installer-*
-          path: signpath/installers
-
-      - name: Upload signing request artifact
-        id: unsigned
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: signpath-request-installers
-          path: signpath/installers/*/*.exe
-          if-no-files-found: error
-          retention-days: 1
-          overwrite: true
-
-      - name: Sign through SignPath
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ env.SIGNPATH_PROJECT }}
-          signing-policy-slug: ${{ env.SIGNPATH_SIGNING_POLICY }}
-          artifact-configuration-slug: windows-installer
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: signpath/signed
-          parameters: |
-            version: ${{ toJSON(env.VERSION) }}
-
-      - name: Update blockmaps and latest.yml for the signed installers
-        shell: bash
+      # SignPath vouches for the commit of this run, so a signed build never
+      # takes another repository or ref.
+      - name: Require the run's own repository and ref
+        env:
+          REPOSITORY: ${{ inputs.repository || github.repository }}
+          REF: ${{ inputs.ref }}
         run: |
-          set -euo pipefail
-          for arch in x64 arm64; do
-            cp "signpath/installers/windows-installer-$arch/latest.yml" "signpath/signed/windows-installer-$arch/"
-            node packages/electron/scripts/windows-signpath.mjs finalize "signpath/signed/windows-installer-$arch" "$VERSION"
-          done
+          test "$REPOSITORY" = "$GITHUB_REPOSITORY" || { echo "Signing builds only $GITHUB_REPOSITORY, got $REPOSITORY"; exit 1; }
+          test -z "$REF" || test "$REF" = "$GITHUB_REF_NAME" || test "$REF" = "$GITHUB_SHA" || { echo "Signing builds the ref this workflow runs from ($GITHUB_REF_NAME), got $REF"; exit 1; }
 
-      - name: Upload Windows installable artifacts (x64)
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: desktop-release-smoke-windows-x64
-          path: signpath/signed/windows-installer-x64
-          if-no-files-found: error
-          retention-days: ${{ fromJSON(inputs.retention_days) }}
-          overwrite: true
-
-      - name: Upload Windows installable artifacts (arm64)
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: desktop-release-smoke-windows-arm64
-          path: signpath/signed/windows-installer-arm64
-          if-no-files-found: error
-          retention-days: ${{ fromJSON(inputs.retention_days) }}
-          overwrite: true
+  sign-windows-electron:
+    needs: check-windows-signing-source
+    name: Signed Windows build
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/windows-signed-build.yml
+    with:
+      retention_days: ${{ fromJSON(inputs.retention_days) }}
+    secrets:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
 
   build-linux-electron:
     if: ${{ inputs.build_linux }}
