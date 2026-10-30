@@ -222,6 +222,14 @@ describe('incremental LFS file discovery', () => {
     expect(fixture.calls).toHaveLength(6);
   });
 
+  it('treats an empty filter value from `filter=` as not LFS', async () => {
+    const fixture = scanFixture([
+      { path: 'docs/small.pdf', content: 'ordinary' },
+      { path: 'docs/large.pdf', content: 'ordinary' },
+    ], { attribute: (file) => file === 'docs/small.pdf' ? '' : 'lfs' });
+    expect(discoverLfs(input(await fixture.run())).attributePaths).toEqual(['docs/large.pdf']);
+  });
+
   it('skips large blobs and absent superproject gitlink objects without fetching content', async () => {
     const fixture = scanFixture([{ path: 'large', content: Buffer.alloc(2 * 1024 * 1024) }]);
     expect(await fixture.run()).toMatchObject({ pointerScanComplete: true, pointerSamples: [] });
