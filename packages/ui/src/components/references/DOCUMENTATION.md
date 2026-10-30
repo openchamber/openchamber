@@ -458,6 +458,9 @@ preview's footer holds actions instead of what the agent gets.
   alone, so a change made on the host's own site shows without waiting out
   the cache and without a read of everything else. The branch's tab also asks
   the branch's PR status again, since it reads state, head and checks there.
+- Every item preview, repository and tracker alike, has a copy-link button
+  just before the host link (`useCopyReferenceLink`); a toast confirms the
+  copy. The session panel's linked rows use the same hook.
 - The board's list has a refresh button of its own after the filter. It reads
   what is listed again (`{ lists: true }`, `scope=lists`; a tracker's
   `trackers.refreshListReads(provider)`), with the checks of the listed PRs, so an item

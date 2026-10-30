@@ -28,6 +28,7 @@ import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
+import { useCopyReferenceLink } from '@/components/references/useCopyReferenceLink';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { resolveDraftPinnedKnowledge } from './draftKnowledge';
@@ -261,6 +262,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     return looks;
   }, [branchPrSummary, changeSummaries, linkedTrackerEntries, linkedWorkItemStates, repositoryChanges, repositoryIssueRefs, repositoryIssueStates, t, urlMatcher]);
   const openTrackerItem = useOpenTrackerItem();
+  const copyLink = useCopyReferenceLink();
   const leaveWorkStatus = useLeaveWorkStatus();
   const trackerDescriptors = useTrackerDescriptors();
   // Connected servers only. A disabled server contributes nothing to the
@@ -397,22 +399,40 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
             openTrackerItem(entry.url, directory, event);
             leaveWorkStatus?.();
           }}
+          className="group/linked"
           // The panel that shows what a session carries is the one that can
           // take an item back off; a pinned row's control is the precedent.
           // This sits in the trailing value slot, where row actions live.
+          // Copying the link waits for a hover in its reserved space, so the
+          // row at rest keeps one action; a touch screen has no hover and
+          // shows it always.
           value={(
-            <button
-              type="button"
-              disabled={!sessionId || !directory}
-              aria-label={t('chat.workStatus.linkedIssues.unlink')}
-              onClick={(event) => {
-                event.stopPropagation();
-                unlinkLinkedThread(entry);
-              }}
-              className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground"
-            >
-              <Icon name="close" className="size-3.5" />
-            </button>
+            <>
+              <button
+                type="button"
+                aria-label={t('references.link.copy')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  copyLink(entry.url);
+                }}
+                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-[color,opacity] hover:text-foreground focus-visible:opacity-100 group-hover/linked:opacity-100 pointer-coarse:p-2 pointer-coarse:opacity-100"
+              >
+                <Icon name="link" className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                disabled={!sessionId || !directory}
+                aria-label={t('chat.workStatus.linkedIssues.unlink')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  unlinkLinkedThread(entry);
+                }}
+                // A finger needs more than the icon, and a missed copy must not land on unlink.
+                className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground pointer-coarse:p-2"
+              >
+                <Icon name="close" className="size-3.5" />
+              </button>
+            </>
           )}
           ariaLabel={entry.kind === 'tracker'
             ? t('chat.workStatus.linkedIssues.openTrackerItem', { identifier: entry.identifier, provider: trackerNameOf(entry.provider) })

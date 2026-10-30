@@ -735,6 +735,12 @@ drop a link the user set (`packages/web/server/lib/openchamber-sessions/session-
 A failed removal reports `chat.workStatus.linkedIssues.unlinkFailed` rather than
 leaving the row looking removed.
 
+Before the close control sits a copy-link control (`useCopyReferenceLink`, the
+same one the Tracker preview's header uses). It shows on hover in space the row
+keeps for it, and always on a coarse pointer, which has no hover: at rest a row
+keeps one action, and the copy is confirmed by a toast since nothing on screen
+changes.
+
 Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
 `openchamber.linked_issues`), persisted through the same server-owned metadata
 store as pinned messages. Number, title, url, author and avatar only — the
