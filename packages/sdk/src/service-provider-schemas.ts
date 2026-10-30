@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import {
   BROWSER_CONTROL_ACTIONS,
+  NOTIFICATIONS_PROVIDER_METHODS,
+  type NotificationsProviderMethod,
   SOURCE_CONTROL_OUTBOUND_BODY_MAX,
   SOURCE_CONTROL_OUTBOUND_METHODS,
   SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS,
@@ -11,6 +13,7 @@ import {
   SOURCE_CONTROL_PROVIDER_TARGET_MAX,
   type SourceControlProviderMethod,
 } from './service-providers.ts';
+import { SESSION_EVENT_ERROR_MAX, type GuestSessionEventResult } from './session-events.ts';
 
 /**
  * Host-side parse of what a browser provider answers. `data` stays whatever
@@ -21,6 +24,21 @@ export const browserProviderResultSchema = z.union([
   z.object({ ok: z.literal(true), data: z.object({}).passthrough() }),
   z.object({ ok: z.literal(false), error: z.string().min(1).max(2_000) }),
 ]);
+
+/**
+ * Host-side parse of what a service answers a session event with. OpenChamber
+ * acts on nothing in it beyond logging a failure's `error`; an answer that does
+ * not parse is a failed delivery, never a delivered one.
+ */
+export const sessionEventResultSchema = z.union([
+  z.object({ ok: z.literal(true) }).strict(),
+  z.object({ ok: z.literal(false), error: z.string().min(1).max(SESSION_EVENT_ERROR_MAX) }).strict(),
+]);
+
+type ParsedSessionEventResult = z.output<typeof sessionEventResultSchema>;
+const assertSessionEventResultParsed: (value: ParsedSessionEventResult) => GuestSessionEventResult = (value) => value;
+const assertSessionEventResultContract: (value: GuestSessionEventResult) => ParsedSessionEventResult = (value) => value;
+void assertSessionEventResultParsed; void assertSessionEventResultContract;
 
 export const browserControlActionSchema = z.enum(BROWSER_CONTROL_ACTIONS);
 
@@ -278,3 +296,39 @@ export const sourceControlProviderSchemasV1 = {
 };
 
 export const sourceControlProviderMethodSchema = z.enum(SOURCE_CONTROL_PROVIDER_METHODS);
+
+/*
+ * Host-side parse of what a notifications provider answers. The envelope and
+ * the error are the Git host's: `ok: true` with `data`, or `ok: false` with
+ * `{ message, status?, code? }`, and a 401 writes the account off only when
+ * OpenChamber's proxy saw the channel's server answer it.
+ */
+
+const notificationsAccountSchema = z.object({
+  account: z.object({
+    id: z.string().min(1).max(256),
+    login: z.string().min(1).max(256),
+    name: optionalText,
+  }),
+});
+
+const notificationsNotifySchema = z.object({ delivered: z.literal(true) }).strict();
+
+const notificationsDataSchemas = {
+  'auth.verify': notificationsAccountSchema,
+  'auth.probe': probeSchema,
+  notify: notificationsNotifySchema,
+} satisfies Record<NotificationsProviderMethod, z.ZodType>;
+
+/** Wire 1 of the notifications role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
+export const notificationsProviderSchemasV1 = {
+  envelope: envelopeSchema,
+  error: errorSchema,
+  account: notificationsAccountSchema,
+  probe: probeSchema,
+  notify: notificationsNotifySchema,
+  outboundRequest: outboundRequestSchema,
+  data: notificationsDataSchemas,
+};
+
+export const notificationsProviderMethodSchema = z.enum(NOTIFICATIONS_PROVIDER_METHODS);

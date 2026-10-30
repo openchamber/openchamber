@@ -1,6 +1,7 @@
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
 import type { FileEditorContribution } from './file-editor.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_DEFAULT, type StatusSectionSource } from './status-view.ts';
+import type { PublicSessionEvents, SessionEventsContribution } from './session-events.ts';
 
 export const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -328,11 +329,13 @@ export type PublicSocketBinding = {
  * Host roles a service can stand in for. `browser` answers the agent's
  * `browser.*` actions in place of the in-app browser view. `source-control`
  * makes the extension a Git host next to GitHub, GitLab and Gitea, described
- * by `contributes.sourceControl`. Both contracts are in `service-providers.ts`.
+ * by `contributes.sourceControl`. `notifications` makes it a delivery channel
+ * for the user's notifications next to the desktop and the phone, described
+ * by `contributes.notifications`. The contracts are in `service-providers.ts`.
  * A service that provides a role needs no panel or background entry: the host
  * starts it on the first call.
  */
-export const GUEST_SERVICE_PROVIDES = ['browser', 'source-control'] as const;
+export const GUEST_SERVICE_PROVIDES = ['browser', 'source-control', 'notifications'] as const;
 export type GuestServiceProvides = (typeof GUEST_SERVICE_PROVIDES)[number];
 
 /**
@@ -343,6 +346,58 @@ export type GuestServiceProvides = (typeof GUEST_SERVICE_PROVIDES)[number];
 export const SOURCE_CONTROL_GUEST_ID_MAX = 28;
 /** The provider id OpenChamber gives the Git host an extension provides. */
 export const sourceControlProviderIdOf = (guestId: string): string => `ext-${guestId}`;
+
+/** The notification channel is named `ext-<panel.id>` the same way, within the same 32 characters. */
+export const NOTIFICATIONS_GUEST_ID_MAX = 28;
+/** The provider id OpenChamber gives the notification channel an extension provides. */
+export const notificationProviderIdOf = (guestId: string): string => `ext-${guestId}`;
+
+/**
+ * `contributes.notifications`: the delivery channel an extension with
+ * `service.provides: ["notifications"]` adds, declared in the manifest so
+ * OpenChamber can draw its account card and route to it without starting the
+ * service. The account is OpenChamber's: the user connects it in Settings →
+ * Integrations, the token stays in OpenChamber, and the service reaches the
+ * channel's server through OpenChamber's outbound proxy with a per-call handle.
+ */
+export type NotificationsContribution = {
+  /** The channel's name on its account card, shown untranslated. 1 to 64 characters. */
+  label: string;
+  /**
+   * Where every account lives: one `fixed` https origin (Slack's API), or an
+   * origin the `user` types when connecting (a Matrix homeserver), with the
+   * field's label and an optional example.
+   */
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  /** How OpenChamber sends the token: which header, with which prefix. Same rules as `contributes.sourceControl.token`. */
+  token: {
+    header: 'authorization' | 'private-token';
+    scheme: 'bearer' | 'token' | 'basic' | 'none';
+    /** Settings asks for the account's username beside the token. Required with, and only with, `basic`. */
+    username?: boolean;
+    /** Scopes the Settings card asks the user to grant. */
+    scopes?: string[];
+    /** Path on the instance where tokens are created, linked from Settings. */
+    createPath?: string;
+  };
+};
+
+/** What the extension catalog and approval dialog show of the channel; never a token. */
+export type PublicNotifications = {
+  label: string;
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  token: { scheme: 'bearer' | 'token' | 'basic' | 'none'; username: boolean; scopes: string[]; createPath?: string };
+};
+
+export const toPublicNotifications = (contribution: NotificationsContribution): PublicNotifications => {
+  const token: PublicNotifications['token'] = {
+    scheme: contribution.token.scheme,
+    username: contribution.token.username === true,
+    scopes: [...(contribution.token.scopes ?? [])],
+  };
+  if (contribution.token.createPath) token.createPath = contribution.token.createPath;
+  return { label: contribution.label, instances: { ...contribution.instances }, token };
+};
 
 /** Default instances a Git host extension may name. */
 export const SOURCE_CONTROL_DEFAULT_INSTANCES_MAX = 4;
@@ -530,9 +585,11 @@ export const serviceProvides = (
  * `shells` are declared under `contributes.capabilities`; `service`, `network`,
  * `filesystem` and `origins` follow from `contributes.service`,
  * `contributes.integration`, `contributes.filesystem` and `contributes.origins`. `model` is one-off text generation with the
- * user's Small Model (`host.generate`), outside any session.
+ * user's Small Model (`host.generate`), outside any session. `transcript`
+ * follows from `contributes.sessionEvents.content`: the service receives what
+ * the agent said or asked, not only that it did.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -595,6 +652,10 @@ export type OpenChamberContributes = {
   fileEditors?: FileEditorContribution[];
   /** The Git host a `source-control` service provides; present exactly when it does. */
   sourceControl?: SourceControlContribution;
+  /** Session events OpenChamber posts to the service (`session-events.ts`). Needs `service`. */
+  sessionEvents?: SessionEventsContribution;
+  /** The notification channel a `notifications` service provides; present exactly when it does. */
+  notifications?: NotificationsContribution;
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -609,7 +670,7 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
@@ -617,8 +678,15 @@ export const requestedGuestCapabilities = (
   if (contributes.integration) declared.add('network');
   if (contributes.filesystem && contributes.filesystem.length > 0) declared.add('filesystem');
   if (contributes.origins && contributes.origins.length > 0) declared.add('origins');
+  if (contributes.sessionEvents?.content) declared.add('transcript');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
+
+/** What the catalog and the approval dialog show of `contributes.sessionEvents`. */
+export const toPublicSessionEvents = (contribution: SessionEventsContribution): PublicSessionEvents => ({
+  events: [...contribution.events],
+  content: contribution.content === true,
+});
 
 /**
  * Whether the package ships a visible panel. Background-only extensions can
@@ -721,6 +789,7 @@ export type ParseManifestErrorCode =
   | 'invalid-attach'
   | 'invalid-page'
   | 'invalid-status-section'
+  | 'invalid-session-events'
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'

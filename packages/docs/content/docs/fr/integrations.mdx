@@ -91,6 +91,12 @@ Active **Session comments** dans la carte Linear : une session démarrée depuis
 
 Les intégrations s'installent pour ton utilisateur et fonctionnent donc dans tous les projets. Tu peux les mettre à jour ou les retirer à tout moment depuis la même carte.
 
+## Canaux de notification des extensions
+
+Une [extension](/fr/extensions/) peut transmettre tes notifications vers Slack, Matrix ou un serveur à elle. Une fois que tu l'as autorisée dans **Settings → Extensions**, elle reçoit une carte sous **Extension accounts** sur cette page. Saisis-y le jeton du compte, et l'adresse du serveur quand la carte la demande, puis connecte : à partir de là, l'extension reçoit les mêmes notifications que ton téléphone, selon tes [réglages de notification](/fr/notifications/). Le jeton reste dans OpenChamber ; le service de l'extension envoie via OpenChamber et ne le voit jamais.
+
+Si le serveur refuse le jeton plus tard, la carte indique que le compte a besoin d'attention ; reconnecte-le avec un nouveau jeton. Déconnecte pour arrêter les envois sans retirer l'extension, ou mets l'extension en pause. Retirer l'extension oublie le compte.
+
 ## Claude Code
 
 Claude Code utilise ton plan Claude Pro ou Max via la CLI Claude Code installée sur ta machine — sans clés API.

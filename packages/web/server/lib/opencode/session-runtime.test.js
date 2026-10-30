@@ -245,6 +245,7 @@ describe('session runtime', () => {
 
     expect(runtime.interruptBusySessionsAfterRestart()).toEqual({
       sessionIds: ['session-busy-1', 'session-busy-2', 'session-busy-3'],
+      autoResumeSessionIds: [],
     });
 
     expect(runtime.getActiveSessionCount()).toBe(0);
@@ -293,7 +294,7 @@ describe('session runtime', () => {
     expect(terminalEvents.some((event) => event.properties.sessionID === 'session-idle')).toBe(false);
 
     events.length = 0;
-    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [] });
+    expect(runtime.interruptBusySessionsAfterRestart()).toEqual({ sessionIds: [], autoResumeSessionIds: [] });
     expect(events).toEqual([]);
   });
 

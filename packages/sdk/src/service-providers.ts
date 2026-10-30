@@ -336,7 +336,8 @@ export const sourceControlProviderTimeoutMs = (method: SourceControlProviderMeth
 /**
  * Environment variable with the base URL of OpenChamber's callback listener
  * (`http://127.0.0.1:<port>`). Set only for a service that provides
- * `source-control`; `createSourceControlForge` reads it.
+ * `source-control` or `notifications`; `createSourceControlForge` and
+ * `createNotificationsOutbound` read it.
  */
 export const OPENCHAMBER_HOST_CALLBACK_URL = 'OPENCHAMBER_HOST_CALLBACK_URL';
 /** Route on the callback listener a service sends a forge request to. */
@@ -611,6 +612,58 @@ type OutboundAnswer = {
   status?: unknown; headers?: unknown; body?: unknown; error?: { message?: unknown; code?: unknown };
 };
 
+type OutboundFailure = (message: string, code: string, status: number) => Error;
+
+/**
+ * One request through OpenChamber's callback listener: the handle as bearer,
+ * the request as JSON, the relayed answer back. `fail` makes the role's own
+ * error for a refusal, a silent host or a malformed relay; an answer of any
+ * status from the far side, 401 included, resolves.
+ */
+const postOutbound = async (
+  url: string,
+  handle: string,
+  request: SourceControlOutboundRequest,
+  timeoutMs: number,
+  fail: OutboundFailure,
+): Promise<SourceControlOutboundResponse> => {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${handle}`, 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+      // A little past OpenChamber's own deadline, so its answer wins.
+      signal: AbortSignal.timeout(timeoutMs + 5_000),
+    });
+  } catch (error) {
+    throw fail(`OpenChamber did not answer: ${error instanceof Error ? error.message : String(error)}`, 'HOST_UNAVAILABLE', 0);
+  }
+  let answer: OutboundAnswer;
+  try {
+    answer = Object(await response.json());
+  } catch {
+    throw fail('OpenChamber answered with something other than JSON', 'HOST_UNAVAILABLE', response.status);
+  }
+  if (!response.ok) {
+    const message = answer.error?.message;
+    const code = answer.error?.code;
+    throw fail(
+      String(message) === message && message.length > 0 ? message : `OpenChamber refused the request (${response.status})`,
+      String(code) === code && code.length > 0 ? code : 'OUTBOUND_REFUSED',
+      response.status,
+    );
+  }
+  if (!Number.isSafeInteger(answer.status) || String(answer.body) !== answer.body) {
+    throw fail('OpenChamber relayed a malformed answer', 'HOST_UNAVAILABLE', response.status);
+  }
+  const headers: SourceControlOutboundResponse['headers'] = {};
+  for (const [name, text] of Object.entries(Object(answer.headers ?? {}))) {
+    if (String(text) === text) headers[name] = text;
+  }
+  return { status: Number(answer.status), headers, body: answer.body };
+};
+
 /**
  * The service's way to the forge: OpenChamber's callback listener
  * (`OPENCHAMBER_HOST_CALLBACK_URL`), which checks the handle, keeps the request
@@ -623,42 +676,217 @@ export const createSourceControlForge = ({ env }: { env: Record<string, string |
   if (!base) throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "source-control" can reach a forge.`);
   const url = `${base.replace(/\/+$/, '')}${SOURCE_CONTROL_OUTBOUND_PATH}`;
   return {
-    async request(handle, request) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          method: 'POST',
-          headers: { authorization: `Bearer ${handle}`, 'content-type': 'application/json' },
-          body: JSON.stringify(request),
-          // A little past OpenChamber's own deadline, so its answer wins.
-          signal: AbortSignal.timeout(SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS + 5_000),
-        });
-      } catch (error) {
-        throw new SourceControlForgeError(`OpenChamber did not answer: ${error instanceof Error ? error.message : String(error)}`, 'HOST_UNAVAILABLE', 0);
-      }
-      let answer: OutboundAnswer;
-      try {
-        answer = Object(await response.json());
-      } catch {
-        throw new SourceControlForgeError('OpenChamber answered with something other than JSON', 'HOST_UNAVAILABLE', response.status);
-      }
-      if (!response.ok) {
-        const message = answer.error?.message;
-        const code = answer.error?.code;
-        throw new SourceControlForgeError(
-          String(message) === message && message.length > 0 ? message : `OpenChamber refused the request (${response.status})`,
-          String(code) === code && code.length > 0 ? code : 'OUTBOUND_REFUSED',
-          response.status,
-        );
-      }
-      if (!Number.isSafeInteger(answer.status) || String(answer.body) !== answer.body) {
-        throw new SourceControlForgeError('OpenChamber relayed a malformed forge answer', 'HOST_UNAVAILABLE', response.status);
-      }
-      const headers: SourceControlOutboundResponse['headers'] = {};
-      for (const [name, text] of Object.entries(Object(answer.headers ?? {}))) {
-        if (String(text) === text) headers[name] = text;
-      }
-      return { status: Number(answer.status), headers, body: answer.body };
-    },
+    request: (handle, request) => postOutbound(url, handle, request, SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS,
+      (message, code, status) => new SourceControlForgeError(message, code, status)),
+  };
+};
+
+/*
+ * Notifications: a service with `provides: ["notifications"]` is the delivery
+ * channel `contributes.notifications` describes, next to the desktop and the
+ * phone. OpenChamber keeps the account and its token. Once the user connects
+ * one, every notification OpenChamber decides to show goes to the service at
+ * `NOTIFICATIONS_PROVIDER_PATH` as `notify`, and the service sends it on
+ * through OpenChamber's outbound proxy (`createNotificationsOutbound`), which
+ * pins the account's origin and adds the token. The service never sees a token.
+ */
+
+/** Route on the service loopback OpenChamber posts every notifications call to. */
+export const NOTIFICATIONS_PROVIDER_PATH = '/notifications';
+/** The `v` of every request; a service answers a version it does not know with HTTP 400. */
+export const NOTIFICATIONS_PROVIDER_WIRE_VERSION = 1;
+/**
+ * `auth.verify` reads who a candidate token belongs to, `auth.probe` whether
+ * an instance is this channel's server, `notify` delivers one notification.
+ */
+export const NOTIFICATIONS_PROVIDER_METHODS = ['auth.verify', 'auth.probe', 'notify'] as const;
+export type NotificationsProviderMethod = (typeof NOTIFICATIONS_PROVIDER_METHODS)[number];
+
+/** A notification is delivered within this deadline; a slower service drops it. */
+export const NOTIFICATIONS_PROVIDER_NOTIFY_TIMEOUT_MS = 10_000;
+export const NOTIFICATIONS_PROVIDER_AUTH_TIMEOUT_MS = 15_000;
+/** Bytes of an answer OpenChamber reads. */
+export const NOTIFICATIONS_PROVIDER_RESPONSE_MAX = 16_000;
+/** Characters of `error.message` OpenChamber reads. */
+export const NOTIFICATIONS_PROVIDER_ERROR_MESSAGE_MAX = 2_000;
+/** No call for this long stops the service; the next call starts it again. */
+export const NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60_000;
+/** Route on the callback listener a service sends the channel's requests to. */
+export const NOTIFICATIONS_OUTBOUND_PATH = '/notifications/outbound';
+/** One outbound request may take this long; the call's own deadline may end it sooner. */
+export const NOTIFICATIONS_OUTBOUND_TIMEOUT_MS = 20_000;
+
+export const notificationsProviderTimeoutMs = (method: NotificationsProviderMethod): number => (
+  method === 'notify' ? NOTIFICATIONS_PROVIDER_NOTIFY_TIMEOUT_MS : NOTIFICATIONS_PROVIDER_AUTH_TIMEOUT_MS
+);
+
+/**
+ * The kinds OpenChamber notifies about. `ready`: the agent finished; `error`:
+ * the turn failed; `question` and `permission`: the agent waits for the user;
+ * `review`: an auto-review ended; the `goal_*` kinds: a session goal settled.
+ * Which kinds reach a channel follows the user's own notification toggles.
+ */
+export const GUEST_NOTIFICATION_KINDS = ['ready', 'error', 'question', 'permission', 'review', 'goal_complete', 'goal_blocked', 'goal_budget'] as const;
+export type GuestNotificationKind = (typeof GUEST_NOTIFICATION_KINDS)[number];
+
+/**
+ * One notification as OpenChamber shows it, after the user's templates. In
+ * enterprise mode `title` is the kind's generic title and `body`,
+ * `sessionName` and `directory` are empty, as they are for the phone.
+ */
+export type GuestNotification = {
+  kind: GuestNotificationKind;
+  title: string;
+  body: string;
+  /** Groups repeats of one thing (`ready-<sessionId>`): a later one may replace an earlier one where the channel can. */
+  tag: string;
+  /** Epoch milliseconds. */
+  at: number;
+  sessionId: string | null;
+  sessionName: string | null;
+  directory: string | null;
+  /** The link that opens the session in OpenChamber, when there is one. */
+  url: string | null;
+};
+
+/** The connected account a call acts as; `null` in `auth.verify` and `auth.probe`, before one exists. */
+export type NotificationsProviderAccount = { id: string; login: string | null };
+
+/**
+ * Who a call is for. `instance` is the account's origin (`https://slack.com`,
+ * a Matrix homeserver). `handle` is the capability for this one call: pass it
+ * to `createNotificationsOutbound(...).request`. It stops working when the
+ * call ends; never store it.
+ */
+export type NotificationsProviderSession = {
+  instance: string;
+  handle: string;
+  account: NotificationsProviderAccount | null;
+};
+
+/** What each method's `input` holds. */
+export type NotificationsProviderInputs = {
+  'auth.verify': Record<string, never>;
+  'auth.probe': Record<string, never>;
+  notify: { notification: GuestNotification };
+};
+
+/**
+ * One call, as OpenChamber posts it. `provider` is the id OpenChamber gave
+ * this channel (`ext-<panel.id>`). `input` was built by OpenChamber; its shape
+ * per method is `NotificationsProviderInputs`.
+ */
+export type NotificationsProviderRequest = {
+  v: typeof NOTIFICATIONS_PROVIDER_WIRE_VERSION;
+  requestId: string;
+  method: NotificationsProviderMethod;
+  provider: string;
+  session: NotificationsProviderSession;
+  input: SourceControlJsonObject;
+};
+
+/** Who the candidate token belongs to; OpenChamber stores the account under `id`. */
+export type NotificationsAccountData = { account: { id: string; login: string; name?: string } };
+export type NotificationsProbeData = { supported: boolean; message?: string };
+export type NotificationsNotifyData = { delivered: true };
+
+/**
+ * An answer. `error.status` is the HTTP status OpenChamber should treat the
+ * failure as; a 401 writes the account off only when OpenChamber's proxy saw
+ * the channel's server answer 401 itself. `error.code` is `[A-Z_]{1,64}`.
+ */
+export type NotificationsProviderError = SourceControlProviderError;
+export type NotificationsProviderResult =
+  | { ok: true; data: SourceControlJson }
+  | { ok: false; error: NotificationsProviderError };
+
+export const isNotificationsProviderMethod = (value: string): value is NotificationsProviderMethod => (
+  NOTIFICATIONS_PROVIDER_METHODS.some((method) => method === value)
+);
+
+type WireNotificationsAccount = { id?: unknown; login?: unknown };
+type WireNotificationsSession = { instance?: unknown; handle?: unknown; account?: WireNotificationsAccount | null };
+type WireNotificationsRequest = {
+  v?: unknown; requestId?: unknown; method?: unknown; provider?: unknown; session?: WireNotificationsSession | null; input?: unknown;
+};
+
+/** `undefined` is an account that is neither `null` nor `{ id, login }`. */
+const readNotificationsAccount = (account: WireNotificationsAccount | null | undefined): NotificationsProviderAccount | null | undefined => {
+  if (account === null) return null;
+  if (Object(account) !== account || account === undefined) return undefined;
+  const { id, login } = account;
+  if (String(id) !== id || id.length === 0) return undefined;
+  if (login !== null && (String(login) !== login || login.length === 0)) return undefined;
+  return { id, login };
+};
+
+/**
+ * A service's read of the body OpenChamber posted to
+ * `NOTIFICATIONS_PROVIDER_PATH`. OpenChamber built `input`, so this checks the
+ * envelope, not every field, and the service bundle needs no schema library.
+ * `null` is a body that is not a notifications call of this wire version;
+ * answer it with HTTP 400.
+ */
+export const readNotificationsProviderRequest = (body: string): NotificationsProviderRequest | null => {
+  let wire: WireNotificationsRequest;
+  try {
+    const parsed: WireNotificationsRequest | null = JSON.parse(body);
+    if (Object(parsed) !== parsed || parsed === null) return null;
+    wire = parsed;
+  } catch {
+    return null;
+  }
+  const { v, requestId, method, provider, session, input } = wire;
+  if (v !== NOTIFICATIONS_PROVIDER_WIRE_VERSION) return null;
+  if (String(requestId) !== requestId || requestId.length === 0) return null;
+  if (String(provider) !== provider || provider.length === 0) return null;
+  if (String(method) !== method || !isNotificationsProviderMethod(method)) return null;
+  if (Object(input) !== input || Array.isArray(input)) return null;
+  if (Object(session) !== session || session === null || session === undefined) return null;
+  const { instance, handle } = session;
+  if (String(instance) !== instance || instance.length === 0 || String(handle) !== handle || handle.length === 0) return null;
+  const account = readNotificationsAccount(session.account);
+  if (account === undefined) return null;
+  // SAFETY: `input` is a plain object parsed from JSON, so every value in it is JSON.
+  return { v: NOTIFICATIONS_PROVIDER_WIRE_VERSION, requestId, method, provider, session: { instance, handle, account }, input: input as SourceControlJsonObject };
+};
+
+/**
+ * OpenChamber refused the request (an expired handle, a path off the
+ * instance, a body too large), could not reach the channel's server, or did
+ * not answer. `status` is the callback listener's HTTP status, `0` when it
+ * gave none; `code` is its error code (`HOST_UNAVAILABLE` when there was no
+ * usable answer).
+ */
+export class NotificationsOutboundError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = 'NotificationsOutboundError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type NotificationsOutbound = {
+  /** Sends `request` to the server of the account `handle` belongs to, with the stored token when the call has one. */
+  request(handle: string, request: SourceControlOutboundRequest): Promise<SourceControlOutboundResponse>;
+};
+
+/**
+ * The service's way to the channel's server: OpenChamber's callback listener
+ * (`OPENCHAMBER_HOST_CALLBACK_URL`), which checks the handle, keeps the
+ * request on the account's origin and adds the token. Plain `fetch`, no
+ * dependencies. Throws `NotificationsOutboundError` when OpenChamber refuses
+ * the request; an answer of any status from the server resolves.
+ */
+export const createNotificationsOutbound = ({ env }: { env: Record<string, string | undefined> }): NotificationsOutbound => {
+  const base = env[OPENCHAMBER_HOST_CALLBACK_URL];
+  if (!base) throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "notifications" can reach a channel's server.`);
+  const url = `${base.replace(/\/+$/, '')}${NOTIFICATIONS_OUTBOUND_PATH}`;
+  return {
+    request: (handle, request) => postOutbound(url, handle, request, NOTIFICATIONS_OUTBOUND_TIMEOUT_MS,
+      (message, code, status) => new NotificationsOutboundError(message, code, status)),
   };
 };

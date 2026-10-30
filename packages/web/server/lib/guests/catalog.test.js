@@ -488,3 +488,56 @@ describe('catalog cache under a store write', () => {
     }
   });
 });
+
+describe('session events', () => {
+  test('a service-only subscriber publishes its events and whether it reads their text, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-session-events-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'journal', name: 'Journal', icon: 'book' },
+          service: { entry: 'service/main.js', runtime: 'host' },
+          sessionEvents: { events: ['turn-finished', 'question-asked'], content: true },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      expect(inspected.guest.sessionEvents).toEqual({ events: ['turn-finished', 'question-asked'], content: true });
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        sessionEvents: { events: ['turn-finished', 'question-asked'], content: true },
+        capabilities: { requested: ['service', 'transcript'], granted: [] },
+      });
+      expect(row).not.toHaveProperty('entry');
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('notification channels', () => {
+  test('a channel package publishes its contribution for the card and the dialog, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-channel-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'slack-bridge', name: 'Slack Bridge', icon: 'notification-3' },
+          service: { entry: 'service/main.js', runtime: 'host', provides: ['notifications'] },
+          notifications: { label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { header: 'authorization', scheme: 'bearer', scopes: ['chat:write'] } },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        notifications: { label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { scheme: 'bearer', username: false, scopes: ['chat:write'] } },
+        service: { provides: ['notifications'] },
+        capabilities: { requested: ['service'], granted: [] },
+      });
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+});

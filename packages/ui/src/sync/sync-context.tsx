@@ -675,12 +675,14 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
   const body = trimmedOrUndefined(notification.body)
   const tag = trimmedOrUndefined(notification.tag)
 
-  if (kind === "opencode-restart-interrupted") {
+  if (kind === "opencode-restart-interrupted" || kind === "opencode-restart-resuming") {
     const dictionary = useI18nStore.getState().dictionary
     const title = formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.title")
     const options = {
       id: "opencode-restart-interrupted",
-      description: formatMessage(dictionary, "chat.toast.opencodeRestartInterrupted.description"),
+      description: formatMessage(dictionary, kind === "opencode-restart-resuming"
+        ? "chat.toast.opencodeRestartInterrupted.autoResumeDescription"
+        : "chat.toast.opencodeRestartInterrupted.description"),
       duration: Infinity,
     }
     if (sessionId && directory) {

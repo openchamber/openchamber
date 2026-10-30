@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import type { AgentWithExtras } from './useAgentsStore';
+import { createProjectIdFromPath } from '@/lib/projectId';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -19,6 +20,7 @@ Object.assign(globalThis, {
 });
 
 const DIRECTORY = '/workspace/project';
+const PROJECT_ID = createProjectIdFromPath(DIRECTORY);
 const agent = (name: string, hidden = false, native = false): AgentWithExtras => ({
   id: name, name, displayName: name, mode: 'subagent', hidden, native,
   request: { settings: {}, headers: {}, body: {} }, permissions: [],
@@ -27,7 +29,7 @@ let listedAgents: AgentWithExtras[] = [];
 let failingConfigLookups = new Set<string>();
 const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
   const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
-  if (path === '/api/config/settings') return Response.json({ projects: [{ id: 'project', path: DIRECTORY }], activeProjectId: 'project' });
+  if (path === '/api/config/settings') return Response.json({ projects: [{ id: PROJECT_ID, path: DIRECTORY }], activeProjectId: PROJECT_ID });
   if (path.endsWith('/agent')) return Response.json({ data: listedAgents });
   if (path.startsWith('/api/config/agents/')) {
     const name = decodeURIComponent(path.slice('/api/config/agents/'.length).replace(/\/config$/, ''));
@@ -59,7 +61,7 @@ beforeEach(() => {
   listedAgents = [agent('build', false, true), agent('title', true, true),
     agent('visible-custom'), agent('hidden-custom', true)];
   failingConfigLookups = new Set();
-  useProjectsStore.setState({ projects: [{ id: 'project', path: DIRECTORY }], activeProjectId: 'project' });
+  useProjectsStore.setState({ projects: [{ id: PROJECT_ID, path: DIRECTORY }], activeProjectId: PROJECT_ID });
   useUIStore.setState({ settingsProjectPath: null });
   invalidateAgentsLoadCache(DIRECTORY);
   useAgentsStore.setState({ agents: [], agentsByDirectory: {}, selectedAgentName: null, agentDraft: null });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes } from './manifest.ts';
+import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
 
 const validBlock = {
@@ -1353,5 +1353,82 @@ describe('contributes.sourceControl', () => {
       expect(result).toMatchObject({ ok: false, code: 'invalid-service' });
       if (!result.ok) expect(result.message.startsWith(field)).toBe(true);
     }
+  });
+});
+
+describe('contributes.sessionEvents', () => {
+  const pageless = { id: 'acme-events', name: 'Events', icon: 'window' };
+  const service = { entry: 'service/main.js', runtime: 'host' };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('a service-only package may subscribe to events and asks for transcript only with content', () => {
+    const result = parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished', 'question-asked'] } });
+    expect(result).toMatchObject({ ok: true, manifest: { contributes: { sessionEvents: { events: ['turn-finished', 'question-asked'] } } } });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    expect(toPublicSessionEvents(result.manifest.contributes.sessionEvents!)).toEqual({ events: ['turn-finished', 'question-asked'], content: false });
+
+    const withContent = parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished'], content: true } });
+    if (!withContent.ok) throw new Error(withContent.message);
+    expect(requestedGuestCapabilities(withContent.manifest.contributes)).toEqual(['service', 'transcript']);
+    expect(toPublicSessionEvents(withContent.manifest.contributes.sessionEvents!)).toEqual({ events: ['turn-finished'], content: true });
+  });
+
+  test('needs contributes.service, and its fields are checked', () => {
+    expect(parse({ panel: pageless, sessionEvents: { events: ['turn-finished'] } })).toMatchObject({
+      ok: false, code: 'invalid-session-events', message: expect.stringContaining('declare contributes.service'),
+    });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: [] } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished', 'turn-finished'] } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: ['turn-aborted'] } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished'], content: false } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: { events: ['turn-finished'], projects: ['/repo'] } })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+    expect(parse({ panel: pageless, service, sessionEvents: ['turn-finished'] })).toMatchObject({ ok: false, code: 'invalid-session-events' });
+  });
+
+  test('a subscribing service beside a panel keeps the panel\'s other contributions', () => {
+    const result = parse({ panel: { ...pageless, entry: 'panel/index.html' }, service, sessionEvents: { events: ['turn-failed'] }, capabilities: ['files'] });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['files', 'service']);
+  });
+});
+
+describe('contributes.notifications', () => {
+  const pageless = { id: 'slack-bridge', name: 'Slack Bridge', icon: 'notification-3' };
+  const role = { entry: 'service/main.js', runtime: 'host', provides: ['notifications'] };
+  const channel = {
+    label: 'Slack',
+    instances: { kind: 'fixed', origin: 'https://slack.com' },
+    token: { header: 'authorization', scheme: 'bearer', scopes: ['chat:write'], createPath: '/apps' },
+  };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('the role and the contribution come together and name a channel OpenChamber can draw without the service', () => {
+    const result = parse({ panel: pageless, service: role, notifications: channel });
+    expect(result).toMatchObject({ ok: true, manifest: { contributes: { notifications: channel } } });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    expect(toPublicNotifications(result.manifest.contributes.notifications!)).toEqual({
+      label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { scheme: 'bearer', username: false, scopes: ['chat:write'], createPath: '/apps' },
+    });
+    const typed = parse({ panel: pageless, service: role, notifications: { ...channel, instances: { kind: 'user', label: 'Homeserver', placeholder: 'https://matrix.example.org' } } });
+    expect(typed).toMatchObject({ ok: true });
+
+    expect(parse({ panel: pageless, service: role })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('come together') });
+    expect(parse({ panel: pageless, service: { ...role, provides: undefined }, notifications: channel })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: { ...pageless, id: 'a'.repeat(29) }, service: role, notifications: channel })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('28') });
+  });
+
+  test('its fields are checked and named', () => {
+    const withChannel = <T,>(patch: T) => parse({ panel: pageless, service: role, notifications: { ...channel, ...patch } });
+    expect(withChannel({ instances: { kind: 'fixed', origin: 'http://slack.com' } })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.notifications.instances') });
+    expect(withChannel({ instances: { kind: 'fixed', origin: 'https://slack.com/api' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ instances: { kind: 'user' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ token: { header: 'private-token', scheme: 'bearer' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ token: { header: 'authorization', scheme: 'basic' } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ token: { header: 'authorization', scheme: 'basic', username: true } })).toMatchObject({ ok: true });
+    expect(withChannel({ label: '' })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withChannel({ extra: 1 })).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 });

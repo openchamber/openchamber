@@ -178,9 +178,23 @@
         "@openchamber/sdk": "workspace:*",
       },
     },
+    "packages/sdk/examples/notification-webhook": {
+      "name": "@openchamber/example-notification-webhook",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
     "packages/sdk/examples/service-echo": {
       "name": "@openchamber/example-service-echo",
       "version": "1.1.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
+    "packages/sdk/examples/session-events-log": {
+      "name": "@openchamber/example-session-events-log",
+      "version": "1.0.0",
       "dependencies": {
         "@openchamber/sdk": "workspace:*",
       },
@@ -1118,7 +1132,11 @@
 
     "@openchamber/example-hello-kit": ["@openchamber/example-hello-kit@workspace:packages/sdk/examples/hello-kit"],
 
+    "@openchamber/example-notification-webhook": ["@openchamber/example-notification-webhook@workspace:packages/sdk/examples/notification-webhook"],
+
     "@openchamber/example-service-echo": ["@openchamber/example-service-echo@workspace:packages/sdk/examples/service-echo"],
+
+    "@openchamber/example-session-events-log": ["@openchamber/example-session-events-log@workspace:packages/sdk/examples/session-events-log"],
 
     "@openchamber/example-source-control-provider": ["@openchamber/example-source-control-provider@workspace:packages/sdk/examples/source-control-provider"],
 

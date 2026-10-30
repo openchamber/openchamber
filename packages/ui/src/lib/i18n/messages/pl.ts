@@ -1024,6 +1024,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.restored': 'Przywrócono wszystkie wiadomości',
   'chat.toast.opencodeRestartInterrupted.title': 'Czat został przerwany',
   'chat.toast.opencodeRestartInterrupted.description': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Wyślij wiadomość, aby kontynuować.',
+  'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'OpenCode uruchomił się ponownie podczas generowania odpowiedzi. Czat zostanie wznowiony automatycznie; wyślij wiadomość, jeśli się nie wznowi.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Otwórz sesję',
   'chat.errorBoundary.title': 'Błąd Czatu',
   'chat.errorBoundary.description': 'Interfejs czatu napotkał błąd. Może to być spowodowane tymczasowym problemem sieciowym lub uszkodzonymi danymi wiadomości.',

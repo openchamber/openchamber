@@ -11,6 +11,7 @@ const { loadSessions } = vi.hoisted(() => ({ loadSessions: vi.fn() }));
 vi.mock('@openchamber/ui/stores/useGlobalSessionsStore', () => ({
   ensureGlobalSessionsLoaded: loadSessions,
   resolveGlobalSessionDirectory: (session: { directory: string }) => session.directory,
+  useGlobalSessionsStore: { getState: () => ({ entityById: new Map() }) },
 }));
 vi.mock('@openchamber/ui/sync/session-ui-store', async () => {
   const { create } = await import('zustand');

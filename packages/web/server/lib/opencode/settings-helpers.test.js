@@ -121,6 +121,7 @@ describe('settings helpers', () => {
     expect(helpers.formatSettingsResponse(next).workStatusHiddenSectionsExplicit).toBe(true);
     expect(helpers.sanitizeSettingsUpdate({ workStatusHiddenSectionsExplicit: 'true' }).workStatusHiddenSectionsExplicit).toBeUndefined();
   });
+  // Packing runs the real prepack build and compression beside the full suite.
   it('imports from the packed @openchamber/web tarball without escaping the published package', async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'settings-helpers-pack-'));
     const packDir = join(tempRoot, 'pack');
@@ -188,7 +189,7 @@ describe('settings helpers', () => {
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it('accepts only booleans for draft starter visibility', () => {
     const helpers = createTestHelpers();

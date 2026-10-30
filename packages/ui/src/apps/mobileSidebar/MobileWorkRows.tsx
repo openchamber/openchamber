@@ -406,7 +406,6 @@ export const MobileDraftRow: React.FC<{
   const { revealed } = useMobileRowSwipe(row.key);
   const { isOpen, firstLine, attachmentCount, label, open, discard } = useSessionDraftRow(draft, actions.close);
   const mixedProject = useMixedRowProject(draft.projectId ?? null, row.detailed && row.mixed);
-  // Known once the directory's git status has been read; the line keeps its height without it.
   const branch = useGitBranchLabel(row.detailed ? draft.directory : null);
   const setRevealed = (next: boolean) => useMobileSidebarRowsStore.getState().setRevealed(row.key, next);
   const select = () => {
@@ -418,6 +417,7 @@ export const MobileDraftRow: React.FC<{
   };
   const pen = <Icon name="edit" className="size-3 shrink-0 text-muted-foreground" />;
   const attachment = firstLine && attachmentCount > 0 ? <Icon name="attachment-2" className="size-3 shrink-0 text-muted-foreground" /> : null;
+  const detailed = row.detailed && Boolean(mixedProject || branch || attachment);
   const titleText = (
     <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label italic', isOpen ? MOBILE_ACTIVE_TITLE_CLASS : 'oc-title-rest')}>
       {label}
@@ -445,7 +445,7 @@ export const MobileDraftRow: React.FC<{
         />
       )}
     >
-      {row.detailed ? (
+      {detailed ? (
         <MobileTwoLineLayout
           indent={geometry.detailedLeft(row.depth)}
           onSelect={select}

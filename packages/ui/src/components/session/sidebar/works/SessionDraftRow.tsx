@@ -32,17 +32,17 @@ type Props = {
  * rows its second line says where it will go: the project (in a zone) and
  * the branch, as a detailed session row's does.
  */
-export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActions, mobileVariant, setSessionSwitcherOpen }: Props): React.ReactNode {
+export function SessionDraftRow({ draft, depth, detailed: detailedRequested, mixed, alwaysShowActions, mobileVariant, setSessionSwitcherOpen }: Props): React.ReactNode {
   const { t } = useI18n();
   const { isOpen, firstLine, attachmentCount, label, open, discard: discardDraft } = useSessionDraftRow(draft, () => {
     if (mobileVariant) setSessionSwitcherOpen(false);
   });
   const project = useProjectsStore(React.useCallback(
-    (state) => (detailed && mixed && draft.projectId ? state.projects.find((entry) => entry.id === draft.projectId) ?? null : null),
-    [detailed, mixed, draft.projectId],
+    (state) => (detailedRequested && mixed && draft.projectId ? state.projects.find((entry) => entry.id === draft.projectId) ?? null : null),
+    [detailedRequested, mixed, draft.projectId],
   ));
-  // Known once the directory's git status has been read; the line keeps its height without it.
-  const branch = useGitBranchLabel(detailed ? draft.directory : null);
+  const branch = useGitBranchLabel(detailedRequested ? draft.directory : null);
+  const detailed = detailedRequested && Boolean(project || branch || (firstLine && attachmentCount > 0));
   const discard = (event: React.MouseEvent): void => {
     event.stopPropagation();
     discardDraft();

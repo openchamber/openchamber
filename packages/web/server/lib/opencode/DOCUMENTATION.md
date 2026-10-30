@@ -354,9 +354,9 @@ Installer output is discarded, not forwarded to clients or logs.
 - `createTurnStartReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders, timeoutMs?, fetchImpl? })` returns `readTurnStart(sessionId)`: the running turn's start read back from `GET /api/session/:id/message`, newest first. OpenCode 2 writes an `idle` record when a turn ends, so the turn began with the first message after the last one; settings records (`agent-switched`, `model-switched`, `location-switched`) are skipped because the user makes them while idle. Null when the read fails, the latest record ends a turn, or no `idle` record appears within 10 pages of 50.
 
 ## Public exports (session-runtime.js)
-- `createSessionRuntime({ writeSseEvent, getNotificationClients, broadcastEvent?, readTurnStart? })`: creates runtime-owned state machine and APIs for session status. `readTurnStart(sessionId)` resolves the running turn's start from history (`turn-start.js`), or null.
+- `createSessionRuntime({ writeSseEvent, getNotificationClients, broadcastEvent?, readTurnStart?, buildOpenCodeUrl?, getOpenCodeAuthHeaders?, fetchImpl? })`: creates runtime-owned state machine and APIs for session status. `readTurnStart(sessionId)` resolves the running turn's start from history (`turn-start.js`), or null. OpenCode URL and auth dependencies enable restart recovery.
 - Returned API:
-  - `processOpenCodeSsePayload(payload)`
+  - `processOpenCodeSsePayload(payload, { spaceId? }?)`: the watcher supplies the event's space identity so host restart recovery never posts a space's continuation to the host OpenCode.
   - `adoptRunningSessions(sessionIds, readAt)`: sessions OpenCode lists as running when the event stream (re)connects, as read from `readAt` on. Marks them busy and reads back the starts of turns this server did not see begin. A session whose status changed after `readAt` is skipped: its turn may have ended while the list was read.
   - `getRunningTurnStart(sessionId)`: the running turn's start, or null.
   - `getSessionActivitySnapshot()`
@@ -364,15 +364,23 @@ Installer output is discarded, not forwarded to clients or logs.
   - `getSessionStateSnapshot()`
   - `getSessionState(sessionId)`
   - `resetAllSessionActivityToIdle()`
-  - `interruptBusySessionsAfterRestart()`: settles every session whose authoritative status is `busy`/`retry` or whose activity phase is still busy, broadcasts `openchamber:session-status` idle plus an OpenCode-shaped `session.error`, resets leftover activity/cooldowns, and returns the interrupted session IDs in stable order.
+  - `interruptBusySessionsAfterRestart()`: settles busy/retry sessions, broadcasts idle status and an OpenCode-shaped `session.error`, clears pending requests and turn starts, and resets activity. Returns `{ sessionIds, autoResumeSessionIds }` in stable order; only host sessions with an unused recovery budget and injected OpenCode access enter `autoResumeSessionIds`.
   - `dispose()`
+
+### Why restart recovery has one continuation per user turn
+
+A managed `opencode serve` without `--service` has no automatic boot sweep. The 60-second grace gives the user time to continue by hand. A user message or busy/retry status cancels the pending timer; otherwise recovery posts to `POST /api/session/:id/synthetic` with `resume: true`, `delivery: 'steer'`, and `metadata.notice: 'opencode-restart'`.
+
+The first HTTP attempt consumes that user turn's budget before sending, because a lost response may still have admitted the message. Up to 3 transport attempts share one `createMessageId` ID at 15-second intervals. A 404 or 409 ends delivery. Only a new user message renews the budget; synthetic messages, status transitions, and managed OpenCode restarts do not. The budget lives in this OpenChamber process until a new user message, session deletion, or disposal. A stale request completion may only change its own schedule. Keeping the budget across managed restarts prevents a turn that hangs OpenCode from restarting and resuming indefinitely.
+
+`restart-notification.js` builds the notification from the recovery result. All sessions eligible uses `opencode-restart-resuming`; a batch containing any manual-only session keeps `opencode-restart-interrupted` and manual guidance. CLI and Electron servers own recovery. Web, hosted mobile, and Capacitor clients receive it from their connected server; VS Code's separate OpenCode and external OpenCode do not use this managed-restart callback.
 
 The runtime keeps when each session's latest turn began, on OpenCode's clock, so every client counts "Active for" from the same moment. The start comes from the translated `session.execution.started` (`turnStartedAt`), and is reported as `turnStartedAt` on `openchamber:session-status` broadcasts of a busy or retry session and on `getSessionStateSnapshot()` entries. A busy or retry status without a running start (the turn began before this server was listening) reads the start back once per turn; the result is applied only if the same turn still runs, and announced with a fresh `openchamber:session-status`. A start outlives its turn with `running: false`: snapshots still report it for an idle session, because a parent idling while its background subagent works is still in that turn on clients, but it is never reported beside a busy status. Starts are dropped with the session's status entry, on deletion, and on an OpenCode restart. Both kinds of start are on OpenCode's clock, which is this server's for a managed OpenCode; with an external OpenCode on another machine, the skew between the two machines shows in the elapsed time. Stamping the live start on arrival would remove that skew but date a start replayed after a stream gap at the moment it arrived.
 
 The runtime maintains active-session count incrementally from idempotent activity phase transitions. Upstream stall-timeout and lifecycle health checks read it in O(1); the hourly cleanup removes activity phases older than 24 hours without broadcasting synthetic state transitions. Snapshot generation remains reserved for the session-activity API.
 
 ## Public exports (lifecycle.js)
-- `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) is fired after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), then calls `interruptBusySessionsAfterRestart()` and broadcasts one `opencode-restart-interrupted` UI notification when interrupted turns exist (#2943).
+- `createOpenCodeLifecycleRuntime(dependencies)`: creates lifecycle runtime for managed/external OpenCode process orchestration. The optional `onOpenCodeRestarted` dependency (default `null`) fires after a successful managed restart. `index.js` rebinds event-stream readers to the possibly-new port (#2638), calls `interruptBusySessionsAfterRestart()`, and broadcasts recovery guidance when interrupted turns exist (#2943).
 - Returned API:
   - `startOpenCode()`
   - `restartOpenCode()`

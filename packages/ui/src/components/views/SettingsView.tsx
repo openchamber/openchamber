@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import {
   formatShortcutForDisplay,
@@ -273,9 +274,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       .sort((a, b) => (rank.get(a.slug) ?? 999) - (rank.get(b.slug) ?? 999));
   }, [visiblePages]);
 
+  const voiceSettings = useConfigStore(useShallow((state) => ({
+    showMessageTTSButtons: state.showMessageTTSButtons,
+    autoReadAloudEnabled: state.autoReadAloudEnabled,
+    voiceProvider: state.voiceProvider,
+    dictationEnabled: state.dictationEnabled,
+    sttProvider: state.sttProvider,
+  })));
   const searchAvailabilityCtx = React.useMemo(
-    () => ({ ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux }),
-    [runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux],
+    () => ({ ...runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux, voiceSettings }),
+    [runtimeCtx, isDesktopLocalOrigin, isMac, isWindows, isLinux, voiceSettings],
   );
   const newSettingPages = getNewSettingPages(searchAvailabilityCtx);
   const hasNewSettings = newSettingPages.some((page) => visiblePages.some((visible) => visible.slug === page));
@@ -360,12 +368,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const trackers = useTrackerDescriptors();
   const sourceControlProviders = useSourceControlProviders();
-  // Search availability reads these values from the config store.
-  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
-  const autoReadAloudEnabled = useConfigStore((state) => state.autoReadAloudEnabled);
-  const voiceProvider = useConfigStore((state) => state.voiceProvider);
-  const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
-  const sttProvider = useConfigStore((state) => state.sttProvider);
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
@@ -376,7 +378,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       trackers,
       sourceControlProviders,
     });
-  }, [getPageTitle, searchAvailabilityCtx, settingsSearchQuery, sourceControlProviders, t, trackers, visiblePageSlugs, showMessageTTSButtons, autoReadAloudEnabled, voiceProvider, dictationEnabled, sttProvider]);
+  }, [getPageTitle, searchAvailabilityCtx, settingsSearchQuery, sourceControlProviders, t, trackers, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {

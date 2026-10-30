@@ -7,6 +7,7 @@ import { Window } from 'happy-dom';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { ModelSelection, Session } from '@/lib/opencode/model';
+import { createProjectIdFromPath } from '@/lib/projectId';
 
 /**
  * A magic prompt command typed in the composer reads the prompts that apply
@@ -57,13 +58,23 @@ Object.assign(globalThis, {
 });
 
 const WORKTREE = '/elsewhere/feature';
+const PROJECTS = [WORKTREE, '/repo'].map((path) => ({ id: createProjectIdFromPath(path), path }));
 
 let promptReads: URL[] = [];
 let promptsStatus = 200;
 
-spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+const responseFor = (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/');
-  if (url.pathname === '/api/config/settings') return Response.json({ projects: [{ id: 'project', path: WORKTREE }, { id: 'repo', path: '/repo' }] });
+  const headers = input instanceof Request ? input.headers : new Headers(init?.headers);
+  const directory = decodeURIComponent(headers.get('x-opencode-directory') ?? url.searchParams.get('location[directory]') ?? WORKTREE);
+  const location = { directory, project: { id: 'project', directory, canonical: directory } };
+  if (url.pathname === '/api/config/settings') return Response.json({ projects: PROJECTS });
+  if (url.pathname.endsWith('/fs/home')) return Response.json({ home: '/home/test' });
+  if (url.pathname.endsWith('/session-warming')) return Response.json({ revision: 0, enabled: false, minutes: 60, sessions: [] });
+  if (url.pathname.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
+  if (url.pathname === '/api/config' || url.pathname === '/api/project') return Response.json([]);
+  if (url.pathname.endsWith('/session/active')) return Response.json({ data: {} });
+  if (url.pathname.endsWith('/vcs')) return Response.json({ data: { branch: { current: 'main', default: 'main' } } });
   if (url.pathname === '/api/magic-prompts') {
     promptReads.push(url);
     return Response.json(promptsStatus === 200
@@ -71,11 +82,20 @@ spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       : { error: 'Project prompts are invalid', code: 'project_prompts_invalid' }, { status: promptsStatus });
   }
   if (url.pathname.endsWith('/location')) {
-    return Response.json({ directory: WORKTREE, project: { id: 'project', directory: WORKTREE, canonical: WORKTREE } });
+    return Response.json(location);
   }
+  const sessionId = url.pathname.match(/\/session\/(ses_feature|ses_btw)$/)?.[1];
+  if (sessionId) return Response.json({ data: {
+    id: sessionId, projectID: 'project', location: { directory: WORKTREE }, title: sessionId,
+    time: { created: 1, updated: 1 }, cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    metadata: { openchamber: sessionId === 'ses_btw'
+      ? { kind: 'btw', originalSessionID: 'ses_feature' } : { btwSessionID: 'ses_btw' } },
+  } });
   if (url.pathname.endsWith('/session')) return Response.json({ data: [] });
-  return Response.json({});
-});
+  return Response.json({ location, data: [], cursor: {} });
+};
+spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => responseFor(input, init));
 
 // Vite-only module forms the composer's import graph reaches, loaded as the keystroke test does.
 plugin({
@@ -100,7 +120,8 @@ const { ThemeSystemProvider } = await import('@/contexts/ThemeSystemContext');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { ChatInput } = await import('../ChatInput');
 const { SyncProvider } = await import('@/sync/sync-context');
-const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+const { useDirectoryStore, ensureHomeDirectoryResolved } = await import('@/stores/useDirectoryStore');
+const { updateDesktopSettings } = await import('@/lib/persistence');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useSelectionStore } = await import('@/sync/selection-store');
@@ -113,17 +134,7 @@ const { OpenCode } = await import('@opencode/client');
 
 const sdk = OpenCode.make({
   baseUrl: 'https://sync.test',
-  fetch: async (request) => {
-    const path = new URL(request instanceof Request ? request.url : request.toString()).pathname;
-    if (path.endsWith('/event')) {
-      return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
-    }
-    const body = path.endsWith('/location')
-      ? { directory: WORKTREE, project: { id: 'project', directory: WORKTREE, canonical: WORKTREE } }
-      : path.endsWith('/session/active') ? {}
-      : { data: [] };
-    return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
-  },
+  fetch: async (request, init) => responseFor(request, init),
 });
 
 // SAFETY: The composer reads only the runtime descriptor and the source-control
@@ -134,7 +145,7 @@ type SentMessage = { content: string; synthetic: string[]; attachments: Attached
 let sent: SentMessage[] = [];
 
 beforeEach(() => {
-  useProjectsStore.setState({ projects: [{ id: 'project', path: WORKTREE }, { id: 'repo', path: '/repo' }] });
+  useProjectsStore.setState({ projects: PROJECTS });
   promptReads = [];
   promptsStatus = 200;
   sent = [];
@@ -178,7 +189,10 @@ const submitInComposer = async (text: string, options?: { attachment: AttachedFi
         </RuntimeAPIContext.Provider>,
       );
     });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    await act(async () => {
+      await ensureHomeDirectoryResolved();
+      await updateDesktopSettings({});
+    });
     if (setup) await act(async () => { setup(); });
 
     if (options) {
@@ -322,7 +336,7 @@ const promptDirectoryForDraft = async (draft: DraftTarget): Promise<string | nul
     currentSessionDirectory: null,
     newSessionDraft: {
       draftId: 7, open: true, parentID: null,
-      selectedProjectId: draft.target === 'project' ? 'repo' : null,
+      selectedProjectId: draft.target === 'project' ? PROJECTS[1].id : null,
       ...draft,
     },
   });

@@ -186,6 +186,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` suit les mêmes règles que `request`. Déclarer un service local ajoute `service` aux capacités que l'utilisateur approuve à l'installation ; tant que ce n'est pas fait, chaque `serviceRequest` donne `NO_SERVICE`. Contrat complet : le fichier `GUEST_SERVICES.md` du package.
 
+## Événements de session
+
+Votre page ne connaît une session que pendant qu'elle est ouverte. Votre service peut en savoir plus : déclarez `contributes.sessionEvents` à côté de `contributes.service`, et OpenChamber envoie au service les événements que vous listez, depuis chaque projet, qu'une fenêtre soit ouverte ou non.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+Les quatre événements sont `turn-finished` (l'agent a terminé et n'attend rien : aucun sous-agent en cours, aucune permission ou question ouverte, aucune étape d'objectif), `turn-failed`, `permission-asked` et `question-asked`. Un tour arrêté par l'utilisateur n'envoie rien. Approuver l'extension vaut abonnement ; la boîte de dialogue liste les événements sous la ligne du service. Sans `content`, le service ne reçoit que des identifiants : la session, le répertoire de son projet, les éléments que l'utilisateur lui a liés. Avec `"content": true`, le manifeste demande aussi une permission que l'utilisateur voit comme une ligne à part, **Lire ce que dit l'agent en arrière-plan**, et chaque événement porte la réponse finale de l'agent, les champs de la question ou le détail de la permission.
+
+Chaque événement arrive sous la forme d'un `POST /session-events` avec le bearer du service. Lisez-le avec `readSessionEventRequest` et répondez `{ "ok": true }` :
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+Les événements de chaque projet sont envoyés ; comparez `event.project.directory` avec vos propres réglages et répondez `{ "ok": true }` pour les autres. La livraison se fait au plus une fois et dans l'ordre, une requête à la fois ; une réponse en échec abandonne vos événements pendant 30 secondes, et rien n'est rejoué après une indisponibilité d'OpenChamber ou de votre service. Le service n'a pas besoin de panneau pour cela. L'exemple `session-events-log` journalise chaque événement dans un fichier.
+
+## Canaux de notification
+
+Un service peut transmettre les notifications de l'utilisateur, à côté du bureau et du téléphone : déclarez `provides: ["notifications"]` et décrivez le canal dans `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+À partir de cette description, OpenChamber dessine une carte de compte pour le canal dans Réglages → Intégrations et garde le compte : l'utilisateur le connecte là, le jeton reste dans OpenChamber, et votre service ne le voit jamais. Une fois un compte connecté, chaque notification qu'OpenChamber enverrait au téléphone va aussi à votre service, selon les réglages de notification de l'utilisateur, et seulement quand aucune fenêtre n'est visible, sauf si l'utilisateur a choisi d'être toujours notifié. Mettre l'extension en pause l'arrête.
+
+OpenChamber transmet trois appels à `POST /notifications` : `auth.probe` (ce serveur est-il un de ceux vers lesquels vous livrez), `auth.verify` (à qui appartient ce jeton) et `notify` (une notification). Lisez chacun avec `readNotificationsProviderRequest`, et n'atteignez le serveur du canal que par le helper outbound, qui poste votre requête à OpenChamber avec le handle de l'appel ; OpenChamber ajoute le jeton et garde la requête sur le serveur du compte.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+Le salon ou le canal où va un projet est le choix de votre extension : la notification porte `directory` et `sessionName`. En mode entreprise, elle ne porte que le titre générique, comme le téléphone. L'exemple `notification-webhook` est un canal complet avec un récepteur pour l'essayer.
+
 ## Fichiers
 
 Un chemin relatif se trouve dans le projet ouvert et nécessite la capacité `files`. Un chemin qui commence par `/` ou `~/` doit correspondre à un motif `contributes.filesystem` déclaré et nécessite la capacité `filesystem`. Voir [Créer une extension](/sdk/#fichiers) pour les règles.

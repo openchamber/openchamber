@@ -13,6 +13,7 @@ import {
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import type { InstalledGuest } from '@/lib/guests/types';
 
 const CAPABILITY_ROWS = {
@@ -26,6 +27,7 @@ const CAPABILITY_ROWS = {
   service: { icon: 'terminal', titleKey: 'settings.extensions.capability.service', detailKey: 'settings.extensions.capability.service.detail' },
   network: { icon: 'plug', titleKey: 'settings.extensions.capability.network', detailKey: 'settings.extensions.capability.network.detail' },
   origins: { icon: 'global', titleKey: 'settings.extensions.capability.origins', detailKey: 'settings.extensions.capability.origins.detail' },
+  transcript: { icon: 'history', titleKey: 'settings.extensions.capability.transcript', detailKey: 'settings.extensions.capability.transcript.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {
@@ -50,6 +52,8 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const serviceSockets = guest?.service?.permissions?.sockets ?? [];
   const providesBrowser = serviceProvides(guest?.service, 'browser');
   const providesSourceControl = serviceProvides(guest?.service, 'source-control');
+  const providesNotifications = serviceProvides(guest?.service, 'notifications');
+  const sessionEvents = guest?.sessionEvents?.events ?? [];
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
 
   return (
@@ -123,6 +127,23 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         label: guest?.sourceControl?.label ?? guest?.name ?? '',
                       })}
                     </p>
+                  ) : null}
+                  {capability === 'service' && providesNotifications ? (
+                    <p className="typography-meta mt-0.5 text-foreground">
+                      {t('settings.extensions.capability.service.providesNotifications', {
+                        label: guest?.notifications?.label ?? guest?.name ?? '',
+                      })}
+                    </p>
+                  ) : null}
+                  {capability === 'service' && sessionEvents.length > 0 ? (
+                    <div className="typography-meta mt-0.5 text-foreground">
+                      <p>{t('settings.extensions.capability.service.sessionEvents')}</p>
+                      <ul className="mt-0.5 list-disc space-y-0.5 ps-4">
+                        {sessionEvents.map((type) => (
+                          <li key={type}>{t(SESSION_EVENT_LABEL_KEYS[type])}</li>
+                        ))}
+                      </ul>
+                    </div>
                   ) : null}
                 </div>
               </li>

@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
+import { MobileTwoLineLayout } from '@/apps/mobileSidebar/mobileRowParts';
 
 let browser: Window;
 let root: Root;
@@ -30,7 +31,7 @@ const title = 'درخواست پاسخ فارسی با React';
 
 const project = { id: 'project-a', icon: null, color: null, iconImage: null, iconBackground: null };
 
-const renderRow = (compact: boolean, withProject = false) => root.render(<SessionTimelineRowBody
+const renderRow = (compact: boolean, withProject = false, overrides: Partial<React.ComponentProps<typeof SessionTimelineRowBody>> = {}) => root.render(<SessionTimelineRowBody
   compact={compact}
   project={withProject ? project : null}
   projectLabel={withProject ? 'openchamber' : null}
@@ -45,7 +46,45 @@ const renderRow = (compact: boolean, withProject = false) => root.render(<Sessio
   zombieIndicator={null}
   badges={null}
   hideMetaOnHoverClass=""
+  {...overrides}
 />);
+
+test('an empty detailed line disappears and returns when metadata arrives', async () => {
+  await act(async () => renderRow(false));
+  expect(document.querySelector('.h-4')).toBeNull();
+  for (const overrides of [
+    { branchLabel: 'main' },
+    { goal: <span>Goal</span> },
+    { prBadge: <span>Issue #1</span> },
+    { badges: <span>Permission required</span> },
+    { badges: <span>Question waiting</span> },
+    { leadToggle: <button>Expand</button> },
+  ]) {
+    await act(async () => renderRow(false, false, overrides));
+    expect(document.querySelector('.h-4')).not.toBeNull();
+    await act(async () => renderRow(false));
+    expect(document.querySelector('.h-4')).toBeNull();
+  }
+  await act(async () => renderRow(false, true));
+  expect(document.querySelector('div.h-4')).not.toBeNull();
+});
+
+test('the phone omits an empty line but keeps metadata and its expansion control', async () => {
+  for (const [secondLine, chevron, visible] of [
+    [null, null, false],
+    [<span>Goal and linked task</span>, null, true],
+    [null, <button>Expand</button>, true],
+  ] as const) {
+    await act(async () => root.render(<MobileTwoLineLayout
+      indent={12}
+      firstLine={title}
+      secondLine={secondLine}
+      chevron={chevron}
+    />));
+    expect(document.querySelector('span.h-4') !== null).toBe(visible);
+    expect(document.querySelector('.min-h-9')).not.toBeNull();
+  }
+});
 
 // A truncated title in an LTR box clips an RTL title's beginning, because its
 // first word sits at the right edge. dir=auto lets the title own its direction.

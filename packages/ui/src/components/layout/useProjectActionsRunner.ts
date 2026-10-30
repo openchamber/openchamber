@@ -1035,7 +1035,7 @@ export const useProjectActionsRunner = ({
     setTabPurpose,
     setTabPreviewUrl,
     setTabSessionId,
-    stableProjectRef?.id,
+    stableProjectRef,
     t,
     terminal,
   ]);

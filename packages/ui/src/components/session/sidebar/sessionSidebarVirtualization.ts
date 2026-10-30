@@ -29,16 +29,20 @@ const SECTION_SPACING_ESTIMATE = { 'pb-5': 20, 'pb-3': 12, 'pb-1.5': 6, 'pb-0.5'
 type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
 
 /**
- * Rows that share a kind and surface context render at the same height apart
- * from their trailing section gap, so one measured row tells the size of every
- * unmeasured one, with whatever gap it ends up having. The virtualizer
+ * Fixed-height rows share measurements by kind and context. Detailed sessions
+ * and drafts can omit their empty second line and keep their own measurement.
+ * The virtualizer
  * compensates the scroll position whenever a row above the viewport measures
  * differently from its estimate, and that write lands in the middle of the
  * user's scroll gesture.
  */
-export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => (
-  `${row.kind}:${'renderContext' in row ? row.renderContext : ''}${'detailed' in row && row.detailed ? ':detailed' : ''}`
-);
+export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => {
+  const context = 'renderContext' in row ? row.renderContext : '';
+  const detailed = 'detailed' in row && row.detailed;
+  const variableHeight = (row.kind === 'session' && (detailed || context === 'timeline-mixed'))
+    || (row.kind === 'draft' && detailed);
+  return `${row.kind}:${context}${detailed ? ':detailed' : ''}${variableHeight ? `:${row.key}` : ''}`;
+};
 
 /**
  * The virtualizer's key for a row: its own key plus its trailing section gap.

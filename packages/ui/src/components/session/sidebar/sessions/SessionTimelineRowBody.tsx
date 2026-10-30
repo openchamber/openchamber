@@ -173,11 +173,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
       {titleLine}
       {meta}
     </div>
-    {/* Fixed 16px branch line, always rendered: a row without a branch,
-        a model or badges keeps the height of its neighbours, so the list
-        does not shift when a branch or a badge arrives and the virtualizer's
-        per-kind size estimate stays exact. */}
-    <div className="flex h-4 w-full min-w-0 items-center gap-1">
+    {leadToggle || leadIcon || branchLine || goal || zombieIndicator || prBadge || badges ? <div className="flex h-4 w-full min-w-0 items-center gap-1">
       {leadToggle ? (
         <span className="relative inline-flex size-3 flex-shrink-0 items-center justify-center">
           {leadIcon ? <span className={cn('inline-flex', leadIconClassName)}>{leadIcon}</span> : null}
@@ -190,6 +186,6 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         {zombieIndicator ?? prBadge}
         {badges}
       </span>
-    </div>
+    </div> : null}
   </div>;
 };

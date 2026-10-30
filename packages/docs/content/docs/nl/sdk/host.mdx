@@ -210,6 +210,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 Voor `path` gelden dezelfde regels als bij `request`. Een service declareren voegt `service` toe aan de bij installatie goed te keuren rechten. Tot goedkeuring geeft elke `serviceRequest` `NO_SERVICE`. Het volledige contract staat in `GUEST_SERVICES.md` in het pakket.
 
+## Sessiegebeurtenissen
+
+Uw pagina weet alleen van een sessie zolang die open is. Uw service kan meer weten: geef `contributes.sessionEvents` op naast `contributes.service`, en OpenChamber stuurt de gebeurtenissen die u opgeeft naar de service, uit elk project, of er nu een venster open is of niet.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+De vier gebeurtenissen zijn `turn-finished` (de agent is klaar en wacht op niets: geen lopende subagent, geen openstaande toestemming of vraag, geen doelstap), `turn-failed`, `permission-asked` en `question-asked`. Een beurt die de gebruiker heeft gestopt, stuurt niets. De goedkeuring van de extensie is het abonnement; het toestemmingsvenster toont de gebeurtenissen onder de regel van de service. Zonder `content` krijgt de service alleen identificatiegegevens: de sessie, de projectmap en de items die de gebruiker eraan heeft gekoppeld. Met `"content": true` vraagt het manifest ook om een recht dat de gebruiker als eigen regel ziet, **Lezen wat de agent op de achtergrond zegt**, en draagt elke gebeurtenis het eindantwoord van de agent, de velden van de vraag of de details van de toestemming.
+
+Elke gebeurtenis komt aan als één `POST /session-events` met de bearer van de service. Lees hem met `readSessionEventRequest` en antwoord met `{ "ok": true }`:
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+De gebeurtenissen van elk project worden verstuurd. Vergelijk `event.project.directory` met uw eigen instellingen en antwoord voor de rest met `{ "ok": true }`. Bezorging gebeurt hoogstens één keer en in volgorde, één verzoek tegelijk. Een mislukt antwoord laat uw gebeurtenissen 30 seconden vallen, en niets wordt opnieuw verstuurd nadat OpenChamber of uw service niet bereikbaar was. De service heeft hiervoor geen paneel nodig. Het voorbeeld `session-events-log` schrijft elke gebeurtenis naar een bestand.
+
+## Meldingskanalen
+
+Een service kan de meldingen van de gebruiker bezorgen, naast de desktop en de telefoon: geef `provides: ["notifications"]` op en beschrijf het kanaal in `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+OpenChamber maakt uit die beschrijving een accountkaart voor het kanaal bij Instellingen → Integraties en bewaart het account. De gebruiker verbindt het daar, het token blijft in OpenChamber en uw service ziet het nooit. Zodra een account is verbonden, gaat elke melding die OpenChamber naar de telefoon zou sturen ook naar uw service, volgens de meldingsinstellingen van de gebruiker en alleen zolang er geen venster zichtbaar is, tenzij de gebruiker heeft gekozen om altijd een melding te krijgen. De extensie pauzeren stopt het.
+
+OpenChamber stuurt drie aanroepen door naar `POST /notifications`: `auth.probe` (is dit een server waaraan u bezorgt), `auth.verify` (van wie is dit token) en `notify` (één melding). Lees elke aanroep met `readNotificationsProviderRequest` en bereik de server van het kanaal alleen via de outbound-helper, die uw verzoek met de handle van de aanroep naar OpenChamber stuurt. OpenChamber voegt het token toe en houdt het verzoek op de server van het account.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+Naar welke ruimte of welk kanaal een project gaat, bepaalt uw extensie zelf: de melding draagt `directory` en `sessionName`. In de enterprise-modus draagt ze alleen de algemene titel, net als de telefoon. Het voorbeeld `notification-webhook` is een compleet kanaal met een ontvanger om het tegen te testen.
+
 ## Bestanden
 
 Een relatief pad ligt binnen het geopende project en vereist `files`. Een pad met `/` of `~/` moet passen bij een opgegeven `contributes.filesystem`-patroon en vereist `filesystem`. Zie [Een extensie bouwen](/nl/sdk/#bestanden) voor de regels.

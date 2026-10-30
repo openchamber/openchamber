@@ -186,6 +186,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` podlega tym samym zasadom co w `request`. Zadeklarowanie usługi lokalnej dodaje `service` do uprawnień, które użytkownik zatwierdza przy instalacji; do tego czasu każde `serviceRequest` to `NO_SERVICE`. Pełny kontrakt: plik `GUEST_SERVICES.md` w pakiecie.
 
+## Zdarzenia sesji
+
+Twoja strona wie o sesji tylko wtedy, gdy ta jest otwarta. Twoja usługa może wiedzieć więcej: zadeklaruj `contributes.sessionEvents` obok `contributes.service`, a OpenChamber wysyła do usługi wymienione zdarzenia ze wszystkich projektów, niezależnie od tego, czy jakieś okno jest otwarte.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+Cztery zdarzenia to `turn-finished` (agent skończył i na nic nie czeka: nie działa żaden subagent, nie ma otwartego uprawnienia ani pytania, nie ma kroku celu), `turn-failed`, `permission-asked` i `question-asked`. Tura zatrzymana przez użytkownika nie wysyła nic. Zatwierdzenie rozszerzenia jest subskrypcją; okno zatwierdzania wymienia zdarzenia pod wierszem usługi. Bez `content` usługa dostaje same identyfikatory: sesję, folder jej projektu i elementy, które użytkownik do niej dołączył. Z `"content": true` manifest prosi też o uprawnienie, które użytkownik widzi jako osobny wiersz, **Czytać, co agent mówi w tle**, a każde zdarzenie niesie końcową odpowiedź agenta, pola pytania albo szczegóły uprawnienia.
+
+Każde zdarzenie przychodzi jako jedno `POST /session-events` z tokenem bearer usługi. Odczytaj je przez `readSessionEventRequest` i odpowiedz `{ "ok": true }`:
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+Wysyłane są zdarzenia ze wszystkich projektów; porównaj `event.project.directory` z własnymi ustawieniami, a na resztę odpowiadaj `{ "ok": true }`. Dostarczanie jest co najwyżej jednokrotne i w kolejności, po jednym żądaniu naraz; nieudana odpowiedź odrzuca Twoje zdarzenia na 30 sekund, a po przestoju OpenChamber lub Twojej usługi nic nie jest wysyłane ponownie. Usługa nie potrzebuje do tego panelu. Przykład `session-events-log` zapisuje każde zdarzenie do pliku.
+
+## Kanały powiadomień
+
+Usługa może dostarczać powiadomienia użytkownika obok komputera i telefonu: zadeklaruj `provides: ["notifications"]` i opisz kanał w `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+Z tego opisu OpenChamber rysuje kartę konta kanału w Ustawienia → Integracje i przechowuje konto: użytkownik podłącza je tam, token zostaje w OpenChamber, a Twoja usługa nigdy go nie widzi. Gdy konto jest podłączone, każde powiadomienie, które OpenChamber wysłałby na telefon, trafia też do Twojej usługi, po przejściu przez przełączniki powiadomień użytkownika i tylko wtedy, gdy żadne okno nie jest widoczne, chyba że użytkownik wybrał powiadamianie zawsze. Wstrzymanie rozszerzenia to zatrzymuje.
+
+OpenChamber przekazuje trzy wywołania do `POST /notifications`: `auth.probe` (czy to serwer, do którego dostarczasz), `auth.verify` (do kogo należy ten token) i `notify` (jedno powiadomienie). Odczytaj każde przez `readNotificationsProviderRequest`, a z serwerem kanału łącz się tylko przez pomocnika wychodzącego, który wysyła Twoje żądanie do OpenChamber z uchwytem wywołania; OpenChamber dodaje token i kieruje żądanie wyłącznie na serwer konta.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+To, do którego pokoju lub kanału trafia projekt, jest wyborem Twojego rozszerzenia: powiadomienie niesie `directory` i `sessionName`. W trybie enterprise niesie tylko ogólny tytuł, tak jak telefon. Przykład `notification-webhook` to kompletny kanał z odbiornikiem, na którym można go wypróbować.
+
 ## Pliki
 
 Ścieżka względna leży w otwartym projekcie i wymaga uprawnienia `files`. Ścieżka zaczynająca się od `/` lub `~/` musi pasować do zadeklarowanego wzorca `contributes.filesystem` i wymaga uprawnienia `filesystem`. Zasady opisuje [Tworzenie rozszerzenia](/sdk/#pliki).

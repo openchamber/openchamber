@@ -6,6 +6,7 @@ import {
   mergeSessionSidebarVirtualIndexes,
   sectionSpacingAfter,
   sessionSidebarRowVirtualKey,
+  sessionSidebarRowSizeKey,
 } from './sessionSidebarVirtualization';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionNode } from './types';
@@ -94,6 +95,16 @@ describe('SessionSidebarRows section spacing', () => {
     // A sibling measured mid-section tells its height; the gap is added as measured.
     expect(estimateSessionSidebarRowSize(last, rows[lastBeforeProjects + 1], { height: 30, gapBySpacing: new Map([['pb-3', 18]]) })).toBe(48);
     expect(estimateSessionSidebarRowSize(last, undefined, { height: 30 })).toBe(30);
+  });
+
+  test('detailed sessions keep independent height measurements while compact rows share theirs', () => {
+    const rows = buildSessionSidebarRowModel({ ...input(false), detailedZoneRows: true }).rows;
+    const sessions = rows.filter((row): row is Extract<SessionSidebarRow, { kind: 'session' }> => row.kind === 'session' && row.renderContext === 'project');
+    expect(sessions).toHaveLength(2);
+    const heights = new Map([[sessionSidebarRowSizeKey(sessions[0]), 34]]);
+    expect(heights.get(sessionSidebarRowSizeKey(sessions[1]))).toBeUndefined();
+    expect(sessionSidebarRowSizeKey({ ...sessions[0], detailed: false }))
+      .toBe(sessionSidebarRowSizeKey({ ...sessions[1], detailed: false }));
   });
 
   test('a header gaining its gap as it closes is a new virtual item, so its old height is not reused', () => {

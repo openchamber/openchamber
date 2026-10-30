@@ -34,6 +34,8 @@ export type SettingsSearchResult = SettingsSearchItem & {
 };
 
 export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+  voiceSettings?: Pick<ReturnType<typeof useConfigStore.getState>,
+    'showMessageTTSButtons' | 'autoReadAloudEnabled' | 'voiceProvider' | 'dictationEnabled' | 'sttProvider'>;
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
@@ -1516,8 +1518,8 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.voice.page.field.endpointPath',
     descriptionKey: 'settings.voice.page.field.endpointPathHint',
     keywords: ['tts', 'read aloud', 'endpoint path', 'custom endpoint', 'resource path'],
-    isAvailable: () => {
-      const state = useConfigStore.getState();
+    isAvailable: (ctx) => {
+      const state = ctx.voiceSettings ?? useConfigStore.getState();
       return (state.showMessageTTSButtons || state.autoReadAloudEnabled) && state.voiceProvider === 'openai-compatible';
     },
   },
@@ -1527,8 +1529,8 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.voice.page.field.endpointPath',
     descriptionKey: 'settings.voice.page.field.endpointPathHint',
     keywords: ['stt', 'dictation', 'endpoint path', 'custom endpoint', 'resource path'],
-    isAvailable: () => {
-      const state = useConfigStore.getState();
+    isAvailable: (ctx) => {
+      const state = ctx.voiceSettings ?? useConfigStore.getState();
       return state.dictationEnabled && state.sttProvider === 'openai-compatible';
     },
   },

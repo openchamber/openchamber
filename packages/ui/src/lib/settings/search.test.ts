@@ -26,6 +26,28 @@ const runtimeCtx = {
 };
 
 describe('settings search', () => {
+  test('uses the subscribed voice settings snapshot when one is supplied', () => {
+    const voiceSettings = {
+      showMessageTTSButtons: true,
+      autoReadAloudEnabled: false,
+      voiceProvider: 'openai-compatible' as const,
+      dictationEnabled: true,
+      sttProvider: 'openai-compatible' as const,
+    };
+    const endpointIds = (enabled: boolean) => buildSettingsSearchResults({
+      query: 'endpoint path',
+      runtimeCtx: { ...runtimeCtx, voiceSettings: {
+        ...voiceSettings, showMessageTTSButtons: enabled, dictationEnabled: enabled,
+      } },
+      t,
+      getPageTitle: (page) => page,
+    }).map((result) => result.id);
+    expect(endpointIds(true)).toContain('voice.tts-endpoint-path');
+    expect(endpointIds(true)).toContain('voice.stt-endpoint-path');
+    expect(endpointIds(false)).not.toContain('voice.tts-endpoint-path');
+    expect(endpointIds(false)).not.toContain('voice.stt-endpoint-path');
+  });
+
   test('indexes the retention target under its current label and existing anchor', () => {
     const results = buildSettingsSearchResults({ query: 'retention', runtimeCtx, t, getPageTitle: (page) => page });
     const target = results.find((result) => result.id === 'sessions.retention-only-archived');

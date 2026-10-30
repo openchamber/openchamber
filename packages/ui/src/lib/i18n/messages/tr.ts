@@ -2295,6 +2295,7 @@ export const dict = {
   'chat.revert.toast.restored': 'Tüm mesajlar geri yüklendi',
   'chat.toast.opencodeRestartInterrupted.title': 'Sohbet kesildi',
   'chat.toast.opencodeRestartInterrupted.description': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Devam etmek için bir mesaj gönder.',
+  'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'Yanıt hâlâ çalışırken OpenCode yeniden başlatıldı. Sohbet otomatik olarak devam edecek; devam etmezse bir mesaj gönder.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'Session\'ı aç',
   'chat.errorBoundary.title': 'Sohbet Hatası',
   'chat.errorBoundary.description': 'Sohbet arayüzünde bir hata oluştu. Bu durum geçici bir ağ sorunu veya bozuk mesaj verilerinden kaynaklanıyor olabilir.',

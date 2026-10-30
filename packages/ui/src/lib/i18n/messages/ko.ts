@@ -2438,6 +2438,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.revert.toast.restored': '모든 메시지 복원됨',
   'chat.toast.opencodeRestartInterrupted.title': '채팅이 중단되었습니다',
   'chat.toast.opencodeRestartInterrupted.description': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 계속하려면 메시지를 보내세요.',
+  'chat.toast.opencodeRestartInterrupted.autoResumeDescription': '응답이 진행 중인 동안 OpenCode가 다시 시작되었습니다. 채팅은 자동으로 이어집니다. 이어지지 않으면 메시지를 보내세요.',
   'chat.toast.opencodeRestartInterrupted.openSession': '세션 열기',
   'chat.errorBoundary.title': '채팅 오류',
   'chat.errorBoundary.description': '채팅 인터페이스에서 오류가 발생했습니다. 일시적인 네트워크 이슈 또는 손상된 메시지 데이터 때문일 수 있습니다.',

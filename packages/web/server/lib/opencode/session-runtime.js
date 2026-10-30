@@ -1,7 +1,17 @@
+import { createMessageId } from '../dispatch-results/runtime.js';
+
 const SESSION_COOLDOWN_DURATION_MS = 2000;
 const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_ACTIVITY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SESSION_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+// Give the user time to continue by hand before the automatic attempt.
+export const RESTART_RESUME_GRACE_MS = 60 * 1000;
+const RESTART_RESUME_RETRY_MS = 15 * 1000;
+const RESTART_RESUME_ATTEMPTS = 3;
+const RESTART_RESUME_TIMEOUT_MS = 15 * 1000;
+const RESTART_RESUME_TEXT =
+  'OpenChamber restarted OpenCode while a response was still running. Continue from where you left off without repeating completed work.';
 
 const extractSessionStatusUpdate = (payload) => {
   if (!payload || payload.type !== 'session.status') {
@@ -40,7 +50,15 @@ const extractSessionStatusUpdate = (payload) => {
 
 const readRequestId = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '');
 
-export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent, readTurnStart = null }) => {
+export const createSessionRuntime = ({
+  writeSseEvent,
+  getNotificationClients,
+  broadcastEvent,
+  readTurnStart = null,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  fetchImpl = fetch,
+}) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
@@ -56,6 +74,11 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   // One history read per session per turn; the token tells a read that
   // outlived its turn from the current one.
   const turnStartReads = new Map();
+  const restartResumeTimers = new Map();
+  // Survives managed OpenCode restarts. Only a new user message renews the budget.
+  const restartResumes = new Map();
+  const latestUserMessages = new Map();
+  const isolatedSessionIds = new Set();
   // Pending permission requests and forms per session, kept from the same
   // upstream stream. Clients that do not initialize a directory cannot read
   // its pending list from OpenCode (that read creates a location), so this map
@@ -132,6 +155,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
       const sessionId = readRequestId(properties.sessionID) || readRequestId(info.id);
       if (sessionId) {
+        cancelRestartResume(sessionId);
+        restartResumes.delete(sessionId);
+        latestUserMessages.delete(sessionId);
+        isolatedSessionIds.delete(sessionId);
         pendingRequestsBySession.delete(sessionId);
         turnStarts.delete(sessionId);
         turnStartReads.delete(sessionId);
@@ -279,6 +306,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       metadata: { ...existing?.metadata, ...metadata },
     });
 
+    if (status === 'busy' || status === 'retry') cancelRestartResume(sessionId);
     if (!existing || existing.status !== status || isRestartInterruption) {
       const state = sessionStates.get(sessionId);
       broadcastSessionStatus({
@@ -338,6 +366,90 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     }
   };
 
+  const cancelRestartResume = (sessionId) => {
+    const check = restartResumeTimers.get(sessionId);
+    if (!check) return;
+    clearTimeout(check.timer);
+    restartResumeTimers.delete(sessionId);
+  };
+
+  const postRestartContinuation = async (sessionId, id) => {
+    const fetchPath = `/api/session/${encodeURIComponent(sessionId)}/synthetic`;
+    const response = await fetchImpl(buildOpenCodeUrl(fetchPath, ''), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...getOpenCodeAuthHeaders(),
+      },
+      body: JSON.stringify({
+        // Stable for every attempt of one restart: a retry after a lost
+        // response lands as a 409, not a second continuation.
+        id,
+        text: RESTART_RESUME_TEXT,
+        resume: true,
+        delivery: 'steer',
+        metadata: { notice: 'opencode-restart' },
+      }),
+      signal: AbortSignal.timeout(RESTART_RESUME_TIMEOUT_MS),
+    });
+    await response.body?.cancel().catch(() => undefined);
+    if (!response.ok) {
+      const error = new Error(`OpenCode restart continuation failed with ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+  };
+
+  const checkRestartResume = (sessionId, check) => {
+    if (restartResumeTimers.get(sessionId) !== check) return; // A newer interrupt superseded it.
+    const state = sessionStates.get(sessionId);
+    // The user already continued the turn.
+    if (!state || state.status === 'busy' || state.status === 'retry') {
+      restartResumeTimers.delete(sessionId);
+      return;
+    }
+    void (async () => {
+      // A lost response may mean the message landed. A later restart must
+      // not mint another continuation for the same user turn.
+      check.resume.attempted = true;
+      try {
+        await postRestartContinuation(sessionId, check.resume.id);
+        if (restartResumeTimers.get(sessionId) !== check) return;
+        restartResumeTimers.delete(sessionId);
+      } catch (error) {
+        if (restartResumeTimers.get(sessionId) !== check) return;
+        if (error?.status === 404 || error?.status === 409) {
+          restartResumeTimers.delete(sessionId);
+          return;
+        }
+        check.attempt += 1;
+        if (check.attempt >= RESTART_RESUME_ATTEMPTS) {
+          restartResumeTimers.delete(sessionId);
+          console.warn(`[session-runtime] could not resume interrupted session ${sessionId}:`, error?.message ?? error);
+          return;
+        }
+        check.timer = setTimeout(() => checkRestartResume(sessionId, check), RESTART_RESUME_RETRY_MS);
+      }
+    })();
+  };
+
+  const scheduleRestartResume = (sessionId) => {
+    cancelRestartResume(sessionId);
+    if (isolatedSessionIds.has(sessionId)) return false;
+    if (!buildOpenCodeUrl || !getOpenCodeAuthHeaders) return false;
+    let resume = restartResumes.get(sessionId);
+    if (resume?.attempted) return false;
+    if (!resume) {
+      resume = { id: createMessageId(Date.now()), attempted: false };
+      restartResumes.set(sessionId, resume);
+    }
+    const check = { timer: null, attempt: 0, resume };
+    restartResumeTimers.set(sessionId, check);
+    check.timer = setTimeout(() => checkRestartResume(sessionId, check), RESTART_RESUME_GRACE_MS);
+    return true;
+  };
+
   const interruptBusySessionsAfterRestart = () => {
     const interruptedSessionIds = new Set();
     for (const [sessionId, state] of sessionStates) {
@@ -356,6 +468,7 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     turnStarts.clear();
     turnStartReads.clear();
     const eventId = `opencode-restart-${Date.now()}`;
+    const autoResumeSessionIds = [];
     for (const sessionId of interruptedSessionIds) {
       updateSessionState(sessionId, 'idle', eventId, {
         message: 'Interrupted by OpenCode restart',
@@ -371,10 +484,11 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
           },
         },
       });
+      if (scheduleRestartResume(sessionId)) autoResumeSessionIds.push(sessionId);
     }
 
     resetAllSessionActivityToIdle();
-    return { sessionIds: [...interruptedSessionIds] };
+    return { sessionIds: [...interruptedSessionIds], autoResumeSessionIds };
   };
 
   const cleanupOldSessionStates = () => {
@@ -382,6 +496,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     for (const [sessionId, data] of sessionStates) {
       if (now - data.lastUpdateAt > SESSION_STATE_MAX_AGE_MS) {
         sessionStates.delete(sessionId);
+        cancelRestartResume(sessionId);
+        if (!restartResumes.has(sessionId)) latestUserMessages.delete(sessionId);
       }
     }
     // A start lives as long as its session's status does.
@@ -400,10 +516,21 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
 
   const cleanupInterval = setInterval(cleanupOldSessionStates, SESSION_STATE_CLEANUP_INTERVAL_MS);
 
-  const processOpenCodeSsePayload = (payload) => {
+  const processOpenCodeSsePayload = (payload, { spaceId = null } = {}) => {
     processBlockingRequestPayload(payload);
+    if (payload?.type === 'message.updated') {
+      const info = payload.properties?.info;
+      const sessionId = readRequestId(info?.sessionID);
+      const messageId = readRequestId(info?.id);
+      if (info?.role === 'user' && sessionId && messageId && latestUserMessages.get(sessionId) !== messageId) {
+        latestUserMessages.set(sessionId, messageId);
+        cancelRestartResume(sessionId);
+        restartResumes.delete(sessionId);
+      }
+    }
     const update = extractSessionStatusUpdate(payload);
     if (!update) return;
+    if (spaceId) isolatedSessionIds.add(update.sessionId);
 
     if (update.type === 'busy' || update.type === 'retry') {
       // Recorded before the status update, so its broadcast carries the start.
@@ -451,6 +578,13 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     for (const timer of sessionActivityCooldowns.values()) {
       clearTimeout(timer);
     }
+    for (const check of restartResumeTimers.values()) {
+      clearTimeout(check.timer);
+    }
+    restartResumeTimers.clear();
+    restartResumes.clear();
+    latestUserMessages.clear();
+    isolatedSessionIds.clear();
     sessionActivityCooldowns.clear();
     sessionActivityPhases.clear();
     sessionStates.clear();

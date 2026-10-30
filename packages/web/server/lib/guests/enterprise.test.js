@@ -108,3 +108,11 @@ describe('extensions in enterprise mode', () => {
     expect(toPublicGuest(restored).storageId).toEqual(expect.any(String));
   });
 });
+
+describe('session content in enterprise mode', () => {
+  test('transcript is gated with the service that would receive it', () => {
+    const guest = { service: { entry: 'service/main.js', runtime: 'host' }, sessionEvents: { events: ['turn-finished'], content: true } };
+    expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service', 'transcript']);
+    expect(enterpriseBlockedCapabilities(guest, { source: 'git', gitUrl: 'https://github.com/acme/ext' }, enterprise(['https://github.com/acme/ext']))).toEqual([]);
+  });
+});

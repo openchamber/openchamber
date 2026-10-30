@@ -7,7 +7,9 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
  * off this machine answers to the administrator:
  * - `network`: host requests to its integration's API origin;
  * - `origins`: its frame fetching approved https origins directly;
- * - `service`: an unsandboxed process with the user's access.
+ * - `service`: an unsandboxed process with the user's access;
+ * - `transcript`: session content (the agent's answers, questions and
+ *   permission requests) posted to that process, so it is gated with it.
  * Such a package installs and runs only from a Git repository listed in the
  * policy (`allowedExtensions`; an entry ending in `/` allows every
  * repository under it, such as a whole organization), or from a local folder
@@ -16,7 +18,7 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
  * The list names repositories, not package ids: a package declares its own
  * id, so an id would let a user ship any code under an allowed name.
  */
-const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service'];
+const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service', 'transcript'];
 
 /** `host/path` of a clone URL (https or scp-style ssh), for comparing two spellings of one repository. */
 const repositoryKey = (value) => {

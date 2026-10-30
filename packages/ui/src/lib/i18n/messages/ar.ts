@@ -2367,6 +2367,7 @@ export const dict = {
   'chat.revert.toast.restored': 'تمت استعادة كل الرسائل',
   'chat.toast.opencodeRestartInterrupted.title': 'انقطعت المحادثة',
   'chat.toast.opencodeRestartInterrupted.description': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. أرسل رسالة للمتابعة.',
+  'chat.toast.opencodeRestartInterrupted.autoResumeDescription': 'أُعيد تشغيل OpenCode بينما كان الرد لا يزال قيد التنفيذ. ستستأنف المحادثة تلقائيًا؛ أرسل رسالة إذا لم تفعل.',
   'chat.toast.opencodeRestartInterrupted.openSession': 'فتح الجلسة',
   'chat.errorBoundary.title': 'خطأ في المحادثة',
   'chat.errorBoundary.description': 'واجهت واجهة المحادثة خطأً. قد يكون السبب مشكلة مؤقتة في الشبكة أو بيانات رسائل تالفة.',

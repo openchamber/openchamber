@@ -694,9 +694,9 @@ dragging a worktree onto a folder is not offered.
   project through the session ownership index first (managed worktrees live
   outside the project path), falls back to a path-prefix match, and finds the
   containing worktree by longest prefix. Branch labels are live-first.
-- A detailed zone row has two lines of fixed height (20px and 16px); the second
-  is rendered even when empty, so nothing shifts when a branch or badge
-  arrives. The first holds the title and the action indicator, pin, done hint,
+- A detailed zone row has two lines of fixed height (20px and 16px). An empty
+  second line is omitted; a project icon, branch, goal, linked reference,
+  waiting request or expansion chevron keeps it visible. The first holds the title and the action indicator, pin, done hint,
   status icon and time; hover actions cover that cluster. The second opens
   with the project's icon and holds the branch (or the space's name) and the
   state cluster: goal glyph, PR (or the zombie warning), permission/question
@@ -718,7 +718,16 @@ dragging a worktree onto a folder is not offered.
   already does; in a zone it opens with the project's icon. A worktree's
   first icon there is the worktree mark tinted by its PR; a draft's line
   opens with a pen and names the branch its session will go to once that
-  directory's git status is known.
+  directory's git status is known. A draft without a project icon, branch or
+  attachment mark uses one line.
+
+### Why empty detailed lines collapse at the row
+
+Git availability alone cannot determine whether a session has a goal, linked
+task or pending request. The row already reads those values and omits its second
+line only when it has no content or expansion control. Detailed sessions and
+drafts keep per-row measured heights in the virtualizer because their contents
+can now give rows of the same kind different heights.
 
 ## Pinned
 

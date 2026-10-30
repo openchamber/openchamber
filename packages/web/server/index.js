@@ -2,6 +2,7 @@ import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
 import 'reflect-metadata';
 import express from 'express';
+import { buildRestartNotification } from './lib/opencode/restart-notification.js';
 import compression from 'compression';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
@@ -128,12 +129,17 @@ import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
-import { beginGuestServiceHost, beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
+import { beginGuestServiceHost, beginGuestServiceShutdown, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
 import { guestServiceRegistryDir } from './lib/guests/service-registry.js';
-import { findInstalledGuest } from './lib/guests/catalog.js';
+import { findInstalledGuest, listInstalledGuests } from './lib/guests/catalog.js';
+import { createExtensionSessionEvents } from './lib/guests/session-events.js';
 import { extensionsPersistPath } from './lib/guests/persist.js';
 import { createGuestSurfaceRuntime } from './lib/guests/surface.js';
-import { BROWSER_PROVIDER_IDLE_MS } from '@openchamber/sdk';
+import { BROWSER_PROVIDER_IDLE_MS, NOTIFICATIONS_OUTBOUND_PATH } from '@openchamber/sdk';
+import { setHostCallbackRoute } from './lib/guests/host-callback.js';
+import { createOutboundHandles } from './lib/source-control/outbound-handles.js';
+import { createNotificationChannelAccounts, notificationChannelsPersistPath } from './lib/notifications/channel-accounts.js';
+import { createExtensionNotificationChannels } from './lib/notifications/extension-channels.js';
 import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import { ensureChatsDir, migrateLegacyUserDirs } from './lib/data-dir-migration.js';
 import { createProjectContextRuntime } from './lib/project-context/runtime.js';
@@ -675,6 +681,8 @@ const sessionRuntime = createSessionRuntime({
   broadcastEvent: broadcastGlobalUiEvent,
   // Called, not captured: the OpenCode URL and auth helpers are declared further down.
   readTurnStart: (sessionId) => createTurnStartReader({ buildOpenCodeUrl, getOpenCodeAuthHeaders }).readTurnStart(sessionId),
+  buildOpenCodeUrl: (...args) => buildOpenCodeUrl(...args),
+  getOpenCodeAuthHeaders: () => getOpenCodeAuthHeaders(),
 });
 
 const getActiveSessionCount = () => sessionRuntime.getActiveSessionCount();
@@ -996,6 +1004,24 @@ notificationTemplateRuntime = createNotificationTemplateRuntime({
   chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
 });
 
+// Extension notification channels (`provides: ["notifications"]`): the user's
+// notifications go to the service of every approved, connected channel, and
+// the service reaches its server only through these handles on the callback
+// listener. Accounts live in their own store; the service never sees a token.
+const notificationChannelHandles = createOutboundHandles();
+setHostCallbackRoute(NOTIFICATIONS_OUTBOUND_PATH, {
+  refusal: notificationChannelHandles.refusal,
+  serve: notificationChannelHandles.serve,
+});
+const extensionNotificationChannels = createExtensionNotificationChannels({
+  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  proxyServiceRequest: proxyGuestServiceRequest,
+  persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
+  accounts: createNotificationChannelAccounts({ persistPath: notificationChannelsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  handles: notificationChannelHandles,
+  isAnyUiVisible,
+});
+
 const notificationTriggerRuntime = createNotificationTriggerRuntime({
   readSettingsFromDisk,
   prepareNotificationLastMessage,
@@ -1016,6 +1042,7 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
   spaceFetchFor: (spaceId) => spacesHost?.openCodeFetchFor(spaceId) ?? null,
   // Declared further down; only ever called after startup.
   isInAutoReview: (sessionId, turnEndedAt) => autoReviewRuntime.speaksFor(sessionId, turnEndedAt),
+  deliverToExtensionChannels: (delivery) => extensionNotificationChannels.deliver(delivery),
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
@@ -1189,6 +1216,21 @@ const trackerRegistry = createTrackerRegistry(undefined, {
 // runtime starts on the first event and a failed load is retried later, so a
 // tracker that fails to load leaves the others running and is not silent for good.
 const trackerSessionStatus = createTrackerSessionStatus({ registry: trackerRegistry });
+// Session events for extension services (`contributes.sessionEvents`): one
+// request per event per subscribed service, with the ready notification's
+// gates on "the turn is finished". The catalog decides who receives what.
+const extensionSessionEvents = createExtensionSessionEvents({
+  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  proxyServiceRequest: proxyGuestServiceRequest,
+  persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  fetchLastAssistantMessageText,
+  readSessionMetadata: readStoredSessionMetadata,
+  // Both declared further down; only ever called after startup.
+  isSessionAutoAccepting: (sessionId, directory, requestId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, requestId),
+  isInAutoReview: (sessionId, turnEndedAt) => autoReviewRuntime.speaksFor(sessionId, turnEndedAt),
+});
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
   buildOpenCodeUrl,
@@ -1370,7 +1412,7 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   onPayload: (payload, { spaceId }) => {
     maybeCacheSessionInfoFromEvent(payload, { spaceId });
     void maybeSendPushForTrigger(payload, { spaceId });
-    sessionRuntime.processOpenCodeSsePayload(payload);
+    sessionRuntime.processOpenCodeSsePayload(payload, { spaceId });
   },
   // Turns already running when the stream (re)connects sent no start this
   // server saw; OpenCode's running list names them.
@@ -1422,6 +1464,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     contextObligatoryRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWarmingRuntime.processPayload(payload);
     trackerSessionStatus.processPayload(payload);
+    extensionSessionEvents.processPayload(payload, directory || payload.properties?.directory || '');
   }
 });
 
@@ -1756,19 +1799,9 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
       console.warn('Failed to rebind message stream after OpenCode restart:', error?.message ?? error);
     }
     try {
-      const { sessionIds } = sessionRuntime.interruptBusySessionsAfterRestart();
-      if (sessionIds.length > 0) {
-        const multiple = sessionIds.length > 1;
-        broadcastUiNotification({
-          title: multiple ? 'Chats interrupted' : 'Chat interrupted',
-          body: multiple
-            ? 'OpenCode restarted during running responses. Send a message in each chat to continue.'
-            : 'OpenCode restarted during a running response. Send a message to continue.',
-          tag: 'opencode-restart-interrupted',
-          kind: 'opencode-restart-interrupted',
-          sessionId: sessionIds[0],
-        });
-      }
+      const recovery = sessionRuntime.interruptBusySessionsAfterRestart();
+      const notification = buildRestartNotification(recovery);
+      if (notification) broadcastUiNotification(notification);
     } catch (error) {
       console.warn('Failed to reconcile sessions after OpenCode restart:', error?.message ?? error);
     }
@@ -2101,12 +2134,16 @@ const openChamberControlService = createOpenChamberControlService({
       };
       broadcastOpenChamberUiEvent(payload);
       void maybeSendPushForTrigger(payload);
+      // Server-made, so it never passes through the hub loop: told here.
+      extensionSessionEvents.processPayload(payload, change.directory);
       return;
     }
-    broadcastOpenChamberUiEvent({
+    const settled = {
       type: 'openchamber:page-settled',
       properties: { sessionID: change.sessionId, pageID: change.callId },
-    });
+    };
+    broadcastOpenChamberUiEvent(settled);
+    extensionSessionEvents.processPayload(settled, change.directory);
   },
   // The tool is off by default; a plugin generated before it was switched off
   // must not keep paging the user.
@@ -2234,6 +2271,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   scheduledTasksRuntime,
   beginGuestServiceShutdown,
   stopAllGuestServices,
+  extensionSessionEvents,
   getGuestSurfaceRuntime: () => guestSurfaceRuntime,
   getRealtimeProxyRuntime: () => realtimeProxyRuntime,
   getDictationRuntime: () => dictationRuntime,
@@ -2831,6 +2869,8 @@ async function main(options = {}) {
       guestSurfaceRuntime?.endForGuest(event.guestId);
       return browserControlRouter.handleGuestDeactivated(event);
     },
+    onExtensionSessionEventsChanged: () => extensionSessionEvents.reconcile(),
+    extensionNotificationChannels,
     surfaceViewerHeaders: (guestId, viewerId) => guestSurfaceRuntime?.viewerHeaders(guestId, viewerId) ?? null,
     builtInExtensionsDir: options.builtInExtensionsDir,
     openchamberUserConfigRoot: OPENCHAMBER_USER_CONFIG_ROOT,

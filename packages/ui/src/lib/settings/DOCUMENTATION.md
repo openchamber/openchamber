@@ -39,6 +39,10 @@
 
 ## Decisions
 
+### Why the Settings view passes its voice availability snapshot
+
+Search and new-setting badges receive the voice fields the view subscribes to, so memoized results refresh when those fields change. Non-React callers can omit the snapshot and read the current config store; separate invalidation-only dependencies hid this relationship from hook checks.
+
 ### Why badges use item-level availability
 
 Badges and acknowledgment use the search registry's page and item availability predicates with the current device context. Hidden controls remain pending until opened on a device that can show them. Filtering only whole pages would announce and acknowledge controls the user cannot see. The initial baseline still seeds every build anchor so a fresh install starts without announcements.

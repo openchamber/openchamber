@@ -226,6 +226,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` follows the same rules as `request`. Declaring a service adds `service` to the capabilities the user approves at install; until then every `serviceRequest` is `NO_SERVICE`. Full contract: the package file `GUEST_SERVICES.md`.
 
+## Session events
+
+Your page only knows about a session while it is open. Your service can know more: declare `contributes.sessionEvents` next to `contributes.service`, and OpenChamber posts the events you list to the service, from every project, whether or not a window is open.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+The four events are `turn-finished` (the agent is done and waits for nothing: no running subagent, no open permission or question, no goal step), `turn-failed`, `permission-asked` and `question-asked`. A turn the user stopped sends nothing. Approving the extension is the subscription; the dialog lists the events under the service line. Without `content` the service gets identifiers only: the session, its project directory, the items the user linked to it. With `"content": true` the manifest also asks for a permission the user sees as its own line, **Read what the agent says in the background**, and each event carries the agent's final answer, the question's fields or the permission's detail.
+
+Each event arrives as one `POST /session-events` with the service bearer. Read it with `readSessionEventRequest` and answer `{ "ok": true }`:
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+Every project's events are sent; compare `event.project.directory` with your own settings and answer `{ "ok": true }` for the rest. Delivery is at most once and in order, one request at a time; a failed answer drops your events for 30 seconds, and nothing is replayed after OpenChamber or your service was down. The service needs no panel for this. The `session-events-log` example journals every event to a file.
+
+## Notification channels
+
+A service can deliver the user's notifications, next to the desktop and the phone: declare `provides: ["notifications"]` and describe the channel in `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+OpenChamber draws an account card for the channel in Settings → Integrations from that description, and keeps the account: the user connects it there, the token stays in OpenChamber, and your service never sees it. Once an account is connected, every notification OpenChamber would send to the phone goes to your service too, after the user's own notification toggles, and only while no window is visible unless the user chose to be notified always. Pausing the extension stops it.
+
+OpenChamber forwards three calls to `POST /notifications`: `auth.probe` (is this server one you deliver to), `auth.verify` (who does this token belong to) and `notify` (one notification). Read each with `readNotificationsProviderRequest`, and reach the channel's server only through the outbound helper, which posts your request to OpenChamber with the call's handle; OpenChamber adds the token and keeps the request on the account's server.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+Which room or channel a project goes to is your extension's own choice: the notification carries `directory` and `sessionName`. In enterprise mode it carries the generic title only, as the phone does. The `notification-webhook` example is a complete channel with a receiver to try it against.
+
 ## Files
 
 A relative path is inside the open project and needs the `files` capability. A path starting with `/` or `~/` must match a declared `contributes.filesystem` pattern and needs the `filesystem` capability. See [Build an extension](/sdk/#files) for the rules.

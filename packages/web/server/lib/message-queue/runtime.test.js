@@ -468,9 +468,13 @@ describe('a message queued as a goal', () => {
     runtime.start();
     await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'Implement this plan: X', text: 'Implement this plan: X', goal: { objective: 'the whole plan', tokenBudget: null } }));
     emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
-    await settle();
-    expect(persisted).toHaveLength(1);
+    await vi.waitFor(() => {
+      expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+      expect(persisted).toHaveLength(1);
+    });
     expect(fs.readFileSync(path.join(process.env.OPENCHAMBER_DATA_DIR, 'goals', `${SESSION}.md`), 'utf8')).toBe('the whole plan');
+    runtime.stop();
+    await runtime.flush();
   });
 });
 

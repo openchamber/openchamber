@@ -48,7 +48,7 @@ const groupingFixture = (
   const projection = buildSidebarSessionProjection({
     globalActiveSessions: [...activeSessions],
     liveSessions: [],
-    knownDirectories: new Set(),
+    knownDirectories: new Set(['/workspace']),
     isVSCode: false,
     pinnedSessionIds: new Set(),
     sessionOrderRanks,

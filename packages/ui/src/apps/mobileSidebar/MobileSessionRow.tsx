@@ -12,6 +12,7 @@ import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isDoneSuggested } from '@/lib/sessionWorkMetadata';
+import { getSessionGoal } from '@/lib/sessionGoalMetadata';
 import { collectSessionWorkInWork } from '@/components/session/sidebar/works/sidebarWorks';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -183,7 +184,7 @@ export const MobileSessionRow: React.FC<{
             {liveState}
             {timeSlot}
           </>}
-        secondLine={<>
+        secondLine={project || branch || getSessionGoal(session) || primaryRef || waitingOnUser ? <>
           {lead}
           {branch ? <>
             {inSpace
@@ -196,7 +197,7 @@ export const MobileSessionRow: React.FC<{
             {refMark(true)}
             <MobileSessionPendingBadges {...pendingRequests} />
           </span>
-        </>}
+        </> : null}
       />
     );
   } else {

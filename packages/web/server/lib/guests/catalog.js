@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicService, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
+import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
@@ -316,6 +316,14 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.sourceControl) {
     guest.sourceControl = parsed.manifest.contributes.sourceControl;
   }
+  // The session events the service subscribed to; the parse requires a service with it.
+  if (parsed.manifest.contributes.sessionEvents) {
+    guest.sessionEvents = parsed.manifest.contributes.sessionEvents;
+  }
+  // The notification channel a `notifications` service provides; the parse requires it exactly then.
+  if (parsed.manifest.contributes.notifications) {
+    guest.notifications = parsed.manifest.contributes.notifications;
+  }
   return { ok: true, guest };
 };
 
@@ -431,6 +439,14 @@ export const toPublicGuest = (guest) => {
   // What the approval dialog names: the Git host's label and the instances it reaches.
   if (guest.sourceControl) {
     row.sourceControl = toPublicSourceControl(guest.sourceControl);
+  }
+  // What the approval dialog names: the events the service is told about, and whether with their text.
+  if (guest.sessionEvents) {
+    row.sessionEvents = toPublicSessionEvents(guest.sessionEvents);
+  }
+  // What the approval dialog and the Integrations card name: the channel and where its account lives.
+  if (guest.notifications) {
+    row.notifications = toPublicNotifications(guest.notifications);
   }
   return row;
 };
