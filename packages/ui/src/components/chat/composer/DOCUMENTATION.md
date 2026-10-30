@@ -644,6 +644,17 @@ and the send path reading the same grammar.
 
 ## Ordering rules worth knowing
 
+### Why mention deduplication requires a full path
+
+Send and queue skip mention conversion and extraction only when the composer's
+attachments contain the same normalized full path. Restored `file://` URLs use
+the shared dropped-path decoder. VS Code selections never suppress a whole-file
+mention: their source path identifies only the selected excerpt. Path case is preserved because the remote
+filesystem may be case-sensitive. Filenames alone cannot establish identity,
+so data URLs without a retained source path and files in different worktrees
+remain separate. Queue projections never suppress composer mentions because a
+command can leave the queue untouched and delivery can take only part of it.
+
 - `editor/ComposerEditor.tsx` forwards a click on the composer's padding by
   focusing the view *before* setting the selection: CodeMirror reveals its
   drawn caret through a class it only writes while applying an update, so the

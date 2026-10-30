@@ -220,6 +220,7 @@ import {
 import {
     INLINE_SERVER_ATTACHMENT_ID_PREFIX,
     filterMissingInlineAttachments,
+    isMentionAlreadyAttached,
 } from './composer/attachments/inlineMentionAttachments';
 import { buildComposerContext, buildOutgoingMessage, expandCommentSnippets, selectComposerQueue } from './composer/submit/buildOutgoingMessage';
 import {
@@ -1102,7 +1103,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const extractInlineFileMentions = React.useCallback((
         rawText: string,
-        preparedMentions?: ReadonlyMap<string, AttachedFile[]>,
+        preparedMentions: ReadonlyMap<string, AttachedFile[]>,
+        existingAttachments: readonly AttachedFile[],
     ) => {
         if (!rawText || !rawText.includes('@')) {
             return { sanitizedText: rawText, attachments: [] };
@@ -1114,9 +1116,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         for (const token of scanMentions(rawText, confirmedMentionsRef.current)) {
             const mention = resolveInlineFileMention(token.name);
             if (!mention || seenPaths.has(mention.serverPath)) continue;
+            if (isMentionAlreadyAttached(mention, existingAttachments)) continue;
             seenPaths.add(mention.serverPath);
 
-            const prepared = preparedMentions?.get(mention.serverPath);
+            const prepared = preparedMentions.get(mention.serverPath);
             if (prepared) {
                 attachments.push(...prepared);
                 continue;
@@ -1154,6 +1157,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         texts: readonly string[],
         reservedFilenames: Set<string>,
         runtimeKey: string,
+        alreadyAttached: readonly AttachedFile[],
     ): Promise<ReadOnSendMentionPreparation> => {
         const prepared = new Map<string, AttachedFile[]>();
         for (const rawText of texts) {
@@ -1163,6 +1167,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     !mention
                     || !isReadOnSendMentionFilename(mention.filename)
                     || prepared.has(mention.serverPath)
+                    || isMentionAlreadyAttached(mention, alreadyAttached)
                 ) {
                     continue;
                 }
@@ -1615,6 +1620,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             [messageToQueue],
             new Set(composerAttachments.map((attachment) => attachment.filename)),
             queueRuntimeKey,
+            composerAttachments,
         );
         if (readOnSendMentions.status === 'runtime-changed') return;
         if (readOnSendMentions.status === 'failed') {
@@ -1622,7 +1628,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         const { sanitizedText, mention } = parseAgentMentions(messageToQueue, agents);
-        const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared);
+        const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared, composerAttachments);
         // #3898: a queued message is delivered later without the composer, so
         // a phantom mention (`@masha.conner`) must be dropped now or the
         // delivery 400s.
@@ -2197,6 +2203,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             !isBtwActive && !queuedOnly && inputSnapshot.hasContent ? [inputSnapshot.message] : [],
             reservedFilenames,
             submitRuntimeKey,
+            attachedFiles,
         );
         if (readOnSendMentions.status === 'runtime-changed') return;
         if (readOnSendMentions.status === 'failed') {
@@ -2296,7 +2303,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             },
             extractFileMentions: (text) => {
                 if (isBtwActive) return { text, attachments: [] };
-                const { sanitizedText, attachments } = extractInlineFileMentions(text, preparedMentions);
+                const { sanitizedText, attachments } = extractInlineFileMentions(text, preparedMentions, attachedFiles);
                 return { text: sanitizedText, attachments };
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,
