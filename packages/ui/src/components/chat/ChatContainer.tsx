@@ -1071,6 +1071,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         ready: hasRenderableSessionSnapshot && sessionMessageLoadState.status === 'ready',
         sessionIsActive,
         reply: latestCompletedReply,
+        history: sessionMessages,
+        olderCompletedReplyIds: sessionMessageLoadState.olderCompletedReplyIds,
         enabled: autoReadAloudEnabled && !pinned,
         play: playAutoReadAloud,
     });
