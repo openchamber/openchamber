@@ -13,30 +13,31 @@ import {
 } from '../../../chatColumnSession';
 import { usePendingComposerText } from '../usePendingComposerText';
 
-type Column = { session: ChatColumnSession | null; pinned: boolean };
+type Column = { session: ChatColumnSession | null; pinned: boolean; /** Overrides the column address the composer takes text for. */ target?: string | null; /** Overrides the session this composer shows. */ shownSessionId?: string | null };
 
 function renderComposer(initial: Column) {
     const dom = installHookTestDom();
     const root = createRoot(dom.container);
     const result = { text: '' };
 
-    function Probe({ target }: { target: string | null }) {
+    function Probe({ target, sessionId }: { target: string | null; sessionId: string | null }) {
         const [message, setMessage] = React.useState('');
-        usePendingComposerText({ enabled: true, target, setMessage, focus: () => undefined });
+        usePendingComposerText({ target, sessionId, setMessage, focus: () => undefined });
         result.text = message;
         return null;
     }
 
     function Column({ column }: { column: Column }) {
         const actions = useChatColumnActions();
-        const target = column.pinned ? column.session?.sessionId ?? null : null;
+        const target = column.target !== undefined ? column.target : column.pinned ? column.session?.sessionId ?? null : null;
+        const sessionId = column.shownSessionId !== undefined ? column.shownSessionId : column.session?.sessionId ?? null;
         return React.createElement(
             ChatColumnActionsContext.Provider,
             { value: { ...actions, pinned: column.pinned } },
             React.createElement(
                 ChatColumnSessionContext.Provider,
                 { value: column.session },
-                React.createElement(Probe, { target }),
+                React.createElement(Probe, { target, sessionId }),
             ),
         );
     }
@@ -58,6 +59,7 @@ function renderComposer(initial: Column) {
 beforeEach(() => {
     useSessionUIStore.setState({ currentSessionId: 'ses_previous' });
     useInputStore.getState().setPendingInputText(null);
+    useInputStore.setState({ pendingSessionRestores: new Map() });
 });
 
 afterEach(() => {
@@ -104,6 +106,59 @@ describe('pending composer text', () => {
             expect(composer.result.text).toBe('');
             act(() => { useInputStore.getState().setPendingInputText('> quoted', 'replace', 'ses_pinned'); });
             expect(composer.result.text).toBe('> quoted');
+        } finally {
+            composer.teardown();
+        }
+    });
+
+    test('a composer on a /btw fork takes the chat text and leaves another session\'s restore waiting', () => {
+        const composer = renderComposer({
+            session: { sessionId: 'ses_parent', directory: '/repo' },
+            pinned: false,
+            target: null,
+            shownSessionId: 'ses_fork',
+        });
+        try {
+            act(() => { useSessionUIStore.setState({ currentSessionId: 'ses_parent' }); });
+            // Written by a surface acting on the chat on screen, so the fork,
+            // being that composer, takes it now.
+            act(() => { useInputStore.getState().setPendingInputText('> quoted', 'append'); });
+            expect(composer.result.text).toBe('> quoted\n\n');
+
+            // A restore addressed to the parent waits: the fork must not eat the
+            // parent's prompt, and the parent takes it once it is back on screen.
+            act(() => { useInputStore.getState().setPendingSessionRestore('ses_parent', 'parent prompt'); });
+            expect(composer.result.text).toBe('> quoted\n\n');
+            expect(useInputStore.getState().pendingSessionRestores.get('ses_parent')).toBe('parent prompt');
+
+            act(() => { useInputStore.getState().setPendingInputText('plugin text', 'append'); });
+            expect(composer.result.text).toBe('> quoted\n\nplugin text\n\n');
+
+            // Its own session's restore goes in.
+            act(() => { useInputStore.getState().setPendingSessionRestore('ses_fork', 'fork prompt'); });
+            expect(composer.result.text).toBe('fork prompt');
+            composer.render({ session: { sessionId: 'ses_parent', directory: '/repo' }, pinned: false });
+            expect(composer.result.text).toBe('parent prompt');
+            expect(useInputStore.getState().consumePendingSessionRestore('ses_parent')).toBeNull();
+        } finally {
+            composer.teardown();
+        }
+    });
+
+    test('a pinned fork takes column quotes but leaves the parent restore until collapse', () => {
+        const column = { session: { sessionId: 'ses_pinned', directory: '/repo' }, pinned: true };
+        const composer = renderComposer({ ...column, shownSessionId: 'ses_fork' });
+        try {
+            act(() => { useInputStore.getState().setPendingInputText('> quoted', 'append', 'ses_pinned'); });
+            expect(composer.result.text).toBe('> quoted\n\n');
+            act(() => { useInputStore.getState().setPendingSessionRestore('ses_pinned', 'parent prompt'); });
+            expect(composer.result.text).toBe('> quoted\n\n');
+            expect(useInputStore.getState().pendingSessionRestores.get('ses_pinned')).toBe('parent prompt');
+            act(() => { useInputStore.getState().setPendingInputText('> another quote', 'append', 'ses_pinned'); });
+            expect(composer.result.text).toBe('> quoted\n\n> another quote\n\n');
+            composer.render(column);
+            expect(composer.result.text).toBe('parent prompt');
+            expect(useInputStore.getState().pendingInputText).toBeNull();
         } finally {
             composer.teardown();
         }

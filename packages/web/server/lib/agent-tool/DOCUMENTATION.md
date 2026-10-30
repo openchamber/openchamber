@@ -52,8 +52,11 @@ the user can want independently:
   mockup, keeps clear of them (a color on all its text and a background of its
   own, since the injected base stylesheet colors unset text and the frame is
   transparent), image files by path from anywhere on the machine as
-  the image grant route allows, and the temporary directory to save a
-  screenshot in (`os.tmpdir()/opencode`) so it stays out of the project. How
+  the image grant route allows. Only complete local paths written literally
+  in the HTML are found and inlined before the page runs; the sandbox cannot
+  read paths assembled at runtime. The description gives the authoring pattern.
+  It also names the temporary directory to save a screenshot in
+  (`os.tmpdir()/opencode`) so it stays out of the project. How
   to ask on a page is the `awaitAnswer` input's description.
   With `awaitAnswer` the call waits for the user's answer on the page. The
   plugin sends the call id (`context.id`) with the callback so the server can
@@ -74,6 +77,18 @@ the user can want independently:
   the control service refuses the action when it is not. Never behind Code
   Mode, like render: the chat draws the images in place of the call's row from
   its stored result, which an `execute` script would hide.
+- `openchamber_secret` — `secret.request`, a card in the chat where the user
+  types a secret the agent asked for (`label`, `reason`, optional
+  `placeholder`). Every call waits, with the same plugin machinery as a page
+  with `awaitAnswer` (call id, `timeout: false`, the `session.prompt` hook
+  that ends the wait when the user writes in the chat, and the inbox check
+  for a message sent before the card appeared). The value never
+  travels through the call: the chat posts it to the server, which writes it
+  to a private file, and the call returns only `{ status, file }`
+  (`../openchamber-control/secret-request.js`). Direct, never behind Code
+  Mode, because the chat draws the card from the call. On by default:
+  enabled while `agentSecretToolEnabled` is not `false`, and the control
+  service refuses the action when it is, so a stale plugin cannot keep asking.
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
   many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Only in
   builds with `OPENCHAMBER_WORKFLOWS_ENABLE`; there it is on unless

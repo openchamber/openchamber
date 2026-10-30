@@ -1,6 +1,7 @@
 import React from 'react';
 
-import { Icon } from '@/components/icon/Icon';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
@@ -49,14 +50,13 @@ export const FontArtifact: React.FC<{
     <div className="flex h-full min-h-0 flex-col">
       <ArtifactMetaBar items={[name, formatArtifactSize(sizeBytes)]} />
       {status === 'failed' ? (
-        <div className="flex flex-1 items-center justify-center p-6 text-center typography-ui text-muted-foreground">
-          {t('filesView.artifact.font.loadFailed')}
-        </div>
+        <ContentState
+          icon={<FileTypeIcon filePath={name} className="size-10" />}
+          title={name}
+          description={t('filesView.artifact.font.loadFailed')}
+        />
       ) : status === 'loading' ? (
-        <div className="flex items-center gap-2 p-3 typography-ui text-muted-foreground">
-          <Icon name="loader-4" className="size-4 animate-spin" />
-          {t('common.loading')}
-        </div>
+        <ContentLoadingState label={t('filesView.artifact.state.loading')} />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto p-4" style={{ fontFamily: `"${family}"` }}>
           <div className="flex flex-col gap-4">

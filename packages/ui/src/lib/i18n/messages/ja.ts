@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -44,6 +45,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'quota.family.zen': 'Zen モデル',
+  'quota.value.requests': 'リクエスト数: {count}',
+  'quota.value.spent': '{spent} 使用済み',
   "opencodeCompatibility.bundled": "OpenCode は OpenChamber に同梱されています。OpenCode v2 を利用するには OpenChamber を更新してください。",
   "opencodeCompatibility.title": "OpenCode v2 が必要です",
   "opencodeCompatibility.outdatedTitle": "OpenCode を更新してください",
@@ -166,6 +170,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n.ja,
   ...htmlRenderI18n.ja,
   ...documentToolbarI18n.ja,
+  ...secretRequestI18n.ja,
   ...sessionNoticesI18n.ja,
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
@@ -232,6 +237,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.mrCheckContext': '失敗したパイプラインジョブ',
   'chat.chatInput.prCheckContextRemove': 'PRチェックのコンテキストを削除',
   'common.loading': '読み込み中...',
+  'common.image.loading': '画像を読み込み中',
+  'common.image.loadFailed': '画像を読み込めませんでした',
+  'common.image.retry': '再試行',
   'common.unavailable': '利用できません',
   'common.language.english': '英語',
   'common.language.german': 'ドイツ語',
@@ -3495,10 +3503,11 @@ export const dict: Record<I18nKey, string> = {
   'common.duration.secondsCompact': '{seconds}秒',
   'common.duration.minutesSecondsCompact': '{minutes}分{seconds}秒',
   'common.duration.hoursMinutesCompact': '{hours}時間{minutes}分',
-  'contextFileOpen.failure.tooLarge': 'ファイルが大きすぎて開けません（>{count}行）',
-  'contextFileOpen.failure.tooLargeSize': 'ファイルが大きすぎるため開けません（{size} 超）',
-  'contextFileOpen.failure.missing': 'ファイルが見つかりません',
-  'contextFileOpen.failure.unreadable': 'ファイルを開けませんでした',
+  'contextFileOpen.failure.tooLarge': '{name} は大きすぎて開けません',
+  'contextFileOpen.failure.tooLargeDetail': '{count} 行超 · {size}',
+  'contextFileOpen.failure.tooLargeSize': '{limit} 超 · {size}',
+  'contextFileOpen.failure.missing': '{name} が見つかりません',
+  'contextFileOpen.failure.unreadable': '{name} を開けませんでした',
   'quota.window.5h': '5時間',
   'quota.window.7d': '7日間制限',
   'quota.window.extraUsage': '追加利用',
@@ -3506,6 +3515,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.daily': '日次',
   'quota.window.monthly': '毎月',
   'quota.window.credits': 'クレジット',
+  'quota.value.creditsUsed': '使用済みクレジット: {credits}',
   'quota.window.keyLimit': 'キーの上限',
   'quota.window.creditsBalance': 'クレジット残高',
   'quota.window.monthlyCredits': '月間クレジット',
@@ -3575,6 +3585,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': '{name} を開く',
   'chat.workStatus.section.usage': '使用量',
   'chat.workStatus.section.telemetry': 'ターンの統計',
+  'chat.workStatus.telemetry.previousTurn': '前のターン',
+  'chat.workStatus.telemetry.previousTurnRate': '前のターン · {rate}',
   'chat.workStatus.telemetry.responseSpeed': '回答',
   'chat.workStatus.telemetry.responseSpeedDescription': '最終テキストが届いた速さです。開始前の待ち時間、推論、先行するツール呼び出しは含みません。テキストの時刻から求めた推定値で、プロバイダー側の速度測定ではありません。',
   'chat.workStatus.telemetry.speed': 'リクエスト全体',
@@ -3673,6 +3685,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.submitFailed': '回答を送信できませんでした',
   'chat.formCard.cancelFailed': 'リクエストをキャンセルできませんでした',
   'chat.formCard.tryAgain': 'もう一度お試しください。',
+  'chat.formCard.recoveredNotice': '待機中にターンが停止しました。送信すると、新しい有料ターンが開始します。',
   'chat.formDock.progress': '{current} / {total}',
   'chat.formDock.waiting': 'あと {count} 件が待機中',
   'chat.formDock.back': '戻る',
@@ -3886,4 +3899,14 @@ export const dict: Record<I18nKey, string> = {
   'notifications.question.bodyFallback': 'エージェントが回答を待っています',
   'notifications.permission.bodyFallback': 'エージェントが承認を待っています',
   'notifications.permission.title': '権限が必要です',
+  'chat.promptHistorySearch.title': "プロンプト履歴を検索",
+  'chat.promptHistorySearch.searchPlaceholder': "記憶したプロンプトを検索",
+  'chat.promptHistorySearch.close': "プロンプト履歴の検索を閉じる",
+  'chat.promptHistorySearch.empty': "検索するプロンプトはまだありません",
+  'chat.promptHistorySearch.noMatches': "一致するプロンプトはありません",
+  'chat.promptHistorySearch.attachmentsSingle': "添付ファイル {count} 件",
+  'chat.promptHistorySearch.attachmentsPlural': "添付ファイル {count} 件",
+  'chat.promptHistorySearch.hint': "↑ ↓ で閲覧 · Enter で読み込み · Esc で閉じる",
+  'helpDialog.item.searchPromptHistory': "プロンプト履歴を検索（チャット入力）",
+
 };

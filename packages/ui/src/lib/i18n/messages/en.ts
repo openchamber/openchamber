@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -43,6 +44,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'quota.family.zen': 'Zen Models',
+  'quota.value.requests': 'Requests: {count}',
+  'quota.value.spent': '{spent} spent',
   "opencodeCompatibility.bundled": "OpenCode is bundled with OpenChamber. Update OpenChamber to get OpenCode v2.",
   "opencodeCompatibility.title": "OpenCode v2 required",
   "opencodeCompatibility.outdatedTitle": "Update OpenCode",
@@ -165,6 +169,7 @@ export const dict = {
   ...fileEditorAidsI18n.en,
   ...htmlRenderI18n.en,
   ...documentToolbarI18n.en,
+  ...secretRequestI18n.en,
   ...sessionNoticesI18n.en,
   ...usageStatsI18n.en,
   ...webSearchI18n.en,
@@ -231,6 +236,9 @@ export const dict = {
   'chat.chatInput.mrCheckContext': 'Failed pipeline jobs',
   'chat.chatInput.prCheckContextRemove': 'Remove PR checks context',
   'common.loading': 'Loading...',
+  'common.image.loading': 'Loading image',
+  'common.image.loadFailed': 'Image couldn\'t load',
+  'common.image.retry': 'Retry',
   'common.unavailable': 'Unavailable',
   'common.language.english': 'English',
   'common.language.german': 'German',
@@ -3499,10 +3507,11 @@ export const dict = {
   'common.duration.secondsCompact': '{seconds}s',
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}h {minutes}m',
-  'contextFileOpen.failure.tooLarge': 'File is too large to open (>{count} lines)',
-  'contextFileOpen.failure.tooLargeSize': 'File is too large to open (over {size})',
-  'contextFileOpen.failure.missing': 'File not found',
-  'contextFileOpen.failure.unreadable': 'Failed to open file',
+  'contextFileOpen.failure.tooLarge': '{name} is too large to open',
+  'contextFileOpen.failure.tooLargeDetail': 'More than {count} lines · {size}',
+  'contextFileOpen.failure.tooLargeSize': 'Larger than {limit} · {size}',
+  'contextFileOpen.failure.missing': '{name} was not found',
+  'contextFileOpen.failure.unreadable': 'Couldn\'t open {name}',
   'quota.window.5h': '5-Hour',
   'quota.window.7d': '7-Day Limit',
   'quota.window.extraUsage': 'Extra Usage',
@@ -3510,6 +3519,7 @@ export const dict = {
   'quota.window.daily': 'Daily',
   'quota.window.monthly': 'Monthly',
   'quota.window.credits': 'Credits',
+  'quota.value.creditsUsed': '{credits} Credits Used',
   'quota.window.keyLimit': 'Key Limit',
   'quota.window.creditsBalance': 'Credits Balance',
   'quota.window.monthlyCredits': 'Monthly Credits',
@@ -3575,6 +3585,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': 'Open {name}',
   'chat.workStatus.section.usage': 'Usage',
   'chat.workStatus.section.telemetry': 'Turn stats',
+  'chat.workStatus.telemetry.previousTurn': 'Previous turn',
+  'chat.workStatus.telemetry.previousTurnRate': 'Previous turn · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Response',
   'chat.workStatus.telemetry.responseSpeedDescription': 'How fast the final text arrived. Excludes the initial wait, reasoning, and earlier tool calls. An estimate from text timestamps, not a provider speed measurement.',
   'chat.workStatus.telemetry.speed': 'Whole turn',
@@ -3652,6 +3664,7 @@ export const dict = {
   'chat.formCard.submitFailed': 'Could not submit the answer',
   'chat.formCard.cancelFailed': 'Could not cancel the request',
   'chat.formCard.tryAgain': 'Try again.',
+  'chat.formCard.recoveredNotice': 'The turn stopped while waiting. Submit starts a new paid turn.',
   'chat.formDock.progress': '{current} of {total}',
   'chat.formDock.waiting': '{count} more waiting',
   'chat.formDock.back': 'Back',
@@ -3886,6 +3899,16 @@ export const dict = {
   'notifications.question.bodyFallback': 'Agent is waiting for your response',
   'notifications.permission.bodyFallback': 'Agent is waiting for your approval',
   'notifications.permission.title': 'Permission required',
+  'chat.promptHistorySearch.title': "Search prompt history",
+  'chat.promptHistorySearch.searchPlaceholder': "Search remembered prompts",
+  'chat.promptHistorySearch.close': "Close prompt history search",
+  'chat.promptHistorySearch.empty': "No prompts to search yet",
+  'chat.promptHistorySearch.noMatches': "No matching prompts",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} attachment",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} attachments",
+  'chat.promptHistorySearch.hint': "↑ ↓ to browse · Enter to load · Esc to close",
+  'helpDialog.item.searchPromptHistory': "Search prompt history (chat input)",
+
 } as const;
 
 export type I18nKey = keyof typeof dict;

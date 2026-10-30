@@ -1090,13 +1090,19 @@ diffs-container {
    Minimal overrides - fonts only, using Streamdown defaults
    ============================================ */
 
-/* VS Code webviews can inject default pre/code/blockquote backgrounds; tool input/output should inherit the card surface. */
+/* VS Code webviews can inject default pre/code backgrounds; tool input/output should inherit the card surface. */
 .tool-input-surface pre,
 .tool-input-surface code,
-.tool-input-surface blockquote,
 .tool-input-text {
   background: transparent !important;
   background-color: transparent !important;
+}
+
+/* Plain-text prose in an expanded tool (a subagent's prompt), set like tool and reasoning markdown. */
+.tool-prose-text {
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  line-height: round(1.625em, 1px);
 }
 
 /* VSCode: tool cards should honor semantic code sizing, even when syntax themes inject sizes. */
@@ -1551,7 +1557,7 @@ diffs-container {
   margin-block-end: var(--oc-block-edge-end, var(--oc-block-margin-end)) !important;
 }
 
-/* Tool cards (code size) and reasoning (meta size, dimmed) are intentionally
+/* Tool and reasoning markdown (meta size) are intentionally
    compact — keep their paragraphs tight, matching prior behavior. */
 .markdown-content.markdown-tool p,
 .markdown-content.markdown-reasoning p {
@@ -1559,9 +1565,9 @@ diffs-container {
   margin-bottom: 0;
 }
 
-/* Tool markdown should render at code size to match tool card typography. */
+/* Prose in an expanded chat block (tool markdown, reasoning) shares the meta size. */
 .markdown-content.markdown-tool {
-  font-size: var(--text-code) !important;
+  font-size: var(--text-meta) !important;
 }
 
 .form-markdown > .markdown-content.markdown-tool {
@@ -1570,7 +1576,7 @@ diffs-container {
 
 /* Reasoning markdown renders at meta size, dimmed. */
 .markdown-content.markdown-reasoning {
-  font-size: var(--text-markdown);
+  font-size: var(--text-meta);
   color: var(--surface-muted-foreground);
   --markdown-link: inherit;
   --markdown-link-hover: var(--surface-foreground);

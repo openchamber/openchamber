@@ -133,6 +133,7 @@ export type SessionSidebarRowModelArgs = {
   sections: readonly ProjectSection[];
   authoritativeSections: readonly ProjectSection[];
   chatGroup: SessionGroup | null;
+  archivedChatGroup?: SessionGroup | null;
   /** Pinned sessions, already ordered and search-filtered; they stay under their project too. */
   pinnedItems?: readonly SessionSidebarActivityItem[];
   /** Pinned worktree works, listed after the pinned sessions, the latest pin first; they leave their project. */
@@ -461,6 +462,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const authoritativeRoots = [
     ...args.authoritativeSections.flatMap((section) => section.groups.flatMap((group) => group.sessions)),
     ...(args.chatGroup?.sessions ?? []),
+    ...(args.archivedChatGroup?.sessions ?? []),
   ];
   const authorityStack = [...authoritativeRoots];
   while (authorityStack.length > 0) {
@@ -936,7 +938,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
 
   if (args.chatGroup) {
-    if (!search || groupSearchMatches(args.chatGroup) > 0) {
+    if (!search || groupSearchMatches(args.chatGroup) > 0 || (args.archivedChatGroup && groupSearchMatches(args.archivedChatGroup) > 0)) {
       const collapsed = appendActivityHeader('chats');
       if (!collapsed) {
         // Chats are one-line rows with the tree's state slot, on a short page
@@ -945,6 +947,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
           initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
           renderContext: 'tree-chat',
         });
+        if (args.archivedChatGroup) {
+          appendGroup(args.archivedChatGroup, 'activity:chats:archived', null, false, { renderContext: 'tree-chat' });
+        }
       }
     }
   }

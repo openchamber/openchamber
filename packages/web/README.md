@@ -117,6 +117,7 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 | `OPENCHAMBER_SKIP_API_COMPRESSION` | Set to `true` to disable gzip compression for `/api/*` responses |
 | `OPENCHAMBER_COMPRESS_API` | Set to `true` to force `/api/*` compression, or `false` to disable it. Desktop runtime disables API compression by default to reduce local sidecar CPU use |
 | `OPENCHAMBER_FS_UPLOAD_MAX_BYTES` | Maximum file upload size in bytes (default: 100 MiB) |
+| `OPENCHAMBER_PROXY_TIMEOUT_MS` | OpenCode upstream proxy deadline in milliseconds. Accepts integers from `0` to `2147483647`; defaults to `240000` (4 minutes). Invalid values warn and keep the default. `0` disables this proxy deadline, allowing unbounded waits until the client disconnects. Other client and upstream timeouts still apply. VS Code's separate extension bridge is unchanged. |
 | `OPENCHAMBER_TERMINAL_SHELL` | Preferred terminal shell executable used by the `Auto` setting before platform defaults |
 | `npm_config_registry` / `NPM_CONFIG_REGISTRY` | Registry used for plugin metadata and npm version checks. Scoped registry settings and the user's `.npmrc` are also honored. The lowercase value takes precedence when both are set. |
 

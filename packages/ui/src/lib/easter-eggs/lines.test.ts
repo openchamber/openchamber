@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { LOCALES, type Locale } from '@/lib/i18n/runtime';
 
-import { isDeepNight, isFridayEvening, isSmallHours, occasionOf } from './calendar';
+import { celebrationOf, isDeepNight, isFridayEvening, isSmallHours, occasionOf } from './calendar';
 import { copy as ar } from './copy/ar';
 import { copy as de } from './copy/de';
 import { copy as en } from './copy/en';
@@ -36,6 +36,55 @@ describe('calendar', () => {
     expect(occasionOf(at(12, 31, 12))).toBe('newYearsEve');
     expect(occasionOf(at(1, 1, 12))).toBe('newYearsDay');
     expect(occasionOf(at(6, 15, 12))).toBeNull();
+  });
+
+  test('a celebration runs from the day before to the day after', () => {
+    const kyiv = 'Europe/Kyiv';
+    expect(celebrationOf(at(10, 29, 12), kyiv)).toBeNull();
+    expect(celebrationOf(at(10, 30, 0), kyiv)).toBe('halloween');
+    expect(celebrationOf(at(11, 1, 23, 59), kyiv)).toBe('halloween');
+    expect(celebrationOf(at(11, 2, 0), kyiv)).toBeNull();
+    expect(celebrationOf(at(12, 30, 12), kyiv)).toBe('newYear');
+    expect(celebrationOf(new Date(2027, 0, 2, 12), kyiv)).toBe('newYear');
+    expect(celebrationOf(at(2, 13, 12), kyiv)).toBe('valentines');
+    expect(celebrationOf(at(3, 18, 12), kyiv)).toBe('stPatricks');
+    expect(celebrationOf(at(12, 24, 12), kyiv)).toBe('winterHolidays');
+  });
+
+  test('moving holidays follow their own calendars', () => {
+    const london = 'Europe/London';
+    // Lunar New Year 2026 is February 17th (engines disagree on some years,
+    // 2027 among them, by a day), Eid al-Fitr 2027 March 9th, Hanukkah 2026
+    // runs from December 5th for eight days.
+    expect(celebrationOf(at(2, 16, 12), london)).toBe('lunarNewYear');
+    expect(celebrationOf(at(2, 19, 12), london)).toBeNull();
+    expect(celebrationOf(new Date(2027, 2, 10, 12), london)).toBe('eidAlFitr');
+    expect(celebrationOf(at(12, 4, 12), london)).toBe('winterHolidays');
+    expect(celebrationOf(at(12, 13, 12), london)).toBe('winterHolidays');
+    expect(celebrationOf(at(12, 14, 12), london)).toBeNull();
+  });
+
+  test('national days show only in their country', () => {
+    expect(celebrationOf(at(8, 24, 12), 'Europe/Kyiv')).toBe('ukraineIndependence');
+    expect(celebrationOf(at(8, 24, 12), 'America/New_York')).toBeNull();
+    expect(celebrationOf(at(7, 4, 12), 'America/Indiana/Indianapolis')).toBe('usIndependence');
+    expect(celebrationOf(at(7, 4, 12), 'America/Indianapolis')).toBe('usIndependence');
+    expect(celebrationOf(at(7, 4, 12), 'Europe/Kyiv')).toBeNull();
+    // Thanksgiving 2026 is Thursday, November 26th.
+    expect(celebrationOf(at(11, 27, 12), 'America/Chicago')).toBe('thanksgiving');
+    expect(celebrationOf(at(11, 19, 12), 'America/Chicago')).toBeNull();
+    expect(celebrationOf(at(11, 26, 12), 'Europe/London')).toBeNull();
+  });
+
+  test('seasons start on the 1st and swap south of the equator', () => {
+    expect(celebrationOf(at(3, 1, 12), 'Europe/Kyiv')).toBe('spring');
+    expect(celebrationOf(at(5, 31, 12), 'Europe/Kyiv')).toBe('summer');
+    expect(celebrationOf(at(9, 2, 12), 'Europe/Kyiv')).toBe('autumn');
+    expect(celebrationOf(at(11, 30, 12), 'Asia/Tokyo')).toBe('winter');
+    expect(celebrationOf(at(12, 1, 12), 'Australia/Sydney')).toBe('summer');
+    expect(celebrationOf(at(3, 1, 12), 'America/Argentina/Buenos_Aires')).toBe('autumn');
+    expect(celebrationOf(at(3, 1, 12), 'America/Cordoba')).toBe('autumn');
+    expect(celebrationOf(at(9, 3, 12), 'Europe/Kyiv')).toBeNull();
   });
 
   test('Friday evening runs from 18:00 to midnight', () => {

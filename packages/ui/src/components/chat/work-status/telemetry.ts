@@ -21,6 +21,8 @@ type CompletedStepStats = {
 
 export type CompletedTurnStats = {
   lastAssistantMessageId: string;
+  /** A newer prompt has already started the next turn; these numbers are from the turn before it. */
+  previousTurn: boolean;
   stepsCount: number;
   elapsedDurationMs: number | null;
   totalLlmDurationMs: number | null;
@@ -239,6 +241,13 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
   };
 }
 
+const lastConversationIndex = (records: readonly SessionMessageRecord[], end: number): number => {
+  for (let i = end - 1; i >= 0; i -= 1) {
+    if (isConversationRole(records[i].info.role)) return i;
+  }
+  return -1;
+};
+
 /**
  * Calculates telemetry metrics for the latest completed turn in the session.
  * A turn encompasses all assistant steps since the preceding user message up to the final completed assistant step.
@@ -248,22 +257,43 @@ export function getLatestCompletedTurnStats(
 ): CompletedTurnStats | null {
   if (!records || records.length === 0) return null;
 
-  // Only the newest user-bounded turn qualifies. A partial newer turn must not
-  // be published as complete or silently replaced with an older turn's stats.
   // v2 plumbing roles can trail the final assistant step, so the turn ends at
   // the newest conversation record rather than the newest record.
-  let lastCompletedAssistantIdx = -1;
-  for (let i = records.length - 1; i >= 0; i -= 1) {
-    if (isConversationRole(records[i].info.role)) {
-      lastCompletedAssistantIdx = i;
-      break;
-    }
+  const newestIdx = lastConversationIndex(records, records.length);
+  if (newestIdx < 0) return null;
+  // A prompt that has no reply yet lands before the session reports busy. The
+  // turn before it is the latest finished one, and is flagged as such.
+  if (records[newestIdx].info.role === 'user') {
+    const previousIdx = lastConversationIndex(records, newestIdx);
+    return previousIdx < 0 ? null : calculateTurnStats(records, previousIdx, true);
   }
-  if (lastCompletedAssistantIdx < 0) return null;
+  return calculateTurnStats(records, newestIdx, false);
+}
+
+/** Excludes the entire newest user-bounded turn, including its completed tool steps. */
+export function getPreviousCompletedTurnStats(records: readonly SessionMessageRecord[]): CompletedTurnStats | null {
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    if (records[i].info.role !== 'user') continue;
+    const previousIdx = lastConversationIndex(records, i);
+    return previousIdx < 0 ? null : calculateTurnStats(records, previousIdx, true);
+  }
+  return null;
+}
+
+/**
+ * Stats for the turn whose final step is `lastCompletedAssistantIdx`. A partial
+ * turn must not be published as complete or silently replaced with an older
+ * turn's stats.
+ */
+function calculateTurnStats(
+  records: readonly SessionMessageRecord[],
+  lastCompletedAssistantIdx: number,
+  previousTurn: boolean,
+): CompletedTurnStats | null {
   const lastAssistantInfo = records[lastCompletedAssistantIdx].info;
   if (lastAssistantInfo.role !== 'assistant') return null;
   let turnStartIdx = -1;
-  for (let i = records.length - 1; i >= 0; i -= 1) {
+  for (let i = lastCompletedAssistantIdx - 1; i >= 0; i -= 1) {
     const record = records[i];
     if (record.info.role === 'user') {
       turnStartIdx = i + 1;
@@ -328,6 +358,7 @@ export function getLatestCompletedTurnStats(
 
   return {
     lastAssistantMessageId: records[lastCompletedAssistantIdx].info.id,
+    previousTurn,
     stepsCount: stepStatsList.length,
     elapsedDurationMs,
     totalLlmDurationMs,

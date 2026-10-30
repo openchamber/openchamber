@@ -216,6 +216,7 @@ const OPENCHAMBER_PHRASES = new Map(Object.entries<ToolActionPhrases>({
     openchamber_notify: { fallback: 'sending a notification' },
     openchamber_render: { fallback: 'drawing a page' },
     openchamber_image: { fallback: 'generating an image' },
+    openchamber_secret: { fallback: 'asking for a secret' },
 }));
 
 /**

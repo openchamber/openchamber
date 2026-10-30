@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -44,6 +45,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'quota.family.zen': 'Zen 模型',
+  'quota.value.requests': '请求数：{count}',
+  'quota.value.spent': '已花费 {spent}',
   "opencodeCompatibility.bundled": "OpenCode 随 OpenChamber 一起提供。请更新 OpenChamber 以获取 OpenCode v2。",
   "opencodeCompatibility.title": "需要 OpenCode v2",
   "opencodeCompatibility.outdatedTitle": "请更新 OpenCode",
@@ -166,6 +170,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n['zh-CN'],
   ...htmlRenderI18n['zh-CN'],
   ...documentToolbarI18n['zh-CN'],
+  ...secretRequestI18n['zh-CN'],
   ...sessionNoticesI18n['zh-CN'],
   ...usageStatsI18n['zh-CN'],
   ...webSearchI18n['zh-CN'],
@@ -232,6 +237,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.mrCheckContext': '失败的流水线作业',
   'chat.chatInput.prCheckContextRemove': '移除 PR 检查上下文',
   'common.loading': '加载中...',
+  'common.image.loading': '正在加载图片',
+  'common.image.loadFailed': '图片加载失败',
+  'common.image.retry': '重试',
   'common.unavailable': '不可用',
   'common.language.english': '英语',
   'common.language.german': '德语',
@@ -3500,10 +3508,11 @@ export const dict: Record<I18nKey, string> = {
   'common.duration.secondsCompact': '{seconds}秒',
   'common.duration.minutesSecondsCompact': '{minutes}分{seconds}秒',
   'common.duration.hoursMinutesCompact': '{hours}小时{minutes}分',
-  'contextFileOpen.failure.tooLarge': '文件过大无法打开（超过 {count} 行）',
-  'contextFileOpen.failure.tooLargeSize': '文件过大，无法打开（超过 {size}）',
-  'contextFileOpen.failure.missing': '未找到文件',
-  'contextFileOpen.failure.unreadable': '打开文件失败',
+  'contextFileOpen.failure.tooLarge': '{name} 过大，无法打开',
+  'contextFileOpen.failure.tooLargeDetail': '超过 {count} 行 · {size}',
+  'contextFileOpen.failure.tooLargeSize': '超过 {limit} · {size}',
+  'contextFileOpen.failure.missing': '未找到 {name}',
+  'contextFileOpen.failure.unreadable': '无法打开 {name}',
   'quota.window.5h': '5 小时',
   'quota.window.7d': '7 天上限',
   'quota.window.extraUsage': '额外用量',
@@ -3511,6 +3520,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.daily': '每日',
   'quota.window.monthly': '每月',
   'quota.window.credits': '点数额度',
+  'quota.value.creditsUsed': '已用点数：{credits}',
   'quota.window.keyLimit': '密钥限额',
   'quota.window.creditsBalance': '额度余额',
   'quota.window.monthlyCredits': '每月积分',
@@ -3576,6 +3586,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': '打开 {name}',
   'chat.workStatus.section.usage': '用量',
   'chat.workStatus.section.telemetry': '轮次统计',
+  'chat.workStatus.telemetry.previousTurn': '上一轮',
+  'chat.workStatus.telemetry.previousTurnRate': '上一轮 · {rate}',
   'chat.workStatus.telemetry.responseSpeed': '回答速度',
   'chat.workStatus.telemetry.responseSpeedDescription': '最终文本到达的速度。不含开始前的等待、推理和之前的工具调用。这是根据文本时间戳估算的速度，不是提供商测得的生成速度。',
   'chat.workStatus.telemetry.speed': '整个请求',
@@ -3674,6 +3686,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.submitFailed': '无法提交答案',
   'chat.formCard.cancelFailed': '无法取消请求',
   'chat.formCard.tryAgain': '请重试。',
+  'chat.formCard.recoveredNotice': '等待期间本轮已停止。提交将开启新一轮付费对话。',
   'chat.formDock.progress': '第 {current} / {total}',
   'chat.formDock.waiting': '还有 {count} 个等待中',
   'chat.formDock.back': '上一步',
@@ -3887,4 +3900,14 @@ export const dict: Record<I18nKey, string> = {
   'notifications.question.bodyFallback': '智能体正在等待你的回复',
   'notifications.permission.bodyFallback': '智能体正在等待你的批准',
   'notifications.permission.title': '需要权限',
+  'chat.promptHistorySearch.title': "搜索提示历史记录",
+  'chat.promptHistorySearch.searchPlaceholder': "搜索已记住的提示",
+  'chat.promptHistorySearch.close': "关闭提示历史搜索",
+  'chat.promptHistorySearch.empty': "还没有可搜索的提示",
+  'chat.promptHistorySearch.noMatches': "没有匹配的提示",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} 个附件",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} 个附件",
+  'chat.promptHistorySearch.hint': "↑ ↓ 浏览 · Enter 加载 · Esc 关闭",
+  'helpDialog.item.searchPromptHistory': "搜索提示历史记录（聊天输入）",
+
 };

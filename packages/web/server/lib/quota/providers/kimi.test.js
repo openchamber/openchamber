@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { fetchQuota, isConfigured } from './kimi.js';
 
@@ -103,6 +103,173 @@ describe('Kimi for Coding quota provider', () => {
     expect(result.ok).toBe(false);
     expect(result.configured).toBe(true);
     expect(result.error).toBe('API error: 401');
+  });
+
+  it.each([401, 403])('falls back to the next stored credential after HTTP %s', async (status) => {
+    const urls = [];
+    const fetchImpl = async (url, init) => {
+      urls.push({ url, authorization: init.headers.Authorization });
+      if (init.headers.Authorization === 'Bearer stale-key') return new Response('{}', { status });
+      return mockResponse({ usage: { limit: '100', used: '25', resetTime: null }, limits: [] });
+    };
+
+    const result = await fetchQuota({
+      readAuth: () => ({
+        'kimi-for-coding': { key: 'stale-key' },
+        'kimi-code-plan-global': { key: 'live-key' },
+      }),
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.weekly.usedPercent).toBe(25);
+    expect(urls.map((call) => call.authorization)).toEqual([
+      'Bearer stale-key',
+      'Bearer stale-key',
+      'Bearer live-key',
+    ]);
+    expect(urls[2].url).toBe('https://api.kimi.ai/coding/v1/usages');
+  });
+
+  it('reports the preferred credential error when every credential is rejected', async () => {
+    const fetchImpl = async (_url, init) => new Response('{}', {
+      status: init.headers.Authorization === 'Bearer stale-key' ? 401 : 403,
+    });
+
+    const result = await fetchQuota({
+      readAuth: () => ({
+        'kimi-for-coding': { key: 'stale-key' },
+        'kimi-code-plan-global': { key: 'another-stale-key' },
+      }),
+      fetchImpl,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('API error: 401');
+  });
+
+  it('tries each distinct key only once when aliases repeat it', async () => {
+    const urls = [];
+    const fetchImpl = async (url, init) => {
+      urls.push({ url, authorization: init.headers.Authorization });
+      return new Response('{}', { status: 401 });
+    };
+
+    const result = await fetchQuota({
+      readAuth: () => ({
+        'kimi-for-coding': { key: 'shared-key' },
+        kimi: { key: 'shared-key' },
+      }),
+      fetchImpl,
+    });
+
+    expect(result.error).toBe('API error: 401');
+    expect(urls.map((call) => call.authorization)).toEqual(['Bearer shared-key', 'Bearer shared-key']);
+  });
+
+  it('stays configured when only a later alias holds a usable key', async () => {
+    const auth = { 'kimi-for-coding': { key: '   ' }, 'kimi-code-plan-global': { key: 'live-key' } };
+
+    expect(isConfigured(auth)).toBe(true);
+  });
+
+  it('tries a repeated key at both regional endpoints', async () => {
+    const urls = [];
+    const result = await fetchQuota({
+      readAuth: () => ({ 'kimi-code-plan-cn': { key: 'shared-key' }, 'kimi-code-plan-global': { key: 'shared-key' } }),
+      fetchImpl: async (url) => {
+        urls.push(url);
+        return url === 'https://api.kimi.ai/coding/v1/usages'
+          ? Response.json({ usages: { limit_5h: { used_ratio: 0.25 } } })
+          : new Response(null, { status: 401 });
+      },
+    });
+    expect(result.usage.windows['5h'].usedPercent).toBe(25);
+    expect(urls).toEqual(['https://api.kimi.com/coding/v1/usages', 'https://api.moonshot.ai/v1/users/me/balance', 'https://api.kimi.ai/coding/v1/usages']);
+  });
+
+  for (const status of [429, 500]) {
+    it(`does not switch accounts after HTTP ${status}`, async () => {
+      let requests = 0;
+      const result = await fetchQuota({
+        readAuth: () => ({ 'kimi-for-coding': { key: 'first' }, kimi: { key: 'second' } }),
+        fetchImpl: async () => {
+          requests += 1;
+          return requests === 1 ? new Response(null, { status }) : Response.json({ usage: { limit: 100, used: 25 } });
+        },
+      });
+      expect(requests).toBe(1);
+      expect(result.error).toBe(`API error: ${status}`);
+      expect(result.usage).toBeNull();
+    });
+  }
+
+  for (const failure of ['transport', 'json']) {
+    it(`does not switch accounts after a ${failure} failure`, async () => {
+      let requests = 0;
+      const result = await fetchQuota({
+        readAuth: () => ({ 'kimi-for-coding': { key: 'first' }, kimi: { key: 'second' } }),
+        fetchImpl: async () => {
+          requests += 1;
+          if (failure === 'transport') throw new Error('Connection failed');
+          return new Response('{');
+        },
+      });
+      expect(requests).toBe(1);
+      expect(result.ok).toBe(false);
+      expect(result.usage).toBeNull();
+    });
+  }
+
+  it('returns a successful Moonshot balance before trying another credential', async () => {
+    const keys = [];
+    const result = await fetchQuota({
+      readAuth: () => ({ 'kimi-for-coding': { key: 'first' }, kimi: { key: 'second' } }),
+      fetchImpl: async (url, init) => {
+        keys.push(init.headers.Authorization);
+        return url === 'https://api.moonshot.ai/v1/users/me/balance'
+          ? Response.json({ data: { available_balance: 5 } })
+          : new Response(null, { status: 403 });
+      },
+    });
+    expect(result.usage.windows.credits_balance.valueLabel).toBe('$5.00');
+    expect(keys).toEqual(['Bearer first', 'Bearer first']);
+  });
+
+  it.each(['probe', 'refresh', 'usage'])('honors the %s deadline during body reads', async (expired) => {
+    const deadlines = [];
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      const controller = new AbortController();
+      deadlines.push({ ms, controller });
+      return controller.signal;
+    });
+    try {
+      const result = await fetchQuota({
+        readAuth: () => ({ 'kimi-for-coding': { key: 'first' }, kimi: { key: 'second' } }),
+        fetchImpl: async (url, init) => {
+          if (expired === 'usage' || url === 'https://api.moonshot.ai/v1/users/me/balance') {
+            return new Response(new ReadableStream({ start(controller) {
+              init.signal.addEventListener('abort', () => controller.error(init.signal.reason), { once: true });
+              deadlines[expired === 'refresh' ? 0 : expired === 'usage' ? 1 : 2].controller.abort(new DOMException('Timed out', 'TimeoutError'));
+            } }));
+          }
+          return init.headers.Authorization === 'Bearer first'
+            ? new Response(null, { status: 401 })
+            : Response.json({ usage: { limit: 100, used: 25 } });
+        },
+      });
+      if (expired === 'probe') {
+        expect(result.usage.windows.weekly.usedPercent).toBe(25);
+        expect(deadlines.map(({ ms }) => ms)).toEqual([25_000, 5_000, 5_000, 5_000]);
+      } else {
+        expect(result.ok).toBe(false);
+        expect(result.usage).toBeNull();
+        expect(deadlines.map(({ ms }) => ms)).toEqual(expired === 'usage' ? [25_000, 5_000] : [25_000, 5_000, 5_000]);
+      }
+    } finally {
+      timeout.mockRestore();
+    }
   });
 
   it('shows the pay-as-you-go balance when the Kimi Code address refuses a platform key', async () => {

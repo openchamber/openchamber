@@ -5,13 +5,13 @@ import { referenceNumberLabel } from '@/components/references/referencePickerIte
 import type { ReferenceCommentItem } from '@/components/references/referenceTimeline';
 import { isFailedConclusion } from '@/components/views/git/checkRunState';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { readComposerDraftTarget } from '@/hooks/useComposerAddress';
 import type { RepositoryReference } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { formatChangeRequestLabel } from '@/lib/source-control/providers/terminology';
 import type { CIRun } from '@/lib/source-control/types';
 import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /** A failed run as the agent reads it: what failed, where, and what the host said. */
 const failedRunText = (run: CIRun): string => {
@@ -45,13 +45,12 @@ export function usePullAttachments(reference: RepositoryReference | null) {
     const directory = useEffectiveDirectory();
 
     const target = React.useCallback((): InlineCommentDraftTarget | null => {
-        const session = useSessionUIStore.getState();
-        const sessionKey = session.currentSessionId ?? (session.newSessionDraft?.open ? 'draft' : null);
-        if (!directory || !sessionKey) {
+        const into = readComposerDraftTarget(directory);
+        if (!into) {
             toast.error(t('gitView.pr.toast.noActiveSession'), { description: t('gitView.pr.toast.noActiveSessionDescription') });
             return null;
         }
-        return { directory, sessionKey };
+        return into;
     }, [directory, t]);
 
     // How the chip names what it came from: a change request by its provider's

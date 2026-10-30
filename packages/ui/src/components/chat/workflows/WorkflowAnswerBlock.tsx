@@ -65,7 +65,7 @@ export const WorkflowAnswerBlock: React.FC<{ answer: WorkflowAnswer }> = ({ answ
   const { t } = useI18n();
   const [raw, setRaw] = React.useState(false);
   if (answer.kind === 'text') {
-    return <SimpleMarkdownRenderer content={answer.text} className="typography-markdown-body" enableFileReferences={false} />;
+    return <SimpleMarkdownRenderer content={answer.text} singleTilde={false} className="typography-markdown-body" enableFileReferences={false} />;
   }
   return (
     <div className="flex flex-col gap-2">

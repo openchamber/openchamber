@@ -23,6 +23,7 @@ export const useMobileAutocompleteMaxHeight = (
     containerRef: React.RefObject<HTMLElement | null>,
     enabled: boolean,
     normalMaxHeight = 256,
+    minimumHeight = 120,
 ): number | undefined => {
     const [maxHeight, setMaxHeight] = React.useState<number | undefined>(undefined);
 
@@ -45,8 +46,9 @@ export const useMobileAutocompleteMaxHeight = (
             // Floor: browser keyboard panning can put the anchor above the
             // measured boundary for a frame (or for the whole pan), which
             // would collapse the popup to zero height. A short popup that
-            // slightly overlaps the header beats an invisible one.
-            const next = available < normalMaxHeight ? Math.max(120, available) : undefined;
+            // slightly overlaps the header beats an invisible one. Panels that
+            // need a strict whole-frame bound pass a zero minimum instead.
+            const next = available < normalMaxHeight ? Math.max(minimumHeight, available) : undefined;
             setMaxHeight((prev) => (prev === next ? prev : next));
         };
         measure();

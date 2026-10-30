@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 // Per-test controllable behaviour plus manual call tracking (the project's
 // tsconfig does not load bun-test's mock matcher types, so existing tests track
@@ -82,6 +83,29 @@ describe('worktreeStatus.getRootBranch', () => {
     statusCalls.length = 0;
     resolveRootImpl = (directory) => directory;
     statusImpl = () => ({ current: 'HEAD' });
+  });
+
+  test('a root resolved after an instance round trip never starts a status read', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-a.test', runtimeKey: 'root-a' });
+    let release = (_root: string) => {};
+    resolveRootImpl = () => new Promise<string>(resolve => { release = resolve; });
+    const pending = getRootBranch('/old-worktree');
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-b.test', runtimeKey: 'root-b' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-a.test', runtimeKey: 'root-a' });
+    release('/old-root');
+    await expect(pending).rejects.toThrow('Runtime instance changed');
+    expect(statusCalls).toEqual([]);
+  });
+
+  test('root-branch resolution continues through a same-instance transport change', async () => {
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://lan.test', runtimeKey: 'device' });
+    let release = (_root: string) => {};
+    resolveRootImpl = () => new Promise<string>(resolve => { release = resolve; });
+    const pending = getRootBranch('/worktree');
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://relay.test', runtimeKey: 'device' });
+    release('/root');
+    await pending;
+    expect(statusCalls).toEqual(['/root']);
   });
 
   test('derives root from absolute-git-dir and returns its branch', async () => {

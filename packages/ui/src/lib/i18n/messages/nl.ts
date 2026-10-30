@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -43,6 +44,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'quota.family.zen': 'Zen-modellen',
+  'quota.value.requests': 'Verzoeken: {count}',
+  'quota.value.spent': '{spent} besteed',
   "opencodeCompatibility.bundled": "OpenCode is inbegrepen bij OpenChamber. Werk OpenChamber bij om OpenCode v2 te krijgen.",
   "opencodeCompatibility.title": "OpenCode v2 vereist",
   "opencodeCompatibility.outdatedTitle": "OpenCode bijwerken",
@@ -165,6 +169,7 @@ export const dict = {
   ...fileEditorAidsI18n.nl,
   ...htmlRenderI18n.nl,
   ...documentToolbarI18n.nl,
+  ...secretRequestI18n.nl,
   ...sessionNoticesI18n.nl,
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
@@ -231,6 +236,9 @@ export const dict = {
   'chat.chatInput.mrCheckContext': 'Mislukte pipelinejobs',
   'chat.chatInput.prCheckContextRemove': 'Context van PR-controles verwijderen',
   'common.loading': 'Laden...',
+  'common.image.loading': 'Afbeelding laden',
+  'common.image.loadFailed': 'Afbeelding kon niet worden geladen',
+  'common.image.retry': 'Opnieuw proberen',
   'common.unavailable': 'Niet beschikbaar',
   'common.language.english': 'Engels',
   'common.language.german': 'Duits',
@@ -3499,10 +3507,11 @@ export const dict = {
   'common.duration.secondsCompact': '{seconds}s',
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}u {minutes}m',
-  'contextFileOpen.failure.tooLarge': 'Bestand is te groot om te openen (>{count} regels)',
-  'contextFileOpen.failure.tooLargeSize': 'Bestand is te groot om te openen (meer dan {size})',
-  'contextFileOpen.failure.missing': 'Bestand niet gevonden',
-  'contextFileOpen.failure.unreadable': 'Kan bestand niet openen',
+  'contextFileOpen.failure.tooLarge': '{name} is te groot om te openen',
+  'contextFileOpen.failure.tooLargeDetail': 'Meer dan {count} regels · {size}',
+  'contextFileOpen.failure.tooLargeSize': 'Groter dan {limit} · {size}',
+  'contextFileOpen.failure.missing': '{name} is niet gevonden',
+  'contextFileOpen.failure.unreadable': '{name} kan niet worden geopend',
   'quota.window.5h': '5-uurslimiet',
   'quota.window.7d': '7-dagenlimiet',
   'quota.window.extraUsage': 'Extra gebruik',
@@ -3510,6 +3519,7 @@ export const dict = {
   'quota.window.daily': 'Dagelijks',
   'quota.window.monthly': 'Maandelijks',
   'quota.window.credits': 'Credits',
+  'quota.value.creditsUsed': '{credits} credits gebruikt',
   'quota.window.keyLimit': 'Sleutellimiet',
   'quota.window.creditsBalance': 'Creditsaldo',
   'quota.window.monthlyCredits': 'Maandelijkse credits',
@@ -3575,6 +3585,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': '{name} openen',
   'chat.workStatus.section.usage': 'Gebruik',
   'chat.workStatus.section.telemetry': 'Beurtstatistieken',
+  'chat.workStatus.telemetry.previousTurn': 'Vorige beurt',
+  'chat.workStatus.telemetry.previousTurnRate': 'Vorige beurt · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Antwoord',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Hoe snel de laatste tekst binnenkwam. Zonder de beginswachttijd, het redeneren en eerdere toolaanroepen. Een schatting op basis van teksttijdstempels, geen snelheidsmeting van de provider.',
   'chat.workStatus.telemetry.speed': 'Hele beurt',
@@ -3652,6 +3664,7 @@ export const dict = {
   'chat.formCard.submitFailed': 'Kan het antwoord niet versturen',
   'chat.formCard.cancelFailed': 'Kan het verzoek niet annuleren',
   'chat.formCard.tryAgain': 'Probeer het opnieuw.',
+  'chat.formCard.recoveredNotice': 'De beurt is tijdens het wachten gestopt. Verzenden start een nieuwe betaalde beurt.',
   'chat.formDock.progress': '{current} van {total}',
   'chat.formDock.waiting': 'nog {count} in de wachtrij',
   'chat.formDock.back': 'Terug',
@@ -3886,4 +3899,14 @@ export const dict = {
   'notifications.question.bodyFallback': 'De agent wacht op je antwoord',
   'notifications.permission.bodyFallback': 'De agent wacht op je goedkeuring',
   'notifications.permission.title': 'Toestemming vereist',
+  'chat.promptHistorySearch.title': "Promptgeschiedenis doorzoeken",
+  'chat.promptHistorySearch.searchPlaceholder': "Onthouden prompts doorzoeken",
+  'chat.promptHistorySearch.close': "Zoeken in promptgeschiedenis sluiten",
+  'chat.promptHistorySearch.empty': "Nog geen prompts om te doorzoeken",
+  'chat.promptHistorySearch.noMatches': "Geen overeenkomende prompts",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} bijlage",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} bijlagen",
+  'chat.promptHistorySearch.hint': "↑ ↓ om te bladeren · Enter om te laden · Esc om te sluiten",
+  'helpDialog.item.searchPromptHistory': "Promptgeschiedenis doorzoeken (chatinvoer)",
+
 } as const;

@@ -15,6 +15,7 @@ const listCalls: string[] = [];
 const listResolvers: Array<(value: WorktreeListEntry[]) => void> = [];
 const listRejecters: Array<(reason: Error) => void> = [];
 let listImplementation: ((directory: string) => Promise<WorktreeListEntry[]>) | undefined;
+let rootImplementation: ((directory: string) => Promise<string>) | undefined;
 let removeImplementation: (() => Promise<{ success: boolean }>) | undefined;
 const createPayloads: unknown[] = [];
 const validatePayloads: unknown[] = [];
@@ -79,7 +80,7 @@ mock.module('@/sync/session-worktree-store', () => ({
 
 mock.module('@/lib/worktrees/worktreeStatus', () => ({
   invalidateResolvedProjectRootCache: mock(),
-  resolveProjectRoot: (directory: string) => Promise.resolve(directory),
+  resolveProjectRoot: (directory: string) => rootImplementation?.(directory) ?? Promise.resolve(directory),
 }));
 
 mock.module('@/sync/session-ui-store', () => ({
@@ -161,6 +162,7 @@ describe('worktreeManager list invalidation', () => {
     listResolvers.length = 0;
     listRejecters.length = 0;
     listImplementation = undefined;
+    rootImplementation = undefined;
     createPayloads.length = 0;
     validatePayloads.length = 0;
     bootstrapWatcherCalls.length = 0;
@@ -302,7 +304,7 @@ describe('worktreeManager list invalidation', () => {
     }
   });
 
-  test('a list still in flight across an instance switch is read again from the new instance', async () => {
+  test('a list still in flight across an instance switch stops before retrying the old directory', async () => {
     const project = { id: 'project-switch-inflight', path: '/repo-switch-inflight' };
     const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
     try {
@@ -311,14 +313,43 @@ describe('worktreeManager list invalidation', () => {
 
       switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-c.test', runtimeKey: 'instance-c' });
 
+      listImplementation = async () => [{ path: '/repo-switch-new', branch: 'new', name: 'new' }];
       listResolvers[0]([{ path: '/repo-switch-old', branch: 'old', name: 'old' }]);
-      await waitForListCallCount(2);
-      listResolvers[1]([{ path: '/repo-switch-new', branch: 'new', name: 'new' }]);
-      expect((await listing).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
+      await expect(listing).rejects.toThrow('Runtime instance changed');
+      expect(listCalls).toEqual([project.path]);
       expect((await listProjectWorktrees(project)).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
     } finally {
       fetch.mockRestore();
     }
+  });
+
+  test('a root lookup spanning A-B-A never starts its old worktree list', async () => {
+    const project = { id: 'root-switch', path: '/root-switch' };
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-a.test', runtimeKey: 'root-a' });
+    let release = (_root: string) => {};
+    rootImplementation = () => {
+      rootImplementation = undefined;
+      return new Promise<string>(resolve => { release = resolve; });
+    };
+    listImplementation = async () => [];
+    const listing = listProjectWorktrees(project);
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-b.test', runtimeKey: 'root-b' });
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://root-a.test', runtimeKey: 'root-a' });
+    release(project.path);
+    await expect(listing).rejects.toThrow('Runtime instance changed');
+    expect(listCalls).toEqual([]);
+  });
+
+  test('a same-instance transport change can retry an in-flight worktree list', async () => {
+    const project = { id: 'transport', path: '/transport' };
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://lan.test', runtimeKey: 'device' });
+    const listing = listProjectWorktrees(project);
+    await waitForListCallCount(1);
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://relay.test', runtimeKey: 'device' });
+    listImplementation = async () => [{ path: '/transport-feature', branch: 'feature' }];
+    listResolvers[0]([]);
+    expect((await listing).map(entry => entry.path)).toEqual(['/transport-feature']);
+    expect(listCalls).toEqual([project.path, project.path]);
   });
 
   test('older completions do not replace a forced refresh result with stale topology', async () => {

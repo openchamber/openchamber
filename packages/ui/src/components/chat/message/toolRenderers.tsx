@@ -447,7 +447,7 @@ export const renderWebSearchOutput = (output: string, options?: { unstyled?: boo
                 )}
                 style={typography.tool.popup}
             >
-                <SimpleMarkdownRenderer content={output} variant="tool" />
+                <SimpleMarkdownRenderer content={output} singleTilde={false} variant="tool" />
             </div>
         );
     } catch {

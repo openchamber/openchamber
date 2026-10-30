@@ -393,6 +393,26 @@ own `dir="ltr"` element so an RTL sentence never reorders them.
 
 The page is hidden in VS Code (`metadata.ts`).
 
+## Plugin duplicate sources
+
+`plugins/PluginsGrid.tsx` keeps every configuration entry and its editing target.
+A discovered package card is hidden when its normalized target is already
+represented by a declaration or another discovery record. Distinct declarations
+and their options remain separate, including declarations of the same target.
+Editable local files always keep their own cards and file edit/delete actions,
+including files declared in config.
+
+### Why paths determine discovery duplicates
+
+Names can match for unrelated plugins, and OpenCode's runtime list can omit
+disabled or not-yet-loaded plugins. Only exact target paths filter discovery;
+runtime status never controls card membership. Web, Electron and mobile use the
+server's path metadata; VS Code's file-only discovery stays visible.
+
+Discovery records keep their original `absolutePath` for runtime matching and
+their canonical `resolvedPath` for duplicate filtering. Resolving symlinks in
+the runtime path would lose statuses reported through the original alias.
+
 ## Entity shapes: OpenCode 2 only
 
 Every OpenCode entity these pages read and write speaks the v2 shape defined in

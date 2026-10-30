@@ -54,6 +54,7 @@ const CommentBody: React.FC<{ comment: ReferenceCommentItem }> = ({ comment }) =
                 className="mt-1 [&_img]:h-auto [&_img]:max-w-full"
                 enableFileReferences={false}
                 allowRawHtml
+                singleTilde
                 repositoryLinks={links.repository}
                 emojiShortcodes={emojiShortcodes}
                 directory={links.directory}

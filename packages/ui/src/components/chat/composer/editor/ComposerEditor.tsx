@@ -23,7 +23,7 @@
 
 import React from 'react';
 import { history, historyKeymap, standardKeymap } from '@codemirror/commands';
-import { Annotation, Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, Prec, type ChangeDesc, type Extension } from '@codemirror/state';
 import {
     EditorView,
     drawSelection,
@@ -53,6 +53,8 @@ export interface ComposerSelection {
 export interface ComposerChange {
     value: string;
     selection: ComposerSelection;
+    /** Authoritative old-to-new ranges for composer-local occurrence state. */
+    changes: ChangeDesc;
     /** True when the edit came from a paste rather than typing. */
     fromPaste: boolean;
     /** The text this edit inserted, empty for deletions. */
@@ -243,10 +245,10 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
 
         // CodeMirror defers Enter on iOS and Chrome Android, then re-dispatches
         // a synthetic keydown. Keep modifiers only for that short handoff.
-        const lastRealEnterModsRef = React.useRef({ shiftKey: false, ctrlKey: false, metaKey: false });
+        const lastRealEnterModsRef = React.useRef({ shiftKey: false, ctrlKey: false, metaKey: false, altKey: false });
         const deferredEnterModsTimeoutRef = React.useRef<number | null>(null);
         const clearDeferredEnterModifiers = () => {
-            lastRealEnterModsRef.current = { shiftKey: false, ctrlKey: false, metaKey: false };
+            lastRealEnterModsRef.current = { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false };
             if (deferredEnterModsTimeoutRef.current !== null) {
                 window.clearTimeout(deferredEnterModsTimeoutRef.current);
                 deferredEnterModsTimeoutRef.current = null;
@@ -362,6 +364,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                                 handlers.onChange({
                                     value: update.state.doc.toString(),
                                     selection,
+                                    changes: update.changes,
                                     fromPaste,
                                     insertedText,
                                     fromValueProp: update.transactions.every(
@@ -410,6 +413,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                     shiftKey: event.shiftKey,
                     ctrlKey: event.ctrlKey,
                     metaKey: event.metaKey,
+                    altKey: event.altKey,
                 };
                 deferredEnterModsTimeoutRef.current = window.setTimeout(clearDeferredEnterModifiers, 500);
             };

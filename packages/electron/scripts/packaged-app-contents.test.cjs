@@ -17,7 +17,8 @@ const completeApp = () => [
   `${web}/package.json`,
   `${web}/server/index.js`,
 ].map((filePath) => ({ path: filePath, unpacked: false }))
-  .concat(helpers.map((filePath) => ({ path: filePath, unpacked: true })));
+  .concat(helpers.map((filePath) => ({ path: filePath, unpacked: true })))
+  .concat(process.platform === 'win32' ? [{ path: `node_modules/7zip-bin/win/${process.arch}/7za.exe`, unpacked: true }] : []);
 
 const writeAsar = (directory, header) => {
   const json = Buffer.from(JSON.stringify(header), 'utf8');
@@ -33,6 +34,42 @@ const writeAsar = (directory, header) => {
 
 test('a complete app has no problems', () => {
   assert.deepEqual(findPackagedAppContentProblems(completeApp()), []);
+});
+
+test('Windows packages require an unpacked decoder for the target architecture', () => {
+  for (const arch of ['x64', 'arm64']) {
+    const target = { platform: 'win32', arch };
+    const decoder = `node_modules/7zip-bin/win/${arch}/7za.exe`;
+    const files = completeApp().filter((file) => !file.path.startsWith('node_modules/7zip-bin/'));
+    assert.deepEqual(findPackagedAppContentProblems(files, target), [`${decoder} is missing`]);
+    assert.deepEqual(findPackagedAppContentProblems([...files, { path: decoder, unpacked: false }], target), [`${decoder} must be unpacked from the asar`]);
+    assert.deepEqual(findPackagedAppContentProblems([...files, { path: decoder, unpacked: true }], target), []);
+  }
+});
+
+test('packaging keeps only the target Windows decoder and no decoders on macOS or Linux', () => {
+  const builderPaths = [require.resolve('electron-builder')];
+  const { getNodeModuleFileMatcher } = require(require.resolve('app-builder-lib/out/fileMatcher.js', { paths: builderPaths }));
+  const { expandMacro } = require(require.resolve('app-builder-lib/out/util/macroExpander.js', { paths: builderPaths }));
+  const { build } = require('../package.json');
+  const appDir = path.resolve(__dirname, '..');
+  for (const targetOs of ['win', 'mac', 'linux']) {
+    for (const arch of ['x64', 'arm64']) {
+      const matcher = getNodeModuleFileMatcher(appDir, appDir, (pattern) => (
+        expandMacro(pattern, arch, {}, { os: targetOs })
+      ), build[targetOs], { config: build, debugLogger: { isEnabled: false } });
+      const filter = matcher.createFilter();
+      for (const decoderOs of ['win', 'mac', 'linux']) {
+        for (const decoderArch of ['ia32', 'x64', 'arm64']) {
+          const decoder = `node_modules/7zip-bin/${decoderOs}/${decoderArch}/7za${decoderOs === 'win' ? '.exe' : ''}`;
+          assert.equal(filter(path.join(appDir, decoder), { isDirectory: () => false }),
+            targetOs === 'win' && decoderOs === 'win' && arch === decoderArch,
+            `${targetOs}/${arch}: ${decoder}`);
+        }
+      }
+      assert.equal(filter(path.join(appDir, 'node_modules/7zip-bin/index.js'), { isDirectory: () => false }), true);
+    }
+  }
 });
 
 test('the web build output inside the archive is rejected', () => {

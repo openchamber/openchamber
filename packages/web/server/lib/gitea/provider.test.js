@@ -43,7 +43,7 @@ describe('Gitea provider authentication', () => {
 
     await expect(impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' })).resolves.toMatchObject({ connected: true, user: { id: 1, login: 'alice' } });
 
-    expect(calls.map((call) => call.url.pathname)).toEqual(['/api/v1/user', '/api/v1/version']);
+    expect(calls.map((call) => call.url.pathname)).toEqual(['/api/v1/user', '/api/v1/version', '/api/forgejo/v1/version']);
     expect(calls[1].headers.authorization).toBeUndefined();
     expect(events.connected).toHaveBeenCalledWith(expect.objectContaining({
       account: expect.objectContaining({ provider: 'gitea', instance: ORIGIN }),
@@ -61,6 +61,23 @@ describe('Gitea provider authentication', () => {
     expect(await store.listInstances()).toEqual([]);
   });
 
+  it.each([
+    ['JSON null', () => Response.json(null)],
+    ['HTTP 204', () => new Response(null, { status: 204 })],
+  ])('refuses %s from `/version` and stores nothing even with a valid token', async (_label, response) => {
+    for (const status of [null, 401, 403]) {
+      const { impl, store, events } = await setup(forkNetworkRoutes({
+        'GET /version': (call) => (status && !call.headers.authorization
+          ? new Response('{}', { status })
+          : response()),
+      }));
+
+      await expect(impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' })).rejects.toBeDefined();
+      expect(await store.listInstances()).toEqual([]);
+      expect(events.connected).not.toHaveBeenCalled();
+    }
+  });
+
   it('sends a Forgejo server to the Forgejo card', async () => {
     const forgejo = forkNetworkRoutes({ 'GET /version': { version: '9.0.3+gitea-1.22.0' } });
     const { impl, store } = await setup(forgejo);
@@ -72,6 +89,21 @@ describe('Gitea provider authentication', () => {
     await expect(impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' })).rejects.toMatchObject({
       sourceControlResponse: { status: 409, body: { code: 'SOURCE_CONTROL_INSTANCE_OTHER_PROVIDER', provider: 'forgejo' } },
     });
+    expect(await store.listInstances()).toEqual([]);
+  });
+
+  it('sends a Forgejo that drops the suffix from `/version` to the Forgejo card', async () => {
+    // Forgejo 16 answers its Gitea-compatible `/version` with its own version
+    // alone; the namespace it serves beside it still names both.
+    const { impl, store, calls } = await setup(forkNetworkRoutes({
+      'GET /version': { version: '16.0.6' },
+      'GET /forgejo/version': { version: '16.0.6+gitea-1.22.0' },
+    }));
+
+    await expect(impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' })).rejects.toMatchObject({
+      sourceControlResponse: { status: 409, body: { code: 'SOURCE_CONTROL_INSTANCE_OTHER_PROVIDER', provider: 'forgejo' } },
+    });
+    expect(calls.map((call) => call.url.pathname)).toContain('/api/forgejo/v1/version');
     expect(await store.listInstances()).toEqual([]);
   });
 
@@ -94,6 +126,7 @@ describe('Gitea provider authentication', () => {
         ['/api/v1/user', 'token pat-1'],
         ['/api/v1/version', undefined],
         ['/api/v1/version', 'token pat-1'],
+        ['/api/forgejo/v1/version', undefined],
       ]);
     });
 

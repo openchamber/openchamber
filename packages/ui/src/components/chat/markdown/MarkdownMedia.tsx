@@ -2,6 +2,8 @@ import React from 'react';
 import type { Element } from 'hast';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
+import { useI18n } from '@/lib/i18n';
 import { useOpenChatLink } from '../useOpenChatLink';
 import { MarkdownPresentationContext } from './MarkdownPresentationContext';
 import { cn } from '@/lib/utils';
@@ -70,13 +72,24 @@ function useMediaMatches(query: string | undefined): boolean {
 // sources have no box of their own, so the picture is watched for them.
 const PictureNearContext = React.createContext<boolean | null>(null);
 
-function MediaLabel({ source, name, title, linked }: { source: string; name: string; title?: string; linked: boolean }) {
+type MediaLabelState = 'loading' | 'failed';
+
+function MediaLabel({ source, name, title, linked, state }: { source: string; name: string; title?: string; linked: boolean; state?: MediaLabelState }) {
+  const { t } = useI18n();
   const presentation = React.useContext(MarkdownPresentationContext);
   const media = useMarkdownMedia();
   const openChatLink = useOpenChatLink(presentation?.directory ?? media?.owner?.options.directory ?? '');
   const label = (
-    <span title={title} data-oc-media-source={copySource(source)} data-oc-media-label="true" className="inline-flex items-center gap-1 align-text-bottom text-muted-foreground">
-      <Icon name="file-image" className="size-3.5 shrink-0" />
+    <span
+      title={state === 'failed' ? t('common.image.loadFailed') : title}
+      data-oc-media-source={copySource(source)}
+      data-oc-media-label="true"
+      data-oc-media-state={state}
+      className="inline-flex items-center gap-1 align-text-bottom text-muted-foreground"
+    >
+      {state === 'loading'
+        ? <Spinner className="size-3.5" aria-hidden />
+        : <Icon name={state === 'failed' ? 'error-warning' : 'file-image'} className="size-3.5 shrink-0" />}
       {name}
     </span>
   );
@@ -121,8 +134,10 @@ function useMediaSource(source: string, active: boolean, video = false) {
     });
     return () => { cancelled = true; };
   }, [owner, source, active, video]);
+  const hasFailed = failed?.owner === owner && failed?.source === source;
   return {
-    url: loaded && loaded.owner === owner && loaded.source === source && (context?.mode !== 'document' || !loaded.signal.aborted) && !(failed?.owner === owner && failed?.source === source) ? loaded.url : undefined,
+    url: loaded && loaded.owner === owner && loaded.source === source && (context?.mode !== 'document' || !loaded.signal.aborted) && !hasFailed ? loaded.url : undefined,
+    failed: hasFailed,
     fail: () => { if (owner) setFailed({ owner, signal: owner.controller.signal, source, url: '' }); },
     retry: async () => {
       if (!owner) throw new Error('Missing media owner');
@@ -191,7 +206,7 @@ function OwnedImage({
   const gallery = assistant && Boolean(context?.onShowPopup) && !linked;
   React.useEffect(() => owner?.register(source), [owner, source]);
   const active = Boolean(context && near && (!assistant || context.settled));
-  const { url, fail } = useMediaSource(source, active);
+  const { url, failed, fail } = useMediaSource(source, active);
   const resolvedSet = useResolvedSrcset(srcSet, active);
   const [dimensions, setDimensions] = React.useState<{ url: string; size: RowSize } | null>(null);
   const drawn = Boolean(url && dimensions?.url === url);
@@ -216,7 +231,8 @@ function OwnedImage({
       title={title}
       width={width}
       height={height}
-      className={cn(documentMode ? className : 'block h-auto max-h-[30rem] w-auto max-w-full object-contain', !documentMode && !drawn && 'hidden')}
+      // A document image keeps its box until its address arrives; without one it would show its alt text.
+      className={cn(documentMode ? className : 'block h-auto max-h-[30rem] w-auto max-w-full object-contain', documentMode ? !url && 'invisible' : !drawn && 'hidden')}
       style={documentMode ? { ...style, ...documentImageSize(width, height) } : { ...style, width: row?.ready ? '100%' : style?.width }}
       data-oc-media-source={copySource(source)}
       data-oc-media-srcset={srcSet}
@@ -243,7 +259,9 @@ function OwnedImage({
     maxWidth: `min(${size.width}px, ${30 * ratio}rem)`,
     margin: 0,
   } : undefined;
-  if (documentMode) return image;
+  if (documentMode) {
+    return failed ? <MediaLabel source={source} name={name} title={title} linked={linked} state="failed" /> : image;
+  }
   return (
     <span
       ref={setRef}
@@ -251,7 +269,7 @@ function OwnedImage({
       style={rowStyle}
       data-oc-media-source={copySource(source)}
     >
-      {!drawn && <MediaLabel source={source} name={name} title={title} linked={linked} />}
+      {!drawn && <MediaLabel source={source} name={name} title={title} linked={linked} state={failed ? 'failed' : active ? 'loading' : undefined} />}
       {url && !gallery && image}
       {url && gallery && (
         <Button

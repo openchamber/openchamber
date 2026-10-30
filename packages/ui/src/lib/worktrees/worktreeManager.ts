@@ -1,6 +1,6 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -529,8 +529,8 @@ const invalidateWorktreeList = (projectDirectory: string): void => {
 };
 
 // The list and root caches are keyed by path, and two instances can have a
-// project at the same path. Bumping every generation also makes a read still
-// in flight against the previous instance retry instead of caching its answer.
+// project at the same path. Transport changes may retry a read; instance
+// changes retire its owner before another request or cache write.
 subscribeRuntimeEndpointChanged(() => {
   const directories = new Set([..._worktreeListGeneration.keys(), ..._worktreeListCache.keys(), ..._worktreeListInflight.keys()]);
   for (const directory of directories) invalidateWorktreeList(directory);
@@ -538,8 +538,9 @@ subscribeRuntimeEndpointChanged(() => {
   invalidateResolvedProjectRootCache();
 });
 
-const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeMetadata[]> => {
+const readProjectWorktrees = async (projectDirectory: string, isCurrent: () => boolean): Promise<WorktreeMetadata[]> => {
   const metadataProjectDirectory = await resolveProjectRoot(projectDirectory).catch(() => projectDirectory);
+  if (!isCurrent()) throw new Error('Runtime instance changed');
   const normalizedProjectDirectory = normalizePath(projectDirectory);
 
   const worktrees = await git.worktree.list(projectDirectory);
@@ -582,9 +583,11 @@ const readStableProjectWorktrees = async (
   projectDirectory: string,
   minimumGeneration = getWorktreeListGeneration(projectDirectory),
 ): Promise<WorktreeMetadata[]> => {
+  const isCurrent = captureRuntimeInstance();
   for (let attempt = 0; attempt < WORKTREE_LIST_MAX_CONVERGENCE_ATTEMPTS; attempt += 1) {
     const generation = getWorktreeListGeneration(projectDirectory);
-    const worktrees = await readProjectWorktrees(projectDirectory);
+    const worktrees = await readProjectWorktrees(projectDirectory, isCurrent);
+    if (!isCurrent()) throw new Error('Runtime instance changed');
 
     if (generation >= minimumGeneration && generation === getWorktreeListGeneration(projectDirectory)) {
       _worktreeListCache.set(projectDirectory, { value: worktrees, at: Date.now() });

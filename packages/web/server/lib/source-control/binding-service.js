@@ -5,6 +5,7 @@ import { sourceControlProviderDescriptors } from './provider-descriptors.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint, parseGitCredentialReference } from '../git/credential-resolver.js';
+import { sshHostReaches, sshUserOf } from '../git/ssh-host-alias.js';
 import { bindingSummary, isSafeRepositoryEndpoint, resolveBindingReadiness } from './binding-contract.js';
 import { allowsTopLevelProjects, splitProjectPath } from './project-path.js';
 
@@ -34,15 +35,21 @@ const providerOrigin = (provider, instance) => {
   return descriptor.instance.origin(instance);
 };
 
-const providerRepositoryForEndpoint = (provider, instance, endpoint) => {
+const providerRepositoryForEndpoint = async (provider, instance, endpoint, reachesInstance) => {
   if (!isSafeRepositoryEndpoint(endpoint)) throw bindingInputError('provider endpoint is invalid');
   let normalized;
   try { normalized = normalizeGitRemoteEndpoint(endpoint.displayUrl); }
   catch { throw bindingInputError('provider endpoint is invalid'); }
   const origin = providerOrigin(provider, instance);
+  const hostname = origin.hostname.toLowerCase();
   const expectedPort = Number(origin.port || (origin.protocol === 'http:' ? 80 : 443));
-  if (normalized.host !== origin.hostname.toLowerCase()
-    || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
+  const hostMatches = normalized.host === hostname
+    || ((provider === 'gitea' || provider === 'forgejo') && normalized.protocol === 'ssh'
+      // URL display metadata strips the SSH user. Without the raw endpoint,
+      // Match user cannot establish which service Git would reach.
+      && !endpoint.displayUrl.includes('://')
+      && await reachesInstance(normalized.host, hostname, sshUserOf(endpoint.displayUrl)));
+  if (!hostMatches || (normalized.protocol !== 'ssh' && normalized.port !== expectedPort)) {
     throw bindingInputError('provider instance does not match the selected remote host');
   }
   const descriptor = sourceControlProviderDescriptors.get(provider);
@@ -66,10 +73,10 @@ const assignRepository = (association, repository) => {
   else delete association.repository;
 };
 
-const parseProviders = (value, repositoryRemotes) => {
+const parseProviders = async (value, repositoryRemotes, reachesInstance) => {
   if (!Array.isArray(value)) throw bindingInputError('providers must be an array');
   const availableRemotes = new Set(repositoryRemotes.map((remote) => remote.name));
-  const bindings = value.map((provider) => {
+  const bindings = await Promise.all(value.map(async (provider) => {
     if (!isPlainObject(provider) || !hasExactKeys(provider,
       ['provider', 'instance', 'accountId', 'primaryRemote'], ['repository'])) throw bindingInputError('provider binding is invalid');
     const name = requiredString(provider.provider, 'provider');
@@ -79,7 +86,7 @@ const parseProviders = (value, repositoryRemotes) => {
     const endpoint = repositoryRemotes.find((remote) => remote.name === primaryRemote)?.fetch;
     if (!endpoint) throw bindingInputError(`remote ${primaryRemote} does not have a fetch endpoint`);
     const instance = normalizeProviderInstance(name, provider.instance);
-    const repository = providerRepositoryForEndpoint(name, instance, endpoint);
+    const repository = await providerRepositoryForEndpoint(name, instance, endpoint, reachesInstance);
     const result = {
       provider: name,
       instance,
@@ -103,7 +110,7 @@ const parseProviders = (value, repositoryRemotes) => {
       }
     }
     return result;
-  });
+  }));
   const keys = bindings.map((binding) => `${binding.provider}\0${binding.instance}\0${binding.primaryRemote}`);
   if (new Set(keys).size !== keys.length) throw bindingInputError('provider bindings must be unique');
   return bindings;
@@ -380,6 +387,7 @@ export function createBindingService({
   validateManagedSshCredential,
   readManagedSshCredentialPresentation,
   resolveCheckoutAuxiliary,
+  sshHostReaches: reachesInstance = sshHostReaches,
 }) {
   const resolveWith = async (directory, resolver) => {
     const normalizedDirectory = requiredString(directory, 'directory');
@@ -717,7 +725,7 @@ export function createBindingService({
       // The transport resolver carries the raw URL alongside the redacted
       // endpoint; the provider contract accepts only the redacted pair.
       const providers = providerAccount
-        ? parseProviders([{ ...providerAccount, primaryRemote: 'origin' }], [{ name: 'origin', fetch: endpoint, push: endpoint }])
+        ? await parseProviders([{ ...providerAccount, primaryRemote: 'origin' }], [{ name: 'origin', fetch: endpoint, push: endpoint }], reachesInstance)
         : [];
       return store.compareAndSwap(context.repositoryId, 0, {
         configRevision: context.configRevision, providers, remotes: [selected], auxiliary,
@@ -1046,12 +1054,12 @@ export function createBindingService({
             || !hasExactKeys(input.provider.repository, ['owner', 'name'])))) {
           throw bindingInputError('Provider binding is invalid');
         }
-        const [provider] = parseProviders([input.provider], context.remotes);
+        const [provider] = await parseProviders([input.provider], context.remotes, reachesInstance);
         const previous = providers[targetIndex];
         // Account repair retains the approved endpoint. A changed destination needs a new association.
         if (previous?.endpoint && previous.primaryRemote === provider.primaryRemote) {
           provider.endpoint = previous.endpoint;
-          assignRepository(provider, providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint));
+          assignRepository(provider, await providerRepositoryForEndpoint(provider.provider, provider.instance, previous.endpoint, reachesInstance));
         }
         if (providers.some((candidate, index) => index !== targetIndex && candidate.provider === provider.provider
           && normalizeProviderInstance(candidate.provider, candidate.instance) === provider.instance
@@ -1090,7 +1098,7 @@ export function createBindingService({
         || current.revision !== expectedRevision) throw conflict();
       if (binding.state !== 'bound' && binding.state !== 'needs-attention') throw bindingInputError('binding state is invalid');
       const state = binding.state;
-      const providers = parseProviders(binding.providers, context.remotes);
+      const providers = await parseProviders(binding.providers, context.remotes, reachesInstance);
       const remotes = parseRemotes(binding.remotes, context.remotes);
       const auxiliary = parseAuxiliary(binding.auxiliary);
       const latest = await resolve(directory);

@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -44,6 +45,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'quota.family.zen': 'Моделі Zen',
+  'quota.value.requests': 'Запити: {count}',
+  'quota.value.spent': 'Витрачено {spent}',
   "opencodeCompatibility.bundled": "OpenCode входить до складу OpenChamber. Оновіть OpenChamber, щоб отримати OpenCode v2.",
   "opencodeCompatibility.title": "Потрібен OpenCode v2",
   "opencodeCompatibility.outdatedTitle": "Оновіть OpenCode",
@@ -176,6 +180,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n.uk,
   ...htmlRenderI18n.uk,
   ...documentToolbarI18n.uk,
+  ...secretRequestI18n.uk,
   ...sessionNoticesI18n.uk,
   ...usageStatsI18n.uk,
   ...webSearchI18n.uk,
@@ -242,6 +247,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.mrCheckContext': 'Невдалі задачі pipeline',
   'chat.chatInput.prCheckContextRemove': 'Прибрати контекст чеків PR',
   "common.loading": "Завантаження...",
+  "common.image.loading": "Завантаження зображення",
+  "common.image.loadFailed": "Не вдалося завантажити зображення",
+  "common.image.retry": "Спробувати ще раз",
   "common.unavailable": "Недоступно",
   "common.language.english": "англійська",
   "common.language.german": "Німецька",
@@ -3491,10 +3499,11 @@ export const dict: Record<I18nKey, string> = {
   "common.duration.secondsCompact": "{seconds}с",
   "common.duration.minutesSecondsCompact": "{minutes}хв {seconds}с",
   "common.duration.hoursMinutesCompact": "{hours}год {minutes}хв",
-  "contextFileOpen.failure.tooLarge": "File is too large to open (>{count} lines)",
-  "contextFileOpen.failure.tooLargeSize": "Файл завеликий, щоб його відкрити (понад {size})",
-  "contextFileOpen.failure.missing": "File not found",
-  "contextFileOpen.failure.unreadable": "Failed to open file",
+  "contextFileOpen.failure.tooLarge": "{name} завеликий, щоб його відкрити",
+  "contextFileOpen.failure.tooLargeDetail": "Понад {count} рядків · {size}",
+  "contextFileOpen.failure.tooLargeSize": "Понад {limit} · {size}",
+  "contextFileOpen.failure.missing": "{name} не знайдено",
+  "contextFileOpen.failure.unreadable": "Не вдалося відкрити {name}",
   "quota.window.5h": "5 годин",
   "quota.window.7d": "Ліміт на 7 днів",
   "quota.window.extraUsage": "Додаткове використання",
@@ -3502,6 +3511,7 @@ export const dict: Record<I18nKey, string> = {
   "quota.window.daily": "Щодня",
   "quota.window.monthly": "Щомісяця",
   "quota.window.credits": "Кредити",
+  "quota.value.creditsUsed": "Використано кредитів: {credits}",
   "quota.window.keyLimit": "Ліміт ключа",
   "quota.window.creditsBalance": "Баланс кредитів",
   "quota.window.monthlyCredits": "Місячні кредити",
@@ -3567,6 +3577,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': 'Відкрити {name}',
   'chat.workStatus.section.usage': 'Використання',
   'chat.workStatus.section.telemetry': 'Статистика ходу',
+  'chat.workStatus.telemetry.previousTurn': 'Попередній хід',
+  'chat.workStatus.telemetry.previousTurnRate': 'Попередній хід · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Відповідь',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Як швидко надходив фінальний текст. Без очікування на початок, міркувань і попередніх викликів інструментів. Це оцінка за часовими мітками тексту, а не вимір швидкості на сервері провайдера.',
   'chat.workStatus.telemetry.speed': 'Увесь запит',
@@ -3674,6 +3686,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.submitFailed': 'Не вдалося надіслати відповідь',
   'chat.formCard.cancelFailed': 'Не вдалося скасувати запит',
   'chat.formCard.tryAgain': 'Спробуйте ще раз.',
+  'chat.formCard.recoveredNotice': 'Хід зупинився під час очікування. Надсилання розпочне новий платний хід.',
   'chat.formDock.progress': '{current} з {total}',
   'chat.formDock.waiting': 'ще {count} в черзі',
   'chat.formDock.back': 'Назад',
@@ -3887,4 +3900,14 @@ export const dict: Record<I18nKey, string> = {
   'notifications.question.bodyFallback': 'Агент чекає на вашу відповідь',
   'notifications.permission.bodyFallback': 'Агент чекає на ваше схвалення',
   'notifications.permission.title': 'Потрібен дозвіл',
+  'chat.promptHistorySearch.title': "Пошук в історії запитів",
+  'chat.promptHistorySearch.searchPlaceholder': "Шукати збережені запити",
+  'chat.promptHistorySearch.close': "Закрити пошук в історії запитів",
+  'chat.promptHistorySearch.empty': "Ще немає запитів для пошуку",
+  'chat.promptHistorySearch.noMatches': "Немає відповідних запитів",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} вкладення",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} вкладень",
+  'chat.promptHistorySearch.hint': "↑ ↓ для перегляду · Enter для завантаження · Esc для закриття",
+  'helpDialog.item.searchPromptHistory': "Пошук в історії запитів (поле чату)",
+
 };

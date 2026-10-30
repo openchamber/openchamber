@@ -377,6 +377,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                 {normalizedRenderingMode === 'markdown' ? (
                     <SessionMentionChipsContext.Provider value={sessionMentionChips}>
                         <SimpleMarkdownRenderer
+                            singleTilde={false}
                             content={processedMarkdownContent}
                             className={cn(
                                 "[&_.markdown-content>*:first-child]:mt-0 [&_.markdown-content>*:last-child]:mb-0",

@@ -7,7 +7,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { BusyDots } from '@/components/ui/busy-dots';
-import { BlockLine } from './BlockLine';
+import { BlockBody } from './BlockLine';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
@@ -471,15 +471,14 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                         overflowAnchor: 'none',
                     }}
                 >
-                    <div
-                        className="relative ms-2 ps-3 pb-1 pt-0.5"
+                    <BlockBody
+                        onToggle={handleToggle}
                         style={{
                             opacity: isExpanded ? 1 : 0,
                             transform: isExpanded ? 'translateY(0)' : 'translateY(-4px)',
                             transition: 'opacity 180ms ease-out, transform 180ms ease-out',
                         }}
                     >
-                        <BlockLine onToggle={handleToggle} />
                         <ScrollableOverlay
                             ref={scrollBoxRef}
                             as="div"
@@ -496,7 +495,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                         >
                             <div>{reasoningBody}</div>
                         </ScrollableOverlay>
-                    </div>
+                    </BlockBody>
                 </div>
             ) : null}
         </div>

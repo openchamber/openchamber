@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useComposerDraftTarget } from '@/hooks/useComposerAddress';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
@@ -30,9 +30,8 @@ interface FilePreviewCommentMenuProps {
 export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: FilePreviewCommentMenuProps) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const effectiveDirectory = useEffectiveDirectory();
+  const target = useComposerDraftTarget(effectiveDirectory);
   const addDraft = useInlineCommentDraftStore((state) => state.addDraft);
 
   const [anchor, setAnchor] = React.useState<{ x: number; y: number } | null>(null);
@@ -189,13 +188,12 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
   }, [anchor, commentMode, isMobile, openComment]);
 
   const saveComment = React.useCallback((text: string) => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!selectedText || !sessionKey || !effectiveDirectory) {
+    if (!selectedText || !target) {
       hide();
       return;
     }
     const lineRange = resolveLineRange(selectedText);
-    addDraft({ directory: effectiveDirectory, sessionKey }, {
+    addDraft(target, {
       source: 'file-quote',
       fileLabel: filePath,
       startLine: lineRange?.start ?? 0,
@@ -208,7 +206,7 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     queueMicrotask(() => {
       focusChatInput();
     });
-  }, [addDraft, currentSessionId, effectiveDirectory, filePath, hide, newSessionDraftOpen, resolveLineRange, selectedText]);
+  }, [addDraft, filePath, hide, resolveLineRange, selectedText, target]);
 
   if (!anchor) return null;
 

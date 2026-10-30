@@ -141,7 +141,13 @@ const probeHost = async (host: DesktopHost, localClientToken: string): Promise<D
   const url = normalizeHostUrl(isElectronShell() ? getDesktopHostApiUrl(host) : host.url);
   if (!url) return { status: 'unreachable', latencyMs: 0 };
 
-  const res = await desktopHostProbe(url, { clientToken: clientToken || null, requestHeaders: host.requestHeaders || null })
+  // The bearer must not reach a server that is not the pinned one: a leased
+  // LAN address may have moved to another machine since it was learned.
+  const res = await desktopHostProbe(url, {
+    clientToken: clientToken || null,
+    requestHeaders: host.requestHeaders || null,
+    expectedServerId: host.relay?.serverId ?? null,
+  })
     .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
   // Multi-transport host away from its network: the direct leg fails but the
   // relay may still reach it. A relay refusal over its limits says more than

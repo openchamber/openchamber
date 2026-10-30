@@ -25,7 +25,7 @@ import { copyMarkdownToClipboard, copyTextToClipboard } from '@/lib/clipboard';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { ToolPopupContent } from './message/types';
-import { getMarkdownProcessingOptions, markdownCjk, markdownMath } from './markdown/streamdownPlugins';
+import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath } from './markdown/streamdownPlugins';
 import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
 import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
 import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
@@ -42,6 +42,7 @@ import {
   MarkdownPresentationContext,
   useMarkdownPresentation,
   type MermaidControls,
+  type FileReferenceSource,
 } from './markdown/MarkdownPresentationContext';
 import { MarkdownLink, MarkdownInlineCode } from './markdown/MarkdownLink';
 import { MarkdownCode } from './markdown/MarkdownCode';
@@ -255,6 +256,8 @@ export interface MarkdownContentProps {
   mediaMode?: 'assistant' | 'local';
   isStreaming?: boolean;
   allowRawHtml?: boolean;
+  /** GFM single-tilde strikethrough; chat content disables it to preserve prose ranges. */
+  singleTilde?: boolean;
   directory?: string;
   settled?: boolean;
   sessionId?: string;
@@ -284,6 +287,7 @@ export function MarkdownContent({
   mediaMode = 'local',
   isStreaming = false,
   allowRawHtml = false,
+  singleTilde = true,
   directory = '',
   settled = !isStreaming,
   sessionId,
@@ -364,18 +368,19 @@ export function MarkdownContent({
   const fileReferences = fileNavigation && !isMobileSurfaceRuntime();
   const confirmFile = React.useMemo(() => {
     const results = new Map<string, Promise<string | null>>();
-    return (source: string): Promise<string | null> => {
-      if (!fileReferences || !resolveMarkdownFile(source, directory) || getRuntimeKey() !== runtimeKey) {
+    return (source: string, inputKind: FileReferenceSource = 'path'): Promise<string | null> => {
+      if (!fileReferences || !resolveMarkdownFile(source, directory, 'probe', inputKind) || getRuntimeKey() !== runtimeKey) {
         return Promise.resolve(null);
       }
-      const existing = results.get(source);
+      const key = `${inputKind}:${source}`;
+      const existing = results.get(key);
       if (existing) return existing;
       if (results.size >= (isVSCode ? 40 : 80)) return Promise.resolve(null);
 
-      const request = confirmMarkdownFile(source, directory).then(
+      const request = confirmMarkdownFile(source, directory, inputKind).then(
         (path) => getRuntimeKey() === runtimeKey ? path : null,
       );
-      results.set(source, request);
+      results.set(key, request);
       return request;
     };
   }, [fileReferences, directory, runtimeKey, isVSCode]);
@@ -386,15 +391,15 @@ export function MarkdownContent({
       : undefined;
     return createMarkdownCodePlugin({ isVSCode, purpose, prepared: preparedHighlights, resolvePaths });
   }, [isVSCode, purpose, preparedHighlights, fileReferences, directory, confirmFile]);
-  const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: markdownCjk, renderers }), [code]);
+  const plugins = React.useMemo(() => ({ code, math: markdownMath, cjk: getMarkdownCjk(singleTilde), renderers }), [code, singleTilde]);
   const processing = React.useMemo(() => {
-    const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode);
+    const base = getMarkdownProcessingOptions(allowRawHtml, isVSCode, singleTilde);
     const extra: Pluggable[] = [];
     if (emojiShortcodes) extra.push([remarkEmojiShortcodes, emojiShortcodes]);
     if (repositoryLinks) extra.push([remarkRepositoryReferences, repositoryLinks]);
     if (extra.length === 0) return base;
     return { ...base, remarkPlugins: [...(base.remarkPlugins ?? []), ...extra] };
-  }, [allowRawHtml, emojiShortcodes, isVSCode, repositoryLinks]);
+  }, [allowRawHtml, emojiShortcodes, isVSCode, repositoryLinks, singleTilde]);
   const presentation = React.useMemo(() => ({
     directory,
     fileReferences,
@@ -519,6 +524,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
     <MarkdownContent
       key={identity}
       content={content}
+      singleTilde={false}
       mode={renderMode.identity === identity ? renderMode.mode : initialMode}
       mediaMode={variant === 'assistant' ? 'assistant' : 'local'}
       isStreaming={isStreaming}

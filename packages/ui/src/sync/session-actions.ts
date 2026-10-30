@@ -6,11 +6,18 @@
 import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
-import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
-import { readWorkflowReport } from "@/lib/workflows/report"
 import { Binary } from "./binary"
 import { dropSessionCaches } from "./session-cache"
+import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcriptCutForMessage } from "./transcript-cut"
 import { useSessionUIStore } from "./session-ui-store"
+import { useSelectionStore } from "./selection-store"
+import {
+  markRecoveredQuestionAnswered,
+  noteLocalFormCancelled,
+  noteLocalFormReplied,
+  submitRecoveredAnswer,
+  type RecoveredQuestion,
+} from "./recoverable-questions"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -49,7 +56,7 @@ import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
 import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { markSessionUnreadSeen } from "./session-unread"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { getErrorStatus, isAmbiguousSendFailure } from "./send-failure-classification"
 import { isFormRequestNotFoundError } from "./form-request-error"
@@ -60,12 +67,13 @@ import { mergeMessages } from "./optimistic"
 import { trackPromptInFlight } from "./prompts-in-flight"
 import { messagesBefore, messagesFrom } from "./message-ordering"
 import { deleteChatDirectory } from "@/lib/chatDirectories"
-import { createChatDraftIdentity } from "@/lib/chatDraftPersistence"
+import { createChatDraftIdentity, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 import { cancelSessionTitleGeneration } from "./session-title-generation"
 import { recordSessionActionFailure } from "./session-action-failures"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
 import { getSessionGoal } from "@/lib/sessionGoalMetadata"
 import { fetchGoalObjectiveContent, writeGoalObjectiveFile } from "@/lib/goalObjectiveFiles"
+import { isVSCodeRuntime } from "@/lib/desktop"
 
 const MESSAGE_REFETCH_LIMIT = 100
 const SEND_CONFIRMATION_REFETCH_LIMIT = 30
@@ -708,15 +716,15 @@ function getSessionReplyDirectory(sessionId?: string): string | undefined {
   return directory ?? dir()
 }
 
-function restoreFilePartsToInput(fileParts: readonly FilePart[]): void {
-  useInputStore.getState().clearAttachedFiles()
+function restoreFilePartsToInput(fileParts: readonly FilePart[], target: ChatDraftIdentity | null): void {
+  useInputStore.getState().clearAttachedFiles(target)
   for (const filePart of fileParts) {
     if (!filePart.url) continue
     useInputStore.getState().addRestoredAttachment({
       url: filePart.url,
       mimeType: filePart.mime,
       filename: filePart.filename ?? "attachment",
-    })
+    }, target)
   }
 }
 
@@ -737,21 +745,6 @@ function contextCarriersForMessage(messages: readonly Message[], messageID: stri
     carriers.unshift({ metadata: candidate.metadata })
   }
   return carriers
-}
-
-/**
- * Where a revert or fork of a user message cuts the transcript: at the first
- * of its context carriers, so the carriers leave together with the message.
- * Cutting at the message itself would leave them in place, and the next prompt
- * would be sent with the reverted context attached a second time.
- */
-function transcriptCutForMessage(messages: readonly Message[], messageID: string): string {
-  const index = messages.findIndex((message) => message.id === messageID)
-  // Only a prompt has carriers; any other target (a subagent run report) is cut at itself.
-  if (messages[index]?.role !== "user") return messageID
-  let first = index
-  while (first > 0 && messages[first - 1].role === "synthetic") first -= 1
-  return first >= 0 ? messages[first].id : messageID
 }
 
 /**
@@ -1038,22 +1031,30 @@ export async function createSession(
   navigation: "open" | "preserve" = "open",
   /** An id this client minted (`descendingId("ses")`), so records keyed by it before the response stay valid. */
   id?: string,
+  expectedRuntimeKey?: string,
 ): Promise<Session | null> {
-  const runtimeKey = getRuntimeKey()
+  const runtimeKey = expectedRuntimeKey ?? getRuntimeKey()
   const runtimeClient = opencodeClient.getSdkClient()
   try {
+    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) return null
     // Capture the effective directory used for session creation so we can fall
     // back to it when the server response omits the `directory` field.
     // Without this, setCurrentSession would fall through to a stale
     // opencodeClient.getDirectory() value and group the session under the
     // wrong project (closes #1637, #2270).
     const effectiveDirectory = directoryOverride ?? dir()
+    const cleanupSession = await opencodeClient.captureSessionCleanup(effectiveDirectory, runtimeKey)
+    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) return null
+    const sessionMetadata = title ? withUserWorkTitle(metadata ?? {}, title) : metadata
     const session = await opencodeClient.createSession(
-      { id, title, metadata, model: selection?.model, agent: selection?.agent },
+      { id, title, metadata: sessionMetadata, model: selection?.model, agent: selection?.agent },
       effectiveDirectory,
     )
 
-    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) return null
+    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) {
+      await cleanupSession(session.id)
+      return null
+    }
     const sessionDirectory = session.directory || effectiveDirectory || null
     // Pre-populate routing index so SSE events arriving before session.created
     // can be routed to the correct child store
@@ -1070,7 +1071,7 @@ export async function createSession(
       }
       getImperativeSessionMessageLoader()?.initializeCreatedSession({ directory: sessionDirectory, sessionID: session.id })
     }
-    if (navigation === "open") useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    if (navigation === "open") useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory, { transition: selectionTransition })
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     useGlobalSessionsStore.getState().upsertSession(session)
     return session
@@ -1276,7 +1277,7 @@ export async function setContextObligatoryMessage(
   pinned: boolean,
 ): Promise<Session> {
   return patchSessionMetadata(sessionId, directory, (metadata) =>
-    withContextObligatoryMessage(metadata, message, pinned))
+    withContextObligatoryMessage(metadata, message, pinned, sessionId))
 }
 
 async function cleanupReviewMetadataBeforeDelete(
@@ -2504,6 +2505,7 @@ export async function replyToForm(
     // #2448). The later SSE event is a no-op (the reducer only removes when
     // present).
     removeFormRequestFromChildStores(sessionId, formId)
+    noteLocalFormReplied(formId)
   } catch (error) {
     if (isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2525,6 +2527,7 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
     // A successful cancellation is authoritative; see replyToForm for the
     // lost-SSE-event rationale (issues #2911, #2448).
     removeFormRequestFromChildStores(sessionId, formId)
+    noteLocalFormCancelled(formId)
   } catch (error) {
     if (isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
@@ -2533,6 +2536,76 @@ export async function cancelForm(sessionId: string, formId: string): Promise<voi
     // Same as replyToForm: not-found is already settled, not a retryable cancel.
     throw error
   }
+}
+
+/** The model and agent a recovered answer's new turn runs with. */
+type RecoveredAnswerSelection = {
+  providerID: string
+  modelID: string
+  agent?: string
+  variant?: string
+}
+
+/**
+ * The configuration to run a recovered answer with, most specific first: the
+ * model that asked the question (the linked assistant message), then the
+ * session's own record, then the selection this client saved for the session.
+ */
+function recoveredAnswerSelection(question: RecoveredQuestion): RecoveredAnswerSelection {
+  const state = dirStoreForDirectory(question.directory).getState()
+  const message = state.message[question.sessionID]?.find((candidate) => candidate.id === question.toolMessageID)
+  if (message?.role === "assistant") {
+    return {
+      providerID: message.providerID,
+      modelID: message.modelID,
+      agent: message.agent,
+      variant: message.variant,
+    }
+  }
+  const session = state.session.find((candidate) => candidate.id === question.sessionID)
+  if (session?.model) {
+    return {
+      providerID: session.model.providerID,
+      modelID: session.model.id,
+      agent: session.agent,
+      variant: session.model.variant,
+    }
+  }
+  const saved = useSelectionStore.getState().getSessionModelSelection(question.sessionID)
+  if (saved) {
+    return {
+      providerID: saved.providerId,
+      modelID: saved.modelId,
+      agent: useSelectionStore.getState().getSessionAgentSelection(question.sessionID) ?? undefined,
+    }
+  }
+  throw new Error("No model is recorded for this question")
+}
+
+/** Uses the normal send path for rollback and ambiguous-failure confirmation. */
+export async function sendRecoveredFormAnswer(question: RecoveredQuestion, text: string): Promise<void> {
+  const runtimeKey = getRuntimeKey()
+  const isCurrentRuntime = captureRuntimeInstance()
+  await submitRecoveredAnswer(question.form.id, async () => {
+    const selection = recoveredAnswerSelection(question)
+    await useSessionUIStore.getState().sendMessage(
+      text,
+      selection.providerID,
+      selection.modelID,
+      selection.agent,
+      undefined,
+      undefined,
+      undefined,
+      selection.variant,
+      "normal",
+      {
+        userInitiated: true,
+        queuedGoal: null,
+        target: { runtimeKey, sessionId: question.sessionID, directory: question.directory },
+      },
+    )
+    if (isCurrentRuntime()) markRecoveredQuestionAnswered(question.form.id)
+  })
 }
 
 /**
@@ -2671,20 +2744,17 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   // Save input store state before mutations — if the API fails we need to
   // roll back both text and attachments to their previous values.
-  const prevInputAttachments = [...useInputStore.getState().attachedFiles]
-  const prevInputText = useInputStore.getState().pendingInputText
-  const prevInputMode = useInputStore.getState().pendingInputMode
+  const prevRestoreText = useInputStore.getState().pendingSessionRestores.get(sessionId) ?? null
   const draftTarget: InlineCommentDraftTarget | null = directory
     ? { directory, sessionKey: sessionId }
     : null
+  const restoreIdentity = createChatDraftIdentity(getRuntimeKey(), directory, sessionId)
+  const prevTargetAttachments = useInputStore.getState().getAttachedFiles(restoreIdentity)
   const prevDrafts = draftTarget ? useInlineCommentDraftStore.getState().getDrafts(draftTarget) : []
 
   // Restore reverted message text and file attachments to input
   if (messageText) {
-    useInputStore.setState({
-      pendingInputText: messageText,
-      pendingInputMode: "replace" as const,
-    })
+    useInputStore.getState().setPendingSessionRestore(sessionId, messageText)
   }
 
   // Restore file/image attachments from the target message.
@@ -2693,7 +2763,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
   // Only a prompt goes back to the composer: reverting a subagent run report
   // leaves whatever the user is typing alone.
   if (targetMsg?.role === "user") {
-    restoreFilePartsToInput(submittedFileParts)
+    restoreFilePartsToInput(submittedFileParts, restoreIdentity)
     if (draftTarget) restoreContextPartsToInput(submittedContextParts, draftTarget)
   }
 
@@ -2728,12 +2798,9 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
     store.setState({
       session: rollback,
     })
-    // Rollback input store: restore previous text and attachments
-    useInputStore.setState({
-      pendingInputText: prevInputText,
-      pendingInputMode: prevInputMode,
-      attachedFiles: prevInputAttachments,
-    })
+    // Rollback input store: only this session's attachment slot moves.
+    useInputStore.getState().setPendingSessionRestore(sessionId, prevRestoreText)
+    useInputStore.getState().setAttachedFiles(prevTargetAttachments, restoreIdentity)
     if (draftTarget) {
       useInlineCommentDraftStore.getState().clearDrafts(draftTarget)
       useInlineCommentDraftStore.getState().restoreDrafts(draftTarget, prevDrafts)
@@ -2781,7 +2848,24 @@ function openForkedSession(store: DirectoryStoreApi, forkedSession: Session, dir
  * The objective copy re-reads the fork's goal id first and is skipped when the
  * user armed a new goal on the fork in the meantime.
  */
-function inheritForkMetadata(sourceSessionId: string, forkedSession: Session, directory: string | null | undefined, expectedRuntimeKey: string) {
+async function inheritForkState(sourceSessionId: string, forkedSession: Session, directory: string | null | undefined, expectedRuntimeKey: string) {
+  // VS Code keeps its permission policy in the extension host; other runtimes
+  // inherit it server-side when OpenCode announces session.forked.
+  if (isVSCodeRuntime()) {
+    try {
+      const { usePermissionStore } = await import("@/stores/permissionStore")
+      if (isStaleRuntime(expectedRuntimeKey)) return
+      await usePermissionStore.getState().hydrate()
+      if (isStaleRuntime(expectedRuntimeKey)) return
+      const permissions = usePermissionStore.getState()
+      if (!Object.hasOwn(permissions.modes, forkedSession.id)) {
+        await permissions.setSessionMode(forkedSession.id, permissions.getSessionMode(sourceSessionId))
+      }
+    } catch (error) {
+      console.warn("[fork] failed to copy the permission mode to the fork", error)
+    }
+    if (isStaleRuntime(expectedRuntimeKey)) return
+  }
   return applyForkInheritance(sourceSessionId, forkedSession, {
     readGoalId: async (sessionId) => getSessionGoal(await opencodeClient.getSession(sessionId, directory))?.id ?? null,
     readObjective: fetchGoalObjectiveContent,
@@ -2793,43 +2877,20 @@ function inheritForkMetadata(sourceSessionId: string, forkedSession: Session, di
 }
 
 /**
- * Records that start something new after a turn. OpenCode 1 carried a
- * compaction and a shell run as user messages; OpenCode 2 gives them their own
- * roles, so they have to be named here or a fork after an answer copies them.
- */
-const TURN_BOUNDARY_ROLES = new Set<Message["role"]>(["user", "compaction", "shell"])
-
-const isTurnBoundary = (message: Message): boolean =>
-  TURN_BOUNDARY_ROLES.has(message.role)
-  || readSubagentRun(message) !== undefined
-  || readDispatchedSessionResult(message) !== undefined
-  || readWorkflowReport(message) !== undefined
-
-/**
  * Fork keeping an assistant turn: the new session holds everything through
- * `messageId`, so the agent there still sees the answer it just gave. The cut
- * is the first record after it that starts something new (a prompt, a
- * compaction, a shell run, a background subagent run, a dispatched session's
- * result); with none, the whole
- * transcript is copied. The composer stays empty since there is no prompt to
- * rewrite.
+ * `messageId`, so the agent there still sees the answer it just gave. The
+ * composer stays empty since there is no prompt to rewrite.
  */
 export async function forkAfterMessage(sessionId: string, messageId: string): Promise<Session | null> {
   const expectedRuntimeKey = getRuntimeKey()
   const { store, directory } = dirStoreForSession(sessionId)
   const messages = store.getState().message[sessionId] ?? []
-  const index = messages.findIndex((message) => message.id === messageId)
-  if (index < 0) throw new Error("Fork source message is not loaded")
-  const boundary = messages.slice(index + 1).find(isTurnBoundary)
 
-  const forkedSession = await opencodeClient.forkSession(sessionId, {
-    before: boundary ? transcriptCutForMessage(messages, boundary.id) : undefined,
-    directory,
-  })
+  const forkedSession = await forkAtTranscriptCut(sessionId, transcriptCutAfterMessage(messages, messageId), directory, expectedRuntimeKey)
   if (isStaleRuntime(expectedRuntimeKey)) return null
   const forkDirectory = resolveSessionOwnedDirectory(forkedSession) ?? directory
   openForkedSession(store, forkedSession, forkDirectory)
-  await inheritForkMetadata(sessionId, forkedSession, forkDirectory, expectedRuntimeKey)
+  await inheritForkState(sessionId, forkedSession, forkDirectory, expectedRuntimeKey)
   return forkedSession
 }
 
@@ -2947,7 +3008,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     contextCarriersForMessage(state.message[sessionId] ?? [], messageId),
     { directory: target.directory, sessionKey: forkedSession.id },
   )
-  await inheritForkMetadata(sessionId, forkedSession, target.directory, expectedRuntimeKey)
+  await inheritForkState(sessionId, forkedSession, target.directory, expectedRuntimeKey)
 }
 
 export async function fetchMessagesForSession(sessionID: string, directory?: string | null): Promise<void> {

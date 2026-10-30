@@ -241,6 +241,7 @@ const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
             className={MARKDOWN_CLASS}
             enableFileReferences={false}
             allowRawHtml
+            singleTilde
             repositoryLinks={links.repository}
             emojiShortcodes={emojiShortcodes}
             directory={links.directory}

@@ -1,7 +1,7 @@
 import * as React from 'react';
 
 import { burstOriginOf, fireworksShowDurationMs, fireworksShowFor, type CelebrationOptions, type FireworksShow } from '@/components/ui/fireworksShows';
-import { occasionOf } from '@/lib/easter-eggs/calendar';
+import { celebrationOf } from '@/lib/easter-eggs/calendar';
 
 interface FireworksState {
   isActive: boolean;
@@ -40,7 +40,7 @@ export const useFireworks = (): UseFireworksResult => {
     // The calendar is read when the celebration fires, so a push at 23:59 on
     // Halloween still gets ghosts however long the app has been open.
     // The button is measured now: a push takes a while, and the panel may have scrolled.
-    const show = fireworksShowFor(options, occasionOf(new Date()), burstOriginOf(options.origin));
+    const show = fireworksShowFor(options, celebrationOf(new Date()), burstOriginOf(options.origin));
     setState((prev) => ({ isActive: true, cycle: prev.cycle + 1, show }));
 
     timeoutRef.current = window.setTimeout(() => {

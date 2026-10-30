@@ -748,6 +748,7 @@ test('keeps the nested repository picker reachable once the working list resolve
   };
   seed('/root/one');
   seed('/repo');
+  seed('/repo/sub');
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -764,13 +765,26 @@ test('keeps the nested repository picker reachable once the working list resolve
   try {
     await render('/root', { rootIsGitRepo: false, gitDirectory: '/root/one', nestedRepos: ['/root/one', '/root/two'], nestedRepoSelection: '/root/one', repositoryOptions: ['/root/one', '/root/two'] });
     await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')));
-    const picker = container.querySelector('[aria-label="Select a repository..."]');
+    let picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker) throw new Error('Missing nested repository picker in the working list header');
     if (!picker.textContent?.includes('one')) throw new Error('Picker does not show the resolved repository');
-    // A root that is itself a repository keeps the picker hidden.
+
+    // A root that is a repository offers itself first, then what is nested.
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: ['/repo/sub'], nestedRepoSelection: null, repositoryOptions: ['/repo', '/repo/sub'] });
+    await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('repo')));
+    picker = container.querySelector('[aria-label="Select a repository..."]');
+    if (!picker?.textContent?.includes('repo')) throw new Error('Picker does not show the root repository');
+
+    // Picking the nested repository (a submodule) switches the surface to it.
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo/sub', nestedRepos: ['/repo/sub'], nestedRepoSelection: '/repo/sub', repositoryOptions: ['/repo', '/repo/sub'] });
+    await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('sub')));
+    picker = container.querySelector('[aria-label="Select a repository..."]');
+    if (!picker?.textContent?.includes('sub')) throw new Error('Picker does not show the selected nested repository');
+
+    // A root repository with nothing nested keeps the picker hidden.
     await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null });
     await settle(() => !container.querySelector('[aria-label="Select a repository..."]'));
-    if (container.querySelector('[aria-label="Select a repository..."]')) throw new Error('Picker should stay hidden for a root repository');
+    if (container.querySelector('[aria-label="Select a repository..."]')) throw new Error('Picker should stay hidden without nested repositories');
   } finally {
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;

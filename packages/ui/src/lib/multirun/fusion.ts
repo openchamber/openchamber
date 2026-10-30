@@ -1,4 +1,6 @@
 import { opencodeClient } from '@/lib/opencode/client';
+import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
+import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import type { Session } from '@/lib/opencode/model';
 import type { GitWorktreeSnapshotResult } from '@/lib/api/types';
 import { getGitRangeDiff, snapshotGitWorktree } from '@/lib/gitApi';
@@ -143,6 +145,8 @@ export async function startRunFusion(input: {
   const assertCurrent = () => {
     if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) throw new Error('Runtime changed');
   };
+  const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => undefined);
+  assertCurrent();
 
   const sources = await loadFusionSources(run, input.sourceIds, input.sessionById, assertCurrent);
   if (sources.length === 0) throw new NoFusionOutputsError();
@@ -254,6 +258,7 @@ export async function startRunFusion(input: {
   }
 
   assertCurrent();
+  await syncSessionKnowledge(directory, fusionSession.id, responseStyleInstruction, runtimeKey);
   await opencodeClient.sendMessage({
     runtimeKey,
     id: fusionSession.id,

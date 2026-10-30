@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const gitLibraries = {
+  getPathDiff: vi.fn(),
+  getPathDiffs: vi.fn(),
+  getFileDiff: vi.fn(),
   stageFiles: vi.fn(),
   unstageFiles: vi.fn(),
   isGitRepository: vi.fn(),
@@ -31,6 +34,9 @@ const gitLibraries = {
 };
 
 vi.mock('./index.js', () => ({
+  getPathDiff: gitLibraries.getPathDiff,
+  getPathDiffs: gitLibraries.getPathDiffs,
+  getFileDiff: gitLibraries.getFileDiff,
   stageFiles: gitLibraries.stageFiles,
   unstageFiles: gitLibraries.unstageFiles,
   isGitRepository: gitLibraries.isGitRepository,
@@ -109,6 +115,40 @@ const createMockResponse = () => {
     },
   };
 };
+
+describe('git diff failures', () => {
+  it.each([
+    ['GET', 'diff', 'getPathDiff'],
+    ['GET', 'file-diff', 'getFileDiff'],
+    ['POST', 'diffs', 'getPathDiffs'],
+  ])('keeps unexpected %s %s failures as 500', async (method, endpoint, operation) => {
+    gitLibraries[operation].mockRejectedValueOnce(new Error('permission denied'));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await getRoute(method, `/api/git/${endpoint}`)({ query: { directory: '/repo', path: 'file.txt' }, body: { paths: ['file.txt'] } }, response);
+      expect(response.statusCode).toBe(500);
+      expect(response.body).toEqual({ error: 'permission denied' });
+      expect(error).toHaveBeenCalledOnce();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it.each([['path_not_found', 404], ['nested_repository', 422], ['untracked_directory', 422]])('preserves %s path errors', async (code, status) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    for (const [endpoint, operation] of [['diff', 'getPathDiff'], ['file-diff', 'getFileDiff']]) {
+      gitLibraries[operation].mockRejectedValueOnce(Object.assign(new Error('Path unavailable'), { code }));
+      const response = createMockResponse();
+      await getRoute('GET', `/api/git/${endpoint}`)({ query: { directory: '/repo', path: 'file.txt' } }, response);
+      expect(response.statusCode).toBe(status);
+      expect(response.body).toEqual({ code, error: 'Path unavailable' });
+    }
+  });
+});
 
 describe('git route renderer DTOs', () => {
   beforeEach(() => {

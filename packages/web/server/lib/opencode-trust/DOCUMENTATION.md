@@ -96,6 +96,14 @@ in `vscode/src/opencodeTrust.ts`.
 
 ## Decisions
 
+### Why queued prompts read trust again
+
+Several worktrees can have untrusted assessments before the user answers the
+first prompt. Each queued prompt reads the server's current assessment when
+its turn arrives, so the first saved answer also opens unchanged worktrees
+without another confirmation. Already-trusted requests bypass the prompt queue;
+a failed assessment still leaves its folder closed.
+
 ### Why a gate in OpenChamber and not a setting in OpenCode
 
 OpenCode 2.1 has no per-folder trust: the only switch,

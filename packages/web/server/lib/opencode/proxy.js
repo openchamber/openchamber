@@ -34,7 +34,8 @@ import { createSessionDirectoryResolver } from '../opencode-trust/session-direct
  * upstream read.
  */
 export const createUpstreamReadSignal = ({ res = null, timeoutMs }) => {
-  const timeout = AbortSignal.timeout(timeoutMs);
+  // AbortSignal.timeout(0) would abort on the next timer tick.
+  const timeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
   const client = new AbortController();
   const abort = () => {
     // A finished response closes too, and its read is already done. Only a
@@ -48,7 +49,7 @@ export const createUpstreamReadSignal = ({ res = null, timeoutMs }) => {
   } else {
     res?.once?.('close', abort);
   }
-  const signal = AbortSignal.any([timeout, client.signal]);
+  const signal = timeout ? AbortSignal.any([timeout, client.signal]) : client.signal;
   signal.addEventListener('abort', () => res?.off?.('close', abort), { once: true });
   return signal;
 };
@@ -663,7 +664,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   };
 
   const normalizeProxyTimeout = (value) => {
-    return Number.isFinite(value) && value > 0 ? value : 4 * 60 * 1000;
+    return Number.isFinite(value) && value >= 0 ? value : 4 * 60 * 1000;
   };
 
   const PROXY_REQUEST_TIMEOUT_MS = normalizeProxyTimeout(LONG_REQUEST_TIMEOUT_MS);
@@ -695,6 +696,10 @@ export const registerOpenCodeProxy = (app, deps) => {
   };
 
   const applyProxyResponseDeadline = (req, res, next) => {
+    if (PROXY_REQUEST_TIMEOUT_MS <= 0) {
+      next();
+      return;
+    }
     const timeout = setTimeout(() => {
       req[PROXY_TIMEOUT_MARKER] = true;
       if (sendProxyErrorResponse(res, 504)) {
@@ -1248,6 +1253,8 @@ export const registerOpenCodeProxy = (app, deps) => {
   const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
 
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
+    // A timeoutMs of 0 disables both timers: node-http-proxy only applies
+    // them when the option is truthy.
     target: resolveProxyTarget(),
     get agent() {
       return resolveOpenCodeProxyAgent();
@@ -1262,7 +1269,16 @@ export const registerOpenCodeProxy = (app, deps) => {
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
     on: {
-      proxyReq: (proxyReq, req) => {
+      proxyReq: (proxyReq, req, res) => {
+        // req.aborted misses disconnects after the incoming body is complete.
+        // Watch the response before upstream headers arrive, even without timers.
+        const onClientClose = () => {
+          if (!res.writableEnded) proxyReq.destroy();
+        };
+        res.once('close', onClientClose);
+        proxyReq.once('close', () => res.off('close', onClientClose));
+        if (res.destroyed) onClientClose();
+
         // Inject OpenCode auth headers
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {

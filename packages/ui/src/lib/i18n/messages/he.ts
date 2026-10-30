@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -43,6 +44,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'quota.family.zen': 'מודלי Zen',
+  'quota.value.requests': 'בקשות: {count}',
+  'quota.value.spent': 'נוצלו {spent}',
   'opencodeCompatibility.bundled': 'OpenCode מגיע יחד עם OpenChamber. יש לעדכן את OpenChamber כדי לקבל את OpenCode v2.',
   'opencodeCompatibility.title': 'נדרש OpenCode v2',
   'opencodeCompatibility.outdatedTitle': 'עדכן את OpenCode',
@@ -184,6 +188,9 @@ export const dict = {
   'chat.chatInput.mrCheckContext': 'משימות pipeline שנכשלו',
   'chat.chatInput.prCheckContextRemove': 'הסר את ההקשר של בדיקות ה-PR',
   'common.loading': 'טוען…',
+  'common.image.loading': 'טוען תמונה',
+  'common.image.loadFailed': 'לא ניתן לטעון את התמונה',
+  'common.image.retry': 'נסה שוב',
   'common.unavailable': 'לא זמין',
   'common.language.english': 'אנגלית',
   'common.language.german': 'גרמנית',
@@ -3433,10 +3440,11 @@ export const dict = {
   'common.duration.secondsCompact': '{seconds} שנ׳',
   'common.duration.minutesSecondsCompact': '{minutes} דק׳ {seconds} שנ׳',
   'common.duration.hoursMinutesCompact': '{hours} שע׳ {minutes} דק׳',
-  'contextFileOpen.failure.tooLarge': 'הקובץ גדול מדי לפתיחה (יותר מ-{count} שורות)',
-  'contextFileOpen.failure.tooLargeSize': 'הקובץ גדול מדי לפתיחה (מעל {size})',
-  'contextFileOpen.failure.missing': 'הקובץ לא נמצא',
-  'contextFileOpen.failure.unreadable': 'לא ניתן היה לפתוח את הקובץ',
+  'contextFileOpen.failure.tooLarge': '{name} גדול מדי לפתיחה',
+  'contextFileOpen.failure.tooLargeDetail': 'יותר מ-{count} שורות · {size}',
+  'contextFileOpen.failure.tooLargeSize': 'גדול מ-{limit} · {size}',
+  'contextFileOpen.failure.missing': '{name} לא נמצא',
+  'contextFileOpen.failure.unreadable': 'לא ניתן לפתוח את {name}',
   'quota.window.5h': '5 שעות',
   'quota.window.7d': 'מגבלת 7 ימים',
   'quota.window.extraUsage': 'שימוש נוסף',
@@ -3444,6 +3452,7 @@ export const dict = {
   'quota.window.daily': 'יומי',
   'quota.window.monthly': 'חודשי',
   'quota.window.credits': 'קרדיטים',
+  'quota.value.creditsUsed': 'קרדיטים שנוצלו: {credits}',
   'quota.window.keyLimit': 'מגבלת המפתח',
   'quota.window.creditsBalance': 'יתרת קרדיטים',
   'quota.window.monthlyCredits': 'קרדיטים חודשיים',
@@ -3509,6 +3518,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': 'פתח את {name}',
   'chat.workStatus.section.usage': 'שימוש',
   'chat.workStatus.section.telemetry': 'נתוני התור',
+  'chat.workStatus.telemetry.previousTurn': 'התור הקודם',
+  'chat.workStatus.telemetry.previousTurnRate': 'התור הקודם · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'תגובה',
   'chat.workStatus.telemetry.responseSpeedDescription': 'באיזו מהירות הגיע הטקסט הסופי. לא כולל את ההמתנה הראשונית, החשיבה וקריאות קודמות לכלים. הערכה לפי חותמות הזמן של הטקסט, לא מדידת מהירות של הספק.',
   'chat.workStatus.telemetry.speed': 'התור כולו',
@@ -3582,6 +3593,7 @@ export const dict = {
   'chat.formCard.submitFailed': 'לא ניתן היה לשלוח את התשובה',
   'chat.formCard.cancelFailed': 'לא ניתן היה לבטל את הבקשה',
   'chat.formCard.tryAgain': 'נסה שוב.',
+  'chat.formCard.recoveredNotice': 'התור נעצר בזמן ההמתנה. שליחה תתחיל תור חדש בתשלום.',
   'chat.formDock.progress': '{current} מתוך {total}',
   'chat.formDock.waiting': 'עוד {count} ממתינות',
   'chat.formDock.back': 'חזרה',
@@ -3826,6 +3838,7 @@ export const dict = {
   ...fileEditorAidsI18n.he,
   ...htmlRenderI18n.he,
   ...documentToolbarI18n.he,
+  ...secretRequestI18n.he,
   ...sessionNoticesI18n.he,
   ...usageStatsI18n.he,
   ...webSearchI18n.he,
@@ -3911,4 +3924,14 @@ export const dict = {
   'notifications.question.bodyFallback': 'הסוכן ממתין לתשובתך',
   'notifications.permission.bodyFallback': 'הסוכן ממתין לאישורך',
   'notifications.permission.title': 'נדרשת הרשאה',
+  'chat.promptHistorySearch.title': "חיפוש בהיסטוריית ההנחיות",
+  'chat.promptHistorySearch.searchPlaceholder': "חיפוש בהנחיות שנשמרו",
+  'chat.promptHistorySearch.close': "סגירת חיפוש בהיסטוריית ההנחיות",
+  'chat.promptHistorySearch.empty': "אין עדיין הנחיות לחיפוש",
+  'chat.promptHistorySearch.noMatches': "לא נמצאו הנחיות תואמות",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} קובץ מצורף",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} קבצים מצורפים",
+  'chat.promptHistorySearch.hint': "↑ ↓ לעיון · Enter לטעינה · Esc לסגירה",
+  'helpDialog.item.searchPromptHistory': "חיפוש בהיסטוריית ההנחיות (קלט צ׳אט)",
+
 } as const;

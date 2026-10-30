@@ -10,6 +10,7 @@ import {
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useComposerDraftTarget } from '@/hooks/useComposerAddress';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { diffCommentOriginKey, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
@@ -66,7 +67,6 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const originKey = diffCommentOriginKey(origin);
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const effectiveDirectory = useEffectiveDirectory();
   const sessionDirectory = useSessionUIStore(
     React.useCallback(
@@ -83,12 +83,7 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   const [commentText, setCommentText] = React.useState('');
   const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
 
-  const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-  const draftDirectory = sessionDirectory ?? effectiveDirectory;
-  const target = React.useMemo(() => {
-    if (!sessionKey || !draftDirectory) return null;
-    return { directory: draftDirectory, sessionKey };
-  }, [draftDirectory, sessionKey]);
+  const target = useComposerDraftTarget(sessionDirectory ?? effectiveDirectory);
   const targetKey = target
     ? getInlineCommentDraftKey(getRuntimeKey(), target.directory, target.sessionKey)
     : null;
@@ -178,7 +173,6 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
   }, [addDraft, editingDraftId, fileLabel, getCodeForRange, language, origin, reset, selection, source, t, target, toStoreRange, updateDraft]);
 
   return {
-    sessionKey,
     drafts,
     selection,
     setSelection,

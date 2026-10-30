@@ -202,10 +202,77 @@ describe('mounted turn telemetry with live sync stores', () => {
         }
         expect(tokenReads).toBe(0);
         expect(getSyncPerformanceDiagnostics()?.sessionMessageChangeCallbacks).toBe(0);
-        if (!expanded) expect(dom.container.textContent).toBe('Turn stats');
+        if (!expanded) expect(dom.container.textContent).toBe('Turn statsPrevious turn');
         else expect(dom.container.textContent).toContain('~6 tok/s');
       }
     }
+  });
+
+  test('busy and retry mounts recover only the previous complete turn, including drawer reopen', async () => {
+    const prompt: UserMessage = { ...user, id: 'user-2', time: { created: 8000 } };
+    const step: AssistantMessage = { ...assistant, id: 'current-step', time: { created: 9000, completed: 10000 } };
+    const streaming: AssistantMessage = { ...assistant, id: 'streaming', time: { created: 11000 } };
+    for (const mode of ['busy', 'retry'] as const) {
+      await render(false);
+      await act(async () => store().setState({
+        message: { [sessionId]: [user, assistant, prompt, step, streaming] },
+        session_status: { [sessionId]: mode === 'busy' ? { type: 'busy' } : { type: 'retry', attempt: 1, message: 'retry', next: 0 } },
+      }));
+      for (let reopen = 0; reopen < 2; reopen += 1) {
+        await render();
+        expect(dom.container.querySelector('button')?.textContent).toBe('Turn statsPrevious turn');
+        expect(dom.container.textContent).toContain('Elapsed6.0s');
+        tokenReads = 0;
+        resetSyncPerformanceDiagnostics();
+        for (let i = 0; i < 100; i += 1) {
+          await act(async () => store().setState({ part: { [streaming.id]: [{
+            id: 'streaming-text', sessionID: sessionId, messageID: streaming.id, type: 'text', text: String(i),
+          }] } }));
+        }
+        expect(tokenReads).toBe(0);
+        expect(getSyncPerformanceDiagnostics()?.sessionMessageChangeCallbacks).toBe(0);
+        expect(messageRequests).toBe(0);
+        await render(false);
+      }
+    }
+  });
+
+  test('active mounts never substitute incomplete, missing or reverted history', async () => {
+    const prompt: UserMessage = { ...user, id: 'user-2' };
+    for (const messages of [[], [assistant, prompt], [user, { ...assistant, time: { created: 2000 } }, prompt]]) {
+      await render(false);
+      await act(async () => store().setState({ message: { [sessionId]: messages }, session_status: { [sessionId]: { type: 'busy' } } }));
+      await render();
+      expect(dom.container.textContent).toBe('Turn stats');
+    }
+    await render(false);
+    await act(async () => store().setState({ message: { [sessionId]: [user, assistant, prompt] }, session: [{ ...session, revert: { messageID: user.id } }] }));
+    await render();
+    expect(dom.container.textContent).toBe('Turn stats');
+    expect(messageRequests).toBe(0);
+  });
+
+  test('a new prompt keeps the finished turn on screen, labelled as the previous turn, until its reply completes', async () => {
+    const reply = { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } } as const;
+    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } }, part: { [assistant.id]: [reply] } }));
+    const heading = () => dom.container.querySelector('button')?.textContent;
+    expect(heading()).toBe('Turn stats~10 tok/s');
+    // The prompt lands while the session still reports idle.
+    const prompt: UserMessage = { id: 'user-2', sessionID: sessionId, role: 'user', time: { created: 8000 } };
+    await act(async () => store().setState({ message: { [sessionId]: [user, assistant, prompt] } }));
+    expect(heading()).toBe('Turn statsPrevious turn · ~10 tok/s');
+    expect(dom.container.textContent).toContain('Elapsed6.0s');
+    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'busy' } } }));
+    expect(heading()).toBe('Turn statsPrevious turn · ~10 tok/s');
+    expect(dom.container.textContent).toContain('Elapsed6.0s');
+    const next: AssistantMessage = { ...assistant, id: 'assistant-next', time: { created: 9000, completed: 11000 } };
+    await act(async () => store().setState({
+      message: { [sessionId]: [user, assistant, prompt, next] },
+      part: { [assistant.id]: [reply], [next.id]: [] },
+      session_status: { [sessionId]: { type: 'idle' } },
+    }));
+    expect(heading()).toBe('Turn stats');
+    expect(dom.container.textContent).toContain('Elapsed3.0s');
   });
 
   test('collapsed headlines follow corrections and clear on revert, empty history and scope changes', async () => {

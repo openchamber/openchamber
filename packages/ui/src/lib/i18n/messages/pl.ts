@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -44,6 +45,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'quota.family.zen': 'Modele Zen',
+  'quota.value.requests': 'Żądania: {count}',
+  'quota.value.spent': 'Wydano {spent}',
   "opencodeCompatibility.bundled": "OpenCode jest dołączony do OpenChamber. Zaktualizuj OpenChamber, aby uzyskać OpenCode v2.",
   "opencodeCompatibility.title": "Wymagany OpenCode v2",
   "opencodeCompatibility.outdatedTitle": "Zaktualizuj OpenCode",
@@ -166,6 +170,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n.pl,
   ...htmlRenderI18n.pl,
   ...documentToolbarI18n.pl,
+  ...secretRequestI18n.pl,
   ...sessionNoticesI18n.pl,
   ...usageStatsI18n.pl,
   ...webSearchI18n.pl,
@@ -233,6 +238,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.prCheckContextRemove': 'Usuń kontekst kontroli PR',
 
   'common.loading': 'Ładowanie...',
+  'common.image.loading': 'Wczytywanie obrazu',
+  'common.image.loadFailed': 'Nie udało się wczytać obrazu',
+  'common.image.retry': 'Spróbuj ponownie',
   'common.unavailable': 'Niedostępne',
   'common.language.english': 'Angielski',
   'common.language.german': 'Niemiecki',
@@ -3504,10 +3512,11 @@ export const dict: Record<I18nKey, string> = {
   'common.duration.secondsCompact': '{seconds}s',
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}h {minutes}m',
-  'contextFileOpen.failure.tooLarge': 'File is too large to open (>{count} lines)',
-  'contextFileOpen.failure.tooLargeSize': 'Plik jest za duży, aby go otworzyć (ponad {size})',
-  'contextFileOpen.failure.missing': 'File not found',
-  'contextFileOpen.failure.unreadable': 'Failed to open file',
+  'contextFileOpen.failure.tooLarge': 'Plik {name} jest za duży, aby go otworzyć',
+  'contextFileOpen.failure.tooLargeDetail': 'Ponad {count} wierszy · {size}',
+  'contextFileOpen.failure.tooLargeSize': 'Ponad {limit} · {size}',
+  'contextFileOpen.failure.missing': 'Nie znaleziono pliku {name}',
+  'contextFileOpen.failure.unreadable': 'Nie można otworzyć pliku {name}',
   'quota.window.5h': '5 godzin',
   'quota.window.7d': 'Limit 7-dniowy',
   'quota.window.extraUsage': 'Dodatkowe zużycie',
@@ -3515,6 +3524,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.daily': 'Dziennie',
   'quota.window.monthly': 'Miesięcznie',
   'quota.window.credits': 'Kredyty',
+  'quota.value.creditsUsed': 'Wykorzystane kredyty: {credits}',
   'quota.window.keyLimit': 'Limit klucza',
   'quota.window.creditsBalance': 'Saldo kredytów',
   'quota.window.monthlyCredits': 'Kredyty miesięczne',
@@ -3580,6 +3590,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': 'Otwórz {name}',
   'chat.workStatus.section.usage': 'Zużycie',
   'chat.workStatus.section.telemetry': 'Statystyki tury',
+  'chat.workStatus.telemetry.previousTurn': 'Poprzednia tura',
+  'chat.workStatus.telemetry.previousTurnRate': 'Poprzednia tura · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Odpowiedź',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Jak szybko docierał końcowy tekst. Bez początkowego oczekiwania, rozumowania i wcześniejszych wywołań narzędzi. To szacunek z czasów tekstu, a nie pomiar po stronie dostawcy.',
   'chat.workStatus.telemetry.speed': 'Całe żądanie',
@@ -3678,6 +3690,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.submitFailed': 'Nie udało się wysłać odpowiedzi',
   'chat.formCard.cancelFailed': 'Nie udało się anulować żądania',
   'chat.formCard.tryAgain': 'Spróbuj ponownie.',
+  'chat.formCard.recoveredNotice': 'Tura zatrzymała się podczas oczekiwania. Wysłanie rozpocznie nową płatną turę.',
   'chat.formDock.progress': '{current} z {total}',
   'chat.formDock.waiting': '{count} więcej czeka',
   'chat.formDock.back': 'Wstecz',
@@ -3891,4 +3904,14 @@ export const dict: Record<I18nKey, string> = {
   'notifications.question.bodyFallback': 'Agent czeka na Twoją odpowiedź',
   'notifications.permission.bodyFallback': 'Agent czeka na Twoją zgodę',
   'notifications.permission.title': 'Wymagane uprawnienie',
+  'chat.promptHistorySearch.title': "Przeszukaj historię poleceń",
+  'chat.promptHistorySearch.searchPlaceholder': "Szukaj zapamiętanych poleceń",
+  'chat.promptHistorySearch.close': "Zamknij wyszukiwanie historii poleceń",
+  'chat.promptHistorySearch.empty': "Nie ma jeszcze poleceń do przeszukania",
+  'chat.promptHistorySearch.noMatches': "Brak pasujących poleceń",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} załącznik",
+   'chat.promptHistorySearch.attachmentsPlural': "Załączniki: {count}",
+  'chat.promptHistorySearch.hint': "↑ ↓ aby przeglądać · Enter aby wczytać · Esc aby zamknąć",
+  'helpDialog.item.searchPromptHistory': "Przeszukaj historię poleceń (pole czatu)",
+
 } as const;

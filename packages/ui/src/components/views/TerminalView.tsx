@@ -4,10 +4,11 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { ACTIVE_PROJECT_ACTION_LIFECYCLES, useTerminalStore } from '@/stores/useTerminalStore';
 import { Spinner } from '@/components/ui/spinner';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { readComposerDraftTarget } from '@/hooks/useComposerAddress';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
-import { type TerminalStreamEvent } from '@/lib/api/types';
+import { type RuntimeAPIs, type TerminalStreamEvent } from '@/lib/api/types';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT } from '@/lib/fontOptions';
@@ -73,6 +74,7 @@ type TerminalTabViewportProps = {
     fontFamily: string;
     fontSize: number;
     enableTouchScroll: boolean;
+    clipboard: RuntimeAPIs['clipboard'];
 };
 
 /**
@@ -83,7 +85,7 @@ type TerminalTabViewportProps = {
  */
 const TerminalTabViewport: React.FC<TerminalTabViewportProps> = ({
     directory, tabId, isActive, isTerminalVisible, registerController,
-    onInput, onResize, onProvisionalSize, theme, monoFont, fontFamily, fontSize, enableTouchScroll,
+    onInput, onResize, onProvisionalSize, theme, monoFont, fontFamily, fontSize, enableTouchScroll, clipboard,
 }) => {
     // Scrollback is a leaf subscription: streaming output must not rerender the tab strip.
     const chunks = useTerminalStore((s) => s.getBuffer(directory, tabId).chunks);
@@ -102,6 +104,7 @@ const TerminalTabViewport: React.FC<TerminalTabViewportProps> = ({
                 fontFamily={fontFamily}
                 fontSize={fontSize}
                 enableTouchScroll={enableTouchScroll}
+                clipboard={clipboard}
                 autoFocus={isTerminalVisible && isActive}
                 isVisible={isTerminalVisible && isActive}
             />
@@ -121,7 +124,7 @@ const TerminalTabIcon: React.FC<{ iconName: IconName; active: boolean }> = ({ ic
 
 export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, onLastTabClosed }) => {
     const { t } = useI18n();
-    const { terminal, runtime } = useRuntimeAPIs();
+    const { terminal, runtime, clipboard } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const pageBackground = usePageColors().background;
     const terminalAppearanceRef = React.useRef<{ themeMode: 'light' | 'dark'; terminalBackground: string; terminalForeground: string }>({ themeMode: 'dark', terminalBackground: '', terminalForeground: '' });
@@ -886,9 +889,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     const handleAttachSelection = React.useCallback(() => {
         const selection = terminalControllerRef.current?.getSelection();
-        const sessionKey = currentSessionId ?? (newSessionDraft?.open ? 'draft' : null);
-        if (!selection || !sessionKey || !activeTab || !contextDirectory) return;
-        addContextDraft({ directory: contextDirectory, sessionKey }, {
+        const target = readComposerDraftTarget(contextDirectory);
+        if (!selection || !target || !activeTab) return;
+        addContextDraft(target, {
             source: 'terminal',
             fileLabel: activeTab.label,
             startLine: selection.startLine,
@@ -899,7 +902,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
             text: '',
         });
         queueMicrotask(focusChatInput);
-    }, [activeTab, addContextDraft, contextDirectory, currentSessionId, newSessionDraft?.open]);
+    }, [activeTab, addContextDraft, contextDirectory]);
 
     // Touch hosts have no keyboard shortcut for copy, so the toolbar offers the
     // same action the desktop gets from Cmd/Ctrl+C on a selection.
@@ -1486,6 +1489,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                             fontFamily={resolvedFontStack}
                             fontSize={terminalFontSize}
                             enableTouchScroll={useTouchTerminalInput}
+                            clipboard={clipboard}
                         />
                     )) : null}
                 </div>

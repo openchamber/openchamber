@@ -61,6 +61,7 @@
     "appId": "dev.openchamber.desktop",
     "productName": "OpenChamber",
     "asarUnpack": [
+      "node_modules/7zip-bin/win/**/*",
       "node_modules/@openchamber/web/server/built-in-extensions/**/*",
       "node_modules/@openchamber/web/server/lib/git/credential-helper.js",
       "node_modules/@openchamber/web/server/lib/git/ssh-wrapper.js",
@@ -80,6 +81,9 @@
       "!node_modules/@openchamber/web/*.{html,tgz}",
       "!node_modules/@openchamber/web/{tsconfig.json,tsconfig.tsbuildinfo}",
       "!node_modules/@openchamber/web/server/**/*.test.js",
+      "!**/node_modules/7zip-bin/{linux,mac}{,/**}",
+      "!**/node_modules/7zip-bin/!(${os})/**/*",
+      "!**/node_modules/7zip-bin/win/!(${arch}){,/**}",
       "!node_modules/node-pty/prebuilds/!(${platform}-${arch}){,/**}",
       "!**/node_modules/@vscode/ripgrep-*{,/**}"
     ],

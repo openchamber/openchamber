@@ -142,6 +142,7 @@ printf '4321\\n'`);
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe('ssh');
     expect(calls[0].options.windowsHide).toBe(true);
+    expect(calls[0].options.stdio[0]).toBe('ignore');
     expect(calls[0].args).toContain('ControlMaster=no');
     expect(calls[0].args).toContain('ControlPath=none');
     expect(calls[0].args).toContain('StrictHostKeyChecking=accept-new');

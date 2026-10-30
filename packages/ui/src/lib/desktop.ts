@@ -45,8 +45,14 @@ export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 // so the many existing importers keep their path.
 export type { DesktopSettings } from '@/lib/settings/registry';
 
+type DesktopClipboardBridge = {
+  readSelection?: () => Promise<string>;
+  writeSelection?: (text: string) => Promise<boolean>;
+};
+
 type DesktopBridgeGlobal = {
   pickThemeFile?: () => Promise<unknown>;
+  clipboard?: DesktopClipboardBridge;
   invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   openDialog?: (options: Record<string, unknown>) => Promise<unknown>;
   grantFileAccess?: (path: string) => Promise<unknown>;
@@ -132,6 +138,21 @@ export const hasDesktopInvoke = (): boolean => {
 };
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
+
+/** Linux's PRIMARY buffer is reachable only through the local Electron bridge. */
+export const createDesktopClipboardAPI = (): RuntimeAPIs['clipboard'] => {
+  const bridge = getDesktopBridge()?.clipboard;
+  if (!bridge?.readSelection || !bridge.writeSelection) return undefined;
+  const { readSelection, writeSelection } = bridge;
+  return {
+    selection: {
+      readText: async () => z.string().parse(await readSelection()),
+      writeText: async (text) => {
+        z.literal(true).parse(await writeSelection(text));
+      },
+    },
+  };
+};
 
 export const createDesktopThemeFileAPI = (): RuntimeAPIs['themeFiles'] => {
   // Preload exposes this capability only to trusted local UI pages. Unlike the

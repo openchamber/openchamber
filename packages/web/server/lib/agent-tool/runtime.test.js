@@ -677,7 +677,25 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('html');
     // How to write the page rides on its input, which no client cuts short.
     expect(tool.openchamber_render.input.properties.parameters.properties.html.description).toContain('--chart-1');
+    expect(tool.openchamber_render.input.properties.parameters.properties.html.description)
+      .toContain('do not build paths from directory and filename fragments');
+    expect(tool.openchamber_render.input.properties.parameters.properties.html.description)
+      .toContain("image.src = images[key]");
     expect(tool.openchamber_render.description).toContain('add no outer card, border or banner title');
+  });
+
+  it('exposes secret as its own direct tool whose every call waits for the user', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeSecret: true, codeMode: true });
+    const hooks = {};
+    const tools = await loadTools(dataDir, 'secret', hooks);
+
+    expect(Object.keys(tools)).toEqual(['openchamber_secret']);
+    expect(Object.keys(tools.openchamber_secret.input.properties.parameters.properties).sort()).toEqual(['label', 'placeholder', 'reason']);
+    expect(tools.openchamber_secret.options).toEqual({ codemode: false });
+    expect(tools.openchamber_secret.description.length).toBeLessThanOrEqual(2048);
+    // A chat message ends the wait, like a page's.
+    expect(hooks.prompt).toBeInstanceOf(Function);
   });
 
   it('takes away the OpenCode tools the control tool replaces, and only while it is on', async () => {

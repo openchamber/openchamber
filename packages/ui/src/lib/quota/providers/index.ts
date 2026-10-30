@@ -23,6 +23,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'ollama-cloud', name: 'Ollama Cloud' },
   { id: 'wafer', name: 'Wafer.ai' },
   { id: 'opencode-go', name: 'OpenCode Go' },
+  { id: 'opencode', name: 'OpenCode Zen' },
   { id: 'deepinfra', name: 'DeepInfra' },
   { id: 'deepseek', name: 'DeepSeek' },
   { id: 'exe-dev', name: 'exe.dev' },

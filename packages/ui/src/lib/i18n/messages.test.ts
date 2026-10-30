@@ -35,6 +35,27 @@ const localeDictionaries = {
 } as const;
 
 describe('i18n dictionaries', () => {
+  test('Zen labels are translated and preserve their value placeholders in every locale', () => {
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['quota.value.requests']).toContain('{count}');
+      expect(dictionary['quota.value.spent']).toContain('{spent}');
+      expect(dictionary['quota.family.zen']).toContain('Zen');
+      if (locale !== 'en') {
+        for (const key of ['quota.value.requests', 'quota.value.spent', 'quota.family.zen'] as const) {
+          expect(dictionary[key]).not.toBe(enDict[key]);
+        }
+      }
+    }
+  });
+
+  test('credits-used messages carry the amount and are translated in every locale', () => {
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['quota.value.creditsUsed']).toContain('{credits}');
+      if (locale !== 'en') {
+        expect(dictionary['quota.value.creditsUsed']).not.toBe(enDict['quota.value.creditsUsed']);
+      }
+    }
+  });
   test('repository links name either provider in every locale', () => {
     for (const dictionary of Object.values(localeDictionaries)) {
       expect(dictionary['gitView.header.openRepository']).toContain('{provider}');

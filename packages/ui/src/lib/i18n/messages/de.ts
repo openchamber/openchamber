@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -43,6 +44,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'quota.family.zen': 'Zen-Modelle',
+  'quota.value.requests': 'Anfragen: {count}',
+  'quota.value.spent': '{spent} ausgegeben',
   "opencodeCompatibility.bundled": "OpenCode ist in OpenChamber enthalten. Aktualisieren Sie OpenChamber, um OpenCode v2 zu erhalten.",
   "opencodeCompatibility.title": "OpenCode v2 erforderlich",
   "opencodeCompatibility.outdatedTitle": "OpenCode aktualisieren",
@@ -165,6 +169,7 @@ export const dict = {
   ...fileEditorAidsI18n.de,
   ...htmlRenderI18n.de,
   ...documentToolbarI18n.de,
+  ...secretRequestI18n.de,
   ...sessionNoticesI18n.de,
   ...usageStatsI18n.de,
   ...webSearchI18n.de,
@@ -195,6 +200,9 @@ export const dict = {
   ...guestStatusViewI18n['de'],
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
+  'common.image.loading': 'Bild wird geladen',
+  'common.image.loadFailed': 'Bild konnte nicht geladen werden',
+  'common.image.retry': 'Erneut versuchen',
   'common.unavailable': 'Nicht verfügbar',
   'common.language.english': 'Englisch',
   'common.language.french': 'Französisch',
@@ -3202,10 +3210,11 @@ export const dict = {
   'common.duration.secondsCompact': '{seconds}s',
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}h {minutes}m',
-  'contextFileOpen.failure.tooLarge': 'Datei ist zu groß zum Öffnen (>{count} Zeilen)',
-  'contextFileOpen.failure.tooLargeSize': 'Datei ist zu groß zum Öffnen (über {size})',
-  'contextFileOpen.failure.missing': 'Datei nicht gefunden',
-  'contextFileOpen.failure.unreadable': 'Fehler beim Öffnen der Datei',
+  'contextFileOpen.failure.tooLarge': '{name} ist zu groß zum Öffnen',
+  'contextFileOpen.failure.tooLargeDetail': 'Mehr als {count} Zeilen · {size}',
+  'contextFileOpen.failure.tooLargeSize': 'Größer als {limit} · {size}',
+  'contextFileOpen.failure.missing': '{name} wurde nicht gefunden',
+  'contextFileOpen.failure.unreadable': '{name} konnte nicht geöffnet werden',
   'quota.window.5h': '5-Stunden-Limit',
   'quota.window.7d': '7-Tage-Limit',
   'quota.window.extraUsage': 'Zusätzliche Nutzung',
@@ -3213,6 +3222,7 @@ export const dict = {
   'quota.window.daily': 'Täglich',
   'quota.window.monthly': 'Monatlich',
   'quota.window.credits': 'Credits',
+  'quota.value.creditsUsed': '{credits} Credits verbraucht',
   'quota.window.keyLimit': 'Schlüssellimit',
   'quota.window.creditsBalance': 'Kreditguthaben',
   'quota.window.monthlyCredits': 'Monatliche Credits',
@@ -3573,6 +3583,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': '{name} öffnen',
   'chat.workStatus.section.usage': 'Nutzung',
   'chat.workStatus.section.telemetry': 'Turn-Statistiken',
+  'chat.workStatus.telemetry.previousTurn': 'Vorheriger Turn',
+  'chat.workStatus.telemetry.previousTurnRate': 'Vorheriger Turn · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Antwort',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Wie schnell der abschließende Text ankam. Ohne anfängliche Wartezeit, Denken und frühere Werkzeugaufrufe. Eine Schätzung aus Textzeitstempeln, keine Geschwindigkeitsmessung des Anbieters.',
   'chat.workStatus.telemetry.speed': 'Anfrage',
@@ -3671,6 +3683,7 @@ export const dict = {
   'chat.formCard.submitFailed': 'Die Antwort konnte nicht gesendet werden',
   'chat.formCard.cancelFailed': 'Die Anfrage konnte nicht abgebrochen werden',
   'chat.formCard.tryAgain': 'Versuchen Sie es erneut.',
+  'chat.formCard.recoveredNotice': 'Der Lauf wurde während des Wartens beendet. Absenden startet einen neuen kostenpflichtigen Lauf.',
   'chat.formDock.progress': '{current} von {total}',
   'chat.formDock.waiting': '{count} weitere warten',
   'chat.formDock.back': 'Zurück',
@@ -3884,4 +3897,14 @@ export const dict = {
   'notifications.question.bodyFallback': 'Der Agent wartet auf deine Antwort',
   'notifications.permission.bodyFallback': 'Der Agent wartet auf deine Freigabe',
   'notifications.permission.title': 'Berechtigung erforderlich',
+  'chat.promptHistorySearch.title': "Prompt-Verlauf durchsuchen",
+  'chat.promptHistorySearch.searchPlaceholder': "Gespeicherte Prompts durchsuchen",
+  'chat.promptHistorySearch.close': "Prompt-Verlaufssuche schließen",
+  'chat.promptHistorySearch.empty': "Noch keine Prompts zum Durchsuchen",
+  'chat.promptHistorySearch.noMatches': "Keine passenden Prompts",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} Anhang",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} Anhänge",
+  'chat.promptHistorySearch.hint': "↑ ↓ zum Durchsuchen · Enter zum Laden · Esc zum Schließen",
+  'helpDialog.item.searchPromptHistory': "Prompt-Verlauf durchsuchen (Chat-Eingabe)",
+
 };

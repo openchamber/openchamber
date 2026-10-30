@@ -479,7 +479,7 @@ export function DesktopHostSwitcherDialog({
     const sshForwarded = host.sshForwarded === true || (
       sshStatusesById[host.id]?.phase === 'ready' && sshStatusesById[host.id]?.localUrl === apiOrigin
     );
-    const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
+    const relayOnly = Boolean(host.relay) && !origin && host.id !== LOCAL_HOST_ID;
     if (!origin && !relayOnly) {
       setSwitchingHostId(null);
       return;
@@ -546,7 +546,11 @@ export function DesktopHostSwitcherDialog({
       let finalStatus: HostStatus = { status: 'unreachable', latencyMs: 0 };
       let transport: 'direct' | 'relay' | null = null;
       if (apiOrigin) {
-        const probe = await desktopHostProbe(apiOrigin, { clientToken: clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
+        const probe = await desktopHostProbe(apiOrigin, {
+          clientToken: clientToken || null,
+          requestHeaders: host.requestHeaders || null,
+          expectedServerId: host.relay?.serverId ?? null,
+        }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
         finalStatus = { status: probe.status, latencyMs: probe.latencyMs };
         if (!isBlockedHostStatus(probe.status)) transport = 'direct';
       }

@@ -1,12 +1,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { Arch } = require('electron-builder');
 const { verifyPackagedAppContents } = require('./packaged-app-contents.cjs');
 
 module.exports = (context) => {
   const resourcesPath = context.electronPlatformName === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
-  verifyPackagedAppContents(resourcesPath);
+  verifyPackagedAppContents(resourcesPath, { platform: context.electronPlatformName, arch: Arch[context.arch] });
   if (context.electronPlatformName !== 'darwin') return;
 
   const sourceAssetsPath = path.join(__dirname, '..', 'resources', 'icons', 'Assets.car');

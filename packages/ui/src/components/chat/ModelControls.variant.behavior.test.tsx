@@ -7,6 +7,7 @@ import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-sys
 import { getThemeById } from '@/lib/theme/themes';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { useRoutingStore } from '@/stores/useRoutingStore';
+import type { ModelMetadata } from '@/types';
 
 /**
  * Restoring a session must not invent an effort choice.
@@ -88,7 +89,7 @@ type ConfigState = {
   getVisibleAgents: () => TestAgent[];
   getCurrentModelVariants: () => string[];
   getDefaultVariantForModel: (providerId: string, modelId: string) => string | undefined;
-  getModelMetadata: () => undefined;
+  getModelMetadata: () => ModelMetadata | undefined;
 };
 
 const useConfigStore = create<ConfigState>((set, get) => ({
@@ -333,7 +334,9 @@ mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isTouch: false }) }
 mock.module('@/lib/startupTrace', () => ({ markStartupTrace: () => undefined }));
 
 const { ModelControls } = await import('./ModelControls');
-const { I18nProvider } = await import('@/lib/i18n');
+const { I18nProvider, useI18nStore } = await import('@/lib/i18n');
+const enDict = useI18nStore.getState().dictionary;
+const { dict: zhCnDict } = await import('@/lib/i18n/messages/zh-CN');
 
 const DOM_GLOBAL_NAMES = [
   'window',
@@ -459,6 +462,7 @@ describe('ModelControls effort restore', () => {
       settingsDefaultModel: undefined,
       settingsDefaultVariant: undefined,
       selectionSource: 'auto',
+      getModelMetadata: () => undefined,
     });
   });
 
@@ -1083,5 +1087,150 @@ describe('ModelControls effort restore', () => {
         }
       });
     }
+  });
+
+  const metadataValues = (container: ParentNode, label: string) => [...container.querySelectorAll('span')]
+    .filter((node) => node.textContent === label)
+    .map((node) => node.nextElementSibling?.textContent ?? '');
+
+  describe('knowledge month display', () => {
+    const setKnowledgeMetadata = (knowledge: string | undefined) => {
+      useConfigStore.setState({
+        getModelMetadata: () => ({ id: MODEL_ID, providerId: PROVIDER_ID, knowledge }),
+      });
+    };
+
+    beforeEach(() => {
+      useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    });
+
+    for (const { knowledge, expected } of [
+      { knowledge: '2025-08', expected: 'Aug 2025' },
+      { knowledge: '2025-01', expected: 'Jan 2025' },
+      { knowledge: undefined, expected: '—' },
+      { knowledge: '', expected: '—' },
+      { knowledge: '2026-04-30', expected: '2026-04-30' },
+      { knowledge: 'unknown', expected: 'unknown' },
+    ]) {
+      test(`preserves the knowledge value for ${knowledge ?? 'a missing cutoff'}`, async () => {
+        setKnowledgeMetadata(knowledge);
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          expect(metadataValues(dom.container, 'Knowledge')).toEqual([expected]);
+        } finally {
+          await cleanup();
+        }
+      });
+    }
+
+    test('keeps the knowledge month when the mounted locale changes', async () => {
+      setKnowledgeMetadata('2025-08');
+      const previousLocale = useI18nStore.getState();
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        expect(metadataValues(dom.container, 'Knowledge')).toEqual(['Aug 2025']);
+        await act(async () => {
+          useI18nStore.setState({ locale: 'zh-CN', dictionary: zhCnDict, loadingLocale: null });
+        });
+        expect(metadataValues(dom.container, zhCnDict['chat.modelControls.knowledge'])).toEqual(['2025年8月']);
+      } finally {
+        await cleanup();
+        useI18nStore.setState(previousLocale);
+      }
+    });
+
+    test('keeps the knowledge month and UTC release day in mobile long-press details', async () => {
+      useUIStore.setState({ isMobile: true });
+      useConfigStore.setState({
+        getModelMetadata: () => ({
+          id: MODEL_ID,
+          providerId: PROVIDER_ID,
+          knowledge: '2025-08',
+          release_date: '2026-09-29',
+        }),
+      });
+      const { dom, cleanup } = await renderModelControls();
+      const trigger = dom.container.querySelector('.model-controls__model-trigger');
+      const dispatchTouch = (type: 'touchstart' | 'touchend') => {
+        const view = trigger?.ownerDocument?.defaultView;
+        if (!trigger || !view) throw new Error('Expected model trigger');
+        trigger.dispatchEvent(new view.Event(type, { bubbles: true }));
+      };
+      try {
+        expect(metadataValues(dom.container, 'Knowledge')).toEqual(['Aug 2025']);
+        expect(metadataValues(dom.container, 'Release')).toEqual(['Sep 29, 2026']);
+        await act(async () => {
+          dispatchTouch('touchstart');
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        });
+        expect(metadataValues(dom.container, 'Knowledge')).toEqual(['Aug 2025', 'Aug 2025']);
+        expect(metadataValues(dom.container, 'Release')).toEqual(['Sep 29, 2026', 'Sep 29, 2026']);
+      } finally {
+        if (trigger) dispatchTouch('touchend');
+        await cleanup();
+      }
+    });
+  });
+
+  describe('release date display', () => {
+    const setReleaseMetadata = (releaseDate: string | undefined) => {
+      useConfigStore.setState({
+        getModelMetadata: () => ({
+          id: MODEL_ID,
+          providerId: PROVIDER_ID,
+          name: MODEL_ID,
+          release_date: releaseDate,
+        }),
+      });
+    };
+
+    beforeEach(() => {
+      useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+    });
+
+    test('shows a date-only release on its UTC day and follows the mounted locale', async () => {
+      setReleaseMetadata('2026-09-29');
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        expect(metadataValues(dom.container, 'Release')).toEqual(['Sep 29, 2026']);
+        await act(async () => {
+          useI18nStore.setState({ locale: 'zh-CN', dictionary: zhCnDict, loadingLocale: null });
+        });
+        expect(metadataValues(dom.container, '发布时间')).toEqual(['2026年9月29日']);
+      } finally {
+        await cleanup();
+        useI18nStore.setState({ locale: 'en', dictionary: enDict, loadingLocale: null });
+      }
+    });
+
+    const fallbackCases = [
+      { release: undefined, expected: '—' },
+      { release: 'not-a-date', expected: 'not-a-date' },
+    ];
+    for (const { release, expected } of fallbackCases) {
+      test(`keeps the release fallback for ${release ?? 'a missing date'}`, async () => {
+        setReleaseMetadata(release);
+        const { dom, cleanup } = await renderModelControls();
+        try {
+          expect(metadataValues(dom.container, 'Release')).toEqual([expected]);
+        } finally {
+          await cleanup();
+        }
+      });
+    }
+
+    test('keeps a full release timestamp on the local calendar day', async () => {
+      const timestamp = '2026-09-29T23:30:00.000Z';
+      const expectedTimestamp = new Intl.DateTimeFormat('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      }).format(new Date(timestamp));
+      setReleaseMetadata(timestamp);
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        expect(metadataValues(dom.container, 'Release')).toEqual([expectedTimestamp]);
+      } finally {
+        await cleanup();
+      }
+    });
   });
 });

@@ -170,8 +170,13 @@ export const requestOpenCodeTrust = (directory: string, { deliberate }: { delibe
     const assessment = await fetchAssessment(directory);
     if (assessment.trusted) return true;
     if (!deliberate && declined.has(`${assessment.directory}\n${assessment.fingerprint}`)) return false;
-    // One prompt on screen at a time; a second folder waits for the first.
-    const turn = promptQueue.then(() => askForTrust(assessment));
+    // Another worktree may be trusted while this folder waits its turn.
+    const turn = promptQueue.then(async () => {
+      const current = await fetchAssessment(directory);
+      if (current.trusted) return true;
+      if (!deliberate && declined.has(`${current.directory}\n${current.fingerprint}`)) return false;
+      return askForTrust(current);
+    });
     promptQueue = turn.catch(() => undefined);
     return turn;
   })()

@@ -11,10 +11,11 @@ import { MarkdownImage, MarkdownParagraph, MarkdownPicture, MarkdownSource, Mark
 import { Streamdown } from 'streamdown';
 import { getMarkdownProcessingOptions } from './streamdownPlugins';
 import { setRuntimeUrlAuthToken } from '@/lib/runtime-auth';
+import { I18nProvider } from '@/lib/i18n';
 
 const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]);
 const originalFetch = globalThis.fetch;
-let root: Root;
+let root: Pick<Root, 'render' | 'unmount'>;
 let host: HTMLDivElement;
 let requests: string[];
 let batches: string[][];
@@ -43,7 +44,9 @@ beforeEach(() => {
     }
     return new Response(png, { headers: { 'content-type': 'image/png' } });
   };
-  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  host = document.createElement('div'); document.body.append(host);
+  const reactRoot = createRoot(host);
+  root = { render: (node) => reactRoot.render(<I18nProvider>{node}</I18nProvider>), unmount: () => reactRoot.unmount() };
 });
 afterEach(async () => { await act(async () => root.unmount()); globalThis.fetch = originalFetch; });
 
@@ -419,6 +422,7 @@ describe('React-owned Markdown media', () => {
     expect(host.querySelectorAll('img')).toHaveLength(1);
     expect(host.querySelector('img')?.getAttribute('data-oc-media-source')).toBe('original.png');
     expect(host.textContent).toContain('bad.png');
+    expect(host.querySelector('[data-oc-media-source="bad.png"][data-oc-media-state="failed"]')?.getAttribute('title')).toBe("Image couldn't load");
     expect(batches).toEqual([['original.png', 'bad.png']]);
   });
   test('groups a paragraph only once every image has known dimensions', async () => {

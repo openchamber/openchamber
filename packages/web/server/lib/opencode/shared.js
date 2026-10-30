@@ -442,10 +442,26 @@ function deepEqualJsonValue(a, b) {
 }
 
 // Structural diff between the parsed on-disk config and the desired config.
-// Object keys are compared per key (order-insensitive); arrays and scalars are
-// replaced whole. The desired config must already be JSON-normalized (no
-// `undefined` values), so absent keys are the only removal signal.
+// Equal-length arrays keep their indices unless a retained value moves between
+// changed positions. Resized arrays and scalars are replaced whole. The desired
+// config must already be JSON-normalized, so absent keys signal removals.
 function collectConfigEdits(current, next, basePath, edits) {
+  if (Array.isArray(current) && Array.isArray(next) && current.length === next.length) {
+    const changedIndices = [];
+    for (let index = 0; index < current.length; index += 1) {
+      if (!deepEqualJsonValue(current[index], next[index])) changedIndices.push(index);
+    }
+    const reordered = changedIndices.some((index) => changedIndices.some((otherIndex) => (
+      index !== otherIndex && deepEqualJsonValue(current[index], next[otherIndex])
+    )));
+    if (!reordered) {
+      for (const index of changedIndices) {
+        collectConfigEdits(current[index], next[index], [...basePath, index], edits);
+      }
+      return;
+    }
+  }
+
   if (!isPlainObject(current) || !isPlainObject(next)) {
     if (!deepEqualJsonValue(current, next)) {
       edits.push({ type: 'set', path: basePath, value: next });

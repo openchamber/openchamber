@@ -74,6 +74,10 @@ mock.module("@/lib/runtime-url", () => ({
 mock.module("@/lib/runtime-switch", () => ({
   getRuntimeApiBaseUrl: mock(() => ""),
   getRuntimeKey: mock(() => runtimeKey),
+  captureRuntimeInstance: () => {
+    const captured = runtimeKey
+    return () => captured === runtimeKey
+  },
 }))
 
 mock.module("@/lib/runtime-fetch", () => ({
@@ -84,7 +88,7 @@ mock.module("@/lib/startupTrace", () => ({
   markStartupTrace: mock(() => undefined),
 }))
 
-const { OpencodeApiError, createRuntimeOpencodeClient, opencodeClient } = await import(`./client?client-test=${Date.now()}`)
+const { OpencodeApiError, createRuntimeOpencodeClient, isOpencodeNotFound, opencodeClient } = await import(`./client?client-test=${Date.now()}`)
 const { readProjectConfigError } = await import("./configError")
 
 const sessionInfo = {
@@ -360,6 +364,17 @@ describe("error normalisation", () => {
     // A lost response proves nothing about whether the server ran the request,
     // so a prompt send it fails must confirm before rolling the message back.
     expect(isAmbiguousSendFailure(error)).toBe(true)
+  })
+
+  // Pinned-message hydration and the dead-link check both rely on this: one
+  // request against the requested session, and a miss stays a recognisable 404.
+  test("getSessionMessage reads only the requested session and keeps a miss a 404", async () => {
+    responses.push(json({ _tag: "MessageNotFoundError", message: "gone" }, 404))
+    const error = await opencodeClient.getSessionMessage("ses_child", "msg_parent").catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(OpencodeApiError)
+    expect(isOpencodeNotFound(error)).toBe(true)
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url.pathname).toBe("/api/session/ses_child/message/msg_parent")
   })
 
   test("fetchPermission maps 404 to resolved and everything else to unknown", async () => {
@@ -1046,5 +1061,139 @@ describe("directory availability batching", () => {
       opencodeClient.getDirectoryAvailability("/repo/two"),
     ])
     expect(results).toEqual(["unknown", "unknown"])
+  })
+})
+
+describe("a subagent transcript showing a message its parent stores", () => {
+  const messageID = "msg_parent_owned"
+  const wire = {
+    id: messageID,
+    type: "assistant",
+    time: { created: 1000, completed: 1500 },
+    agent: "build",
+    model: { id: "gpt-5.6-luna", providerID: "openai" },
+    finish: "stop",
+    cost: 0,
+    tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+    content: [{
+      type: "tool",
+      id: "call_1",
+      name: "bash",
+      executed: true,
+      time: { created: 1003, ran: 1004, completed: 1005 },
+      state: { status: "completed", input: { command: "ls" }, content: [{ type: "text", text: "parent-owned output" }] },
+    }],
+  }
+  const session = (id: string, parentID?: string) => json({ data: { ...sessionInfo, id, parentID } })
+  const messageNotFound = () => json({ _tag: "MessageNotFoundError", message: "not found" }, 404)
+  const messageURL = (sessionID: string) => `/api/session/${sessionID}/message/${messageID}`
+  const paths = () => requests.map((r) => r.url.pathname)
+
+  test("pins, references and existence checks read only the requested session", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), json({ data: wire }))
+    expect(await opencodeClient.getSessionMessage("ses_child", messageID).catch((error: unknown) => error))
+      .toMatchObject({ status: 404 })
+    expect(paths()).toEqual([messageURL("ses_child")])
+  })
+
+  test("is read under the parent and stays the child's message", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), json({ data: wire }))
+    const record = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app")
+    expect(paths()).toEqual([messageURL("ses_child"), "/api/session/ses_child", messageURL("ses_parent")])
+    expect(record.info).toMatchObject({ id: messageID, sessionID: "ses_child" })
+    expect(record.parts.map((part: { sessionID: string }) => part.sessionID)).toEqual(["ses_child"])
+    expect(JSON.stringify(record.parts)).toContain("parent-owned output")
+  })
+
+  test("is found through more than one ancestor", async () => {
+    responses.push(
+      messageNotFound(), session("ses_grandchild", "ses_child"),
+      messageNotFound(), session("ses_child", "ses_parent"),
+      json({ data: wire }),
+    )
+    const record = await opencodeClient.getToolContentMessage("ses_grandchild", messageID, "/repo/app")
+    expect(paths().at(-1)).toBe(messageURL("ses_parent"))
+    expect(record.info).toMatchObject({ sessionID: "ses_grandchild" })
+  })
+
+  test("a message the session stores itself takes exactly one read", async () => {
+    responses.push(json({ data: wire }))
+    const record = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app")
+    expect(paths()).toEqual([messageURL("ses_child")])
+    expect(record.info).toMatchObject({ sessionID: "ses_child" })
+  })
+
+  test("a message no ancestor has either still fails with the transcript's own 404", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), messageNotFound(), session("ses_parent"))
+    const error = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(OpencodeApiError)
+    expect(error).toMatchObject({ status: 404, operation: "session.message.get" })
+    expect(paths()).toEqual([messageURL("ses_child"), "/api/session/ses_child", messageURL("ses_parent"), "/api/session/ses_parent"])
+  })
+
+  test("a server failure is not taken as absence and reads no other session", async () => {
+    responses.push(json({ _tag: "UnknownError", message: "boom" }, 500))
+    const error = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((e: unknown) => e)
+    expect(error).toMatchObject({ status: 500 })
+    expect(paths()).toEqual([messageURL("ses_child")])
+  })
+
+  test("a parent chain that loops back stops instead of reading again", async () => {
+    responses.push(
+      messageNotFound(), session("ses_child", "ses_parent"),
+      messageNotFound(), session("ses_parent", "ses_child"),
+    )
+    const error = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((e: unknown) => e)
+    expect(error).toMatchObject({ status: 404 })
+    expect(paths()).toHaveLength(4)
+  })
+
+  test("a runtime switch during the lookup ends it", async () => {
+    responses.push(messageNotFound(), () => {
+      runtimeKey = "other-runtime"
+      return session("ses_child", "ses_parent")
+    })
+    const error = await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((e: unknown) => e)
+    expect(error).toMatchObject({ status: 404 })
+    expect(paths()).toEqual([messageURL("ses_child"), "/api/session/ses_child"])
+  })
+
+  test("a runtime switch during a successful ancestor read discards the result", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), () => {
+      runtimeKey = "other-runtime"
+      return json({ data: wire })
+    })
+    expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 404 })
+  })
+
+  test("stops after 32 session reads with the first message 404", async () => {
+    for (let index = 0; index < 32; index++) {
+      responses.push(messageNotFound(), session(`ses_${index}`, `ses_${index + 1}`))
+    }
+    expect(await opencodeClient.getToolContentMessage("ses_0", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 404, operation: "session.message.get" })
+    expect(paths().filter((path) => path.includes("/message/"))).toHaveLength(32)
+  })
+
+  test("a non-404 ancestor failure stops without reading further", async () => {
+    responses.push(messageNotFound(), session("ses_child", "ses_parent"), json({}, 500))
+    expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 500 })
+    expect(paths()).toHaveLength(3)
+  })
+
+  test("missing parent metadata preserves the initial message 404", async () => {
+    responses.push(messageNotFound(), json({ _tag: "SessionNotFoundError", message: "missing session" }, 404))
+    expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 404, operation: "session.message.get", detail: "not found" })
+    expect(paths()).toHaveLength(2)
+  })
+
+  test("a parent metadata server failure propagates unchanged", async () => {
+    responses.push(messageNotFound(), json({}, 500))
+    expect(await opencodeClient.getToolContentMessage("ses_child", messageID, "/repo/app").catch((error: unknown) => error))
+      .toMatchObject({ status: 500, operation: "session.get" })
+    expect(paths()).toHaveLength(2)
   })
 })

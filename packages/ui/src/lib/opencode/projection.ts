@@ -164,6 +164,7 @@ export function projectToolPart(
         status: "error",
         input: tool.state.input,
         error: structuredErrorText(tool.state.error),
+        errorType: tool.state.error.type,
         output: toolOutputText(tool.state.content) || undefined,
         metadata: tool.state.metadata,
         time: { start, end },

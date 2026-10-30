@@ -3,6 +3,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
+import { captureRuntimeInstance } from '@/lib/runtime-switch';
 import type { RuntimeAPIs } from '@/lib/api/types';
 
 type Project = { id: string; path: string; normalizedPath: string };
@@ -80,8 +81,10 @@ export const useProjectRepoStatus = (args: Args): void => {
     // Read the paths this sidebar has not populated yet in one scheduled pass.
     // The prefetch answers every status in one batched request, so the store's
     // per-project reads after it are cache hits instead of a connection each.
+    const isCurrent = captureRuntimeInstance();
     void runBackgroundNetworkTask(async () => {
       await git.prefetchProjectStatuses?.(newPaths);
+      if (!isCurrent()) return;
       await Promise.all(newPaths.map((path) => ensureStatus(path, git).then(
         () => forgetIfUnknown(path),
         () => forgetIfUnknown(path),
@@ -186,7 +189,7 @@ export const useProjectRepoStatus = (args: Args): void => {
             return { id: project.id, inputKey, branch };
           })),
         );
-        if (cancelled) {
+        if (!entries || cancelled) {
           return;
         }
 

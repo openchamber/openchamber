@@ -12,7 +12,15 @@ import { getBoundSourceControlReadContexts } from "@/lib/source-control/identity
 import type { SourceControlStatus } from "./useGitHubPrStatusStore"
 
 let runtimeKey = "runtime-a"
-mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => runtimeKey }))
+const runtimeSwitch = await import("@/lib/runtime-switch")
+mock.module("@/lib/runtime-switch", () => ({
+  ...runtimeSwitch,
+  getRuntimeKey: () => runtimeKey,
+  captureRuntimeInstance: () => {
+    const captured = runtimeKey
+    return () => captured === runtimeKey
+  },
+}))
 
 const { trackedItemKey } = await import("@/lib/trackedItems/model")
 const {

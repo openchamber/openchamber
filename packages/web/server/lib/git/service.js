@@ -135,7 +135,7 @@ const trackWorktreeBootstrapTask = (directory, task) => {
   return task;
 };
 
-const waitForActiveWorktreeBootstrap = async (directory) => {
+export const waitForActiveWorktreeBootstrap = async (directory) => {
   const key = toBootstrapStateKey(directory);
   if (!key) {
     return;

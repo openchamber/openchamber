@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -43,6 +44,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'quota.family.zen': 'Modèles Zen',
+  'quota.value.requests': 'Requêtes : {count}',
+  'quota.value.spent': '{spent} dépensés',
   "opencodeCompatibility.bundled": "OpenCode est inclus dans OpenChamber. Mettez OpenChamber à jour pour obtenir OpenCode v2.",
   "opencodeCompatibility.title": "OpenCode v2 requis",
   "opencodeCompatibility.outdatedTitle": "Mettre à jour OpenCode",
@@ -165,6 +169,7 @@ export const dict = {
   ...fileEditorAidsI18n.fr,
   ...htmlRenderI18n.fr,
   ...documentToolbarI18n.fr,
+  ...secretRequestI18n.fr,
   ...sessionNoticesI18n.fr,
   ...usageStatsI18n.fr,
   ...webSearchI18n.fr,
@@ -231,6 +236,9 @@ export const dict = {
   'chat.chatInput.mrCheckContext': 'Jobs de pipeline échoués',
   'chat.chatInput.prCheckContextRemove': 'Retirer le contexte des vérifications de PR',
   'common.loading': 'Chargement...',
+  'common.image.loading': 'Chargement de l’image',
+  'common.image.loadFailed': 'Impossible de charger l’image',
+  'common.image.retry': 'Réessayer',
   'common.unavailable': 'Indisponible',
   'common.language.english': 'Anglais',
   'common.language.german': 'Allemand',
@@ -3169,10 +3177,11 @@ export const dict = {
   'common.duration.secondsCompact': '{seconds}s',
   'common.duration.minutesSecondsCompact': '{minutes}m {seconds}s',
   'common.duration.hoursMinutesCompact': '{hours}h {minutes}m',
-  'contextFileOpen.failure.tooLarge': 'Le fichier est trop volumineux pour être ouvert (> {count} lignes)',
-  'contextFileOpen.failure.tooLargeSize': 'Le fichier est trop volumineux pour être ouvert (plus de {size})',
-  'contextFileOpen.failure.missing': 'Fichier introuvable',
-  'contextFileOpen.failure.unreadable': 'Impossible d’ouvrir le fichier',
+  'contextFileOpen.failure.tooLarge': '{name} est trop volumineux pour être ouvert',
+  'contextFileOpen.failure.tooLargeDetail': 'Plus de {count} lignes · {size}',
+  'contextFileOpen.failure.tooLargeSize': 'Plus de {limit} · {size}',
+  'contextFileOpen.failure.missing': '{name} est introuvable',
+  'contextFileOpen.failure.unreadable': 'Impossible d’ouvrir {name}',
   'quota.window.5h': '5 heures',
   'quota.window.7d': 'Limite sur 7 jours',
   'quota.window.extraUsage': 'Utilisation supplémentaire',
@@ -3180,6 +3189,7 @@ export const dict = {
   'quota.window.daily': 'Quotidien',
   'quota.window.monthly': 'Mensuel',
   'quota.window.credits': 'Crédits',
+  'quota.value.creditsUsed': 'Crédits utilisés : {credits}',
   'quota.window.keyLimit': 'Limite de la clé',
   'quota.window.creditsBalance': 'Solde de crédits',
   'quota.window.monthlyCredits': 'Crédits mensuels',
@@ -3574,6 +3584,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': 'Ouvrir {name}',
   'chat.workStatus.section.usage': 'Utilisation',
   'chat.workStatus.section.telemetry': 'Stats du tour',
+  'chat.workStatus.telemetry.previousTurn': 'Tour précédent',
+  'chat.workStatus.telemetry.previousTurnRate': 'Tour précédent · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Réponse',
   'chat.workStatus.telemetry.responseSpeedDescription': 'La vitesse à laquelle le texte final est arrivé. Sans attente initiale, raisonnement ni appels précédents aux outils. Une estimation basée sur les horodatages du texte, pas une mesure du fournisseur.',
   'chat.workStatus.telemetry.speed': 'Requête',
@@ -3672,6 +3684,7 @@ export const dict = {
   'chat.formCard.submitFailed': 'Impossible d’envoyer la réponse',
   'chat.formCard.cancelFailed': 'Impossible d’annuler la demande',
   'chat.formCard.tryAgain': 'Réessayez.',
+  'chat.formCard.recoveredNotice': 'Le tour s\'est arrêté pendant l\'attente. Envoyer lance un nouveau tour payant.',
   'chat.formDock.progress': '{current} sur {total}',
   'chat.formDock.waiting': '{count} de plus en attente',
   'chat.formDock.back': 'Retour',
@@ -3885,4 +3898,14 @@ export const dict = {
   'notifications.question.bodyFallback': 'L\'agent attend votre réponse',
   'notifications.permission.bodyFallback': 'L\'agent attend votre autorisation',
   'notifications.permission.title': 'Autorisation requise',
+   'chat.promptHistorySearch.title': "Rechercher dans l'historique des prompts",
+  'chat.promptHistorySearch.searchPlaceholder': "Rechercher les prompts mémorisés",
+   'chat.promptHistorySearch.close': "Fermer la recherche dans l'historique des prompts",
+  'chat.promptHistorySearch.empty': "Aucun prompt à rechercher pour le moment",
+  'chat.promptHistorySearch.noMatches': "Aucun prompt correspondant",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} pièce jointe",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} pièces jointes",
+  'chat.promptHistorySearch.hint': "↑ ↓ pour parcourir · Enter pour charger · Esc pour fermer",
+   'helpDialog.item.searchPromptHistory': "Rechercher dans l'historique des prompts (saisie du chat)",
+
 } as const;

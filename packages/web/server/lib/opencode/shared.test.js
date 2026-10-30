@@ -6,6 +6,7 @@ import path from 'path';
 import { parseMdFile, writeMdFile, readConfigFile, readConfigLayers, writeConfig, walkSkillMdFiles } from './shared.js';
 import { updateAgent } from './agents.js';
 import { updateMcpConfig, createMcpConfig, deleteMcpConfig } from './mcp.js';
+import { encodePluginId, updatePluginEntry } from './plugins.js';
 
 const FIXTURE_DIR = path.join(os.tmpdir(), `openchamber-shared-test-${process.pid}`);
 
@@ -633,6 +634,109 @@ describe('writeConfig preserves JSONC comments (issue #3587)', () => {
 
     expect(fs.readFileSync(file, 'utf8')).toBe(COMMENTED_CONFIG);
   });
+
+  it('preserves untouched array entries during a plugin version update', () => {
+    const original = [
+      '{',
+      '  "plugins": [',
+      '    // plugin A stays as written',
+      '    {',
+      '      "package": "example-plugin-a",',
+      '      "options": {',
+      '        // keep this timeout comment',
+      '        "timeoutMs": 5000,',
+      '      },',
+      '    }, /* after plugin A */',
+      '    // plugin B changes version',
+      '    "example-plugin-b@1.0.0", // keep this entry comment',
+      '  ],',
+      '}',
+      '',
+    ].join('\n');
+    const file = writeFixture('plugins.jsonc', original);
+
+    withCustomConfig(file, () => updatePluginEntry(
+      encodePluginId('config', 'user:example-plugin-b@1.0.0'),
+      { spec: 'example-plugin-b@2.0.0' },
+    ));
+
+    expect(fs.readFileSync(file, 'utf8')).toBe(original.replace('example-plugin-b@1.0.0', 'example-plugin-b@2.0.0'));
+    expect(readConfigFile(file)).toEqual({
+      plugins: [
+        { package: 'example-plugin-a', options: { timeoutMs: 5000 } },
+        'example-plugin-b@2.0.0',
+      ],
+    });
+    expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe(original);
+  });
+
+  it('preserves array comments when plugin options and a nested array entry change', () => {
+    const original = [
+      '{',
+      '  "plugins": [',
+      '    { "package": "example-plugin-a", "options": { /* keep A */ "timeoutMs": 5000 } },',
+      '    {',
+      '      "package": "example-plugin-b",',
+      '      "options": {',
+      '        // keep the timeout explanation',
+      '        "timeoutMs": 7000,',
+      '        "retries": [',
+      '          1,',
+      '          1, // keep the unchanged duplicate delay',
+      '          2,',
+      '          3,',
+      '        ],',
+      '      },',
+      '    },',
+      '  ],',
+      '}',
+      '',
+    ].join('\n');
+    const file = writeFixture('plugin-options.jsonc', original);
+
+    withCustomConfig(file, () => updatePluginEntry(
+      encodePluginId('config', 'user:example-plugin-b'),
+      { options: { timeoutMs: 9000, retries: [2, 1, 2, 4] } },
+    ));
+
+    expect(fs.readFileSync(file, 'utf8')).toBe(original
+      .replace('"timeoutMs": 7000', '"timeoutMs": 9000')
+      .replace('          1,', '          2,')
+      .replace('          3,', '          4,'));
+    expect(readConfigFile(file)).toEqual({
+      plugins: [
+        { package: 'example-plugin-a', options: { timeoutMs: 5000 } },
+        { package: 'example-plugin-b', options: { timeoutMs: 9000, retries: [2, 1, 2, 4] } },
+      ],
+    });
+  });
+
+  const retainedObject = { package: 'example-plugin-a', options: { timeoutMs: 5000 } };
+  for (const [name, next] of [
+    ['append', [retainedObject, 'b', 'c', 'd']],
+    ['reorder', ['b', 'd', 'c']],
+  ]) {
+    it(`round-trips a whole-array replacement for ${name}`, () => {
+      const file = writeFixture('array-replacement.jsonc', [
+        '{',
+        '  // keep the section comment',
+        '  "values": [',
+        '    { "package": "example-plugin-a", "options": { /* old position */ "timeoutMs": 5000 } },',
+        '    "b",',
+        '    "c",',
+        '  ],',
+        '}',
+        '',
+      ].join('\n'));
+
+      writeConfig({ values: next }, file);
+
+      const raw = fs.readFileSync(file, 'utf8');
+      expect(raw).toContain('// keep the section comment');
+      expect(raw).not.toContain('/* old position */');
+      expect(readConfigFile(file)).toEqual({ values: next });
+    });
+  }
 
   it('preserves CRLF line endings and comments', () => {
     const file = writeFixture('crlf.jsonc', [

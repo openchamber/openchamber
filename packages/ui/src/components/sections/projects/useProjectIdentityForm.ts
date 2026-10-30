@@ -3,7 +3,7 @@ import { toast } from '@/components/ui';
 import { parseModelIdentifier, type ParsedModelIdentifier } from '@/lib/modelIdentifier';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
-import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useProjectsStore, resolveUploadMime } from '@/stores/useProjectsStore';
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
 
@@ -201,6 +201,20 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       return;
     }
 
+    const mime = resolveUploadMime(file);
+    if (!mime) {
+      toast.error(t('settings.projects.page.toast.iconUnsupportedFormat'));
+      return;
+    }
+    if (!Number.isFinite(file.size) || file.size <= 0) {
+      toast.error(t('settings.projects.page.toast.iconEmpty'));
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error(t('settings.projects.page.toast.iconTooLarge'));
+      return;
+    }
+
     setPendingRemoveImageIcon(false);
     setPreviewImageFailed(false);
     setPendingUploadIconFile(file);
@@ -210,7 +224,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       }
       return URL.createObjectURL(file);
     });
-  }, [isUploadingIcon, project]);
+  }, [isUploadingIcon, project, t]);
 
   const handleRemoveImageIcon = React.useCallback(() => {
     if (!project || !hasRemovableImageIcon || isRemovingCustomIcon) {

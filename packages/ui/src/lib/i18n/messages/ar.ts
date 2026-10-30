@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -43,6 +44,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'quota.family.zen': 'نماذج Zen',
+  'quota.value.requests': 'الطلبات: {count}',
+  'quota.value.spent': 'تم إنفاق {spent}',
   'opencodeCompatibility.bundled': 'يأتي OpenCode مضمّنًا مع OpenChamber. حدّث OpenChamber للحصول على OpenCode v2.',
   'opencodeCompatibility.title': 'يلزم OpenCode v2',
   'opencodeCompatibility.outdatedTitle': 'تحديث OpenCode',
@@ -184,6 +188,9 @@ export const dict = {
   'chat.chatInput.mrCheckContext': 'مهام خط المعالجة الفاشلة',
   'chat.chatInput.prCheckContextRemove': 'إزالة سياق فحوصات PR',
   'common.loading': 'جارٍ التحميل…',
+  'common.image.loading': 'جارٍ تحميل الصورة',
+  'common.image.loadFailed': 'تعذّر تحميل الصورة',
+  'common.image.retry': 'إعادة المحاولة',
   'common.unavailable': 'غير متاح',
   'common.language.english': 'الإنجليزية',
   'common.language.german': 'الألمانية',
@@ -3433,10 +3440,11 @@ export const dict = {
   'common.duration.secondsCompact': '{seconds} ث',
   'common.duration.minutesSecondsCompact': '{minutes} د {seconds} ث',
   'common.duration.hoursMinutesCompact': '{hours} س {minutes} د',
-  'contextFileOpen.failure.tooLarge': 'الملف أكبر من أن يُفتح (>{count} سطر)',
-  'contextFileOpen.failure.tooLargeSize': 'الملف كبير جدًا بحيث لا يمكن فتحه (أكثر من {size})',
-  'contextFileOpen.failure.missing': 'الملف غير موجود',
-  'contextFileOpen.failure.unreadable': 'تعذّر فتح الملف',
+  'contextFileOpen.failure.tooLarge': '{name} أكبر من أن يُفتح',
+  'contextFileOpen.failure.tooLargeDetail': 'أكثر من {count} سطر · {size}',
+  'contextFileOpen.failure.tooLargeSize': 'أكبر من {limit} · {size}',
+  'contextFileOpen.failure.missing': 'لم يُعثر على {name}',
+  'contextFileOpen.failure.unreadable': 'تعذّر فتح {name}',
   'quota.window.5h': '5 ساعات',
   'quota.window.7d': 'حد 7 أيام',
   'quota.window.extraUsage': 'استخدام إضافي',
@@ -3444,6 +3452,7 @@ export const dict = {
   'quota.window.daily': 'يومي',
   'quota.window.monthly': 'شهري',
   'quota.window.credits': 'الأرصدة',
+  'quota.value.creditsUsed': 'الأرصدة المستخدمة: {credits}',
   'quota.window.keyLimit': 'حد المفتاح',
   'quota.window.creditsBalance': 'رصيد الأرصدة',
   'quota.window.monthlyCredits': 'الأرصدة الشهرية',
@@ -3509,6 +3518,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': 'فتح {name}',
   'chat.workStatus.section.usage': 'الاستخدام',
   'chat.workStatus.section.telemetry': 'إحصاءات الدور',
+  'chat.workStatus.telemetry.previousTurn': 'الدور السابق',
+  'chat.workStatus.telemetry.previousTurnRate': 'الدور السابق · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'الرد',
   'chat.workStatus.telemetry.responseSpeedDescription': 'سرعة وصول النص النهائي. لا يشمل الانتظار الأولي ولا التفكير ولا استدعاءات الأدوات السابقة. هذا تقدير من الطوابع الزمنية للنص، وليس قياسًا للسرعة من الموفر.',
   'chat.workStatus.telemetry.speed': 'الدور كاملًا',
@@ -3582,6 +3593,7 @@ export const dict = {
   'chat.formCard.submitFailed': 'تعذّر إرسال الإجابة',
   'chat.formCard.cancelFailed': 'تعذّر إلغاء الطلب',
   'chat.formCard.tryAgain': 'أعد المحاولة.',
+  'chat.formCard.recoveredNotice': 'توقّفت الجولة أثناء الانتظار. سيؤدي الإرسال إلى بدء جولة جديدة مدفوعة.',
   'chat.formDock.progress': '{current} من {total}',
   'chat.formDock.waiting': '{count} أخرى في الانتظار',
   'chat.formDock.back': 'رجوع',
@@ -3826,6 +3838,7 @@ export const dict = {
   ...fileEditorAidsI18n.ar,
   ...htmlRenderI18n.ar,
   ...documentToolbarI18n.ar,
+  ...secretRequestI18n.ar,
   ...sessionNoticesI18n.ar,
   ...usageStatsI18n.ar,
   ...webSearchI18n.ar,
@@ -3911,4 +3924,14 @@ export const dict = {
   'notifications.question.bodyFallback': 'الوكيل بانتظار ردك',
   'notifications.permission.bodyFallback': 'الوكيل بانتظار موافقتك',
   'notifications.permission.title': 'مطلوب إذن',
+  'chat.promptHistorySearch.title': "البحث في سجل المطالبات",
+  'chat.promptHistorySearch.searchPlaceholder': "ابحث في المطالبات المتذكرة",
+  'chat.promptHistorySearch.close': "إغلاق البحث في سجل المطالبات",
+  'chat.promptHistorySearch.empty': "لا توجد مطالبات للبحث فيها بعد",
+  'chat.promptHistorySearch.noMatches': "لا توجد مطالبات مطابقة",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} مرفق",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} مرفقات",
+  'chat.promptHistorySearch.hint': "↑ ↓ للتصفح · Enter للتحميل · Esc للإغلاق",
+  'helpDialog.item.searchPromptHistory': "البحث في سجل المطالبات (إدخال الدردشة)",
+
 } as const;

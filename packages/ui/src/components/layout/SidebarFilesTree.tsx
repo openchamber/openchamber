@@ -70,7 +70,7 @@ import {
   type FileTreeGitStatus,
 } from '@/components/views/files/fileTreeRow';
 import { Icon } from "@/components/icon/Icon";
-import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
+import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopPath } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
@@ -1178,7 +1178,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
 
     const openValidation = await validateContextFileOpen(files, node.path, { directory: root });
     if (!openValidation.ok) {
-      toast.error(getContextFileOpenFailureMessage(openValidation.reason));
+      toastContextFileOpenFailure(node.path, openValidation);
       return;
     }
 
@@ -1195,7 +1195,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
 
     const openValidation = await validateContextFileOpen(files, match.path, { directory: root });
     if (!openValidation.ok) {
-      toast.error(getContextFileOpenFailureMessage(openValidation.reason));
+      toastContextFileOpenFailure(match.path, openValidation);
       return;
     }
 

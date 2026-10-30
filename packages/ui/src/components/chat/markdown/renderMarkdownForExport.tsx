@@ -21,7 +21,7 @@ export async function renderMarkdownForExport(text: string, options: { purpose: 
     texts.add(source.replace(/\n$/, ''));
   };
   const draw = (preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>) => flushSync(() => root.render(
-    <I18nProvider><MarkdownContent content={text} purpose={options.purpose} enableFileReferences={false} onExportCode={collect} preparedHighlights={preparedHighlights} /></I18nProvider>,
+    <I18nProvider><MarkdownContent content={text} singleTilde={false} purpose={options.purpose} enableFileReferences={false} onExportCode={collect} preparedHighlights={preparedHighlights} /></I18nProvider>,
   ));
   try {
     draw();

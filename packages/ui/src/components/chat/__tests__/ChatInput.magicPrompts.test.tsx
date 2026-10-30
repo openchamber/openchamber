@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import type { AttachedFile } from '@/stores/types/sessionTypes';
 
 /**
  * A magic prompt command typed in the composer reads the prompts that apply
@@ -100,6 +101,10 @@ const { SyncProvider } = await import('@/sync/sync-context');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
+const { useInputStore } = await import('@/sync/input-store');
+const { getSyncChildStores } = await import('@/sync/sync-refs');
+const { useMessageQueueStore, createMessageQueueTarget, getMessageQueueKey } = await import('@/stores/messageQueueStore');
+const { opencodeClient } = await import('@/lib/opencode/client');
 const { OpenCode } = await import('@opencode/client');
 
 const sdk = OpenCode.make({
@@ -121,19 +126,20 @@ const sdk = OpenCode.make({
 // object's identity here; no runtime API method is invoked.
 const runtimeAPIs = { runtime: { platform: 'web', isDesktop: false, isVSCode: false }, sourceControl: {} } as RuntimeAPIs;
 
-type SentMessage = { content: string; synthetic: string[] };
+type SentMessage = { content: string; synthetic: string[]; attachments: AttachedFile[] };
 let sent: SentMessage[] = [];
 
 beforeEach(() => {
   promptReads = [];
   promptsStatus = 200;
   sent = [];
+  useMessageQueueStore.setState({ queuedMessages: {}, sendingIds: {} });
   useDirectoryStore.setState({ currentDirectory: WORKTREE });
   useSessionUIStore.setState({
     currentSessionId: 'ses_feature',
     currentSessionDirectory: WORKTREE,
-    sendMessage: async (content, _providerID, _modelID, _agent, _attachments, _agentMention, additionalParts) => {
-      sent.push({ content, synthetic: (additionalParts ?? []).filter((part) => part.synthetic).map((part) => part.text) });
+    sendMessage: async (content, _providerID, _modelID, _agent, attachments, _agentMention, additionalParts) => {
+      sent.push({ content, attachments: attachments ?? [], synthetic: (additionalParts ?? []).filter((part) => part.synthetic).map((part) => part.text) });
     },
   });
   useConfigStore.setState({
@@ -149,7 +155,7 @@ afterAll(() => {
 });
 
 /** Mounts the composer, types `text`, submits it and returns the editor text afterwards. */
-const submitInComposer = async (text: string): Promise<string> => {
+const submitInComposer = async (text: string, options?: { attachment: AttachedFile; queue: boolean }): Promise<string> => {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -169,6 +175,16 @@ const submitInComposer = async (text: string): Promise<string> => {
     });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
 
+    if (options) {
+      await act(async () => {
+        useInputStore.getState().setAttachedFiles([options.attachment]);
+        if (options.queue) {
+          useMessageQueueStore.setState({ followUpBehavior: 'queue' });
+          getSyncChildStores().getChild(WORKTREE)?.setState({ session_status: { ses_feature: { type: 'busy' } } });
+        }
+      });
+    }
+
     const content = container.querySelector<HTMLElement>('.cm-content');
     const view = content ? EditorView.findFromDOM(content) : null;
     const form = container.querySelector('form');
@@ -178,7 +194,13 @@ const submitInComposer = async (text: string): Promise<string> => {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: 'input.type' });
     });
     await act(async () => {
-      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      if (options?.queue) {
+        const button = container.querySelector<HTMLButtonElement>('button[aria-label="Queue message"]');
+        if (!button) throw new Error('Queue button did not mount');
+        button.click();
+      } else {
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      }
       await new Promise((resolve) => setTimeout(resolve, 300));
     });
     return view.state.doc.toString();
@@ -206,6 +228,78 @@ test('a failed prompt read sends nothing and gives the text back', async () => {
   expect(sent).toEqual([]);
   expect(remaining).toBe('/workspace-review');
 });
+
+function queueWithMentionedFile() {
+  const target = createMessageQueueTarget('ses_feature', WORKTREE);
+  if (!target) throw new Error('Missing queue target');
+  const file: AttachedFile = {
+    id: 'queued-file', file: new File([], 'a.ts'), filename: 'a.ts',
+    mimeType: 'text/plain', size: 0, source: 'server',
+    serverPath: `${WORKTREE}/a.ts`, dataUrl: `file://${WORKTREE}/a.ts`,
+  };
+  const queued = { id: 'queued-a', content: 'Earlier', text: 'Earlier', createdAt: 1, attachments: [file] };
+  const key = getMessageQueueKey(target);
+  useMessageQueueStore.setState({ queuedMessages: { [key]: [queued] } });
+  return { key, queued };
+}
+
+test('a prompt command keeps its mentioned file when the queue stays untouched', async () => {
+  const { key, queued } = queueWithMentionedFile();
+  const listing = spyOn(opencodeClient, 'listLocalDirectory').mockResolvedValue([{ path: `${WORKTREE}/a.ts`, name: 'a.ts', isDirectory: false, isFile: true }]);
+  try {
+    await submitInComposer('/workspace-review @a.ts');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].attachments.map((file) => file.serverPath)).toEqual([`${WORKTREE}/a.ts`]);
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toEqual([queued]);
+  } finally {
+    listing.mockRestore();
+  }
+});
+
+test('a queue item omitted by takeForSend cannot suppress a composer mention', async () => {
+  queueWithMentionedFile();
+  const take = spyOn(useMessageQueueStore.getState(), 'takeForSend').mockResolvedValue([]);
+  const listing = spyOn(opencodeClient, 'listLocalDirectory').mockResolvedValue([{ path: `${WORKTREE}/a.ts`, name: 'a.ts', isDirectory: false, isFile: true }]);
+  try {
+    await submitInComposer('Read @a.ts');
+    expect(take.mock.calls).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].attachments.map((file) => file.serverPath)).toEqual([`${WORKTREE}/a.ts`]);
+  } finally {
+    take.mockRestore();
+    listing.mockRestore();
+  }
+});
+
+for (const queue of [false, true]) {
+  test(`${queue ? 'Queue' : 'Send'} keeps a VS Code selection and its whole-file mention`, async () => {
+    const path = `${WORKTREE}/src/a.ts`;
+    const selection: AttachedFile = {
+      id: 'vscode-selection', file: new File(['selected line'], 'a.ts:2-2', { type: 'text/plain' }),
+      filename: 'a.ts:2-2', mimeType: 'text/plain', size: 13,
+      dataUrl: 'data:text/plain;base64,c2VsZWN0ZWQgbGluZQ==',
+      source: 'vscode', vscodeSource: 'selection', vscodePath: path,
+    };
+    const listing = spyOn(opencodeClient, 'listLocalDirectory').mockResolvedValue([
+      { path, name: 'a.ts', isDirectory: false, isFile: true },
+    ]);
+    // Capture the queue payload without writing to the running server.
+    const add = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockResolvedValue(undefined);
+    try {
+      await submitInComposer('Read @src/a.ts', { attachment: selection, queue });
+      const attachments = queue ? add.mock.calls[0]?.[1].attachments : sent[0]?.attachments;
+      expect(queue ? add.mock.calls.length : sent.length).toBe(1);
+      expect(attachments).toHaveLength(2);
+      expect(attachments?.[0]).toEqual(selection);
+      expect(attachments?.[1]?.serverPath).toBe(path);
+      expect(attachments?.[1]?.dataUrl).toBe(`file://${path}`);
+      if (queue) expect(sent).toEqual([]);
+    } finally {
+      add.mockRestore();
+      listing.mockRestore();
+    }
+  });
+}
 
 // The draft fields the composer routes a first send by.
 type DraftTarget = { target: 'chat' | 'project'; directoryOverride: string | null; preparedChatDirectory?: string };

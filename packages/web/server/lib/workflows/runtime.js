@@ -691,7 +691,13 @@ export const createWorkflowRuntime = ({
    */
   const remove = async ({ runId }) => {
     const run = await requireRun(runId);
-    if (active.has(run.id) || run.state === 'running' || run.state === 'awaiting-approval') {
+    // The run's state is the rule ("stop or decline first"), not the active
+    // set: an execution leaves `active` only once its end save resolves
+    // (execute's finally), so for a moment after the end is saved the run is
+    // finished yet still listed there. Deleting in that overlap is safe — the
+    // deletion drops an undelivered report and the `removedRuns` guards keep
+    // the run from coming back.
+    if (run.state === 'running' || run.state === 'awaiting-approval') {
       throw new OpenChamberControlError('Stop or decline the run before deleting it', 409);
     }
     removedRuns.add(run.id);

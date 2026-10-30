@@ -19,10 +19,11 @@ afterEach(() => {
 });
 
 /** A real surface with the real WebAssembly encoder; painting is stubbed out. */
-async function createSurface(userAgent: string) {
+async function createSurface(userAgent: string, platform?: string) {
   const happyWindow = new Window({ url: 'http://localhost/' });
   dom = happyWindow;
   Object.defineProperty(happyWindow.navigator, 'userAgent', { value: userAgent });
+  if (platform) Object.defineProperty(happyWindow.navigator, 'platform', { value: platform });
   Object.defineProperty(happyWindow.HTMLCanvasElement.prototype, 'getContext', {
     value: () => ({
       fillRect() {},
@@ -54,7 +55,10 @@ async function createSurface(userAgent: string) {
     onResize() {},
   });
   const field = surface.input;
-  const key = (type: 'keydown' | 'keyup', init: { key: string; code: string; keyCode: number }) => {
+  const key = (
+    type: 'keydown' | 'keyup',
+    init: { key: string; code: string; keyCode: number } & KeyboardEventInit,
+  ) => {
     const event = new KeyboardEvent(type, { ...init, cancelable: true });
     field.dispatchEvent(event);
     return event;
@@ -71,7 +75,7 @@ async function createSurface(userAgent: string) {
   const composition = (type: 'compositionstart' | 'compositionend', data: string) => {
     field.dispatchEvent(new CompositionEvent(type, { data }));
   };
-  return { sent, field, key, edited, composition, write: (data: string) => surface?.write(data) };
+  return { sent, field, key, edited, composition, terminal: surface, write: (data: string) => surface?.write(data) };
 }
 
 // Sequences recorded on an Android 15 emulator with Gboard 14.2, Chrome 124 and Chromium 158.
@@ -215,4 +219,120 @@ describe('Backspace elsewhere', () => {
     edited('a', { inputType: 'insertText', data: 'a' });
     expect(sent).toEqual(['a']);
   });
+});
+
+describe('macOS natural text editing chords', () => {
+  test('Cmd+Backspace and Cmd+arrows send line bytes; other Super chords stand down', async () => {
+    const { sent, key, write } = await createSurface(MAC_UA, 'MacIntel');
+    write('\x1b[?1h');
+    const del = key('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true });
+    key('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true });
+    expect(del.defaultPrevented).toBe(true);
+    key('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, metaKey: true });
+    key('keyup', { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, metaKey: true });
+    key('keydown', { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, metaKey: true, repeat: true });
+    write('\x1b[>11u');
+    key('keyup', { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39, metaKey: true });
+    expect(sent).toEqual(['\x15', '\x01', '\x05']);
+    write('\x1b[<u');
+    // Every other Super chord keeps standing down for the app.
+    const untouched = key('keydown', { key: 'b', code: 'KeyB', keyCode: 66, metaKey: true });
+    key('keyup', { key: 'b', code: 'KeyB', keyCode: 66, metaKey: true });
+    expect(untouched.defaultPrevented).toBe(false);
+    expect(sent).toEqual(['\x15', '\x01', '\x05']);
+  });
+});
+
+describe('viewport scroll chords', () => {
+  test('Shift+PageUp scrolls the viewport and never reaches the pty', async () => {
+    const { sent, key, write, terminal } = await createSurface(MAC_UA, 'Linux x86_64');
+    write('line\r\n'.repeat(60));
+    const before = terminal['core'].scrollbarState();
+    expect(before).not.toBeNull();
+    const press = key('keydown', { key: 'PageUp', code: 'PageUp', keyCode: 33, shiftKey: true });
+    key('keyup', { key: 'PageUp', code: 'PageUp', keyCode: 33, shiftKey: true });
+    expect(press.defaultPrevented).toBe(true);
+    expect(sent).toEqual([]);
+    expect(terminal['core'].scrollbarState()!.offset).toBeLessThan(before!.offset);
+    // Unmodified PageUp still encodes for the pty, like in Ghostty.
+    key('keydown', { key: 'PageUp', code: 'PageUp', keyCode: 33 });
+    key('keyup', { key: 'PageUp', code: 'PageUp', keyCode: 33 });
+    expect(sent).toEqual(['\x1b[5~']);
+  });
+
+  test('Cmd+Home and Cmd+PageDown claim the macOS stand-down to scroll', async () => {
+    const { sent, key, write, terminal } = await createSurface(MAC_UA, 'MacIntel');
+    write('line\r\n'.repeat(60));
+    const home = key('keydown', { key: 'Home', code: 'Home', keyCode: 36, metaKey: true });
+    key('keyup', { key: 'Home', code: 'Home', keyCode: 36, metaKey: true });
+    expect(terminal['core'].scrollbarState()!.offset).toBe(0);
+    const pageDown = key('keydown', { key: 'PageDown', code: 'PageDown', keyCode: 34, metaKey: true });
+    key('keyup', { key: 'PageDown', code: 'PageDown', keyCode: 34, metaKey: true });
+    expect(home.defaultPrevented).toBe(true);
+    expect(pageDown.defaultPrevented).toBe(true);
+    expect(terminal['core'].scrollbarState()!.offset).toBe(terminal['core'].scrollbarState()!.len);
+    expect(sent).toEqual([]);
+  });
+});
+
+describe('shell shortcut boundaries', () => {
+  for (const signal of ['event', 'compositionstart', 'keyCode']) {
+    for (const platform of ['MacIntel', 'Linux x86_64']) {
+      test(`${platform} leaves ${signal} composition keys alone`, async () => {
+        const { sent, key, write, composition, terminal } = await createSurface(MAC_UA, platform);
+        write('line\r\n'.repeat(60));
+        const before = terminal['core'].scrollbarState();
+        if (signal === 'compositionstart') composition('compositionstart', '');
+        const chords = platform === 'MacIntel'
+          ? [
+            { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true },
+            { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37, metaKey: true },
+            { key: 'PageUp', code: 'PageUp', keyCode: 33, metaKey: true },
+          ]
+          : [{ key: 'PageUp', code: 'PageUp', keyCode: 33, shiftKey: true }];
+        for (const chord of chords) {
+          const init = { ...chord, isComposing: signal === 'event', ...(signal === 'keyCode' ? { keyCode: 229 } : {}) };
+          expect(key('keydown', init).defaultPrevented).toBe(false);
+          key('keyup', init);
+        }
+        expect(sent).toEqual([]);
+        expect(terminal['core'].scrollbarState()).toEqual(before);
+      });
+    }
+  }
+
+  for (const mode of ['\x1b[?1049h', '\x1b[>1u', '\x1b[>11u']) {
+    test(`macOS keeps app shortcuts unchanged in ${JSON.stringify(mode)}`, async () => {
+      const { sent, key, write } = await createSurface(MAC_UA, 'MacIntel');
+      write(mode);
+      for (const name of ['Backspace', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']) {
+        const chord = { key: name, code: name, keyCode: 0, metaKey: true };
+        expect(key('keydown', chord).defaultPrevented).toBe(false);
+        key('keyup', chord);
+      }
+      expect(sent).toEqual([]);
+      write(mode === '\x1b[?1049h' ? '\x1b[?1049l' : '\x1b[<u');
+      key('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true });
+      key('keyup', { key: 'Backspace', code: 'Backspace', keyCode: 8, metaKey: true });
+      expect(sent).toEqual(['\x15']);
+    });
+
+    test(`Linux passes scroll chords to the encoder in ${JSON.stringify(mode)}`, async () => {
+      const { sent, key, write, terminal } = await createSurface(MAC_UA, 'Linux x86_64');
+      write('line\r\n'.repeat(60));
+      write(mode);
+      const before = terminal['core'].scrollbarState();
+      for (const name of ['Home', 'End', 'PageUp', 'PageDown']) {
+        const chord = { key: name, code: name, keyCode: 0, shiftKey: true };
+        const expected = [terminal['core'].encodeKey(new KeyboardEvent('keydown', chord), 'Linux x86_64'),
+          terminal['core'].encodeKey(new KeyboardEvent('keyup', chord), 'Linux x86_64', 'release')].filter(Boolean);
+        sent.length = 0;
+        key('keydown', chord);
+        key('keyup', chord);
+        expect(sent).toEqual(expected);
+        expect(sent.length).toBeGreaterThan(0);
+      }
+      expect(terminal['core'].scrollbarState()).toEqual(before);
+    });
+  }
 });

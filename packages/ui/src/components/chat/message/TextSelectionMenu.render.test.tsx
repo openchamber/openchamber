@@ -8,8 +8,15 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { ChatColumnSessionContext } from '../chatColumnSession';
+import { useInputStore } from '@/sync/input-store';
+import { invokeActiveSelectionAddToChat } from '@/lib/addSelectionToChat';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
+import { ChatColumnActionsContext, ChatColumnSessionContext, useChatColumnActions } from '../chatColumnSession';
+import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { dispatchFrameSelection } from './frameSelection';
+import { MobileCommentComposerContext } from '../composer/comment/MobileCommentComposerContext';
+import { createMobileCommentDraftController, type MobileCommentDraftController } from '../composer/comment/mobileCommentDraft';
 
 // React DOM probes for a DOM when first imported; give it one, then restore
 // the caller's globals.
@@ -36,13 +43,13 @@ const session = (updated: number, sessionDirectory = directory): Session => ({
 });
 const otherSession = (updated: number): Session => ({ ...session(updated), id: 'session-2' });
 
-const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'CustomEvent', 'DOMRect', 'MutationObserver', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'CustomEvent', 'DOMRect', 'MutationObserver', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'FileReader', 'File', 'ClipboardEvent', 'DataTransfer', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const installDom = () => {
   const win = new Window({ url: 'http://localhost' });
   const previous = DOM_GLOBAL_NAMES.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
   const values = { window: win, document: win.document, navigator: win.navigator, Node: win.Node, Element: win.Element,
     HTMLElement: win.HTMLElement, CustomEvent: win.CustomEvent, DOMRect: win.DOMRect, MutationObserver: win.MutationObserver, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
-    requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true };
+    requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), FileReader: win.FileReader, File: win.File, ClipboardEvent: win.ClipboardEvent, DataTransfer: win.DataTransfer, IS_REACT_ACT_ENVIRONMENT: true };
   for (const name of DOM_GLOBAL_NAMES) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
   const container = document.createElement('div');
   document.body.appendChild(container);
@@ -56,6 +63,10 @@ const installDom = () => {
 };
 
 describe('TextSelectionMenu render subscriptions', () => {
+  const Pinned = ({ children }: { children: React.ReactNode }) => {
+    const actions = useChatColumnActions();
+    return <ChatColumnActionsContext.Provider value={{ ...actions, pinned: true }}>{children}</ChatColumnActionsContext.Provider>;
+  };
   let root: Root;
   let dom: ReturnType<typeof installDom>;
   let renders = 0;
@@ -70,14 +81,18 @@ describe('TextSelectionMenu render subscriptions', () => {
   const stage = (sessions: Session[]) => act(async () => {
     store().setState({ session: sessions });
   });
-  const render = (frameSelections = false) => act(async () => root.render(
+  const render = (frameSelections = false, controller: MobileCommentDraftController | null = null, pinned = false) => act(async () => root.render(
     <SyncProvider sdk={sdk} directory={directory}>
       <I18nProvider>
-        <ChatColumnSessionContext.Provider value={column}>
-          <React.Profiler id="menu" onRender={() => { renders += 1; }}>
-            <TextSelectionMenu containerRef={containerRef} readingKey="message-1" canReadAloud={false} frameSelections={frameSelections} />
-          </React.Profiler>
-        </ChatColumnSessionContext.Provider>
+        <MobileCommentComposerContext.Provider value={controller}>
+          <ChatColumnSessionContext.Provider value={column}>
+            <React.Profiler id="menu" onRender={() => { renders += 1; }}>
+              {pinned
+                ? <Pinned><TextSelectionMenu containerRef={containerRef} readingKey="message-1" canReadAloud={false} frameSelections={frameSelections} /></Pinned>
+                : <TextSelectionMenu containerRef={containerRef} readingKey="message-1" canReadAloud={false} frameSelections={frameSelections} />}
+            </React.Profiler>
+          </ChatColumnSessionContext.Provider>
+        </MobileCommentComposerContext.Provider>
       </I18nProvider>
     </SyncProvider>,
   ));
@@ -90,6 +105,9 @@ describe('TextSelectionMenu render subscriptions', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+    useInputStore.getState().setPendingInputText(null);
+    useInputStore.setState({ composerAddress: null, attachedFiles: [], attachmentDrafts: new Map(), attachmentDraftKey: null });
     dom.restore();
   });
 
@@ -252,6 +270,95 @@ describe('TextSelectionMenu render subscriptions', () => {
     });
 
     expect(document.body.textContent).not.toContain('Comment');
+    containerRef.current = null;
+  });
+
+  test('a comment is filed into the target the composer published, not the column session', async () => {
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.appendChild(frame);
+    document.body.appendChild(host);
+    containerRef.current = host;
+    const controller = createMobileCommentDraftController();
+    await render(true, controller);
+
+    await act(async () => {
+      // The composer is talking to a `/btw` fork while the column still shows
+      // the parent session; the fork's key is the only one it reads.
+      controller.setScope({ runtimeKey: getRuntimeKey(), directory, sessionKey: 'btw-fork' });
+      dispatchFrameSelection(frame, { text: 'picked words', rect: { top: 10, left: 20, width: 80, height: 16 } });
+    });
+
+    const comment = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === 'Comment');
+    await act(async () => { comment?.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+    const attach = document.querySelector<HTMLButtonElement>('button[aria-label="Attach"]');
+    expect(attach).not.toBeNull();
+    await act(async () => { attach?.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
+
+    const store = useInlineCommentDraftStore.getState();
+    expect(store.getDrafts({ directory, sessionKey: 'btw-fork' })).toHaveLength(1);
+    expect(store.getDrafts({ directory, sessionKey: column.sessionId })).toEqual([]);
+    containerRef.current = null;
+  });
+
+  test('a pinned comment and its pasted image stay together while the main composer is selected', async () => {
+    const main = createChatDraftIdentity(getRuntimeKey(), directory, 'main-session');
+    const pinned = createChatDraftIdentity(getRuntimeKey(), directory, 'pinned-fork');
+    if (!main || !pinned) throw new Error('Expected draft identities');
+    useInputStore.getState().selectAttachmentDraft(main);
+    useInputStore.getState().addRestoredAttachment({ url: 'data:text/plain;base64,aGk=', mimeType: 'text/plain', filename: 'main.txt' }, main);
+    useInputStore.getState().setComposerAddress({ inline: { directory, sessionKey: 'main-session' }, attachments: main });
+    const mainFiles = useInputStore.getState().getAttachedFiles(main);
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.appendChild(frame);
+    document.body.appendChild(host);
+    containerRef.current = host;
+    const controller = createMobileCommentDraftController();
+    controller.setScope({ runtimeKey: getRuntimeKey(), directory, sessionKey: 'pinned-fork' });
+    await render(true, controller, true);
+    await act(async () => { dispatchFrameSelection(frame, { text: 'picked words', rect: { top: 10, left: 20, width: 80, height: 16 } }); });
+    const comment = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === 'Comment');
+    await act(async () => { comment?.click(); });
+    const editor = document.querySelector<HTMLElement>('[contenteditable="true"]');
+    expect(editor).not.toBeNull();
+    const data = new DataTransfer();
+    data.items.add(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'image.png', { type: 'image/png' }));
+    await act(async () => { editor?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true })); });
+    await act(async () => { document.querySelector<HTMLButtonElement>('button[aria-label="Attach"]')?.click(); });
+    await act(async () => {
+      for (let attempt = 0; attempt < 100 && !useInputStore.getState().getAttachedFiles(pinned).length; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    });
+    const drafts = useInlineCommentDraftStore.getState();
+    expect(drafts.getDrafts({ directory, sessionKey: 'pinned-fork' })[0]?.text).toContain('[image-1.png]');
+    expect(drafts.getDrafts({ directory, sessionKey: 'main-session' })).toEqual([]);
+    expect(useInputStore.getState().getAttachedFiles(pinned).map((file) => file.filename)).toEqual(['image-1.png']);
+    expect(useInputStore.getState().getAttachedFiles(main)).toBe(mainFiles);
+    containerRef.current = null;
+  });
+
+  test('a quote is addressed to the chat on screen, so an expanded fork takes it', async () => {
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.appendChild(frame);
+    document.body.appendChild(host);
+    containerRef.current = host;
+    const controller = createMobileCommentDraftController();
+    await render(true, controller);
+
+    await act(async () => {
+      controller.setScope({ runtimeKey: getRuntimeKey(), directory, sessionKey: 'btw-fork' });
+      dispatchFrameSelection(frame, { text: 'picked words', rect: { top: 10, left: 20, width: 80, height: 16 } });
+    });
+
+    await act(async () => { expect(invokeActiveSelectionAddToChat()).toBe(true); });
+
+    // The main column's address, which the fork composer reads as the composer on
+    // screen; addressing the fork by id would strand the text on collapse.
+    expect(useInputStore.getState().pendingInputText).toContain('picked words');
+    expect(useInputStore.getState().pendingInputTarget).toBeNull();
     containerRef.current = null;
   });
 

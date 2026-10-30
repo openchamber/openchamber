@@ -370,7 +370,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </Button>
   ) : null;
 
-  const newChatButton = !editingOrder && projects.length > 0 ? (
+  const newChatButton = !editingOrder ? (
     <Button
       type="button"
       variant="default"

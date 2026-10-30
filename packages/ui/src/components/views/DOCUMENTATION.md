@@ -122,8 +122,15 @@ is one `dir/` row in the parent's status; its diff read answers
 and lists its changed files, each diff read from that repository when the row
 opens, read-only: no stage, discard or hunk actions. "Open as project" adds the
 folder as a project and opens a new session draft in it, where the Git panel
-commits. The listing reads again when the entry's `contentRevision` moves.
-Mobile Changes still shows only the note for such a row.
+commits. A repository row inside that listing keeps the separate-repository
+note without recursively reading its changes. The listing reads again when
+the entry's `contentRevision` moves. Mobile Changes still shows
+only the note for such a row.
+
+Git, Changes, Walkthrough, pull requests and mobile Changes use the shared
+repository picker. Selection, discovery refresh and persistence belong to
+[`useGitStore`](../../stores/DOCUMENTATION.md#usegitstorets) and
+`useNestedGitDirectory`; diff rows do not change that selection.
 
 ## Find in changes
 

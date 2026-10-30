@@ -77,6 +77,8 @@ export interface MobileCommentDraftController {
     subscribe(listener: () => void): () => void;
     /** The mounted composer publishes its target, including pending BTW drafts. */
     setScope(scope: MobileCommentScope | null): void;
+    /** That target as published: where a comment or quote taken here has to land. */
+    getScope(): MobileCommentScope | null;
     /** Capture the composer's target and open a comment for the selection. */
     open(quote: MobileCommentQuote): boolean;
     /**
@@ -160,6 +162,7 @@ export function createMobileCommentDraftController(): MobileCommentDraftControll
                 update(CLOSED_MOBILE_COMMENT_DRAFT);
             }
         },
+        getScope: () => scope,
         open(quote) {
             if (!scope || scope.runtimeKey !== getRuntimeKey() || !scope.directory || !scope.sessionKey) return false;
             if (!quote.markdownText.trim()) return false;

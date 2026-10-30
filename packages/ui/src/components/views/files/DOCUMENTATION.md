@@ -169,7 +169,26 @@ throwaway `FontFace` family removed when the tab closes), `TableArtifact`
 (CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
 and `BinaryArtifact` (name, type, size, download; never a decode attempt).
 `FilesView.renderArtifactPreview` is the single switch both the docked and
-the fullscreen viewer use. SVG, Mermaid (`.mmd`) and delimited files are text
+the fullscreen viewer use.
+
+A file that cannot be shown fills the pane with `ContentState`
+(`components/ui/content-state.tsx`): icon, title, one sentence, actions. A
+failed read names the file, adds the server's reason when there is one, and
+offers Retry (`reloadSelectedFile`, the same reload a content invalidation
+runs); the binary, media and font states use it too. `ContentLoadingState`
+shows the spinner only after 200 ms, so switching between quick files does not
+flash it. `ImageArtifact` keeps the loading state until the image decodes
+(an empty `src` is a fetch still running) and shows its own failure with Retry
+and download for data the browser cannot decode. A failed image fetch marks
+the file failed (`failedFilePath`) like a text read and keeps the loaded path:
+clearing it made the selection effect load the file again, which wiped the
+error without fetching the image.
+
+Opening a file from the sidebar tree, the command palette or a diff runs
+`validateContextFileOpen` first. A file over `MAX_OPEN_FILE_BYTES` or
+`MAX_OPEN_FILE_LINES`, or one that cannot be read, never opens;
+`toastContextFileOpenFailure` names it and adds the limit and its size, or the
+server's reason. SVG, Mermaid (`.mmd`) and delimited files are text
 with an artifact view: each has a per-path preview/source toggle, and opens
 in preview regardless of the text-first setting because an agent-produced
 artifact is opened to be looked at.
@@ -296,6 +315,9 @@ preview changes or unmounts. Relative links open through the supplied
 files view. Fragment links find a heading within the Markdown root. A source's
 `prefers-color-scheme` condition follows the app theme through its rendered
 `media` prop. Content, file and runtime changes retire older asset results.
+A document image keeps its box hidden until its object URL arrives, and one
+that cannot be read or decoded is replaced by its name after a warning icon,
+with "Image couldn't load" as the tooltip.
 
 A document image is read once it comes within one height of the preview's
 scroller of its visible part (`useNearMedia` with the nearest ancestor that

@@ -5,19 +5,21 @@ import { defaultSourceControlIdentities } from '@/lib/source-control/identity';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitRemote, SourceControlIdentity } from '@/lib/api/types';
 import { normalizePath } from '@/lib/pathNormalization';
+import { discoversNestedRepos } from '@/lib/nestedRepositories';
 import { useRepositoryBindings } from '@/lib/source-control/repository-binding';
 import { repositoryLinkFromRemotes } from '@/lib/source-control/repositoryUrl';
 import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 import { useSourceControlProviders } from '@/lib/source-control/providers/registry';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { useGitStore, useIsGitRepo, useNestedRepos, type NestedRepoDiscovery } from '@/stores/useGitStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import type { SourceBoardTab } from '@/stores/useSourceBoardStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
 
 import { repositoryUrlOfItemLink } from './openTrackerItem';
 
-const NO_FOLDERS: readonly string[] = [];
+const NO_FOLDERS: string[] = [];
 
 /**
  * The folder the board reads a project's repository from.
@@ -33,10 +35,17 @@ const NO_FOLDERS: readonly string[] = [];
 export type BoardRepository = {
     status: 'pending' | 'failed' | 'ready';
     directory: string | null;
-    /** The repositories under a root that is not one itself; empty otherwise. */
+    /**
+     * What the picker offers: a root that is a repository first, then the
+     * repositories under it — or only the latter under a root that is not one.
+     */
     repositories: readonly string[];
     /** The board lists all of `repositories` together. */
     all: boolean;
+    /** "All repositories" can be picked: the runtime lists across, and the root is no repository. */
+    allAvailable: boolean;
+    /** There is something to switch to, so the picker earns its row. */
+    choosable: boolean;
 };
 
 /** What the board remembers for a project's repository: a single one, and whether it lists them all. */
@@ -54,9 +63,17 @@ export function resolveBoardRepository(
     /** The runtime can list across repositories (VS Code cannot). */
     acrossAvailable: boolean,
 ): BoardRepository {
-    if (!root) return { status: 'ready', directory: null, repositories: [], all: false };
-    const atRoot = (status: BoardRepository['status']): BoardRepository => ({ status, directory: root, repositories: [], all: false });
-    if (rootIsGitRepo === true) return atRoot('ready');
+    if (!root) return { status: 'ready', directory: null, repositories: [], all: false, allAvailable: false, choosable: false };
+    const atRoot = (status: BoardRepository['status']): BoardRepository => ({ status, directory: root, repositories: [], all: false, allAvailable: false, choosable: false });
+    // An established root is read where it is and stays the default, but it
+    // does not hide what is below it: its submodules and nested checkouts are
+    // offered next to it, as the Git surfaces offer them.
+    if (rootIsGitRepo === true) {
+        const repositories = Array.isArray(nestedRepos) ? [root, ...nestedRepos] : [root];
+        const directory = choice.path && repositories.includes(choice.path) ? choice.path : root;
+        // Its own items are the root's: listing them "all" would only merge the same repository with itself.
+        return { status: 'ready', directory, repositories, all: false, allAvailable: false, choosable: repositories.length > 1 };
+    }
     if (rootIsGitRepo === null || nestedRepos === undefined) return atRoot('pending');
     if (nestedRepos === null) return atRoot('failed');
     // A runtime without discovery cannot look any further than the root.
@@ -64,10 +81,10 @@ export function resolveBoardRepository(
     const first = nestedRepos[0];
     if (first === undefined) return atRoot('ready');
     if (acrossAvailable && (choice.all ?? choice.path === null)) {
-        return { status: 'ready', directory: root, repositories: nestedRepos, all: true };
+        return { status: 'ready', directory: root, repositories: nestedRepos, all: true, allAvailable: true, choosable: true };
     }
     const directory = choice.path && nestedRepos.includes(choice.path) ? choice.path : first;
-    return { status: 'ready', directory, repositories: nestedRepos, all: false };
+    return { status: 'ready', directory, repositories: nestedRepos, all: false, allAvailable: acrossAvailable, choosable: true };
 }
 
 /**
@@ -76,6 +93,8 @@ export function resolveBoardRepository(
  * lookup never runs first against a single repository that may not hold the
  * item. Where the root is a repository, or the runtime cannot list across
  * repositories, `resolveBoardRepository` ignores it as it ignores any "all".
+ * That root's own nested repositories are looked in too, so a link to a
+ * submodule's item opens there.
  */
 export const choiceForFocus = (choice: RepositoryChoice, focusPending: boolean): RepositoryChoice => (
     focusPending ? { ...choice, all: true } : choice
@@ -117,8 +136,9 @@ export function resolveBoardTab(options: {
     return first === undefined ? null : trackerReferenceSource(first);
 }
 
-/** A repository's path below the project's root, as the pickers name it. */
+/** A repository's path below the project's root; the root itself goes by its folder name. */
 export const repositoryLabel = (repository: string, root: string): string => {
+    if (repository === root) return root.split('/').filter(Boolean).pop() ?? root;
     const prefix = `${root}/`;
     return repository.startsWith(prefix) ? repository.slice(prefix.length) : repository;
 };
@@ -182,9 +202,15 @@ export function resolvePullLinkTarget(options: {
     };
 }
 
-/** Probes a project's root and, when it is not a repository, finds the repositories under it, read only. */
+/**
+ * Probes a project's root and finds the repositories under it, read only:
+ * they are what a root that is not a repository resolves through, and what
+ * the picker offers next to an established root, submodules included.
+ */
 function useFolderRepositories(root: string | null) {
     const { git } = useRuntimeAPIs();
+    const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
+    const searchesNested = root !== null && discoversNestedRepos(root, homeDirectory);
     const rootIsGitRepo = useIsGitRepo(root);
     const nestedRepos = useNestedRepos(root);
     const ensureStatus = useGitStore((state) => state.ensureStatus);
@@ -194,13 +220,13 @@ function useFolderRepositories(root: string | null) {
         if (root && rootIsGitRepo === null) void ensureStatus(root, git);
     }, [ensureStatus, git, root, rootIsGitRepo]);
     React.useEffect(() => {
-        if (root && rootIsGitRepo === false) void ensureNestedRepos(root);
-    }, [ensureNestedRepos, root, rootIsGitRepo]);
+        if (root && searchesNested && rootIsGitRepo !== null) void ensureNestedRepos(root);
+    }, [ensureNestedRepos, root, rootIsGitRepo, searchesNested]);
 
     const retry = React.useCallback(() => {
-        if (root) void ensureNestedRepos(root, { force: true });
-    }, [ensureNestedRepos, root]);
-    return { rootIsGitRepo, nestedRepos, retry };
+        if (root && searchesNested) void ensureNestedRepos(root, { force: true });
+    }, [ensureNestedRepos, root, searchesNested]);
+    return { rootIsGitRepo, nestedRepos: searchesNested ? nestedRepos : NO_FOLDERS, retry };
 }
 
 /**
@@ -208,7 +234,7 @@ function useFolderRepositories(root: string | null) {
  * screen's discovery without touching its repository selection: the board's
  * choice is its own.
  */
-export function useBoardRepository(root: string | null, choice: RepositoryChoice): BoardRepository & { retry: () => void } {
+export function useBoardRepository(root: string | null, choice: RepositoryChoice): BoardRepository & { retry: () => void; discoveryFailed: boolean; discoveryPending: boolean } {
     const { sourceControl } = useRuntimeAPIs();
     const acrossAvailable = Boolean(sourceControl.referencesAcross);
     const { rootIsGitRepo, nestedRepos, retry } = useFolderRepositories(root);
@@ -216,7 +242,7 @@ export function useBoardRepository(root: string | null, choice: RepositoryChoice
         () => resolveBoardRepository(root, rootIsGitRepo, nestedRepos, { path: choice.path, all: choice.all }, acrossAvailable),
         [acrossAvailable, choice.all, choice.path, nestedRepos, root, rootIsGitRepo],
     );
-    return { ...resolution, retry };
+    return { ...resolution, retry, discoveryFailed: nestedRepos === null, discoveryPending: nestedRepos === undefined };
 }
 
 /** A folder's remotes once its binding is read; null while it is, empty when the read failed. */
@@ -245,23 +271,32 @@ export function folderOfRepository(
 export type LinkRepository = { status: 'pending' | 'failed' | 'ready'; directory: string; retry: () => void };
 
 /**
- * The folder the Tracker reads a link through. A root that is a repository is
- * read where it is, as before. A root that is not one but holds repositories
- * is read through the one whose remote is the link's repository, so a link to
- * any of them opens in the Tracker; with none, the root is read and answers
- * that it cannot show the link. The Git selection is never touched.
+ * The folder the Tracker reads a link through, or a surface that only needs it
+ * for the item another surface asked to show. A link is read where its
+ * repository is: an established root for its own items, and whichever of the
+ * repositories under it — or under a root that is not one — owns the link.
+ * With none, the root is read and answers that it cannot show the link. The
+ * Git selection is never touched. `enabled: false` reads nothing and answers
+ * with the root, for surfaces that ask only while a link is on screen.
  */
-export function useLinkRepository(root: string, url: string): LinkRepository {
+export function useLinkRepository(root: string, url: string, options: { enabled?: boolean } = {}): LinkRepository {
+    const { enabled = true } = options;
     const { sourceControl } = useRuntimeAPIs();
     const { rootIsGitRepo, nestedRepos, retry } = useFolderRepositories(root);
-    const candidates = rootIsGitRepo === false && Array.isArray(nestedRepos) ? nestedRepos : NO_FOLDERS;
+    // An established root answers first and for itself; the repositories under
+    // it are there for a link that belongs to one of them instead.
+    const discovered = Array.isArray(nestedRepos) ? nestedRepos : NO_FOLDERS;
+    const candidates = React.useMemo(
+        () => (!enabled ? NO_FOLDERS : rootIsGitRepo === true ? [root, ...discovered] : discovered),
+        [discovered, enabled, root, rootIsGitRepo],
+    );
     const bindings = useRepositoryBindings(candidates, sourceControl);
     const knownIdentities = useSourceControlAuthStore((state) => state.identities);
     const descriptors = useSourceControlProviders();
     const urls = useRepositoryUrlMatcher();
     const repositoryUrl = repositoryUrlOfItemLink(url, urls);
     const match = React.useMemo(() => {
-        if (!repositoryUrl || candidates.length === 0) return 'none';
+        if (!enabled || !repositoryUrl || candidates.length === 0) return 'none';
         const folders = candidates.map((directory, index): FolderRemotes => {
             const binding = bindings[index];
             if (binding?.read) {
@@ -273,10 +308,13 @@ export function useLinkRepository(root: string, url: string): LinkRepository {
             return { directory, remotes: binding?.status === 'error' ? [] : null };
         });
         return folderOfRepository(repositoryUrl, folders, [...knownIdentities, ...defaultSourceControlIdentities(descriptors)], descriptors);
-    }, [bindings, candidates, descriptors, knownIdentities, repositoryUrl]);
+    }, [bindings, candidates, descriptors, enabled, knownIdentities, repositoryUrl]);
 
-    if (rootIsGitRepo === null || (rootIsGitRepo === false && nestedRepos === undefined)) return { status: 'pending', directory: root, retry };
-    if (rootIsGitRepo === false && nestedRepos === null) return { status: 'failed', directory: root, retry };
+    if (!enabled) return { status: 'ready', directory: root, retry };
+    if (rootIsGitRepo === null) return { status: 'pending', directory: root, retry };
+    if (match !== null && match !== 'none') return { status: 'ready', directory: match, retry };
+    if (nestedRepos === undefined) return { status: 'pending', directory: root, retry };
+    if (nestedRepos === null) return { status: 'failed', directory: root, retry };
     if (match === null) return { status: 'pending', directory: root, retry };
-    return { status: 'ready', directory: match === 'none' ? root : match, retry };
+    return { status: 'ready', directory: root, retry };
 }

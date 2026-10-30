@@ -9,6 +9,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useKeybinds } from './useKeybind';
 import { hasActiveBtwComposer, isEditableEventTarget } from './keyboard-shortcut-dom';
+import { dispatchPromptHistorySearch } from '@/components/chat/composer/state/promptHistorySearchRoute';
 
 export const useMiniChatKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
@@ -53,6 +54,7 @@ export const useMiniChatKeyboardShortcuts = () => {
     focus_input: () => {
       focusChatInput();
     },
+    search_prompt_history: (event) => dispatchPromptHistorySearch(event),
     new_mini_chat: () => {
       if (!canUseElectronDesktopIPC()) return false;
       void invokeDesktop('desktop_open_draft_mini_chat_window', {

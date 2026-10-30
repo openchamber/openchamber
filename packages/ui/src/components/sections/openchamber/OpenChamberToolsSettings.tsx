@@ -99,6 +99,8 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentImageToolEnabled = useUIStore((state) => state.setAgentImageToolEnabled);
   const agentImageModel = useUIStore((state) => state.agentImageModel);
   const setAgentImageModel = useUIStore((state) => state.setAgentImageModel);
+  const agentSecretToolEnabled = useUIStore((state) => state.agentSecretToolEnabled);
+  const setAgentSecretToolEnabled = useUIStore((state) => state.setAgentSecretToolEnabled);
   // Absent in builds without workflows, the way memory is.
   const agentWorkflowAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
   const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
@@ -155,6 +157,11 @@ export const OpenChamberToolsSettings: React.FC = () => {
   }, []);
   const imageModelOptions = imageModels.status === 'ready' ? imageModels.models : [];
   const imageModelKnown = imageModelOptions.some((model) => model.value === agentImageModel);
+
+  const handleAgentSecretToolChange = React.useCallback((enabled: boolean) => {
+    setAgentSecretToolEnabled(enabled);
+    void updateDesktopSettings({ agentSecretToolEnabled: enabled });
+  }, [setAgentSecretToolEnabled]);
 
   const handleAgentKnowledgeToolChange = React.useCallback((enabled: boolean) => {
     setAgentKnowledgeToolEnabled(enabled);
@@ -365,6 +372,17 @@ export const OpenChamberToolsSettings: React.FC = () => {
             </Select>
           </div>
         </div>
+
+        <ToolRow
+          icon="shield-keyhole"
+          settingsItem="sessions.agent-secret-tool"
+          checked={agentSecretToolEnabled}
+          onChange={handleAgentSecretToolChange}
+          title={t('settings.openchamber.tools.field.agentSecretTool')}
+          summary={t('settings.openchamber.tools.field.agentSecretToolSummary')}
+          info={t('settings.openchamber.tools.field.agentSecretToolInfo')}
+          ariaLabel={t('settings.openchamber.tools.field.agentSecretToolAria')}
+        />
 
         <ToolRow
           icon="sticky-note"

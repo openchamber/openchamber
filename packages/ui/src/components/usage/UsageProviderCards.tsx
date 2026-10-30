@@ -1,6 +1,7 @@
 import React from 'react';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { formatQuotaResetLabel, formatQuotaValueLabel } from '@/lib/quota';
+import { formatQuotaResetLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import type { UsageWindow } from '@/types';
@@ -26,7 +27,9 @@ export const UsageProviderCards: React.FC<{
   displayMode: 'usage' | 'remaining';
   timeFormatPreference: TimeFormatPreference;
   className?: string;
-}> = ({ groups, displayMode, timeFormatPreference, className }) => (
+}> = ({ groups, displayMode, timeFormatPreference, className }) => {
+  const { t } = useI18n();
+  return (
   <div className={cn('space-y-1.5', className)}>
     {groups.map((group) => (
       <div key={group.providerId} className="min-w-0 rounded-xl bg-foreground/[0.03] p-2.5">
@@ -51,7 +54,7 @@ export const UsageProviderCards: React.FC<{
               const displayPercent = displayMode === 'remaining'
                 ? row.window.remainingPercent
                 : row.window.usedPercent;
-              const metricLabel = formatQuotaValueLabel(row.window.valueLabel, displayPercent);
+              const metricLabel = formatQuotaWindowValueLabel(row.window, displayPercent, t);
               const resetLabel = formatQuotaResetLabel(
                 row.window.resetAt,
                 row.window.resetAfterFormatted ?? row.window.resetAtFormatted,
@@ -89,4 +92,5 @@ export const UsageProviderCards: React.FC<{
       </div>
     ))}
   </div>
-);
+  );
+};

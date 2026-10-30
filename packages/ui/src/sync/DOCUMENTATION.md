@@ -45,6 +45,26 @@ complete list alone sets authoritative coverage, reconciles missing sessions,
 and updates the root total. A later-page failure preserves the pages already
 published without claiming a complete snapshot.
 
+## Cleanup after a runtime switch
+
+Draft creation captures its cleanup owner before creating a session or chat
+folder. `lib/runtime-cleanup.ts` keeps direct HTTP cleanup on that owner's URL
+and credentials, bypassing the active runtime's fetch bridge. Chat cleanup
+accepts only descendants of the roots captured from that owner and never a
+shared root. Session cleanup uses the SDK with the captured transport and
+directory header.
+
+Relay and same-origin cleanup waits until the owner returns. Failed cleanup
+stays in an in-memory queue and retries on that owner's endpoint-change event
+with fresh credentials. The queue does not survive a page reload.
+
+### Why cleanup captures transport separately from the SDK client
+
+A cached SDK client still resolves authentication and transport at request
+time. Keeping the client alone can send a rollback to the newly selected
+server, or omit the old server's credentials. Only rollback captures transport;
+ordinary feature requests continue to resolve the active runtime at call time.
+
 ## OpenCode compatibility before bootstrap
 
 The desktop/web/VS Code App entry and MobileApp entry wrap the application in
@@ -101,9 +121,26 @@ The VS Code queue gate and its live inputs are documented in
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `attachment-files.ts` | Attachment picker allowlists, MIME/content validation, structured-text sanitization, and HEIC conversion | Local chat attachments across shared UI runtimes |
 | `document-attachments.ts` | Bounded Office/OpenDocument extraction, document text serialization, embedded-image extraction, and positional citations | DOCX, PPTX, XLSX, ODT, ODP, and ODS chat attachments |
-| `input-store.ts` | Draft input state, attached files, synthetic parts, pending guest attach, destination-scoped fork replay handoff | Attachments and fork replay target runtime + directory + session; other pending input is app UI state |
+| `input-store.ts` | Draft input state, attached files, synthetic parts, pending guest attach, destination-scoped fork replay handoff, the address the composer publishes (inline drafts and attachments) | Attachments and fork replay target runtime + directory + session; the published address is the composer's own session or `/btw` fork; other pending input is app UI state |
 | `selection-store.ts` | Model/agent/variant selections | App UI state |
 | `voice-store.ts` | Voice state | App UI state |
+
+Pending text keeps column insertions and session-keyed restores in separate
+mailboxes, so a quote or plugin insertion cannot overwrite a waiting revert.
+A pinned
+column and its expanded BTW share the column address; only the composer showing
+the restored session may consume session-addressed text. Attachment appends to
+named slots preserve other in-flight appends; replacement, clearing and owner
+switches retain their read-cancellation behavior.
+
+### Why restores have a session-keyed mailbox
+
+A parent revert can wait while BTW owns the composer and receives more text.
+A single pending-text slot lost the restore on the next insertion. Each session
+keeps its latest restore until its composer consumes it; a failed revert rolls
+back only that session's entry. An annotation captures the published inline and
+attachment address together at attach time and keeps both through screenshot
+preparation, including when the callback was saved before a BTW transition.
 
 Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection. Large plain-text clipboard pastes can become in-memory `text/plain` attachments named `pasted-context-N.txt` through the composer paste path; they use the same normalization and send pipeline as manually attached `.txt` files.
 
@@ -114,6 +151,13 @@ The composer compares normalized attachment MIME types with the selected model's
 Attachment drafts stay in memory for the page's lifetime, including composer remounts, independently of text persistence. `selectAttachmentDraft` saves the outgoing list and restores the rendered composer's runtime, directory, and session before paint. Switching cancels unfinished attachment reads. Send and queue recovery pass their captured draft identity so a late failure restores files to the source rather than the currently open session. Clearing or deleting a draft releases only its files. Opening a new-session draft leaves the outgoing session's files available for a return visit. With a chat pinned in the side panel two composers are on screen; each shows its own draft's files (`useDraftAttachedFiles`) and the selected slot follows the composer the user works in (composer documentation, *Pinned composer*).
 
 ## Catalog changes apply live
+
+Worktree drafts keep their checkout root as target identity and expose a separate
+pending or resolved start folder to composer discovery. Runtime switches retire
+the outgoing resolution. Restoring a pending draft resolves its folder again,
+preserving its model and agent picks; runtime, draft and revision guards reject
+obsolete completions. Confirmed session directories outrank worktree metadata
+when resolving composer configuration and file search.
 
 OpenCode v2 watches its own config files and rebuilds agents, commands, skills,
 MCP servers and plugins by itself, announcing each rebuilt slice
@@ -230,8 +274,8 @@ to that same directory (`noteCurrentDirectory` in the server lifecycle), so a
 left project is not started again by them. Another client still showing the directory gets
 `location.shutdown` and bootstraps it again, which restarts its MCP servers. A
 failed release is ignored: OpenCode's own sweep still applies. The rule is the
-same on every surface; VS Code has no managed chats, so only its worktrees and
-projects qualify there.
+same on every surface; VS Code includes managed Chats in windows without a
+workspace folder.
 
 ## Committing a revert
 
@@ -258,6 +302,20 @@ shadows and prefetch coverage, and prevents an older response or the next empty
 fetch from restoring deleted messages. The remaining visible records stay in place
 while the loader establishes fresh coverage. Their optimistic shadows remain
 until an authoritative snapshot confirms them.
+
+## Forking after an answer
+
+`/fork`, the fork action on an answer, and `/btw` keep the answer in the fork. OpenCode's fork `before` leaves out the record it names, so `transcriptCutAfterMessage` in `transcript-cut.ts` names the next turn boundary, the first record after the answer that starts something new, such as a prompt, a compaction, a background command's result or a workflow report. Without one, ordinary forks copy the whole transcript; `/btw` fails before creating a fork. A locally visible cut may not be persisted yet. All three paths retry a 404 once with the same cut and captured runtime, then propagate the error so the user can try again.
+
+### Why `/btw` requires an explicit cut and retries never widen one
+
+The next prompt can reach the server before the first fork request or between attempts, while this window still shows an idle or empty transcript. An omitted `before` would copy that prompt and its unfinished response into the fork. `/btw` requires an explicit cut from the first attempt; keeping that cut on retry preserves the selected history even when the main chat advances.
+
+If `/btw` has no completed answer or no following turn boundary, it fails before creating a fork and clears its creating flag so the user can retry. This includes idle and locally empty parents: the current API cannot enforce an inclusive upper bound at an answer or an empty server snapshot. Retry once a later turn boundary is loaded. No parent messages are changed.
+
+### Why the next turn boundary and not the next record
+
+The records between an answer and that boundary belong to the answer's turn. One of them is the `idle` record that OpenCode writes when a turn ends. The store gets that record only from a transcript read, never from a live event. A cut at the next record would leave it out of a fork made after a reload and keep it in a fork made from the live transcript.
 
 ## An interruption whose reason is `shutdown`
 
@@ -365,7 +423,7 @@ Session materialization recency is keyed by runtime and directory. Foreground lo
 
 Selection changes and directory message/status/blocking-request publications schedule one coalesced retention pass per directory, and one timer per directory wakes the pass when the earliest idle grace expires. Part-only streaming updates do not schedule retention. Switching runtimes and disposing directories cancel the old cleanup ownership. Eviction resets the loader entry and marks it evicted: messages that later arrive by event for that session are renderable but are not history coverage, so the next navigation fetches the transcript again and merges it with those events instead of presenting them as the whole history.
 
-A viewed transcript is never evicted, so someone working in one chat would keep every turn since they opened it, and every timeline pass (turn projection, record snapshots, timeline rows, the part map clone per event batch) walks all of them. Measured with `profile:session --grow` on a CPU slowed four times: one agentic turn kept the main thread 14% busy with 10 turns in memory and 26% with 100, with 28 long tasks instead of 5. `SessionMessageLoader.trimHistory` therefore cuts a transcript that outgrew the cold-navigation window back to that window (ten prompts, or 300 records once the newest prompt is in), at the prompt that starts it (with the `synthetic` context carriers sent right before it, which its chips and a revert or fork of it need), and moves coverage to a cursor below the first kept record (`olderMessagesCursor` in `@/lib/opencode/messageCursor`, OpenCode's own `next` cursor shape), so loading older history reads the dropped turns again. `ChatContainer` asks for it 3 s after a turn starts or ends, only while the reader is pinned to the end, where removing rows above moves nothing on screen. It cuts nothing while a load runs, while an export or title read holds the transcript, while any timeline showing the session is scrolled away from its end or has its prompt navigator panel open (`retainSessionHistory(..., "browsing")`; earlier prompts loaded from the panel change the turn count and would otherwise be cut while the reader looks at them), while a revert is pending (its marker hides the tail, and a cut counted over hidden turns could drop the marker), after a stream gap the transcript was not confirmed since, or at an unconfirmed record. Browser find in page does not see dropped turns; the in-chat search is server-indexed and loads history itself. Readouts that sum the loaded records describe the loaded window, as for a session opened cold: the Context panel's message counts drop at a cut, while its total cost comes from the session record (`Session.cost`).
+A viewed transcript is never evicted, so someone working in one chat would keep every turn since they opened it, and every timeline pass (turn projection, record snapshots, timeline rows, the part map clone per event batch) walks all of them. Measured with `profile:session --grow` on a CPU slowed four times: one agentic turn kept the main thread 14% busy with 10 turns in memory and 26% with 100, with 28 long tasks instead of 5. `SessionMessageLoader.trimHistory` therefore cuts a transcript that outgrew the cold-navigation window back to that window (ten prompts, or 300 records once the newest prompt is in), at the prompt that starts it (with the `synthetic` context carriers sent right before it, which its chips and a revert or fork of it need), and moves coverage to a cursor below the first kept record (`olderMessagesCursor` in `@/lib/opencode/messageCursor`, OpenCode's own `next` cursor shape), so loading older history reads the dropped turns again. `ChatContainer` asks for it 3 s after a turn starts or ends, only while the reader is pinned to the end, where removing rows above moves nothing on screen. The timer keys on the newest turn id so prepending older history does not schedule a cut. It cuts nothing while a load runs, while an export or title read holds the transcript, while any timeline showing the session is scrolled away from its end or has its prompt navigator panel open, while the session timeline dialog is open (both surfaces hold the transcript with `retainSessionHistory(..., "browsing")`), while a revert is pending (its marker hides the tail, and a cut counted over hidden turns could drop the marker), after a stream gap the transcript was not confirmed since, or at an unconfirmed record. Browser find in page does not see dropped turns; the in-chat search is server-indexed and loads history itself. Readouts that sum the loaded records describe the loaded window, as for a session opened cold: the Context panel's message counts drop at a cut, while its total cost comes from the session record (`Session.cost`).
 
 ### Why the viewed transcript is cut back and not kept whole
 
@@ -545,6 +603,12 @@ Extension session subscriptions project these same stores through `lib/guests/wo
 
 The session creation action accepts `navigation: "preserve"` for background extension launches. It still registers the returned directory, initializes message loading, marks the session as OpenChamber-created, and updates the global cache, but never selects it. Explicit guest `openSession` performs selection later. `session-ui-store.worktreeDiscoveryByProject` publishes topology loading/ready/error separately from retained worktree records; the existing sidebar discovery and control-event refresh own these flags.
 
+An explicit creation title is recorded as `metadata.openchamber.workTitle`
+with `by: "user"`, preserving the caller's other metadata. Titleless creation
+leaves metadata unchanged. The title and its ownership reach OpenCode in the
+same create request, so `work.name` cannot replace a user-given title before
+a later metadata write completes.
+
 Use the sync hooks backed by aggregated child stores when the UI needs **live truth** for sessions or statuses across all initialized directories.
 
 Current consumers:
@@ -584,6 +648,16 @@ Session display order is independent from streaming-frequency `time.updated` pub
 
 A background subagent keeps its parent's turn open for display. The parent goes idle while the child session works and runs again when OpenCode hands the result back; `global-session-status.ts` therefore holds the parent's timer through that pause (an idle parent with a running descendant does not settle, the last descendant to finish settles it, and snapshots count ancestors of running sessions as active). `useSessionTurnActivity` exposes that display state to rows, tabs and switchers. `statusById` and `activeSessionIds` stay the session's own status: sends, cleanup and retention must not treat an idle parent as busy. The parent lookup comes from the global sessions store through `setSessionParentResolver`, wired by `sync-context.tsx`.
 
+### Why auto-fusion observes transitions before batch publication
+
+`subscribeSessionStatusTransitions` synchronously exposes the active-ID draft
+after each busy/retry or idle/error event. Listeners must consume it during the
+callback without retaining or mutating it, and unsubscribe on unmount. Auto-fusion
+uses its own merged session map to record a parent waiting for a descendant.
+The store still publishes once per batch. A React effect alone misses the wait
+when the parent and child settle in the same batch and can fuse an earlier answer
+before the parent resumes.
+
 A background shell command keeps its session's turn open the same way. OpenCode settles a `shell` call with `background: true` at once, the session goes idle, and it runs again when the command's result is handed back. `background-shells.ts` indexes the commands OpenCode runs on behalf of a session (the shell tool tags each with `metadata.sessionID`): `shell.started`/`shell.ended` events keep it current for every directory, applied before status events in the same flush; a directory's `/api/shell` list is authoritative for that directory and is read by directory bootstrap and, on `server.connected`, for directories without a store that the index holds commands for. The list is keyed by the directory OpenCode answered for (symlinks resolved), which its shell events carry, and events that arrive while it is read win over it. A failed read changes nothing; a runtime switch resets the index and discards reads started before it. OpenCode runs every shell call as such a command, including one the turn waits for, so each entry carries `background`: set when the call that started it settles while it runs (`message.tool.transition` success with `metadata.status: "running"` and the `shellID`, remembered when it arrives before the start), false until then, and true for a command first seen in a list, which has no event to tell. The turn state below counts every command; the composer's background commands strip shows only background ones. A command that leaves the index moves to its `ended` list (extensions read it through `lib/guests/shells.ts`) with how it ended: `shell.exited` gives `exited` / `timeout` / `killed`, its exit code and the event time; `shell.deleted` of a running command is `stopped`, since only a user's Stop (the shell route) or an aborted turn removes a running command; a list read that no longer has the command records `unknown`. Removing a running command kills it, and OpenCode usually reports that kill as `shell.exited` with no exit code before the `shell.deleted`, so the index remembers each stop note (`message.updated` with `openchamberShellCancellation` metadata, written by `stopBackgroundShell` before it removes the command) and reads an exit without a code after one as `stopped`; an exit with a code after a stop that failed stays `exited`. Only the first end of a tracked command counts, so OpenCode evicting an exited command later (also `shell.deleted`) changes nothing. The list holds the latest `ENDED_SHELLS_MAX` (200) and resets with the index on a runtime switch. The session turn activity combines this index with live session status; the turn timer does not settle while a command runs, and the last command of an idle session ending settles it. The session's own status and the queue gate are unchanged: a dev server left running in the background must not hold queued messages.
 
 An agent that ended its turn to wait on its pull request reads as working too, last in that order (`pullRequest`). `pr-watch.ts` is the projection of the server's watches (`packages/web/server/lib/pr-watch`): `pr-watch-sync.ts` reads `GET /api/pr-watch` at mount and after every control-stream reconnect and applies `openchamber:pr-watch.updated` by revision, so an older update or snapshot never undoes a newer one; a runtime switch clears it. It only marks: the turn timer settles as usual, the queue is not held, and the server wakes the session. The composer row (`PullRequestWatchStrip`) stops a watch optimistically and puts it back when the server refuses.
@@ -602,9 +676,17 @@ Counting from the moment a client first saw a session busy made every late joine
 
 Forks (`forked-session.ts`): OpenCode 2.x publishes only `session.forked` for a fork, with ids and no record, and no `session.created` follows. `handleEvent` reads the fork's record with `session.get` and replays it as a `session.created`, so other clients show the fork without a list reload. A session the global cache already holds (the forking client inserted it from the fork response) is skipped; a failed read or a runtime switch applies nothing.
 
+Fork permission modes are independent copies of the source's effective mode, including `ask`. Web, Electron, hosted mobile and Capacitor use the permission runtime's `session.forked` handler. VS Code's fork actions refresh the extension host's policy and persist the source mode through `permissionStore`, preserving any explicit fork choice already present. A policy failure is logged and keeps the created fork usable at `ask`; metadata cleanup and goal objective copying continue. A runtime switch stops further policy and metadata work. Ordinary new sessions continue to use Settings defaults.
+
 Child-session discovery (`child-session-discovery.ts`) adds only children the global sessions cache does not list as archived: the listing asks for active children, but a response that left the server before an archive completed still carries them without `time.archived`, and re-adding them would show the just-archived subagents as active orphans until the next refresh.
 
 The active-session watchdog in `sync-context.tsx` sends status recovery through the active-session priority of `runBackgroundNetworkTask`. Its child-session discovery pages use `runSessionListNetworkTask`, alongside global and bootstrap session pages. Both lanes live in `@/lib/background-network`. Git, skills, and directory initialization use the background lane. These limits reserve browser connections for interactive message requests rather than letting startup fan-out occupy the whole pool.
+
+Queued reads belong to the instance where they were submitted. On an instance change, both lanes retire their waiters and the new instance gets its own capacity. Active old requests finish against their original lane counters. A retired task resolves `undefined`; value-consuming callers must preserve state or signal failure, never turn retirement into an empty snapshot. Multi-step reads also check ownership before their next request, because the queue cannot stop a callback that has already started. Session pagination retains one owner across pages and retries.
+
+### Why queue ownership follows instances, not transports
+
+`captureRuntimeInstance` in `lib/runtime-switch.ts` captures the instance key and an instance-change generation. Returning to the same instance cannot revive work from a previous visit. A LAN/relay rebind of the same instance keeps its work and concurrency budget. Lanes retire on the will-change event so changed-event listeners can enqueue new work without losing it to listener order.
 
 Reconnect and watchdog candidates come from non-idle status, the viewed session, or unresolved materialized messages and tool parts. Only ancestors of those candidates join recovery. The watchdog's 5 s status poll and its child discovery run only for sessions with live work of their own; the viewed session joins them only when it is busy or unresolved. An idle viewed session gets its updates from the event stream, and the stale-stream check still covers it. Polling it every 5 s kept the private relay awake for as long as a session stayed open on any device, because the relay hibernates only after 10 s without a message. Parentage in cached session history alone starts no status polling, child discovery, or message materialization; an idle directory with only cached metadata does not scan its history.
 
@@ -730,6 +812,13 @@ always whole, and so are calls arriving by the event stream, except `read` and
 reducer drops it the moment the call finishes (`withoutUnshownResult`), with
 the same marker.
 
+Tool completion checks existing transcript membership and a result shell before
+requesting `getToolContentMessage`. This dedicated adapter operation may read
+ancestors as described in `lib/opencode/DOCUMENTATION.md`; ordinary message
+reads remain session-strict. Completion writes only into the original store
+while the runtime and message are still current, so an evicted store or a
+removed message is never recreated by the response.
+
 A successful local session creation publishes its session record and calls `SessionMessageLoader.initializeCreatedSession` before selection starts navigation loading. The create response establishes an empty transcript only if no transcript has arrived yet. Initialization supersedes an earlier unresolved history load, preserves any messages or metadata received before the create response, and uses the server-returned directory. Opening that new session needs no history read; forced recovery and later eviction still use normal fetching. Creation responses from a previous runtime cannot select or initialize a session in the current runtime.
 
 Initial loads use smaller requests on constrained VS Code/mobile surfaces and publish the cursor-extended ten-turn window described above. The mounted chat timeline requests one history batch when its pinned viewport is underfilled, when the user scrolls toward history, or when load older is pressed; mobile uses the explicit button. Timeline caches, pending work, prepend snapshots, and stale checks use runtime + directory + session identity so equal session IDs in different worktrees cannot share lifecycle state. Older pages are fetched through the same loader and merged with optimistic records before publication. The same chronology contract applies in the VS Code webview because it consumes this shared loader and sync store; the extension bridge must transport OpenCode records without introducing its own ID-based ordering.
@@ -804,7 +893,7 @@ When `session.idle` or `session.error` settles a session but the trailing assist
 
 A completed assistant message is authoritative for its own tool parts. During materialization, a `pending` or `running` tool under `time.completed` becomes `error`/`Interrupted` with an end time. This handles stale persisted tool state during reload. The merge preserves a terminal part already observed live, and a later terminal server snapshot can replace the local interrupted marker.
 
-A turn is marked stopped only when OpenCode says it stopped: a `session.execution.interrupted` event (any reason but `shutdown`, which keeps the turn for resumption) or `session.execution.failed`, translated to `session.idle` with `outcome: "interrupted"` and to `session.error`, or, in loaded history, an `idle` record after the trailing assistant message whose outcome is `interrupted` or `failed` (`markRecordedInterruptedTurn`, run after every message load; the newest record after that message decides). The server does not always finalize the message and its parts before that record (anomalyco/opencode#19023), so with no pending form/permission and the session not running again, the unfinished assistant message is completed locally (`closedLocally`) with the error OpenCode reported for a failed turn (the live `session.error`, or since 2.0.27 the `idle` record's `error`) and with an `aborted` structured error for a stopped turn or a failure that came without one, including text-only turns and turns whose tools had already finished, and any active parts are finalized as `error`/`Interrupted` with an end time, so tool timers stop and cards render the error state. A later terminal event can supersede the mark, while a stale unfinished refresh cannot regress the locally finalized message or parts. Supersession is concrete: a `message.patched` that carries `time.completed` without an error drops the local mark and its error, and a server snapshot whose assistant record is completed replaces a record this client still holds open or marked. Nothing else marks a turn: not an idle status, a status snapshot that lowers or drops a session, a `session.idle` without outcome or with `succeeded`, nor an unfinished answer on its own. OpenCode keeps run state per process, so a turn another OpenCode process runs on the same database (the TUI, `opencode run`) reads exactly like that while it is still going (openchamber#4156). The cost is deliberate: a turn whose process was hard-killed (crash, force quit, power loss) has no record, because nothing ran to write it, and stays open until the session is stopped or continued. A plain `opencode serve`, which is what OpenChamber manages, does not sweep such turns on start; OpenCode's registered service mode does (`SessionRestart`).
+A turn is marked stopped only when OpenCode says it stopped: a `session.execution.interrupted` event (any reason but `shutdown`, which keeps the turn for resumption) or `session.execution.failed`, translated to `session.idle` with `outcome: "interrupted"` and to `session.error`, or, in loaded history, an `idle` record after the trailing assistant message whose outcome is `interrupted` or `failed` (`markRecordedInterruptedTurn`, run after every message load; the newest record after that message decides). The server does not always finalize the message and its parts before that record (anomalyco/opencode#19023), so with no pending form/permission and the session not running again, the unfinished assistant message is completed locally (`closedLocally`) with the error OpenCode reported for a failed turn (the live `session.error`, or since 2.0.27 the `idle` record's `error`) and with an `aborted` structured error for a stopped turn or a failure that came without one, including text-only turns and turns whose tools had already finished, and any active parts are finalized as `error`/`Interrupted` with an end time (`errorSource: "local"` marks the manufactured end, so `sync/recoverable-questions.ts` can tell it from OpenCode's own report and a later authoritative tool transition supersedes it), so tool timers stop and cards render the error state. A later terminal event can supersede the mark, while a stale unfinished refresh cannot regress the locally finalized message or parts. Supersession is concrete: a `message.patched` that carries `time.completed` without an error drops the local mark and its error, and a server snapshot whose assistant record is completed replaces a record this client still holds open or marked. Nothing else marks a turn: not an idle status, a status snapshot that lowers or drops a session, a `session.idle` without outcome or with `succeeded`, nor an unfinished answer on its own. OpenCode keeps run state per process, so a turn another OpenCode process runs on the same database (the TUI, `opencode run`) reads exactly like that while it is still going (openchamber#4156). The cost is deliberate: a turn whose process was hard-killed (crash, force quit, power loss) has no record, because nothing ran to write it, and stays open until the session is stopped or continued. A plain `opencode serve`, which is what OpenChamber manages, does not sweep such turns on start; OpenCode's registered service mode does (`SessionRestart`).
 
 Directory stores also own session-keyed sidecar notification channels for permissions, forms, and message materialization. Collapsed sidebar rows group their hidden descendants by owning directory and subscribe to the exact permission and form buckets; expanded rows subscribe only to their own buckets. High-frequency realtime part events annotate the exact session/message before committing, so visible records, user history, renderability, and sidebar permission and question rows are not notified by unrelated sessions. Structural message replacements notify only changed subscribed session buckets; unannotated bulk part replacement conservatively resets active message subscribers so bootstrap, pagination, rollback, and legacy writers cannot leave stale projections.
 
@@ -907,13 +996,25 @@ Examples of global-store updates performed in `session-actions.ts`:
 
 Sending a message while forms are open cancels them through `dismissOpenFormsForSession`, which removes them from the store before the cancel request so the card disappears at once. A not-found answer keeps them removed. Any other failure puts each form back into the store and session it came from: the agent is still waiting, and no event will return it. The mounted chat's form-only recovery would refetch the open session's own form, but a subagent's form shown in the parent chat has no other path back. Open permissions follow the same rule through `dismissOpenPermissionsForSession`, which rejects them: a not-found answer keeps them removed, any other failure puts each one back. Permissions have no in-chat recovery at all, so without the restore even the open session's own prompt stays hidden until a reconnect. A restored card can belong to a request the server already settled (its response was lost, or another client answered it); any reply from the card then comes back not-found, and `respondToPermission` removes it. The same cleanup applies to its other callers, VS Code auto-accept and the desktop tray's approve action.
 
+A lost question can be answered through a new paid turn in the asking session. `recoverable-questions.ts` captures only observed session-owned question forms with a tool link. Recovery requires that linked call's exact interruption error or a local interrupted-turn mark. A recorded interrupted or failed turn also grants that mark to stale active tools finalized by materialization under an already completed assistant message; the server's completed message stays unchanged. Explicit replies and local dismissals veto recovery; shutdown, still-running calls and unknown evidence do not qualify. Later authoritative tool transitions supersede local marks.
+
+Recovery is memory-only and retains the last 100 captured questions together with their outcomes and tool dispositions. Closed questions remain tombstoned within that window; eviction forgets the question and its auxiliary records together. Session deletion clears its entries and runtime switching clears everything. These cards do not hold directories, protect caches or count as blocking requests. Both form surfaces warn about the new paid turn, use the normal send path with a per-request lock, and retain drafts after rejected sends. Recovered answers explicitly disable Goal Mode for their turn and leave the main composer's armed goal untouched.
+
+### Why recovery needs a linked tool outcome
+
+A missing form can have been answered on another client. Recovery therefore requires request-specific turn-death evidence; missing forms, idle status and disconnects alone cannot re-ask a question.
+
 ### Restore (unarchive) contract
 
 An explicitly user-initiated composer send restores an archived top-level
 session after OpenCode accepts the prompt or command. Queueing from the
 composer is the same intent: the session is restored once the queue accepts
 the message, so delivery itself never restores anything and the server queue
-has no archive logic. Opening the archive, typing, shell commands, scheduled
+has no archive logic. A prompt an agent or the CLI sends through
+`session.send` is the same intent, and the server restores the session there
+once OpenCode accepts it (`restoreAfterSend` in
+`packages/web/server/lib/openchamber-sessions/routes.js`), with its archived
+subsessions. Opening the archive, typing, shell commands, scheduled
 tasks and automated continuations do not restore it. The send captures the
 session's archive timestamp and runtime; a newer archive, manual restore or
 runtime switch supersedes that intent. Restoration uses the existing tree
@@ -1022,7 +1123,7 @@ Typing the first character in a managed Chat draft starts one deduplicated direc
 
 Enter in a draft makes it a session on the spot. `sendMessage` mints the session id (`descendingId("ses")`: OpenCode mints session ids counting down with time, so the client's lists where the server's would, and `session.create` accepts the id), opens an empty transcript for it (`openPendingSessionTranscript`), saves its selection, selects it with the `submitted-draft` transition (which closes the draft), and publishes a `pendingDraftSends` entry for it. The prompt then goes through the same `routeMessage` and `optimisticSend` as any other send: the user message is inserted at once, without marking the session busy (no agent works yet, so no working status shows next to "Creating session…"), and the request waits on `ready`, which is the session's creation (`createSession` with the minted id and `navigation: "preserve"`, so the response does not re-navigate), the post-creation bookkeeping, the busy mark, the armed goal and the knowledge write. Whether the server has the session is answered by the create response alone; a session created under another id than the minted one is not this one, counts as not created and is deleted best effort. A send that fails once the session exists (a goal or knowledge write, a command lookup, a lost connection before the insert) leaves the session in place, idle again, with its text back in its composer. The waits that decide where the session is shown (a worktree still being made, a chat folder being prepared) happen before the switch, with the draft still open and its own status line; the waits that only delay creation (a worktree's setup commands, the start folder inside a worktree, the missing-directory probe) run while the message is on screen, and a session that ends up in another directory than the one it was shown in has its transcript carried there by `adoptSessionMove`.
 
-The entry says what the composer shows: `sessionCreated` false is the "Creating session…" line (shown once the wait has held 300 ms, so a fast server never flashes it); while the entry exists, Send is disabled and Enter does nothing, so a second message cannot reach OpenCode before the first prompt. Context that must be fresh at send time (the response style, which another device may have changed) is read through `lateContext` while `ready` settles and admitted right before the request leaves, so neither the message nor the request waits for that read. The sidebar lists the session once the server has it, as before #5783; the early busy mark that listed it at once is gone. The entry goes when the request that starts the turn leaves the client (`beforeSend` from `opencodeClient.sendMessage` and `sendCommand` right before their last request, after the context parts ahead of it; before `shellSession`), never when it resolves: a prompt request can resolve only after the directory's services started, long after the agent began answering. A shell command therefore does not hold the composer for its lifetime. A draft is sent once (`sentDraftIds`): a second `sendMessage` with the same draft snapshot is refused at the store, creates nothing and keeps the caller's text.
+The entry says what the composer shows: `sessionCreated` false is the "Creating session…" line (shown once the wait has held 300 ms, so a fast server never flashes it); while the entry exists, Send is disabled and Enter does nothing, so a second message cannot reach OpenCode before the first prompt. The response style rides in the same knowledge sync that `ready` covers, so the first prompt reads it from the session's instructions and the message still appears without waiting for that read. The sidebar lists the session once the server has it, as before #5783; the early busy mark that listed it at once is gone. The entry goes when the request that starts the turn leaves the client (`beforeSend` from `opencodeClient.sendMessage` and `sendCommand` right before their last request, after the context parts ahead of it; before `shellSession`), never when it resolves: a prompt request can resolve only after the directory's services started, long after the agent began answering. A shell command therefore does not hold the composer for its lifetime. A draft is sent once (`sentDraftIds`): a second `sendMessage` with the same draft snapshot is refused at the store, creates nothing and keeps the caller's text.
 
 A rejected `ready` is a definite failure, not an ambiguous one: `optimisticSend` rolls the message back without a confirmation read. The store then reopens the same draft object (same `draftId` and `workDraftId`, so the composer's draft key is unchanged and the sent text returns there), clears the pointer a cold launch would restore, removes a chat's directory, and rejects with `DraftSendError`, which names the session, its directory and whether the server created it. The composer restores the text under the identity the error names: the created session's when it exists, the draft's otherwise, with the text typed meanwhile kept above it. A user who moved to another session or draft meanwhile is left where they are; the created session simply is in the sidebar, and a draft that failed to create stays listed.
 
@@ -1032,7 +1133,11 @@ The transcript, its scroll, its optimistic shadow and every status index are key
 
 The global sessions store persists and hydrates one bounded, runtime-scoped startup snapshot containing only active managed chat sessions. Every global session surface, including the main sidebar and Electron Mini Chat switcher, sees that stale snapshot while the global list is unresolved or failed; the first authoritative global snapshot replaces it. Full and directory-scoped global loads resolve the active server's chats roots before fetching or classifying sessions. The store enters loading before resolving roots and hydrates its saved snapshot once roots are available, preserving any newer mutations. Root lookup failure preserves the snapshot for a later retry; a failed global request retains the hydrated sessions. Old runtime completions cannot hydrate or fetch for the destination runtime. Persistence waits for root authority; before hydration it overlays explicit mutations onto the saved seed rather than replacing it with a partial list, and the first page of a still-paginating full load is merged into the visible lists (status stays `loading`) without ever being persisted as that snapshot. Hydration happens once per runtime, so a later global load cannot undo an earlier directory refresh. Runtime reset to idle must hydrate rather than erase the destination runtime's snapshot; authoritative empty, archive, and delete updates do persist the resulting empty or reduced list.
 
-VS Code intentionally has no managed Chats mode. It neither reads nor writes the managed Chats startup cache, regular drafts continue to target the open workspace, and the global session store rejects managed chat sessions from both snapshots and live upserts before any VS Code surface can consume them. Sidebar and switcher filters repeat that exclusion defensively.
+VS Code uses managed Chats only when the host's workspace folder list is empty.
+Regular drafts then ignore the last project directory, and the global session
+store, sidebar and switcher admit Chats. Windows with folders retain workspace
+drafts and exclude Chats from snapshots and live upserts. VS Code does not read
+or write the managed Chats startup cache; reopening uses the OpenCode session list.
 
 ### Remembering the last draft target
 
@@ -1321,7 +1426,12 @@ calls `restoreLastActiveSession` after it connects. A route, link, or click
 that selected a session first wins. The sidebar's project session selection
 (`useProjectSessionSelection`) ignores the project active when the list
 mounts and reacts only to later project switches; it used to pick that
-project's remembered or first session on launch.
+project's remembered or first session on launch. For the same reason the
+restore passes `keepSingleProject`, so reopening a session does not rewrite
+the sidebar's remembered One project picker: the restore is launch state, not
+the user choosing a project. The selection keeps that policy in memory until
+the next navigation, so a space's project arriving later also leaves the picker
+alone while making the restored session's project active.
 
 The scroll hook holds the gate
 until the viewport is in place. The reveal itself runs on the frames after the

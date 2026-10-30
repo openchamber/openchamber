@@ -54,8 +54,11 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
     OpenAI-compatible `/v1/audio/transcriptions` endpoint
     (`openai-compatible-session.js`, reuses `../tts/stt.js`). `connect()`
     runs the same URL check as every transcription
-    (`normalizeCustomOpenAIBaseURL`), so a refused host — any remote one in
-    enterprise mode — fails before the user dictates.
+    (`normalizeCustomOpenAIBaseURL`) and the same endpoint path check
+    (`normalizeEndpointPath`), so a refused host or a malformed path — any
+    remote host in enterprise mode — fails before the user dictates. A
+    configured `endpointPath` replaces the fixed resource path on each
+    committed segment.
 - `local/` — worker process + client (IPC, idle shutdown TTL), sherpa
   recognizer engine and segment session (one decode per committed segment),
   model catalog and downloader. The native `sherpa-onnx-node` addon is only
@@ -75,9 +78,11 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 
 `options` in `start` carries the client-selected provider config:
 `{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey }, correct? }`. With
+openaiCompatible?: { baseUrl, model, apiKey, endpointPath }, correct? }`. With
 `correct: true` the final text goes through the correction pass first, and
 `finish_accepted.timeoutMs` includes its budget (`CORRECTION_TIMEOUT_MS`).
+An empty or
+absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path.
 
 ## Segmentation
 
@@ -118,6 +123,7 @@ the user is still speaking, so only the tail is left to transcribe on stop.
 - Silence-only segments (peak < 300) are cleared, never committed, so
   Whisper-style providers do not hallucinate on silence.
 - Model files live under `~/.config/openchamber/speech-models`.
+- Model installation verifies required files in a staging directory before promotion. Extraction failures remove the staging directory and cached archive.
 
 ## Decisions
 
@@ -187,3 +193,7 @@ disk forever.
 The sherpa-onnx 2.0 release removed espeak-ng and piper-phonemize (k2-fsa/sherpa-onnx#4055),
 which the Kokoro and Piper voices of local read-aloud use to turn text into
 phonemes (`files.espeakData`). An upgrade has to bring those voices back first.
+
+### Why native Windows decompression and not a JavaScript extractor
+
+Windows' bundled tar can delegate bzip2 to an external program that the OS does not ship. On Windows, bundled 7-Zip decodes to a temporary tar file inside staging, then system tar extracts it. This keeps decompression out of the server's main thread and avoids the MSYS bzip2-to-tar pipe. macOS and Linux keep direct system-tar extraction. The temporary tar needs additional disk space and disappears with staging.

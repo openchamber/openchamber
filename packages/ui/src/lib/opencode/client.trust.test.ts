@@ -66,6 +66,7 @@ describe("OpenCode folder trust in the client", () => {
       expect(calls).toEqual([
         "GET /api/agent",
         "GET /api/opencode/trust",
+        "GET /api/opencode/trust",
         "POST /api/opencode/trust",
         "GET /api/agent",
       ])
@@ -98,6 +99,57 @@ describe("OpenCode folder trust in the client", () => {
       await settleOpenCodeTrust("skip")
       expect(await create).toBe("refused")
     } finally {
+      fetch.mockRestore()
+    }
+  })
+
+  test("asks once when identical worktrees wait for the same repository trust", async () => {
+    const directories = Array.from({ length: 6 }, (_, index) => `/repo/worktree-${index + 1}`)
+    const assessed = new Set<string>()
+    const prompts: string[] = []
+    let trusted = false
+    let savedAnswers = 0
+    let answerFollowingPrompts = false
+    let markAssessed: () => void
+    const allAssessed = new Promise<void>((resolve) => { markAssessed = resolve })
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input.toString(), init)
+      const url = new URL(request.url)
+      const directory = decodeURIComponent(request.headers.get("x-opencode-directory") ?? "")
+      if (url.pathname === "/api/opencode/trust") {
+        if (request.method === "POST") {
+          savedAnswers += 1
+          trusted = true
+          return assessment((await request.json()).directory, true)
+        }
+        const assessedDirectory = url.searchParams.get("directory") ?? ""
+        assessed.add(assessedDirectory)
+        if (assessed.size === directories.length) markAssessed()
+        return assessment(assessedDirectory, trusted)
+      }
+      return trusted ? Response.json({ data: [{ id: "build" }] }) : refusal(directory)
+    })
+    const unsubscribe = subscribeOpenCodeTrust(() => {
+      const prompt = getOpenCodeTrustSnapshot()
+      if (!prompt) return
+      prompts.push(prompt.directory)
+      if (answerFollowingPrompts) void settleOpenCodeTrust("trust")
+    })
+    try {
+      const pending = directories.map((directory) => createRuntimeOpencodeClient({
+        baseUrl: "https://trust.test/api", directory,
+      }).agent.list())
+      await allAssessed
+      await nextPrompt()
+      // Finish every unexpected duplicate too, so the regression fails on the
+      // observed prompt count instead of leaving requests waiting for a timer.
+      answerFollowingPrompts = true
+      expect(await settleOpenCodeTrust("trust")).toBe("saved")
+      expect(await Promise.all(pending)).toHaveLength(directories.length)
+      expect(prompts).toHaveLength(1)
+      expect(savedAnswers).toBe(1)
+    } finally {
+      unsubscribe()
       fetch.mockRestore()
     }
   })

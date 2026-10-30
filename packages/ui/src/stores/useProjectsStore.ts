@@ -211,7 +211,7 @@ const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | u
   return { mime, updatedAt, source };
 };
 
-const resolveUploadMime = (file: File): 'image/png' | 'image/jpeg' | 'image/svg+xml' | null => {
+export const resolveUploadMime = (file: File): 'image/png' | 'image/jpeg' | 'image/svg+xml' | null => {
   const rawType = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
   if (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/svg+xml') {
     return rawType;

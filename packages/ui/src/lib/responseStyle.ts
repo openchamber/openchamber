@@ -44,9 +44,9 @@ const buildResponseStyleInstruction = ({
   return getResponseStylePresetInstructions(preset);
 };
 
-export const fetchResponseStyleInstruction = async (): Promise<string | null> => {
+export const fetchResponseStyleInstruction = async (): Promise<string | null | undefined> => {
   const settings = await loadDesktopSettings();
-  if (!settings) return null;
+  if (!settings) return undefined;
   return buildResponseStyleInstruction({
     enabled: settings.responseStyleEnabled === true,
     preset: settings.responseStylePreset,

@@ -11,7 +11,7 @@ import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client"
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
-import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage, getSafeStorage } from "./utils/safeStorage";
 import { filterVisibleAgents, isAgentHidden } from "./useAgentsStore";
 import { isPrimaryMode } from "@/components/chat/mobileControlsUtils";
 import { useSessionUIStore } from "@/sync/session-ui-store";
@@ -46,6 +46,7 @@ const ADD_PROVIDER_SENTINEL = "__add_provider__";
 const GIT_UTILITY_PROVIDER_ID = "zen";
 const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 const PROVIDER_CONFIG_REFRESH_CONCURRENCY = 4;
+
 const PROVIDERS_RETRY_SOURCE = "loadProviders:retryAfterFailure";
 const PROVIDERS_RETRY_DELAY_MS = 3000;
 
@@ -59,8 +60,10 @@ interface OpenChamberDefaults {
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
     dictationEnabled?: boolean;
+    dictationAutoSend?: boolean;
     sttProvider?: 'local' | 'openai-compatible';
     sttServerUrl?: string;
+    sttEndpointPath?: string;
     sttModel?: string;
     sttLocalModel?: string;
     sttLanguage?: string;
@@ -74,6 +77,8 @@ const OPENCHAMBER_DEFAULTS_FRESH_MS = 15_000;
 type ConfigRuntimeContext = { runtimeKey: string; generation: number };
 
 let configRuntimeGeneration = 0;
+// A transport change retires in-flight reads but keeps delayed same-instance discovery.
+let configInstanceGeneration = 0;
 
 const captureConfigRuntimeContext = (): ConfigRuntimeContext => ({
     runtimeKey: getRuntimeKey(),
@@ -144,8 +149,10 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         zenModel: zenModel.length > 0 ? zenModel : undefined,
         messageStreamTransport: data.messageStreamTransport,
         dictationEnabled: data.dictationEnabled,
+        dictationAutoSend: data.dictationAutoSend,
         sttProvider: data.sttProvider,
         sttServerUrl: data.sttServerUrl,
+        sttEndpointPath: data.sttEndpointPath,
         sttModel: data.sttModel,
         sttLocalModel: data.sttLocalModel,
         sttLanguage: data.sttLanguage,
@@ -611,6 +618,14 @@ const buildModelMetadataKey = (providerId: string, modelId: string) => {
     return `${normalizedProvider}/${modelId}`;
 };
 
+const runtimeModelReleaseDate = (released: number | undefined): string | undefined => {
+    if (released === undefined || !Number.isFinite(released) || released <= 0) return undefined;
+    const date = new Date(released);
+    if (!Number.isFinite(date.getTime())) return undefined;
+    const iso = date.toISOString();
+    return /^\d{4}-/.test(iso) ? iso.slice(0, 10) : undefined;
+};
+
 /**
  * Fallback metadata for models models.dev does not list (custom providers,
  * proxies). v2 prices a model per context tier; the untiered entry is the base
@@ -626,7 +641,8 @@ const deriveModelMetadata = (providerId: string, model: ProviderModel): ModelMet
     const hasReasoningSignal = modelVariantNames(model).length > 0
         || model.compatibility?.reasoningField !== undefined
         || model.compatibility?.requireReasoning === true;
-    return {
+    const releaseDate = runtimeModelReleaseDate(model.time?.released);
+    const metadata: ModelMetadata = {
         id: model.modelID,
         providerId,
         name: model.name,
@@ -645,6 +661,29 @@ const deriveModelMetadata = (providerId: string, model: ProviderModel): ModelMet
         } : undefined,
         limit: { context: model.limit.context, output: model.limit.output },
     };
+    if (releaseDate) metadata.release_date = releaseDate;
+    return metadata;
+};
+
+const findDescriptiveMetadata = (
+    metadata: ReadonlyMap<string, ModelMetadata>,
+    model: ProviderModel,
+    providerCanonical: string | undefined,
+): ModelMetadata | undefined => {
+    if (!model.modelID) return undefined;
+    const canonical = normalizeOptionalString(model.canonical)
+        ?? normalizeOptionalString(providerCanonical);
+    if (canonical) {
+        return metadata.get(buildModelMetadataKey(canonical, model.modelID));
+    }
+    let match: ModelMetadata | undefined;
+    for (const [key, entry] of metadata) {
+        const separator = key.indexOf('/');
+        if (separator < 0 || key.slice(separator + 1) !== model.modelID) continue;
+        if (match) return undefined;
+        match = entry;
+    }
+    return match;
 };
 
 const transformModelsDevResponse = (payload: unknown): Map<string, ModelMetadata> => {
@@ -1161,6 +1200,7 @@ subscribeRuntimeEndpointChanged((detail) => {
     _agentsLoadGeneration.clear();
     _initializeAppInFlight = null;
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
+    configInstanceGeneration += 1;
     useConfigStore.setState({
         configRuntimeKey: detail.runtimeKey,
         directoryScoped: {},
@@ -1485,11 +1525,16 @@ interface ConfigStore {
     openaiCompatibleUrl: string;
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
+    /** Optional resource path for the OpenAI-compatible speech endpoint. */
+    openaiCompatibleTtsEndpointPath: string;
     // STT (dictation) settings
     dictationEnabled: boolean;
+    dictationAutoSend: boolean;
     sttProvider: 'local' | 'openai-compatible';
     sttServerUrl: string;
     sttModel: string;
+    /** Optional resource path for the OpenAI-compatible transcription endpoint. */
+    sttEndpointPath: string;
     sttLocalModel: string;
     sttLanguage: string;
     sttCorrectTranscript: boolean;
@@ -1521,10 +1566,13 @@ interface ConfigStore {
     setOpenaiCompatibleUrl: (url: string) => void;
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
+    setOpenaiCompatibleTtsEndpointPath: (path: string) => void;
     setDictationEnabled: (enabled: boolean) => void;
+    setDictationAutoSend: (enabled: boolean) => void;
     setSttProvider: (provider: 'local' | 'openai-compatible') => void;
     setSttServerUrl: (url: string) => void;
     setSttModel: (model: string) => void;
+    setSttEndpointPath: (path: string) => void;
     setSttLocalModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
     setSttCorrectTranscript: (enabled: boolean) => void;
@@ -1891,6 +1939,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'kokoro';
                 })(),
+                openaiCompatibleTtsEndpointPath: getSafeStorage().getItem('openaiCompatibleTtsEndpointPath') ?? '',
                 // Voice input (dictation) master toggle - default enabled
                 dictationEnabled: (() => {
                     if (typeof window !== 'undefined') {
@@ -1899,6 +1948,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return true;
                 })(),
+                dictationAutoSend: getSafeStorage().getItem('dictationAutoSend') === 'true',
                 // STT provider: 'local' (server-side sherpa-onnx) or 'openai-compatible'
                 sttProvider: (() => {
                     if (typeof window !== 'undefined') {
@@ -1924,6 +1974,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'deepdml/faster-whisper-large-v3-turbo-ct2';
                 })(),
+                sttEndpointPath: getSafeStorage().getItem('sttEndpointPath') ?? '',
                 sttLocalModel: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('sttLocalModel');
@@ -2799,9 +2850,11 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsZenModel: defaults.zenModel,
                             settingsMessageStreamTransport: defaults.messageStreamTransport ?? state.settingsMessageStreamTransport,
                             dictationEnabled: typeof defaults.dictationEnabled === 'boolean' ? defaults.dictationEnabled : state.dictationEnabled,
+                            dictationAutoSend: defaults.dictationAutoSend ?? state.dictationAutoSend,
                             sttProvider: defaults.sttProvider ?? state.sttProvider,
                             sttServerUrl: defaults.sttServerUrl ?? state.sttServerUrl,
                             sttModel: defaults.sttModel ?? state.sttModel,
+                            sttEndpointPath: defaults.sttEndpointPath ?? state.sttEndpointPath,
                             sttLocalModel: defaults.sttLocalModel ?? state.sttLocalModel,
                             sttLanguage: defaults.sttLanguage ?? state.sttLanguage,
                             sttCorrectTranscript: defaults.sttCorrectTranscript ?? state.sttCorrectTranscript,
@@ -3981,6 +4034,11 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
+                setOpenaiCompatibleTtsEndpointPath: (path: string) => {
+                    set({ openaiCompatibleTtsEndpointPath: path });
+                    getSafeStorage().setItem('openaiCompatibleTtsEndpointPath', path);
+                },
+
                 setDictationEnabled: (enabled: boolean) => {
                     set({ dictationEnabled: enabled });
                     if (typeof window !== 'undefined') {
@@ -3993,6 +4051,12 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ sttCorrectTranscript: enabled });
                     globalThis.localStorage?.setItem('sttCorrectTranscript', String(enabled));
                     updateDesktopSettings({ sttCorrectTranscript: enabled }).catch(() => {});
+                },
+
+                setDictationAutoSend: (enabled: boolean) => {
+                    set({ dictationAutoSend: enabled });
+                    getSafeStorage().setItem('dictationAutoSend', String(enabled));
+                    updateDesktopSettings({ dictationAutoSend: enabled }).catch(() => {});
                 },
 
                 setSttProvider: (provider: 'local' | 'openai-compatible') => {
@@ -4018,6 +4082,12 @@ export const useConfigStore = create<ConfigStore>()(
                         localStorage.setItem('sttModel', model);
                     }
                     updateDesktopSettings({ sttModel: model }).catch(() => {});
+                },
+
+                setSttEndpointPath: (path: string) => {
+                    set({ sttEndpointPath: path });
+                    getSafeStorage().setItem('sttEndpointPath', path);
+                    updateDesktopSettings({ sttEndpointPath: path }).catch(() => {});
                 },
 
                 setSttLocalModel: (model: string) => {
@@ -4185,6 +4255,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
 
                     const runtimeContext = captureConfigRuntimeContext();
+                    const instanceGeneration = configInstanceGeneration;
                     const run = (async () => {
                         const initStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
                         markStartupTrace('initializeApp:start');
@@ -4285,7 +4356,10 @@ export const useConfigStore = create<ConfigStore>()(
                             set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected", lastInitFailure: null });
                             // A plugin registers its agents while the server is already serving, so
                             // the load above can race it. Re-check once, after startup has settled.
-                            setTimeout(() => void get().loadAgents({ directory: configDirectory, source: 'startupAgentRecheck' }), 8_000);
+                            setTimeout(() => {
+                                if (instanceGeneration !== configInstanceGeneration) return;
+                                void get().loadAgents({ directory: configDirectory, source: 'startupAgentRecheck' });
+                            }, 8_000);
                             const initEnded = typeof performance !== 'undefined' ? performance.now() : Date.now();
                             markStartupTrace('initializeApp:end', {
                                 durationMs: Math.round(initEnded - initStarted),
@@ -4339,18 +4413,44 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     const { modelsMetadata, providers } = get();
                     const cached = modelsMetadata.get(key);
-                    const model = findCatalogModel(providers.find((p) => p.id === providerId)?.models, modelId);
+                    const provider = providers.find((p) => p.id === providerId);
+                    const model = findCatalogModel(provider?.models, modelId);
 
                     // The running OpenCode's limits win over the models.dev
                     // catalog: providers adjust them per auth (ChatGPT sign-in
                     // serves GPT models with a 400K window, the catalog says 1M+).
                     if (cached) {
-                        if (!model || model.limit.context <= 0) return cached;
-                        return { ...cached, limit: { ...cached.limit, context: model.limit.context, output: model.limit.output } };
+                        if (!model) return cached;
+                        const releaseDate = runtimeModelReleaseDate(model.time?.released);
+                        const hasLiveLimits = model.limit.context > 0;
+                        if (!hasLiveLimits && !releaseDate) return cached;
+                        const metadata: ModelMetadata = { ...cached };
+                        if (hasLiveLimits) {
+                            metadata.limit = {
+                                ...cached.limit,
+                                context: model.limit.context,
+                                output: model.limit.output,
+                            };
+                        }
+                        if (releaseDate) metadata.release_date = releaseDate;
+                        return metadata;
                     }
 
                     // Fallback: derive metadata from provider model data (covers custom providers not in models.dev)
-                    return model ? deriveModelMetadata(providerId, model) : undefined;
+                    if (!model) return undefined;
+                    const derived = deriveModelMetadata(providerId, model);
+                    const descriptive = findDescriptiveMetadata(modelsMetadata, model, provider?.canonical);
+                    if (!descriptive) return derived;
+                    const supplemented: ModelMetadata = { ...derived };
+                    const knowledge = normalizeOptionalString(descriptive.knowledge);
+                    if (knowledge) supplemented.knowledge = knowledge;
+                    if (!supplemented.release_date) {
+                        const releaseDate = normalizeOptionalString(descriptive.release_date);
+                        if (releaseDate) supplemented.release_date = releaseDate;
+                    }
+                    const lastUpdated = normalizeOptionalString(descriptive.last_updated);
+                    if (lastUpdated) supplemented.last_updated = lastUpdated;
+                    return supplemented;
                 },
                 getVisibleAgents: () => {
                     const { agents } = get();
@@ -4434,6 +4534,7 @@ export const useConfigStore = create<ConfigStore>()(
                     settingsZenModel: state.settingsZenModel,
                     settingsMessageStreamTransport: state.settingsMessageStreamTransport,
                     dictationEnabled: state.dictationEnabled,
+                    dictationAutoSend: state.dictationAutoSend,
                     speechRate: state.speechRate,
                     speechPitch: state.speechPitch,
                     speechVolume: state.speechVolume,

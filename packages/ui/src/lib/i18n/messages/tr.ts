@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -43,6 +44,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  'quota.family.zen': 'Zen Modelleri',
+  'quota.value.requests': 'İstekler: {count}',
+  'quota.value.spent': '{spent} harcandı',
   "opencodeCompatibility.bundled": "OpenCode, OpenChamber ile birlikte gelir. OpenCode v2 için OpenChamber’ı güncelleyin.",
   "opencodeCompatibility.title": "OpenCode v2 gerekli",
   "opencodeCompatibility.outdatedTitle": "OpenCode’u güncelleyin",
@@ -104,6 +108,7 @@ export const dict = {
   ...fileEditorAidsI18n.tr,
   ...htmlRenderI18n.tr,
   ...documentToolbarI18n.tr,
+  ...secretRequestI18n.tr,
   ...sessionNoticesI18n.tr,
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,
@@ -153,6 +158,9 @@ export const dict = {
   'chat.chatInput.mrCheckContext': 'Başarısız pipeline işleri',
   'chat.chatInput.prCheckContextRemove': 'PR kontrolleri bağlamını kaldır',
   'common.loading': 'Yükleniyor...',
+  'common.image.loading': 'Görsel yükleniyor',
+  'common.image.loadFailed': 'Görsel yüklenemedi',
+  'common.image.retry': 'Yeniden dene',
   'common.unavailable': 'Kullanılamıyor',
   'common.language.english': 'İngilizce',
   'common.language.german': 'Almanca',
@@ -3301,10 +3309,11 @@ export const dict = {
   'common.duration.secondsCompact': '{seconds} sn',
   'common.duration.minutesSecondsCompact': '{minutes}dk {seconds}sn',
   'common.duration.hoursMinutesCompact': '{hours}sa {minutes}dk',
-  'contextFileOpen.failure.tooLarge': 'Dosya açmak için çok büyük (>{count} satır)',
-  'contextFileOpen.failure.tooLargeSize': 'Dosya açılamayacak kadar büyük ({size} üzeri)',
-  'contextFileOpen.failure.missing': 'Dosya bulunamadı',
-  'contextFileOpen.failure.unreadable': 'Dosya açılamadı',
+  'contextFileOpen.failure.tooLarge': '{name} açılamayacak kadar büyük',
+  'contextFileOpen.failure.tooLargeDetail': '{count} satırdan fazla · {size}',
+  'contextFileOpen.failure.tooLargeSize': '{limit} üzeri · {size}',
+  'contextFileOpen.failure.missing': '{name} bulunamadı',
+  'contextFileOpen.failure.unreadable': '{name} açılamadı',
   'quota.window.5h': '5 Saatlik',
   'quota.window.7d': '7 Günlük Limit',
   'quota.window.extraUsage': 'Ek Kullanım',
@@ -3312,6 +3321,7 @@ export const dict = {
   'quota.window.daily': 'Günlük',
   'quota.window.monthly': 'Aylık',
   'quota.window.credits': 'Kredi',
+  'quota.value.creditsUsed': 'Kullanılan kredi: {credits}',
   'quota.window.keyLimit': 'Anahtar Limiti',
   'quota.window.creditsBalance': 'Kredi Bakiyesi',
   'quota.window.monthlyCredits': 'Aylık Kredi',
@@ -3376,6 +3386,8 @@ export const dict = {
   'chat.workStatus.action.openSubagent': '{name} öğesini aç',
   'chat.workStatus.section.usage': 'Kullanım',
   'chat.workStatus.section.telemetry': 'Tur istatistikleri',
+  'chat.workStatus.telemetry.previousTurn': 'Önceki tur',
+  'chat.workStatus.telemetry.previousTurnRate': 'Önceki tur · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Yanıt',
   'chat.workStatus.telemetry.responseSpeedDescription': 'Son metnin ne hızla geldiği. İlk bekleme, akıl yürütme ve önceki araç çağrıları dahil değildir. Metin zamanlarından hesaplanan bir tahmindir, sağlayıcı tarafındaki hız ölçümü değildir.',
   'chat.workStatus.telemetry.speed': 'Tüm istek',
@@ -3671,6 +3683,7 @@ export const dict = {
   'chat.formCard.submitFailed': 'Yanıt gönderilemedi',
   'chat.formCard.cancelFailed': 'İstek iptal edilemedi',
   'chat.formCard.tryAgain': 'Tekrar deneyin.',
+  'chat.formCard.recoveredNotice': 'Tur beklerken durdu. Gönder, yeni bir ücretli tur başlatır.',
   'chat.formDock.progress': '{current} / {total}',
   'chat.formDock.waiting': '{count} tane daha bekliyor',
   'chat.formDock.back': 'Geri',
@@ -3884,4 +3897,14 @@ export const dict = {
   'notifications.question.bodyFallback': 'Ajan yanıtınızı bekliyor',
   'notifications.permission.bodyFallback': 'Ajan onayınızı bekliyor',
   'notifications.permission.title': 'İzin gerekiyor',
+  'chat.promptHistorySearch.title': "İstem geçmişinde ara",
+  'chat.promptHistorySearch.searchPlaceholder': "Hatırlanan istemlerde ara",
+  'chat.promptHistorySearch.close': "İstem geçmişi aramasını kapat",
+  'chat.promptHistorySearch.empty': "Henüz aranacak istem yok",
+  'chat.promptHistorySearch.noMatches': "Eşleşen istem yok",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} ek",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} ek",
+  'chat.promptHistorySearch.hint': "↑ ↓ ile gezin · Enter ile yükle · Esc ile kapat",
+  'helpDialog.item.searchPromptHistory': "İstem geçmişinde ara (sohbet girişi)",
+
 };

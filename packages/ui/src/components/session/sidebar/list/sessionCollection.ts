@@ -11,6 +11,7 @@ import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { normalizePath } from '../utils';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import { isVSCodeWithoutWorkspace } from '@/lib/vscodeBootstrap';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
 import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
 import type { GlobalSessionStructure } from '@/stores/globalSessionStructure';
@@ -43,10 +44,11 @@ export const partitionSidebarSessions = (
 ): SidebarSessionPartitions => {
   const projectSessions: Session[] = [];
   const chatSessions: Session[] = [];
+  const excludeChats = isVSCode && !isVSCodeWithoutWorkspace();
   for (const session of sessions) {
     if (isBtwSession(session)) continue;
     if (isChatDirectoryPath(session.directory)) {
-      if (isVSCode) continue;
+      if (excludeChats) continue;
       chatSessions.push(session);
       continue;
     }

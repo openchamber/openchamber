@@ -97,8 +97,10 @@ export function getCatalogPluginPrimaryAction(
     return 'install';
   }
 
-  const latestSpec = getLatestNpmSpec(packageName, state.registry);
-  return latestSpec && latestSpec !== state.userEntry.spec ? 'update' : 'setup';
+  // Update writes an exact version, so only an exact version behind the latest
+  // release gets one. A bare, tag or range spec stays as the user wrote it.
+  const hasUpdate = state.registry?.kind === 'npm-ok' && state.registry.hasUpdate;
+  return hasUpdate && getLatestNpmSpec(packageName, state.registry) ? 'update' : 'setup';
 }
 
 /**
@@ -134,7 +136,7 @@ export function getCatalogPluginPresentation(
   if (state.registry?.kind === 'npm-ok' && state.registry.currentVersion === null) {
     return { status: 'unpinned', latestVersion };
   }
-  if (state.registry?.kind === 'npm-ok' && latestVersion) {
+  if (state.registry?.kind === 'npm-ok' && state.registry.hasUpdate && latestVersion) {
     return { status: 'update-available', latestVersion };
   }
   return { status: 'installed', latestVersion };

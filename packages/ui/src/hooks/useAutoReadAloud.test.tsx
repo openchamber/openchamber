@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -8,6 +8,23 @@ import { useAutoReadAloud, type AutoReadAloudOptions } from './useAutoReadAloud'
 
 let root: Root | null = null;
 let host: HTMLElement;
+let appStateListener: ((state: { isActive: boolean }) => void) | undefined;
+let getAppState: () => Promise<{ isActive: boolean }>;
+let listenerRemovals = 0;
+
+mock.module('@capacitor/app', () => ({
+    App: {
+        addListener: async (_event: string, listener: typeof appStateListener) => {
+            appStateListener = listener;
+            return { remove: async () => { listenerRemovals += 1; } };
+        },
+        getState: () => getAppState(),
+    },
+}));
+
+const useNativeMobile = () => {
+    Object.defineProperty(window, 'Capacitor', { value: { isNativePlatform: () => true } });
+};
 
 const Probe: React.FC<AutoReadAloudOptions> = (props) => {
     useAutoReadAloud(props);
@@ -29,6 +46,9 @@ const recorder = () => {
 const mount = (props: AutoReadAloudOptions) => act(async () => root?.render(<Probe {...props} />));
 
 beforeEach(() => {
+    appStateListener = undefined;
+    getAppState = async () => ({ isActive: true });
+    listenerRemovals = 0;
     const dom = new Window({ url: 'http://localhost' });
     Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: dom });
     Object.defineProperty(globalThis, 'document', { configurable: true, writable: true, value: dom.document });
@@ -47,6 +67,138 @@ afterEach(() => {
 });
 
 describe('useAutoReadAloud', () => {
+    const setVisible = (visible: boolean) => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: visible ? 'visible' : 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+    };
+
+    test('a native mobile background reply is skipped without a claim or replay on return', async () => {
+        useNativeMobile();
+        const { calls, play } = recorder();
+        const claims: string[] = [];
+        const claim = async (id: string) => { claims.push(id); return true; };
+        const props = { sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: null, enabled: true, play, claim };
+        await mount(props);
+        setVisible(false);
+        await mount({ ...props, reply: reply('background') });
+        setVisible(true);
+        await mount({ ...props, reply: reply('background') });
+        expect(calls).toEqual([]);
+        expect(claims).toEqual([]);
+        await mount({ ...props, reply: reply('foreground') });
+        expect(calls).toEqual(['Text of foreground']);
+    });
+
+    test('backgrounding during a claim cancels it even after returning', async () => {
+        useNativeMobile();
+        const { calls, play } = recorder();
+        let resolveClaim: (claimed: boolean) => void = () => {};
+        const claim = () => new Promise<boolean>((resolve) => { resolveClaim = resolve; });
+        const props = { sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: null, enabled: true, play, claim };
+        await mount(props);
+        await mount({ ...props, reply: reply('pending') });
+        setVisible(false);
+        setVisible(true);
+        await act(async () => resolveClaim(true));
+        expect(calls).toEqual([]);
+    });
+
+    test('preparation eligibility stays cancelled after a background round trip', async () => {
+        useNativeMobile();
+        let canStart: (() => boolean) | undefined;
+        const play: AutoReadAloudOptions['play'] = async (_text, options) => { canStart = options?.canStart; };
+        const props = { sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: null, enabled: true, play };
+        await mount(props);
+        await mount({ ...props, reply: reply('preparing') });
+        expect(canStart?.()).toBe(true);
+        setVisible(false);
+        setVisible(true);
+        expect(canStart?.()).toBe(false);
+    });
+
+    test('web and desktop keep claiming and preparing replies in a hidden document', async () => {
+        const claims: string[] = [];
+        const guards: Array<() => boolean> = [];
+        const claim = async (id: string) => { claims.push(id); return true; };
+        const play: AutoReadAloudOptions['play'] = async (_text, options) => {
+            if (options?.canStart) guards.push(options.canStart);
+        };
+        const props = { sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: null, enabled: true, play, claim };
+        await mount(props);
+        setVisible(false);
+        await mount({ ...props, reply: reply('background') });
+        expect(claims).toEqual(['background']);
+        expect(guards[0]()).toBe(true);
+        setVisible(true);
+        setVisible(false);
+        expect(guards[0]()).toBe(true);
+    });
+
+    test('web and desktop allow a pending claim to finish after a background round trip', async () => {
+        const { calls, play } = recorder();
+        let resolveClaim: (claimed: boolean) => void = () => {};
+        const claim = () => new Promise<boolean>((resolve) => { resolveClaim = resolve; });
+        const props = { sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: null, enabled: true, play, claim };
+        await mount(props);
+        await mount({ ...props, reply: reply('pending') });
+        setVisible(false);
+        setVisible(true);
+        await act(async () => resolveClaim(true));
+        expect(calls).toEqual(['Text of pending']);
+    });
+
+    test('native lifecycle alone cancels preparation and removes its listener on unmount', async () => {
+        useNativeMobile();
+        let canStart: (() => boolean) | undefined;
+        const play: AutoReadAloudOptions['play'] = async (_text, options) => { canStart = options?.canStart; };
+        const props = { sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: null, enabled: true, play };
+        await mount(props);
+        await mount({ ...props, reply: reply('preparing') });
+        expect(canStart?.()).toBe(true);
+        appStateListener?.({ isActive: false });
+        appStateListener?.({ isActive: true });
+        expect(canStart?.()).toBe(false);
+        act(() => root?.unmount());
+        root = null;
+        expect(listenerRemovals).toBe(1);
+    });
+
+    test('unknown native state stays silent and a newer lifecycle event wins over initial state', async () => {
+        useNativeMobile();
+        let resolveState: (state: { isActive: boolean }) => void = () => {};
+        getAppState = () => new Promise((resolve) => { resolveState = resolve; });
+        const { calls, play } = recorder();
+        const claims: string[] = [];
+        const claim = async (id: string) => { claims.push(id); return true; };
+        const props = { sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: null, enabled: true, play, claim };
+        await mount(props);
+        await mount({ ...props, reply: reply('unknown') });
+        appStateListener?.({ isActive: false });
+        await act(async () => resolveState({ isActive: true }));
+        await mount({ ...props, reply: reply('inactive') });
+        expect(calls).toEqual([]);
+        expect(claims).toEqual([]);
+        appStateListener?.({ isActive: true });
+        await mount({ ...props, reply: reply('active') });
+        expect(calls).toEqual(['Text of active']);
+    });
+
+    test('session changes and disabling auto-read invalidate preparation', async () => {
+        const guards: Array<() => boolean> = [];
+        const play: AutoReadAloudOptions['play'] = async (_text, options) => {
+            if (options?.canStart) guards.push(options.canStart);
+        };
+        const props = { sessionKey: 'ses_1', ready: true, sessionIsActive: true, reply: null, enabled: true, play };
+        await mount(props);
+        await mount({ ...props, reply: reply('preparing') });
+        await mount({ ...props, reply: reply('preparing'), enabled: false });
+        await mount({ ...props, reply: reply('preparing'), enabled: true });
+        expect(guards[0]()).toBe(false);
+        await mount({ ...props, reply: reply('next') });
+        await mount({ ...props, sessionKey: 'ses_2' });
+        await mount({ ...props, reply: reply('next') });
+        expect(guards[1]()).toBe(false);
+    });
     test('a reply already present at mount is the baseline, not speech', async () => {
         const { calls, play } = recorder();
 

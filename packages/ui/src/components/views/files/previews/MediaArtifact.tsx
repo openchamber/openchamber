@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { ContentState } from '@/components/ui/content-state';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactDimensions, formatArtifactDuration, formatArtifactSize } from './artifactMeta';
@@ -73,10 +75,12 @@ export const MediaArtifact: React.FC<{
         ]}
       />
       {failed ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-          <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.artifact.media.unplayable')}</div>
-          {download}
-        </div>
+        <ContentState
+          icon={<FileTypeIcon filePath={name} className="size-10" />}
+          title={name}
+          description={t('filesView.artifact.media.unplayable')}
+          actions={download}
+        />
       ) : kind === 'video' ? (
         <div className="flex min-h-0 flex-1 items-center justify-center bg-[var(--surface-background)] p-3">
           <video

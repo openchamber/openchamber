@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -44,6 +45,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'quota.family.zen': 'Modelos Zen',
+  'quota.value.requests': 'Solicitações: {count}',
+  'quota.value.spent': '{spent} gastos',
   "opencodeCompatibility.bundled": "O OpenCode está incluído no OpenChamber. Atualize o OpenChamber para obter o OpenCode v2.",
   "opencodeCompatibility.title": "OpenCode v2 necessário",
   "opencodeCompatibility.outdatedTitle": "Atualize o OpenCode",
@@ -176,6 +180,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n['pt-BR'],
   ...htmlRenderI18n['pt-BR'],
   ...documentToolbarI18n['pt-BR'],
+  ...secretRequestI18n['pt-BR'],
   ...sessionNoticesI18n['pt-BR'],
   ...usageStatsI18n['pt-BR'],
   ...webSearchI18n['pt-BR'],
@@ -242,6 +247,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.mrCheckContext': 'Jobs de pipeline com falha',
   'chat.chatInput.prCheckContextRemove': 'Remover contexto de verificações do PR',
   "common.loading": "Carregando...",
+  "common.image.loading": "Carregando imagem",
+  "common.image.loadFailed": "Não foi possível carregar a imagem",
+  "common.image.retry": "Tentar novamente",
   "common.unavailable": "Indisponível",
   "common.language.english": "Inglês",
   "common.language.german": "Alemão",
@@ -3491,10 +3499,11 @@ export const dict: Record<I18nKey, string> = {
   "common.duration.secondsCompact": "{seconds}s",
   "common.duration.minutesSecondsCompact": "{minutes}m {seconds}s",
   "common.duration.hoursMinutesCompact": "{hours}h {minutes}m",
-  "contextFileOpen.failure.tooLarge": "File is too large to open (>{count} lines)",
-  "contextFileOpen.failure.tooLargeSize": "O arquivo é grande demais para abrir (mais de {size})",
-  "contextFileOpen.failure.missing": "File not found",
-  "contextFileOpen.failure.unreadable": "Failed to open file",
+  "contextFileOpen.failure.tooLarge": "{name} é grande demais para abrir",
+  "contextFileOpen.failure.tooLargeDetail": "Mais de {count} linhas · {size}",
+  "contextFileOpen.failure.tooLargeSize": "Mais de {limit} · {size}",
+  "contextFileOpen.failure.missing": "{name} não foi encontrado",
+  "contextFileOpen.failure.unreadable": "Não foi possível abrir {name}",
   "quota.window.5h": "5 horas",
   "quota.window.7d": "Limite de 7 dias",
   "quota.window.extraUsage": "Uso adicional",
@@ -3502,6 +3511,7 @@ export const dict: Record<I18nKey, string> = {
   "quota.window.daily": "Diário",
   "quota.window.monthly": "Mensal",
   "quota.window.credits": "Créditos",
+  "quota.value.creditsUsed": "Créditos usados: {credits}",
   "quota.window.keyLimit": "Limite da chave",
   "quota.window.creditsBalance": "Saldo de créditos",
   "quota.window.monthlyCredits": "Créditos mensais",
@@ -3567,6 +3577,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': 'Abrir {name}',
   'chat.workStatus.section.usage': 'Uso',
   'chat.workStatus.section.telemetry': 'Estatísticas do turno',
+  'chat.workStatus.telemetry.previousTurn': 'Turno anterior',
+  'chat.workStatus.telemetry.previousTurnRate': 'Turno anterior · {rate}',
   'chat.workStatus.telemetry.responseSpeed': 'Resposta',
   'chat.workStatus.telemetry.responseSpeedDescription': 'A velocidade com que o texto final chegou. Exclui a espera inicial, o raciocínio e as chamadas anteriores de ferramentas. É uma estimativa pelos horários do texto, não uma medição do provedor.',
   'chat.workStatus.telemetry.speed': 'Solicitação',
@@ -3674,6 +3686,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.submitFailed': 'Não foi possível enviar a resposta',
   'chat.formCard.cancelFailed': 'Não foi possível cancelar a solicitação',
   'chat.formCard.tryAgain': 'Tente novamente.',
+  'chat.formCard.recoveredNotice': 'A execução parou enquanto aguardava. Enviar inicia uma nova execução paga.',
   'chat.formDock.progress': '{current} de {total}',
   'chat.formDock.waiting': 'mais {count} aguardando',
   'chat.formDock.back': 'Voltar',
@@ -3887,4 +3900,14 @@ export const dict: Record<I18nKey, string> = {
   'notifications.question.bodyFallback': 'O agente está aguardando sua resposta',
   'notifications.permission.bodyFallback': 'O agente está aguardando sua aprovação',
   'notifications.permission.title': 'Permissão necessária',
+  'chat.promptHistorySearch.title': "Pesquisar histórico de prompts",
+  'chat.promptHistorySearch.searchPlaceholder': "Pesquisar prompts lembrados",
+  'chat.promptHistorySearch.close': "Fechar pesquisa do histórico de prompts",
+  'chat.promptHistorySearch.empty': "Ainda não há prompts para pesquisar",
+  'chat.promptHistorySearch.noMatches': "Nenhum prompt correspondente",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} anexo",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} anexos",
+  'chat.promptHistorySearch.hint': "↑ ↓ para navegar · Enter para carregar · Esc para fechar",
+  'helpDialog.item.searchPromptHistory': "Pesquisar histórico de prompts (entrada de chat)",
+
 };

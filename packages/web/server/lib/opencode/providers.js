@@ -375,6 +375,7 @@ function setProviderDisabled(providerId, disabled, workingDirectory) {
 
 export {
   getProviderSources,
+  mergeCustomProviderConfig,
   readDisabledProviders,
   setProviderDisabled,
   removeProviderConfig,

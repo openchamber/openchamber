@@ -186,8 +186,8 @@ interface MobileChangesPaneProps extends MobileChangesSurfaceProps {
 export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, visible = true, onNavigatedToChat }) => {
   const { t } = useI18n();
   const { git, sourceControl } = useRuntimeAPIs();
-  // When the root is not itself a repository, changes come from the resolved
-  // nested repository instead.
+  // Changes come from the picked repository, or the root when nothing is
+  // picked.
   const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = repository;
   const currentDirectory = gitDirectory ?? rootDirectory;
   const status = useGitStatus(currentDirectory || null);

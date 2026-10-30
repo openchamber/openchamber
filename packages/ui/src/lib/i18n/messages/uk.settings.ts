@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'Період зберігання рахується від архівації. Сесії, строк яких минув, видаляються.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, архівуються.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, видаляються.',
   'settings.sourceControl.ssh.title': 'SSH-ключі',
   'settings.sourceControl.ssh.load': 'Показати ключі',
   'settings.sourceControl.ssh.discover': 'Знайти ключі в ~/.ssh',
@@ -97,6 +100,7 @@ export const settingsDict = {
   "settings.view.unavailable.title": "Недоступно",
   "settings.view.unavailable.description": "Ця сторінка налаштувань недоступна в цьому середовищі виконання.",
   "settings.view.badge.beta": "бета-версія",
+  "settings.view.badge.new": "нове",
 
   "settings.view.actions.backToSettings": "Назад до налаштувань",
   "settings.view.actions.closeSettings": "Закрити налаштування",
@@ -1099,10 +1103,8 @@ export const settingsDict = {
   "settings.openchamber.messageSearch.actions.delete": "Видалити індекс",
   "settings.openchamber.messageSearch.actions.working": "Виконую…",
   "settings.openchamber.sessionWork.title": "Сесії в роботі",
-  "settings.openchamber.sessionWork.info": "Блок у сайдбарі під «Чатами» для сесій, у яких ви працюєте. Сесія потрапляє туди, щойно ви надсилаєте в ній повідомлення, лишається й у своєму проєкті та йде звідти, коли ви позначаєте її готовою: наведіть на неї й натисніть галочку або скористайтеся меню сесії. Коли хід схожий на завершення роботи, галочка сіріє як підказка.",
+  "settings.openchamber.sessionWork.info": "Блок у сайдбарі під «Чатами» для сесій, у яких ви працюєте. Сесія з’являється там, щойно ви надсилаєте повідомлення. За замовчуванням вона відображається лише в цьому блоці. Увімкніть «Також показувати роботу в проєктах» у меню сайдбара, щоб вона відображалася і у своєму проєкті. У VS Code сесії завжди показуються у своїх проєктах. Позначте сесію як готову галочкою або в її меню. Коли хід схожий на завершення роботи, галочка сіріє як підказка.",
   "settings.openchamber.sessionWork.field.enabled": "Показувати сесії в роботі",
-  "settings.openchamber.sessionRetention.field.onlyArchived": "Лише архівні сесії",
-  "settings.openchamber.sessionRetention.field.onlyArchivedDescription": "Використовує видалення та рахує період зберігання від архівації. Неархівовані сесії зберігаються.",
   "settings.openchamber.sessionRetention.archivedTooltip": "Видаляє архівні сесії після завершення періоду зберігання. Зберігає 5 останніх архівованих сесій, відкриту сесію, сесії в роботі та сесії з публічним посиланням. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
   "settings.openchamber.sessionRetention.tooltip": "Архівує або видаляє неархівовані сесії за часом останньої активності. Зберігає 5 найновіших сесій, відкриту сесію, сесії в роботі та сесії з публічним посиланням. Архівні сесії зберігаються. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Увімкнути автоматичне очищення",
@@ -1425,6 +1427,9 @@ export const settingsDict = {
   "settings.projects.page.toast.discoverIconFailed": "Не вдалося знайти значок проєкту",
   "settings.projects.page.toast.customIconAlreadySet": "Спеціальна піктограма вже встановлена для цього проєкту",
   "settings.projects.page.toast.iconDiscovered": "Виявлено значок проєкту",
+  "settings.projects.page.toast.iconUnsupportedFormat": "Підтримуються лише PNG, JPEG і SVG",
+  "settings.projects.page.toast.iconEmpty": "Файл піктограми порожній",
+  "settings.projects.page.toast.iconTooLarge": "Піктограма перевищує обмеження розміру (5 МБ)",
   "settings.projects.page.toast.saveFailed": "Не вдалося зберегти налаштування проєкту",
   "settings.usage.sidebar.title": "Використання",
   "settings.usage.sidebar.total": "Усього {count}",
@@ -2091,6 +2096,9 @@ export const settingsDict = {
   "settings.voice.page.section.speechRecognition": "Розпізнавання мовлення",
   "settings.voice.page.field.enableVoiceInput": "Увімкнути голосовий ввід",
   "settings.voice.page.field.enableVoiceInputAria": "Увімкнути голосовий ввід (диктування)",
+  "settings.voice.page.field.dictationAutoSend": "Надсилати після завершення диктування",
+  "settings.voice.page.field.dictationAutoSendAria": "Надсилати повідомлення після завершення диктування",
+  "settings.voice.page.field.dictationAutoSendInfo": "Автоматично надсилати розшифровку, коли ви зупиняєте диктування клавіатурним скороченням або клавішею Enter. Кнопка з позначкою все ще дає змогу вставити текст без надсилання.",
   "settings.voice.page.section.playbackAndSummary": "Відтворення",
   "settings.voice.page.field.provider": "Провайдер",
   "settings.voice.page.provider.browser": "Браузер",
@@ -2148,6 +2156,8 @@ export const settingsDict = {
   "settings.voice.page.toast.apiKeySaveFailed": "Не вдалося зберегти ключ",
   "settings.voice.page.field.serverUrl": "URL сервера",
   "settings.voice.page.field.serverUrlHint": "Базовий URL OpenAI-сумісного TTS-сервера",
+  'settings.voice.page.field.endpointPath': 'Шлях ендпоінта',
+  'settings.voice.page.field.endpointPathHint': 'Шлях до ресурсу на сервері; запит і відповідь лишаються сумісними з OpenAI',
   "settings.voice.page.field.model": "Модель",
   "settings.voice.page.field.voice": "Голос",
   "settings.voice.page.field.voiceIdentifierHint": "Голосовий ідентифікатор, який підтримується сервером",
@@ -2675,4 +2685,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} знову увімкнено',
   'settings.agents.sidebar.toast.disableFailed': 'Не вдалося вимкнути агента: не вийшло записати його конфіг',
   'settings.agents.sidebar.toast.enableFailed': 'Не вдалося увімкнути агента: не вийшло записати його конфіг',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "Пошук в історії запитів",
+
 } as const;

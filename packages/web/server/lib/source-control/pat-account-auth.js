@@ -9,12 +9,15 @@ import { ownedOriginInstance } from './origin-instance.js';
  * - `verify(origin, token)` answers the token's user (`{ id, login, ... }`)
  *   or throws; `classifyFailure(error) === 'invalid-token'` means the forge
  *   refused the token, which writes the account off.
- * - `probe(origin, token?)` answers `{ supported, version?, message? }`:
+ * - `probe(origin, token?)` answers `{ supported, version?, edition?, message? }`:
  *   whether the instance is one this provider can serve. Capabilities call
  *   it without a token; connect passes the token being connected, for an
- *   instance that refuses anonymous reads.
- * - `ownerElsewhere({ origin, version })`, optional, answers another
+ *   instance that refuses anonymous reads. `edition` is the server the
+ *   instance's own API namespace named, when it reports one.
+ * - `ownerElsewhere({ origin, version, edition })`, optional, answers another
  *   provider (`{ id, label }`) whose card the instance belongs on, or null.
+ *   `edition` is what the probe learned from the instance's own API
+ *   namespace, when it reports one; `version` is the fallback signal.
  *   Connect refuses such an instance before anything is stored.
  *
  * A provider whose settings declare a `username` field signs in with HTTP
@@ -156,14 +159,14 @@ export function createPatAccountAuth({ descriptor, store, events, verify, probe,
       // A Basic-auth host's stored login is the username the user typed, the
       // one Basic auth accepted, whatever name the host reports for the account.
       const user = takesUsername ? { ...(await verify(origin, token, credentials)), login: username } : await verify(origin, token);
-      const { version, supported, message } = takesUsername ? await probe(origin, token, credentials) : await probe(origin, token);
+      const { version, supported, message, edition } = takesUsername ? await probe(origin, token, credentials) : await probe(origin, token);
       if (!supported) {
         throw responseError(400, {
           error: message || (version ? `${descriptor.label} ${version} is not supported` : `${descriptor.label} is not supported`),
           code: 'UNSUPPORTED_PROVIDER_VERSION',
         });
       }
-      const owner = ownerElsewhere ? await ownerElsewhere({ origin, version }) : null;
+      const owner = ownerElsewhere ? await ownerElsewhere({ origin, version, edition }) : null;
       if (owner) {
         throw responseError(409, {
           error: `${origin} belongs on the ${owner.label} card`,

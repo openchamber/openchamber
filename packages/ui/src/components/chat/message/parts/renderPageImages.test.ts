@@ -25,6 +25,15 @@ describe('renderPageImageSources', () => {
         ]);
     });
 
+    test('discovers and inlines complete local paths in a script image map', () => {
+        const page = `<script>const images = { a: '/tmp/a.png', b: '/tmp/b.png' }; image.src = images[key];</script>`;
+        expect(renderPageImageSources(page)).toEqual(['/tmp/a.png', '/tmp/b.png']);
+        expect(inlineRenderPageImages(page, new Map([
+            ['/tmp/a.png', 'data:image/png;base64,A'],
+            ['/tmp/b.png', 'data:image/png;base64,B'],
+        ]))).toBe('<script>const images = { a: \'data:image/png;base64,A\', b: \'data:image/png;base64,B\' }; image.src = images[key];</script>');
+    });
+
     test('lists every image a page names, past twelve: the server decides what fits by weight', () => {
         const page = Array.from({ length: 19 }, (_, index) => `<img src="/tmp/${index}.png">`).join('');
         expect(renderPageImageSources(page)).toHaveLength(19);

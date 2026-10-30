@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 
 import { claimReplyForAutoRead } from '@/lib/messages/autoReadClaims';
 import type { LatestReply } from '@/lib/messages/latestReply';
+import { isCapacitorApp } from '@/lib/platform';
+import type { PlayMessageTTSOptions } from './useMessageTTS';
 
 export interface AutoReadAloudOptions {
     /** Identity of the session on screen; a switch starts a new baseline. */
@@ -13,7 +15,7 @@ export interface AutoReadAloudOptions {
     /** Newest completed answer in the session, or null when there is none. */
     reply: LatestReply | null;
     enabled: boolean;
-    play: (text: string) => Promise<void>;
+    play: (text: string, options?: PlayMessageTTSOptions) => Promise<void>;
     /** Claims a reply across windows so only one of them reads it. */
     claim?: (messageId: string) => Promise<boolean>;
 }
@@ -40,9 +42,54 @@ export const useAutoReadAloud = ({
     // turn makes an older answer the latest reply again, and that answer must
     // not be read a second time.
     const heardReplyIdsRef = useRef<Set<string>>(new Set());
+    const nativeMobile = isCapacitorApp();
+    const foregroundRef = useRef(!nativeMobile);
+    const backgroundEpochRef = useRef(0);
+    const currentRef = useRef({ sessionKey, enabled, reply });
+    currentRef.current = { sessionKey, enabled, reply };
+
+    useEffect(() => {
+        if (!enabled) backgroundEpochRef.current += 1;
+    }, [enabled]);
+
+    useEffect(() => {
+        let disposed = false;
+        let removeNativeListener: (() => void) | undefined;
+        const onVisibility = () => {
+            if (document.visibilityState === 'hidden') backgroundEpochRef.current += 1;
+        };
+        if (nativeMobile) {
+            document.addEventListener('visibilitychange', onVisibility);
+            void import('@capacitor/app').then(async ({ App }) => {
+                let stateChanged = false;
+                const listener = await App.addListener('appStateChange', ({ isActive }) => {
+                    stateChanged = true;
+                    foregroundRef.current = isActive;
+                    if (!isActive) backgroundEpochRef.current += 1;
+                });
+                if (disposed) {
+                    void listener.remove();
+                    return;
+                }
+                removeNativeListener = () => void listener.remove();
+                const state = await App.getState();
+                if (!disposed && !stateChanged) foregroundRef.current = state.isActive;
+            }).catch(() => {
+                // Unknown native state must not authorize automatic speech.
+                foregroundRef.current = false;
+            });
+        }
+        return () => {
+            disposed = true;
+            backgroundEpochRef.current += 1;
+            if (nativeMobile) document.removeEventListener('visibilitychange', onVisibility);
+            removeNativeListener?.();
+        };
+    }, [nativeMobile]);
 
     useEffect(() => {
         if (activeSessionKeyRef.current !== sessionKey) {
+            backgroundEpochRef.current += 1;
             activeSessionKeyRef.current = sessionKey;
             observedActiveRef.current = sessionIsActive;
             initializedRef.current = false;
@@ -70,8 +117,15 @@ export const useAutoReadAloud = ({
 
         heardReplyIdsRef.current.add(reply.messageId);
         const { messageId, text } = reply;
+        const epoch = backgroundEpochRef.current;
+        const canStart = () => (!nativeMobile || (foregroundRef.current && document.visibilityState !== 'hidden'))
+            && backgroundEpochRef.current === epoch
+            && currentRef.current.enabled
+            && currentRef.current.sessionKey === sessionKey
+            && currentRef.current.reply?.messageId === messageId;
+        if (!canStart()) return;
         void claim(messageId).then((claimed) => {
-            if (claimed) void play(text);
-        });
-    }, [claim, enabled, play, ready, reply, sessionIsActive, sessionKey]);
+            if (claimed && canStart()) void play(text, { canStart });
+        }).catch((error) => console.warn('[useAutoReadAloud] Claim failed:', error));
+    }, [claim, enabled, nativeMobile, play, ready, reply, sessionIsActive, sessionKey]);
 };

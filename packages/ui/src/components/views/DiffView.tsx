@@ -61,7 +61,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { ToolbarButton, ToolbarTooltipButton } from '@/components/ui/action-toolbar';
-import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
+import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
+import { StatusImage } from '@/components/ui/status-image';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { findDiffScrollAnchor, getRestoredDiffScrollTop, type DiffScrollAnchor } from './diffScrollAnchor';
@@ -456,11 +457,14 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
                 {hasOriginal && (
                     <div className={imageContainerClass}>
                         <span className="typography-meta text-muted-foreground font-medium">{t('diffView.image.original')}</span>
-                        <img
+                        <StatusImage
                             src={diff.original}
                             alt={t('diffView.image.originalAlt', { path: filePath })}
-                            className={renderSideBySide ? "max-w-full max-h-[70vh] object-contain" : "max-w-full object-contain"}
-                            style={{ imageRendering: 'auto' }}
+                            variant="large"
+                            // Room for the loading and failed states before the image has a size.
+                            className="flex min-h-40 min-w-40 max-w-full items-center justify-center"
+                            imgClassName={renderSideBySide ? "max-w-full max-h-[70vh] object-contain" : "max-w-full object-contain"}
+                            imgStyle={{ imageRendering: 'auto' }}
                         />
                     </div>
                 )}
@@ -469,11 +473,14 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
                         <span className="typography-meta text-muted-foreground font-medium">
                             {hasOriginal ? t('diffView.image.modified') : t('diffView.image.new')}
                         </span>
-                        <img
+                        <StatusImage
                             src={diff.modified}
                             alt={t('diffView.image.modifiedAlt', { path: filePath })}
-                            className={renderSideBySide ? "max-w-full max-h-[70vh] object-contain" : "max-w-full object-contain"}
-                            style={{ imageRendering: 'auto' }}
+                            variant="large"
+                            // Room for the loading and failed states before the image has a size.
+                            className="flex min-h-40 min-w-40 max-w-full items-center justify-center"
+                            imgClassName={renderSideBySide ? "max-w-full max-h-[70vh] object-contain" : "max-w-full object-contain"}
+                            imgStyle={{ imageRendering: 'auto' }}
                         />
                     </div>
                 )}
@@ -1542,8 +1549,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const foreign = Boolean(targetDirectory);
     const rootDirectory = targetDirectory ?? panelDirectory;
     const runtimeKey = useGitStore((state) => state.runtimeKey);
-    // Diffs belong to the repository being diffed: when the root is not
-    // itself a repository, operate on the resolved nested repository instead.
+    // Diffs belong to the repository being diffed: the picked one, or the
+    // root when nothing is picked.
     const { gitDirectory: nestedGitDirectory, repositoryOptions } = useNestedGitDirectory(rootDirectory ?? null, { enabled: visible, recheckOnOpen: true });
     const effectiveDirectory = nestedGitDirectory ?? rootDirectory;
     // The binding follows the repository actually being diffed.
@@ -2791,7 +2798,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             const absolutePath = toAbsolutePath(effectiveDirectory, filePath);
             const openValidation = await validateContextFileOpen(files, absolutePath, { directory: effectiveDirectory });
             if (!openValidation.ok) {
-                toast.error(getContextFileOpenFailureMessage(openValidation.reason));
+                toastContextFileOpenFailure(absolutePath, openValidation);
                 return;
             }
 

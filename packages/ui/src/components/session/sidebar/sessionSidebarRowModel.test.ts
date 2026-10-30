@@ -81,6 +81,23 @@ const args = (sections: ProjectSection[]): SessionSidebarRowModelArgs => ({
 });
 
 describe('buildSessionSidebarRowModel', () => {
+  test('a Chats-only sidebar exposes an archived bucket with restore semantics and distinct row keys', () => {
+    const active = node('active-chat');
+    const archived = node('archived-chat');
+    archived.session.time.archived = 3;
+    const input = args([]);
+    input.chatGroup = group([active], { id: 'managed-chats', draftTarget: 'chat' });
+    input.archivedChatGroup = group([archived], { id: 'managed-chats-archived', label: 'Archived', isMain: false, isArchivedBucket: true, folderScopes: [] });
+    const model = buildSessionSidebarRowModel(input);
+    expect(model.rows.filter((row) => row.kind === 'group-header').map((row) => row.group.isArchivedBucket)).toEqual([true]);
+    const sessions = model.rows.filter((row) => row.kind === 'session');
+    expect(sessions.map((row) => [row.node.session.id, row.archived])).toEqual([['active-chat', false], ['archived-chat', true]]);
+    expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
+    expect(model.sessionById.get('archived-chat')).toBe(archived.session);
+    input.archivedChatGroup = null;
+    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session').map((row) => row.node.session.id)).toEqual(['active-chat']);
+  });
+
   test('a session in work is in the top block and stays in its project group', () => {
     const working = node('working');
     const other = node('other');

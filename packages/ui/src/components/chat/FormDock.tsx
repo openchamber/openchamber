@@ -10,9 +10,10 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { FormRequest } from '@/lib/opencode/model';
+import type { RecoveredQuestion } from '@/sync/recoverable-questions';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
-import { useScopedBlockingForms, useSessions } from '@/sync/sync-context';
+import { useScopedBlockingForms, useRecoveredQuestions, useSessions } from '@/sync/sync-context';
 import { useRequestReveal } from '@/sync/request-reveal';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
@@ -21,7 +22,9 @@ import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentDock } from './WebSearchConsent';
 import { FormMarkdown } from './FormMarkdown';
-import { serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
+import { formDraftScope, loadFormDraft, saveFormDraft, dropFormDraft } from './formDrafts';
+import { dismissRecoveredQuestion } from '@/sync/recoverable-questions';
 import {
     type FormValues,
     buildFormAnswer,
@@ -65,32 +68,29 @@ const FormDockView: React.FC<FormDockProps> = ({ sessionId, directory, hidden })
     // of the directory that raised it.
     const form = forms[0];
     const webSearchConsent = form ? readWebSearchConsent(form) : null;
+    // A question whose ask died with its turn waits behind the live requests;
+    // answering it starts a new turn instead of replying to a form.
+    const recovered = useRecoveredQuestions(sessionId, directory);
+    const recoveredFirst = form ? undefined : recovered[0];
     // Keyed on the form id so a different request starts from a clean slate
     // (and the panels cross-fade instead of swapping content in place).
     return (
         <AnimatePresence>
-            {hidden || !form ? null : webSearchConsent
-                ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
-                : <FormDockPanel key={form.id} form={form} forms={forms} />}
+            {hidden ? null : form ? (
+                webSearchConsent
+                    ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
+                    : <FormDockPanel key={form.id} form={form} forms={forms} directory={directory} />
+            ) : recoveredFirst ? (
+                <FormDockPanel
+                    key={recoveredFirst.form.id}
+                    form={recoveredFirst.form}
+                    forms={forms}
+                    directory={directory}
+                    recovered={recoveredFirst}
+                />
+            ) : null}
         </AnimatePresence>
     );
-};
-
-type FormDraft = { fieldsSignature: string; values: FormValues; step: number };
-
-// Answers in progress outlive the panel: switching sessions unmounts it, and
-// coming back must find the form where it was left. Kept in memory only and
-// dropped once the form is answered or dismissed.
-const formDrafts = new Map<string, FormDraft>();
-const MAX_FORM_DRAFTS = 50;
-
-const saveFormDraft = (formId: string, draft: FormDraft) => {
-    formDrafts.delete(formId);
-    formDrafts.set(formId, draft);
-    if (formDrafts.size > MAX_FORM_DRAFTS) {
-        const oldest = formDrafts.keys().next().value;
-        if (oldest !== undefined) formDrafts.delete(oldest);
-    }
 };
 
 const isStepAnswered = (field: FormField, values: FormValues): boolean => {
@@ -100,7 +100,13 @@ const isStepAnswered = (field: FormField, values: FormValues): boolean => {
     return !(Array.isArray(answer) && answer.length === 0);
 };
 
-const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ form, forms }) => {
+const FormDockPanel: React.FC<{
+    form: FormRequest;
+    forms: FormRequest[];
+    directory?: string;
+    /** Set when this card re-asks a question whose turn died before it was answered. */
+    recovered?: RecoveredQuestion;
+}> = ({ form, forms, directory, recovered }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     // The sessions of the chat this dock belongs to, which may be a chat of
@@ -112,8 +118,9 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
     // A rebuilt pending list hands over a new object with the same content;
     // only fields that actually changed start the answers over.
     const fieldsSignature = fields.map((field) => `${field.key}:${field.type}`).join('|');
+    const draftScope = React.useMemo(() => formDraftScope(form, recovered?.directory ?? directory), [directory, form, recovered?.directory]);
     const [restored] = React.useState(() => {
-        const draft = formDrafts.get(form.id);
+        const draft = loadFormDraft(draftScope);
         return draft?.fieldsSignature === fieldsSignature ? draft : null;
     });
     const [values, setValues] = React.useState<FormValues>(() => restored?.values ?? initialFormValues(fields));
@@ -140,8 +147,8 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
 
     React.useEffect(() => {
         if (appliedSignatureRef.current !== fieldsSignature) return;
-        saveFormDraft(form.id, { fieldsSignature, values, step });
-    }, [fieldsSignature, form.id, step, values]);
+        saveFormDraft(draftScope, { fieldsSignature, values, step });
+    }, [draftScope, fieldsSignature, step, values]);
 
     const isFromSubagent = React.useMemo(() => {
         const source = sessions.find((session) => session.id === form.sessionID);
@@ -201,12 +208,16 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
         respondingRef.current = true;
         setIsResponding(true);
         try {
-            await sessionActions.replyToForm(form.sessionID, form.id, buildFormAnswer(fields, values));
-            formDrafts.delete(form.id);
+            const answer = buildFormAnswer(fields, values);
+            if (recovered) {
+                await sessionActions.sendRecoveredFormAnswer(recovered, serializeFormAnswerAsMarkdown(form, answer));
+            } else {
+                await sessionActions.replyToForm(form.sessionID, form.id, answer);
+            }
+            dropFormDraft(draftScope);
         } catch (error) {
-            // The store removes not-found requests, so no form remains to retry.
-            if (isFormRequestNotFoundError(error)) {
-                formDrafts.delete(form.id);
+            if (!recovered && isFormRequestNotFoundError(error)) {
+                dropFormDraft(draftScope);
                 return;
             }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
@@ -214,18 +225,22 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
             respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [canSubmit, fields, form.id, form.sessionID, missing, shown, t, values]);
+    }, [canSubmit, draftScope, fields, form, missing, recovered, shown, t, values]);
 
     const handleDismiss = React.useCallback(async () => {
         if (respondingRef.current) return;
         respondingRef.current = true;
         setIsResponding(true);
         try {
-            await sessionActions.cancelForm(form.sessionID, form.id);
-            formDrafts.delete(form.id);
+            if (recovered) {
+                dismissRecoveredQuestion(recovered.form.id);
+            } else {
+                await sessionActions.cancelForm(form.sessionID, form.id);
+            }
+            dropFormDraft(draftScope);
         } catch (error) {
-            if (isFormRequestNotFoundError(error)) {
-                formDrafts.delete(form.id);
+            if (!recovered && isFormRequestNotFoundError(error)) {
+                dropFormDraft(draftScope);
                 return;
             }
             toast.error(t('chat.formCard.cancelFailed'), { description: t('chat.formCard.tryAgain') });
@@ -233,7 +248,7 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
             respondingRef.current = false;
             setIsResponding(false);
         }
-    }, [form.id, form.sessionID, t]);
+    }, [draftScope, form.id, form.sessionID, recovered, t]);
 
     const goNext = React.useCallback(() => {
         setStep(Math.min(currentStep + 1, lastStep));
@@ -345,6 +360,11 @@ const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ 
         >
             {!collapsed ? (
                 <div onKeyDown={handlePanelKeyDown}>
+                    {recovered ? (
+                        <div className="typography-micro mx-1.5 mb-1 rounded bg-[var(--status-warning-background)] px-2 py-1.5 text-[var(--status-warning-text)]">
+                            {t('chat.formCard.recoveredNotice')}
+                        </div>
+                    ) : null}
                     <div
                         ref={bodyRef}
                         className="max-h-[50vh] overflow-y-auto overscroll-contain px-1.5"

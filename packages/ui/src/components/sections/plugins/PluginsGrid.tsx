@@ -202,9 +202,22 @@ export const PluginsGrid: React.FC<{
     return actions;
   };
 
+  const seenPaths = new Set<string>();
+  for (const entry of entries) {
+    const target = entry.resolvedPath ? pluginFileRuntimeTarget(entry.resolvedPath) : runtimeTargets.get(entry.id);
+    if (target?.kind === 'local') seenPaths.add(target.path);
+  }
+  const visibleFiles = files.filter((file) => {
+    if (file.kind !== 'package') return true;
+    const target = pluginFileRuntimeTarget(file.resolvedPath ?? file.absolutePath);
+    if (target?.kind !== 'local') return true;
+    if (seenPaths.has(target.path)) return false;
+    seenPaths.add(target.path);
+    return true;
+  });
   const items: GridItem[] = [
     ...entries.map((entry): GridItem => ({ kind: 'entry', entry })),
-    ...files.map((file): GridItem => ({ kind: 'file', file })),
+    ...visibleFiles.map((file): GridItem => ({ kind: 'file', file })),
   ];
   const filtered = rankByQuery(items, query, (item) => (
     item.kind === 'entry' ? [pluginDisplayName(item.entry.spec), item.entry.spec] : [item.file.fileName, item.file.absolutePath ?? '']

@@ -60,7 +60,6 @@ import { cn, getRevealLabelKey } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
-import { formatFileSize } from '@/lib/fileSize';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
@@ -108,6 +107,8 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
+import { getContextFileSizeLimitMessage } from '@/lib/contextFileOpenGuard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
@@ -2111,7 +2112,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (sizeStat && sizeStat.size > MAX_OPEN_FILE_BYTES) {
       setFileContent('');
       setDraftContent('');
-      setFileError(t('contextFileOpen.failure.tooLargeSize', { size: formatFileSize(MAX_OPEN_FILE_BYTES) }));
+      setFileError(getContextFileSizeLimitMessage(sizeStat.size, t));
       setFailedFilePath(node.path);
       lastLoadedFileStatRef.current = null;
       setFileLoading(false);
@@ -2325,6 +2326,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const isDirtyRef = React.useRef(isDirty);
   isDirtyRef.current = isDirty;
 
+  const reloadSelectedFile = React.useCallback(() => {
+    activeFileLoadIdRef.current += 1;
+    loadingFilePathRef.current = null;
+    lastLoadedFileStatRef.current = null;
+    setDesktopImageSrc('');
+    setFileError(null);
+    setLoadedFilePath(null);
+    setFileContentRevision((revision) => revision + 1);
+  }, []);
+
   React.useEffect(() => subscribeToFileContentInvalidation(({ runtimeKey, paths }) => {
     const selectedPath = selectedFile?.path;
     if (
@@ -2336,14 +2347,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-    activeFileLoadIdRef.current += 1;
-    loadingFilePathRef.current = null;
-    lastLoadedFileStatRef.current = null;
-    setDesktopImageSrc('');
-    setFileError(null);
-    setLoadedFilePath(null);
-    setFileContentRevision((revision) => revision + 1);
-  }), [selectedFile?.path]);
+    reloadSelectedFile();
+  }), [reloadSelectedFile, selectedFile?.path]);
 
   // Poll open file for external changes. Metadata is compared first so an
   // unchanged file never reads content, and a changed text file swaps content
@@ -3807,7 +3812,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // for both the docked and the fullscreen viewer, so they cannot drift.
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
     if (isSelectedImage && !isSvgSource) {
-      return <ImageArtifact src={imageSrc} name={file.name} sizeBytes={artifactSize} neighbors={imageNeighbors} />;
+      return (
+        <ImageArtifact
+          src={imageSrc}
+          name={file.name}
+          sizeBytes={artifactSize}
+          neighbors={imageNeighbors}
+          onRetry={reloadSelectedFile}
+          download={downloadButton}
+        />
+      );
     }
     if (isSelectedPdf) {
       return <PdfArtifact src={pdfSrc} name={file.name} sizeBytes={artifactSize} download={downloadButton} />;
@@ -3862,6 +3876,24 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     ? renderArtifactPreview(selectedFile)
     : null;
 
+  const fileLoadingState = suppressFileLoadingIndicator
+    ? <div className="h-full" />
+    : <ContentLoadingState label={t('filesView.artifact.state.loading')} />;
+  const renderFileErrorState = (file: FileNode) => (
+    <ContentState
+      icon={<Icon name="error-warning" className="size-10 text-[color:var(--status-error)]" />}
+      title={t('filesView.artifact.state.readFailed', { name: file.name })}
+      // The generic fallback adds nothing to the title; a server's reason does.
+      description={fileError && fileError !== assetAuthErrorFallback ? fileError : undefined}
+      actions={(
+        <Button type="button" variant="outline" size="sm" onClick={reloadSelectedFile}>
+          <Icon name="refresh" className="me-2 size-4" />
+          {t('filesView.artifact.state.retry')}
+        </Button>
+      )}
+    />
+  );
+
   React.useEffect(() => {
     let cancelled = false;
     let objectUrl = '';
@@ -3914,7 +3946,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           if (!cancelled) {
             setDesktopImageSrc('');
             setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
-            setLoadedFilePath(null);
+            // Marked failed like a text read. Clearing the loaded path would make
+            // the selection effect load the file again, which wipes this error
+            // without fetching the image and leaves the viewer empty.
+            setFailedFilePath(selectedFile.path);
           }
         })
         .finally(() => {
@@ -4769,17 +4804,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           {!selectedFile ? (
             <div className="p-3 typography-ui text-muted-foreground">{t('filesView.editor.pickFileFromTree')}</div>
           ) : (fileLoading || isPdfAssetAuthLoading) ? (
-            suppressFileLoadingIndicator
-              ? <div className="p-3" />
-              : (
-                <div className="p-3 flex items-center gap-2 typography-ui text-muted-foreground">
-                  <Icon name="loader-4" className="size-4 animate-spin" />
-                  {t('filesView.state.loading')}
-                </div>
-              )
+            fileLoadingState
           ) : fileError ? (
-            <div className="p-3 typography-ui text-[color:var(--status-error)]">{fileError}</div>
-) : showCanvas ? (
+            renderFileErrorState(selectedFile)
+          ) : showCanvas ? (
             // Ahead of the built-in previews: a binary editor may claim an image or PDF.
             // Shown fullscreen instead while the overlay is open: one canvas instance.
             canvasInFullscreen ? <div className="h-full" /> : canvasElement
@@ -5092,17 +5120,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         </div>
         <ScrollableOverlay ref={setFullscreenPreviewScroller} outerClassName="h-full min-w-0" className={cn('h-full min-w-0', isLargeFile && '[overflow-anchor:none]')}>
           {(fileLoading || isPdfAssetAuthLoading) ? (
-            suppressFileLoadingIndicator
-              ? <div className="p-4" />
-              : (
-                <div className="p-4 flex items-center gap-2 typography-ui text-muted-foreground">
-                  <Icon name="loader-4" className="size-4 animate-spin" />
-                  Loading…
-                </div>
-              )
+            fileLoadingState
           ) : fileError ? (
-            <div className="p-4 typography-ui text-[color:var(--status-error)]">{fileError}</div>
-) : showCanvas ? (
+            renderFileErrorState(selectedFile)
+          ) : showCanvas ? (
             canvasElement
           ) : artifactPreview ? (
             artifactPreview

@@ -102,7 +102,7 @@ export function createDictationService({ modelsDir }) {
    * the provider is not ready.
    *
    * @param {{ provider?: string, language?: string, localModel?: string,
-   *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string } }} options
+   *           openaiCompatible?: { baseUrl?: string, model?: string, apiKey?: string, endpointPath?: string } }} options
    */
   const createSttSession = async (options = {}) => {
     const provider = options.provider === 'openai-compatible' ? 'openai-compatible' : 'local';
@@ -116,6 +116,7 @@ export function createDictationService({ modelsDir }) {
         // client older than the server-side store.
         apiKey: config.apiKey || readVoiceKey('stt'),
         language: options.language || undefined,
+        endpointPath: config.endpointPath,
       });
       try {
         await session.connect();

@@ -391,6 +391,36 @@ test('GitHub alerts render as titled callouts in both HTML modes and leave other
   expect(host.querySelector('blockquote')?.hasAttribute('data-oc-alert')).toBe(false);
 });
 
+test('file preview preserves single-tilde strikethrough without an explicit parser option', async () => {
+  await act(() => root.render(React.createElement(I18nProvider, null,
+    React.createElement(Renderer.SimpleMarkdownRenderer, {
+      content: '---\ntitle: Preview\n---\n\n~removed~ and ~~deleted~~',
+      frontmatter: 'properties', allowRawHtml: true, enableFileReferences: false,
+    }))));
+  expect(Array.from(host.querySelectorAll('del')).map(node => node.textContent)).toEqual(['removed', 'deleted']);
+});
+
+test('single tildes stay literal in chat and strike in host-authored Markdown', async () => {
+  const content = 'a ~removed~ b and ~~deleted~~ c';
+  for (const singleTilde of [false, true, false]) {
+    await act(() => root.render(React.createElement(I18nProvider, null,
+      React.createElement(Renderer.SimpleMarkdownRenderer, { content, singleTilde, allowRawHtml: true, enableFileReferences: false }))));
+    expect(Array.from(host.querySelectorAll('del')).map(node => node.textContent)).toEqual(
+      singleTilde ? ['removed', 'deleted'] : ['deleted'],
+    );
+  }
+});
+
+test('chat exports preserve literal single tildes and double-tilde strikethrough', async () => {
+  const { renderMarkdownForExport } = await import('./markdown/renderMarkdownForExport');
+  for (const purpose of ['copy', 'image'] as const) {
+    let output!: HTMLElement;
+    await act(async () => { output = await renderMarkdownForExport('~literal~ and ~~deleted~~', { purpose }); });
+    expect(output.textContent).toContain('~literal~');
+    expect(Array.from(output.querySelectorAll('del')).map(node => node.textContent)).toEqual(['deleted']);
+  }
+});
+
 test('item text links its repository references and leaves code, words and paths alone', async () => {
   const { githubLikeDescriptor, gitlabLikeDescriptor } = await import('@/lib/source-control/providers/descriptor.fixture');
   const github = { descriptor: githubLikeDescriptor(), origin: 'https://github.com', owner: 'acme', repo: 'app' };
@@ -467,6 +497,18 @@ test('handles empty, shrink and same-length replacement without stale text', asy
   expect(host.textContent).toBe('x');
   await render('');
   expect(host.textContent).toBe('');
+});
+
+test('preserves prose ranges while chat streams and after settlement', async () => {
+  for (const isStreaming of [true, false]) {
+    await act(() => root.render(React.createElement(I18nProvider, null,
+      React.createElement(Renderer.MarkdownRenderer, {
+        content: 'ETA 5~20s and 8~10 minutes. ~literal~ ~~Removed~~', isStreaming,
+        messageId: 'tilde-stream', isAnimated: false, enableFileReferences: false,
+      }))));
+    expect(host.textContent).toContain('ETA 5~20s and 8~10 minutes.');
+    expect(Array.from(host.querySelectorAll('del')).map(node => node.textContent)).toEqual(['Removed']);
+  }
 });
 
 test('chooses static history and preserves the live block tree through settlement', async () => {

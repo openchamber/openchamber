@@ -38,7 +38,7 @@ import { checkIsGitRepository } from '@/lib/gitApi';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { normalizePath } from './sidebar/utils';
 import { recordWorktreesSeen } from './sidebar/projects/worktreeFirstSeen';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import { streamPerfCount, streamPerfMark } from '@/stores/utils/streamDebug';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { buildKnownSessionDirectories } from './sidebar/list/sessionListDirectories';
@@ -234,6 +234,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
     const discoverWorktrees = async () => {
       const discoveryRuntimeKey = runtimeKey;
+      const isCurrent = captureRuntimeInstance();
       const connectedAtStart = useConfigStore.getState().isConnected;
       const projectEntries = useProjectsStore.getState().projects;
       useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map(projectEntries.map((project) => [normalizePath(project.path) ?? project.path, 'loading'])) });
@@ -272,12 +273,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           // check for projects the Git store hasn't seen yet.
           const cachedIsGitRepo = useGitStore.getState().directories.get(projectPath)?.isGitRepo;
           const isGitRepo = cachedIsGitRepo ?? await checkIsGitRepository(projectPath);
+          if (cancelled || !isCurrent()) return;
           if (!isGitRepo) {
             worktreesByProject.delete(projectPath);
             return;
           }
           const worktrees = await listProjectWorktrees({ id: project.id, path: projectPath });
-          if (cancelled) return;
+          if (cancelled || !isCurrent()) return;
           if (worktrees.length === 0) {
             worktreesByProject.delete(projectPath);
           } else {
@@ -289,7 +291,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         }
       })));
 
-      if (cancelled || getRuntimeKey() !== discoveryRuntimeKey) return;
+      if (cancelled || !isCurrent() || getRuntimeKey() !== discoveryRuntimeKey) return;
 
       const activeProjectPaths = new Set(projectEntries.map((project) => normalizePath(project.path)).filter(Boolean));
       for (const projectPath of worktreesByProject.keys()) {

@@ -496,7 +496,8 @@ export class ElectronSshManager {
   async runSshOutput(parsed, preDestinationArgs, remoteCommand = null) {
     return await new Promise((resolve, reject) => {
       const child = this.trackSshProcess(this.spawnProcess('ssh', buildSshArgs(parsed, preDestinationArgs, remoteCommand), {
-        stdio: ['pipe', 'pipe', 'pipe'],
+        // ssh.exe on Windows sometimes hung with an open stdin pipe. No setup command reads stdin.
+        stdio: ['ignore', 'pipe', 'pipe'],
         ...this.hiddenSpawnOptions(),
         env: this.authEnvironment(parsed),
       }), parsed);
@@ -1152,7 +1153,7 @@ export class ElectronSshManager {
   // login shell instead, the one `serve` gives a server started without a
   // password of its own. It is read from stdin, so it never reaches argv.
   async probeRemoteServer(parsed, controlPath, port, openchamberPassword, { environmentPassword = false } = {}) {
-    const authRequest = `curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE"`;
+    const authRequest = `curl -sS --max-time 3 -o /dev/null --write-out '%{http_code}' -c "$COOKIE_FILE"`;
     let authCommand = null;
     if (openchamberPassword) {
       authCommand = `${authRequest} -H 'content-type: application/json' --data ${shellQuote(JSON.stringify({ password: openchamberPassword }))} http://127.0.0.1:${port}/auth/session`;
@@ -1160,7 +1161,7 @@ export class ElectronSshManager {
       authCommand = `[ -n "$OPENCHAMBER_UI_PASSWORD" ] && printf '%s' "$OPENCHAMBER_UI_PASSWORD" | ${authRequest} --data-urlencode password@- http://127.0.0.1:${port}/auth/session`;
     }
     const authEnabled = authCommand ? '1' : '0';
-    const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(${authCommand || 'true'} || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
+    const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(${authCommand || 'true'} || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" --write-out '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" --write-out '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" --write-out '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null --write-out '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
     const output = await this.runRemoteCommand(parsed, controlPath, script);
     const lines = output.split(/\r?\n/);
     const infoStatus = parseProbeStatusLine(lines[0], 'INFO_STATUS=') || 0;

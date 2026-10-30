@@ -1,8 +1,9 @@
 import { execFile } from 'child_process';
 import { stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+
+import { ghConfigDir } from './gh-config.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,21 +20,11 @@ const hostKeyFor = (host) => {
   return value && value !== 'github.com' ? value : 'github.com';
 };
 
-// gh's own config dir rule: GH_CONFIG_DIR, then $XDG_CONFIG_HOME/gh, then
-// %AppData%\GitHub CLI on Windows, then ~/.config/gh.
-const ghHostsFile = () => {
-  const configDir = process.env.GH_CONFIG_DIR
-    || (process.env.XDG_CONFIG_HOME && join(process.env.XDG_CONFIG_HOME, 'gh'))
-    || (process.platform === 'win32' && process.env.APPDATA && join(process.env.APPDATA, 'GitHub CLI'))
-    || join(homedir(), '.config', 'gh');
-  return join(configDir, 'hosts.yml');
-};
-
 // gh rewrites hosts.yml on every login, logout, account switch and token
 // refresh, so its stat names the gh state an answer was read from.
 async function ghStateStamp() {
   try {
-    const info = await stat(ghHostsFile());
+    const info = await stat(join(ghConfigDir(), 'hosts.yml'));
     return `${info.mtimeMs}:${info.size}:${info.ino}`;
   } catch {
     return 'missing';

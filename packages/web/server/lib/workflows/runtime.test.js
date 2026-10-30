@@ -263,6 +263,45 @@ describe('workflow runtime', () => {
     expect(await store.get(runId)).toBeNull();
   });
 
+  it('deletes a run in the moment its end is saved but its execution is still winding down', async () => {
+    // The end state becomes observable before the execution leaves the
+    // runtime's active set: that happens only once the end save resolves.
+    // A delete in that overlap used to be refused as if the run were still
+    // going. The gated save holds the run in exactly that moment.
+    const agents = fakeAgentSessions();
+    const { runtime, act, store } = await setup(agents);
+    const originalSave = store.save;
+    let releaseSave = () => {};
+    const gate = new Promise((resolve) => { releaseSave = resolve; });
+    store.save = (run) => {
+      const saved = originalSave(run);
+      return run.state === 'completed' ? gate.then(() => saved) : saved;
+    };
+    const { runId } = await act('workflow.run', { script: script("return agent('x')") });
+    await runtime.approve({ runId });
+    await waitFor(async () => (await act('workflow.status', { runId })).state === 'completed');
+
+    await runtime.remove({ runId });
+    releaseSave();
+    await store.flush();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await store.get(runId)).toBeNull();
+    // The report never went out and must not wake the session afterwards.
+    expect(agents.reports.some((report) => report.body.metadata.runId === runId)).toBe(false);
+  });
+
+  it('refuses to delete a run that is still working', async () => {
+    const agents = fakeAgentSessions({ hang: ['slow'] });
+    const { runtime, act, finished } = await setup(agents);
+    const { runId } = await act('workflow.run', { script: script("return agent('slow 1')") });
+    await runtime.approve({ runId });
+    await waitFor(async () => (await act('workflow.status', { runId })).agents.some((agent) => agent.state === 'running' && agent.sessionId));
+
+    await expect(runtime.remove({ runId })).rejects.toThrow('Stop or decline the run before deleting it');
+    await runtime.stop({ runId });
+    await finished(runId);
+  });
+
   it('takes an answer accepted during a correction even when that turn ends in an error', async () => {
     let runtimeRef = null;
     const agents = fakeAgentSessions({ answer: () => 'not json' });

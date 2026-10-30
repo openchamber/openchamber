@@ -21,6 +21,8 @@ export type GuestSessionRecord = {
   title: string;
   projectId: string;
   directory: string;
+  /** The agent the session runs as. Absent from hosts older than this field. */
+  agent?: string;
   parentId: string | null;
   createdAt: number;
   updatedAt: number;

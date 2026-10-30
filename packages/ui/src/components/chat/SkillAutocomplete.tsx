@@ -3,6 +3,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
@@ -17,6 +18,8 @@ interface SkillInfo {
   source?: string;
   description?: string;
 }
+
+const EMPTY_SKILLS: SkillInfo[] = [];
 
 export interface SkillAutocompleteHandle {
   handleKeyDown: (key: string) => void;
@@ -51,13 +54,16 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   // Skills of the directory the composer sends to (session directory, or the
   // Chats root for a chat draft), not of the project the app was on last.
   const effectiveDirectory = useEffectiveDirectory();
-  const skills = useSkillsStore((s) => selectAvailableSkillsForDirectory(s, effectiveDirectory));
+  const target = useComposerConfigDirectory(effectiveDirectory);
+  const directory = target.status === 'resolved' ? target.directory : null;
+  const skills = useSkillsStore((s) => target.status === 'pending'
+    ? EMPTY_SKILLS
+    : selectAvailableSkillsForDirectory(s, target.directory));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
-    // Always trigger loadSkills when autocomplete opens to ensure the directory's skills are fresh
-    void loadSkills(effectiveDirectory);
-  }, [effectiveDirectory, loadSkills]);
+    if (directory) void loadSkills(directory);
+  }, [directory, loadSkills]);
 
   React.useEffect(() => {
     setFilteredSkills(rankSkillAutocompleteItems(skills, searchQuery));

@@ -3,6 +3,7 @@ import {
   getVSCodeBootstrapConfig,
   getVSCodeBootstrapWorkspaceFolder,
   isVSCodeBootstrapPresent,
+  isVSCodeWithoutWorkspace,
 } from './vscodeBootstrap';
 
 interface TestWindow {
@@ -64,5 +65,13 @@ describe('VS Code bootstrap config', () => {
     expect(getVSCodeBootstrapConfig()).toBeNull();
     expect(isVSCodeBootstrapPresent()).toBe(false);
     expect(isVSCodeBootstrapPresent(null)).toBe(false);
+    expect(isVSCodeWithoutWorkspace()).toBe(false);
+  });
+
+  test('uses workspace membership even when an editor panel names a session directory', () => {
+    setTestWindow({ __VSCODE_CONFIG__: { workspaceFolder: '/chats/session-a', workspaceFolders: [] } });
+    expect(isVSCodeWithoutWorkspace()).toBe(true);
+    setTestWindow({ __VSCODE_CONFIG__: { workspaceFolder: '', workspaceFolders: [{ name: 'project', path: '/project' }] } });
+    expect(isVSCodeWithoutWorkspace()).toBe(false);
   });
 });

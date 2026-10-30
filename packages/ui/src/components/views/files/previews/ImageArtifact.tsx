@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
@@ -43,6 +44,8 @@ type ImageArtifactProps = {
   name: string;
   sizeBytes: number | null;
   neighbors?: { previous: ImageNeighbor; next: ImageNeighbor } | null;
+  onRetry?: () => void;
+  download?: React.ReactNode;
 };
 
 /**
@@ -56,18 +59,31 @@ type ImageArtifactProps = {
  * With `neighbors`, arrows at the viewer's edges and the arrow keys (while the
  * viewer has focus and the image is at fit; zoomed, the keys keep scrolling)
  * show the previous and next image of the folder.
+ *
+ * An empty `src` is an image still being fetched; until it decodes the viewer
+ * shows the loading state, and an image the browser cannot decode shows a
+ * failure with retry and download in its place.
  */
-const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes, neighbors }) => {
+const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes, neighbors, onRetry, download }) => {
   const { t, direction } = useI18n();
   // null is fit: the scale then follows the viewer's size.
   const [scale, setScale] = React.useState<number | null>(null);
   const [natural, setNatural] = React.useState<Size | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  // A retry of the same URL remounts the element, so the browser requests it again.
+  const [attempt, setAttempt] = React.useState(0);
   const [viewport, setViewport] = React.useState<Size | null>(null);
   const [dragging, setDragging] = React.useState(false);
   const viewportRef = React.useRef<HTMLDivElement | null>(null);
   const imageRef = React.useRef<HTMLImageElement | null>(null);
   const anchorRef = React.useRef<ZoomAnchor | null>(null);
   const dragRef = React.useRef<DragState | null>(null);
+
+  const retry = () => {
+    setFailed(false);
+    setAttempt((value) => value + 1);
+    onRetry?.();
+  };
 
   React.useEffect(() => {
     const element = viewportRef.current;
@@ -307,11 +323,33 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
         )}
       />
       <div className="relative flex min-h-0 flex-1 flex-col" onKeyDown={handleKeyDown}>
+        {failed ? (
+          <ContentState
+            // Clears the round previous/next arrows at the viewer's edges.
+            className={neighbors ? 'px-16' : undefined}
+            icon={<Icon name="image" className="size-10 text-muted-foreground" />}
+            title={t('filesView.artifact.image.loadFailed')}
+            description={t('filesView.artifact.image.loadFailedDescription')}
+            actions={(
+              <>
+                <Button type="button" variant="outline" size="sm" onClick={retry}>
+                  <Icon name="refresh" className="me-2 size-4" />
+                  {t('filesView.artifact.state.retry')}
+                </Button>
+                {download}
+              </>
+            )}
+          />
+        ) : null}
+        {!failed && !natural ? (
+          <ContentLoadingState label={t('filesView.artifact.state.loading')} className="pointer-events-none absolute inset-0" />
+        ) : null}
         <div
           ref={viewportRef}
           tabIndex={neighbors ? 0 : undefined}
           className={cn(
             'min-h-0 flex-1 overflow-auto outline-none',
+            failed && 'hidden',
             canPan && (dragging ? 'cursor-grabbing' : 'cursor-grab'),
           )}
           onPointerDown={handlePointerDown}
@@ -326,24 +364,29 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
               scale === null ? 'h-full w-full' : 'min-h-full min-w-full w-max',
             )}
           >
-            <img
-              ref={imageRef}
-              key={src}
-              src={src}
-              alt={name}
-              draggable={false}
-              onLoad={(event) => {
-                const image = event.currentTarget;
-                setNatural({ width: image.naturalWidth, height: image.naturalHeight });
-              }}
-              style={scale !== null && natural
-                ? { width: natural.width * scale, height: natural.height * scale }
-                : undefined}
-              className={cn(
-                'select-none rounded-md border border-edge-muted bg-primary/10',
-                scale === null ? 'max-h-full max-w-full object-contain' : 'max-w-none shrink-0',
-              )}
-            />
+            {src ? (
+              <img
+                ref={imageRef}
+                key={`${src}:${attempt}`}
+                src={src}
+                alt={name}
+                draggable={false}
+                onLoad={(event) => {
+                  const image = event.currentTarget;
+                  setNatural({ width: image.naturalWidth, height: image.naturalHeight });
+                }}
+                onError={() => setFailed(true)}
+                style={scale !== null && natural
+                  ? { width: natural.width * scale, height: natural.height * scale }
+                  : undefined}
+                className={cn(
+                  'select-none rounded-md border border-edge-muted bg-primary/10',
+                  scale === null ? 'max-h-full max-w-full object-contain' : 'max-w-none shrink-0',
+                  // Kept in the document while it decodes, so it can load and report its size.
+                  !natural && 'invisible',
+                )}
+              />
+            ) : null}
           </div>
         </div>
         {neighbors ? (

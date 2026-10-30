@@ -388,12 +388,21 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
 };
 
 let runtimeFetchBridgeInstalled = false;
+// The browser's own fetch, kept before the bridge replaces window.fetch. A
+// request to a runtime that is no longer active must not resolve through the
+// active one.
+let fetchBypassingRuntimeBridgeImpl: typeof fetch | null = null;
+
+export const fetchBypassingRuntimeBridge = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => (
+  (fetchBypassingRuntimeBridgeImpl ?? globalThis.fetch.bind(globalThis))(input, init)
+);
 
 export const installRuntimeFetchBridge = (): void => {
   if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
   runtimeFetchBridgeInstalled = true;
 
   const nativeFetch = window.fetch.bind(window);
+  fetchBypassingRuntimeBridgeImpl = nativeFetch;
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const relayResponse = await tryRelayFetch(input, init ?? {});
     if (relayResponse) return relayResponse;

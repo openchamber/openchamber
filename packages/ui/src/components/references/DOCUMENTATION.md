@@ -192,6 +192,7 @@ Tracker then show one state for the same PR.
 - Descriptions and comments render with `allowRawHtml`, sharing the Files preview's Streamdown processing and restricted rehype policy in `chat/markdown/streamdownPlugins.ts`. GitHub screenshots, tables and disclosures show; scripts, author styles and application classes are excluded. Media components preserve safe image dimensions and aspect ratios. Tracker items and the Git view's PR section use this same renderer.
 - Inside a preview, `#12`, `owner/repo#12` (`!12` where change requests have their own prefix), `@someone` and commit ids link the way the item's host links them (`referenceLinks.ts` provides the item's repository to every body; `chat/markdown/remarkRepositoryReferences.ts` builds the links from the descriptor's URL patterns). Code, existing links, words and paths stay text, and a run of hex counts as a commit only with a digit and a letter in it. A provider without `urls.commit` or `urls.user` gets no links for those. The links open like any link in item text: an issue or change request in the Tracker, a commit in the Diff view when the folder the item was read through has it (`useOpenChatLink`), else on the host. Only the desktop app looks for the commit first: knowing whether the repository has it takes a git read, and a browser opens a new tab only right inside the click, so on the web a missing commit would open nowhere. The SHAs of a PR's commit rows open the same way.
 - Emoji shortcodes (`:tada:`) in item text read as emoji, the way the host shows them; hosts send the shortcode as written. The names are GitHub's (`gemoji`), loaded from `lib/emoji/shortcodes.ts` only once a body holds something shaped like a shortcode, so a preview without one never loads the table. Code keeps its shortcodes, and an unknown name stays text. Chat does not convert them: agents write the emoji themselves.
+- Descriptions and comments opt into `singleTilde` strikethrough, preserving GFM's `~text~` rendering on GitHub. Chat requires `~~text~~` so prose ranges remain literal.
 - Where issues and change requests share one number, `#12` links the issue page, which the host forwards to a change request. The Tracker reads such a link as an issue first and, when no issue has that number, as a change request (`TrackerItemView`).
 - A review comment's ```` ```suggestion ```` fence (GitLab's `suggestion:-0+2` too) draws as a suggested change: a diff of the lines the comment sits on against the suggestion. Those lines come with the comment as `excerpt` where the host sends them (GitHub, from the thread's diff hunk); without them the suggestion shows as added lines. Copying the block copies the suggested code.
 - Clicking a picture in the description or a comment opens the chat's image viewer (`useReferenceImagePreview.tsx`) with every loaded picture of the item, in page order, so the arrows step through them; a picture inside a link keeps opening its link. Escape closes the viewer alone, never the picker dialog under it. The viewer's chunk loads on the first click, and nothing runs while it is closed.
@@ -309,10 +310,12 @@ preview's footer holds actions instead of what the agent gets.
   the project and repository pickers stay beside it: they are the only way
   off the tracker for that project.
 - The board reads one folder, `useBoardRepository` (`sourceBoard/boardRepository.ts`):
-  the project's root when it is a git repository, as always. When the root is
-  not one but repositories lie under it, the board reads one of them, or all of
-  them together, and a second picker beside the project picker
-  (`SourceBoardRepositoryPicker`, a bottom sheet on the phone) chooses.
+  the project's root when it is a git repository, unless a repository under it
+  was picked. When the root is not one but repositories lie under it, the board
+  reads one of them, or all of them together. A second picker beside the project
+  picker (`SourceBoardRepositoryPicker`, a bottom sheet on the phone) chooses;
+  it appears only when there is something to switch to (`choosable`), so an
+  established root with nothing below it keeps its own row alone.
   Discovery is the Git store's (`ensureNestedRepos`), read only: the board never
   calls `selectNestedRepo` for browsing, so its choice is independent of the Git
   screen's. The choice is per project id in the persisted board choice:
@@ -320,14 +323,17 @@ preview's footer holds actions instead of what the agent gets.
   (whether all are listed; absent means all, unless a single repository was
   remembered before this existed). Updates merge into both maps, older data
   reads as empty. A remembered repository that is no longer discovered falls
-  back to the first. While the root is probed and the folder searched, a root
-  without a remote shows a loading state instead of the no-remote one; a failed
+  back to the first, which under an established root is the root itself. While
+  the root is probed and the folder searched, a root without a remote shows a
+  loading state instead of the no-remote one; a failed
   search shows an error with Retry and is never read as "no repositories"; a
   runtime without discovery (`'unsupported'`) stays at the root.
 - **All repositories** is the picker's first entry and the default for such a
-  folder, offered only where `sourceControl.referencesAcross` exists; a
-  runtime without it lists the first repository. Every runtime that mounts the
-  board has it; VS Code has no board. The list, its search
+  folder, offered only where `sourceControl.referencesAcross` exists and the
+  root is no repository (`allAvailable`): an established root lists itself, and
+  "all" of its repositories would only be the same one beside itself. A
+  runtime without the route lists the first repository. Every runtime that
+  mounts the board has it; VS Code has no board. The list, its search
   (including a pasted link or `#number`, which the server resolves) and paging
   come from one `referencesAcross` call per page
   (`useRepositoryAcrossReferenceList`) to one provider: the lowest-`order`
@@ -358,7 +364,20 @@ preview's footer holds actions instead of what the agent gets.
   because discovery lives there, so it waits for the probe and discovery and the
   pinned lookup never runs against a stale single repository), remembers that
   as the project's choice, and opens the item in its own repository. A root that
-  is a repository, or a runtime without the search, is unchanged.
+  is a repository has nothing to list across, so the item is read through the
+  repository its link names instead (`useLinkRepository`, the folder rule the
+  Tracker uses): a submodule's item opens from an established root's board, its
+  labels, comments and Changes links belonging to that repository, while the
+  list and the remembered choice stay as they were. A runtime without the
+  search is unchanged.
+  Link lookup waits for repository discovery and candidate bindings unless the
+  root already matches the link. Failed discovery keeps the link with Retry;
+  it never triggers the external-browser fallback. The home directory is never
+  scanned, including on retry, and cached discoveries there are ignored.
+  Repository focus stays in the store until the preview opens and discovery
+  settles, so resolving a remembered child can remount the list without losing
+  the request. A discovery failure on a repository root leaves its list usable
+  and shows a separate Retry even when no link is pinned.
 - With one repository chosen (or a folder that is one), lists, preview, labels,
   reviewers, reply, merge and the other writes use that repository's read
   context. New session and Attach keep the project's root. Changes and
@@ -401,7 +420,9 @@ preview's footer holds actions instead of what the agent gets.
   the board instead, selected. The board moves to the session's project and
   tab and previews the item, read on its own (`focusRepositoryItem` with its
   link, `focusTrackerItem` with its tracker and identifier, then the browser's
-  `pinnedItem`) while the search stays empty and the list as it was. A link
+  `pinnedItem`) while the search stays empty and the list as it was; the pinned
+  lookup reads the folder the link's repository names rather than the one the
+  list reads. A link
   finds that one item whatever its state, on GitLab too, where a number or link
   is read rather than searched. The board takes from that answer only the item
   whose link names the same repository and number (links are read through the
@@ -497,4 +518,3 @@ preview's footer holds actions instead of what the agent gets.
   the button says so. The PR comes from the branch status; on a provider with
   `features.referenceSearch` `#N` is also looked up for its labels and comment
   count, which the status does not carry.
-

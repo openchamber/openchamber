@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -44,6 +45,9 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'quota.family.zen': 'Zen 모델',
+  'quota.value.requests': '요청: {count}',
+  'quota.value.spent': '{spent} 사용',
   "opencodeCompatibility.bundled": "OpenCode는 OpenChamber에 포함되어 있습니다. OpenCode v2를 사용하려면 OpenChamber를 업데이트하세요.",
   "opencodeCompatibility.title": "OpenCode v2가 필요합니다",
   "opencodeCompatibility.outdatedTitle": "OpenCode를 업데이트하세요",
@@ -166,6 +170,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n.ko,
   ...htmlRenderI18n.ko,
   ...documentToolbarI18n.ko,
+  ...secretRequestI18n.ko,
   ...sessionNoticesI18n.ko,
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
@@ -232,6 +237,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.mrCheckContext': '실패한 파이프라인 작업',
   'chat.chatInput.prCheckContextRemove': 'PR 체크 컨텍스트 제거',
   'common.loading': '로딩 중...',
+  'common.image.loading': '이미지 불러오는 중',
+  'common.image.loadFailed': '이미지를 불러올 수 없습니다',
+  'common.image.retry': '다시 시도',
   'common.unavailable': '사용할 수 없음',
   'common.language.english': '영어',
   'common.language.german': '독일어',
@@ -3499,10 +3507,11 @@ export const dict: Record<I18nKey, string> = {
   'common.duration.secondsCompact': '{seconds}초',
   'common.duration.minutesSecondsCompact': '{minutes}분 {seconds}초',
   'common.duration.hoursMinutesCompact': '{hours}시간 {minutes}분',
-  'contextFileOpen.failure.tooLarge': 'File is too large to open (>{count} lines)',
-  'contextFileOpen.failure.tooLargeSize': '파일이 너무 커서 열 수 없습니다({size} 초과)',
-  'contextFileOpen.failure.missing': 'File not found',
-  'contextFileOpen.failure.unreadable': 'Failed to open file',
+  'contextFileOpen.failure.tooLarge': '{name}은(는) 너무 커서 열 수 없습니다',
+  'contextFileOpen.failure.tooLargeDetail': '{count}줄 초과 · {size}',
+  'contextFileOpen.failure.tooLargeSize': '{limit} 초과 · {size}',
+  'contextFileOpen.failure.missing': '{name}을(를) 찾을 수 없습니다',
+  'contextFileOpen.failure.unreadable': '{name}을(를) 열 수 없습니다',
   'quota.window.5h': '5시간',
   'quota.window.7d': '7일 한도',
   'quota.window.extraUsage': '추가 사용량',
@@ -3510,6 +3519,7 @@ export const dict: Record<I18nKey, string> = {
   'quota.window.daily': '매일',
   'quota.window.monthly': '매월',
   'quota.window.credits': '크레딧',
+  'quota.value.creditsUsed': '사용한 크레딧: {credits}',
   'quota.window.keyLimit': '키 한도',
   'quota.window.creditsBalance': '크레딧 잔액',
   'quota.window.monthlyCredits': '월간 크레딧',
@@ -3575,6 +3585,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.action.openSubagent': '{name} 열기',
   'chat.workStatus.section.usage': '사용량',
   'chat.workStatus.section.telemetry': '턴 통계',
+  'chat.workStatus.telemetry.previousTurn': '이전 턴',
+  'chat.workStatus.telemetry.previousTurnRate': '이전 턴 · {rate}',
   'chat.workStatus.telemetry.responseSpeed': '응답',
   'chat.workStatus.telemetry.responseSpeedDescription': '최종 텍스트가 도착한 속도입니다. 시작 전 대기, 추론, 이전 도구 호출은 제외합니다. 텍스트 시간 기록으로 계산한 추정치이며 제공자 측 속도 측정값은 아닙니다.',
   'chat.workStatus.telemetry.speed': '전체 요청',
@@ -3673,6 +3685,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.formCard.submitFailed': '답변을 제출할 수 없습니다',
   'chat.formCard.cancelFailed': '요청을 취소할 수 없습니다',
   'chat.formCard.tryAgain': '다시 시도하세요.',
+  'chat.formCard.recoveredNotice': '대기 중 턴이 중지되었습니다. 제출하면 새로운 유료 턴이 시작됩니다.',
   'chat.formDock.progress': '{total} 중 {current}',
   'chat.formDock.waiting': '{count}개 더 대기 중',
   'chat.formDock.back': '뒤로',
@@ -3886,4 +3899,14 @@ export const dict: Record<I18nKey, string> = {
   'notifications.question.bodyFallback': '에이전트가 답변을 기다리고 있습니다',
   'notifications.permission.bodyFallback': '에이전트가 승인을 기다리고 있습니다',
   'notifications.permission.title': '권한 필요',
+  'chat.promptHistorySearch.title': "프롬프트 기록 검색",
+  'chat.promptHistorySearch.searchPlaceholder': "기억된 프롬프트 검색",
+  'chat.promptHistorySearch.close': "프롬프트 기록 검색 닫기",
+  'chat.promptHistorySearch.empty': "검색할 프롬프트가 아직 없습니다",
+  'chat.promptHistorySearch.noMatches': "일치하는 프롬프트가 없습니다",
+  'chat.promptHistorySearch.attachmentsSingle': "첨부 파일 {count}개",
+  'chat.promptHistorySearch.attachmentsPlural': "첨부 파일 {count}개",
+  'chat.promptHistorySearch.hint': "↑ ↓ 탐색 · Enter 불러오기 · Esc 닫기",
+  'helpDialog.item.searchPromptHistory': "프롬프트 기록 검색(채팅 입력)",
+
 };

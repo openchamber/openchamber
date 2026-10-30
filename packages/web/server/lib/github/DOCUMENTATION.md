@@ -64,7 +64,7 @@ GitHub sits on the shared source-control route shell (`../source-control/provide
 ## Host trust
 
 - A non-github.com host is trusted when the server's own `GH_HOST` names it, gh has a `hosts.yml` login for it, or the user already stored a per-host PAT for it (registering the PAT is what trusts a host; the async gates use `isTrustedGitHubHostOrStored(host)`, and the sync `isTrustedGitHubHost(host)` stays gh/env-only for its sync consumers). The trust gate runs before any token lookup, nothing here throws or talks to the network, and nothing here talks to a host.
-- `github.com` (and an omitted host) is always trusted. The server's own `GH_HOST` is trusted. Any other host is trusted only when gh has a stored login for it: a top-level key equal to the host in `$GH_CONFIG_DIR/hosts.yml` (falling back to `~/.config/gh/hosts.yml`) recording an account — a direct `oauth_token`, a bare `user` (when the token lives in the OS keyring), or a non-empty `users` map. An unreadable or malformed file means "not trusted" (fail closed).
+- `github.com` (and an omitted host) is always trusted. The server's own `GH_HOST` is trusted. A gh login is recorded by a top-level host key in `hosts.yml` with a direct `oauth_token`, a bare `user` for an OS-keyring login, or a non-empty `users` map. Host trust and credential-cache invalidation share `ghConfigDir()` in `gh-config.js`. It selects the first non-empty value in gh's order: `GH_CONFIG_DIR`, `$XDG_CONFIG_HOME/gh`, `%APPDATA%/GitHub CLI` on Windows, then `~/.config/gh`. Only the selected directory is read; an unreadable or malformed file means "not trusted" with no fallback to another directory.
 - The gate is two layers. `resolveGitHubRepoFromDirectory` refuses unapproved hosts at the single choke point every remote resolution passes through (so `resolveRemoteCandidates` skips them too, and `/pr/status` reports `project: null` for GitLab-style remotes). `getOctokitOrNull(host)` re-checks before ANY token lookup as defense in depth, so a direct caller with a client-supplied host can never mint a token for an untrusted host.
 - Trusted non-github.com hosts are also github instances: `listTrustedGitHubHosts()` in `host-trust.js` enumerates the hosts gh has a stored login for plus the server's `GH_HOST`, and `GET /api/source-control/github/auth/status?instance=<host>` answers for such a host with that host's gh login as the `<host>#cli:<id>` account — a GitHub Enterprise repository can bind and read PRs with a gh login for its host and no github.com OAuth account. This adds instances, it does not relax trust: a host only appears once trusted, and `getOctokitForAccountId` still refuses every `<host>#cli:<id>` the trust gate rejects.
 
@@ -265,6 +265,10 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 - Repo parser supports scp, `ssh://`, and `https://` remotes for any host, including GitHub Enterprise; `getOctokitOrNull(host)` pairs each Enterprise host with that host's gh token. Remotes on hosts the server never authenticated with are refused before any token is looked up ("Host trust" above), so a gitlab.com (or arbitrary) remote resolves to `repo: null` instead of receiving an enterprise token.
 
 ## Decisions
+
+### Why host trust and token invalidation share gh's config directory
+
+Both must observe the same login file gh uses. Separate directory rules can trust one file while watching another for login changes. Selecting one directory before reading also keeps a missing or malformed override from trusting a login in a lower-priority directory.
 
 ### Why a session's Octokit stays in the provider and not in the session
 

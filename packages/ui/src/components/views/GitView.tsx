@@ -292,10 +292,11 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     })));
 
   // The root the view is anchored to (session/worktree context stays keyed on
-  // it). When the root is not itself a repository and the user picked a nested
-  // one, `gitDirectory` is the effective repository all git data and actions
-  // operate on. The hook owns probing, discovery, auto-select, and
-  // stale-selection recovery; data fetching below keys off its result.
+  // it). When the user picked a repository nested under it — a submodule or a
+  // checkout in a non-repository folder — `gitDirectory` is the effective
+  // repository all git data and actions operate on. The hook owns probing,
+  // discovery, auto-select, and stale-selection recovery; data fetching below
+  // keys off its result.
   const { rootIsGitRepo, gitDirectory, nestedRepos, repositoryOptions } = useNestedGitDirectory(
     currentDirectory ?? null,
     { enabled: isActive, recheckOnOpen: true },

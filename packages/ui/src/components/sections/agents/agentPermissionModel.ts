@@ -43,7 +43,7 @@ export const BUILTIN_ACTIONS = [
 ] as const;
 
 /** OpenChamber's own agent tools, shown so their rules are discoverable. */
-export const OPENCHAMBER_ACTIONS = ['openchamber', 'openchamber_schedule', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_render', 'openchamber_image'] as const;
+export const OPENCHAMBER_ACTIONS = ['openchamber', 'openchamber_schedule', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_render', 'openchamber_image', 'openchamber_secret'] as const;
 
 /**
  * v1 permission keys OpenCode 2 no longer checks. Rules on them are inert, so

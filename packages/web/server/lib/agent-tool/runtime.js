@@ -15,6 +15,8 @@ import {
   OPENCHAMBER_NOTIFY_ACTIONS,
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
   OPENCHAMBER_RENDER_ACTIONS,
+  OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+  OPENCHAMBER_SECRET_ACTIONS,
   OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS,
   OPENCHAMBER_SCHEDULE_ACTIONS,
   resolveAgentToolAction,
@@ -33,6 +35,12 @@ import {
   RENDER_PAGE_MAX_HTML_LENGTH,
   RENDER_PAGE_MAX_TITLE_LENGTH,
 } from '../openchamber-control/render-page.js';
+import {
+  SECRET_REQUEST_CLOSED_IN_CHAT_NOTE,
+  SECRET_REQUEST_MAX_LABEL_LENGTH,
+  SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH,
+  SECRET_REQUEST_MAX_REASON_LENGTH,
+} from '../openchamber-control/secret-request.js';
 import { createCallbackAddress } from './callback-address.js';
 
 const TOOL_SCHEMA_VERSION = 1;
@@ -48,6 +56,7 @@ const ACTIONS = new Set([
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
   ...OPENCHAMBER_IMAGE_ACTIONS,
+  ...OPENCHAMBER_SECRET_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);
@@ -61,6 +70,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
     ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
     ...OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
     ...OPENCHAMBER_IMAGE_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS,
     ...OPENCHAMBER_WORKFLOW_ANSWER_ACTION_DEFINITIONS,
   ].map(({ action, title }) => [action, title]),
@@ -242,7 +252,7 @@ const RENDER_PAGE_HTML_DESCRIPTION = [
   "Ready classes in the app's look, so these need no CSS of your own: .oc-box (a box; a box inside it steps up a tone), .oc-muted (secondary text), .oc-table on a div around a <table> (scrolls sideways when wide), .oc-num (tabular figures, end-aligned), .oc-badge with optional data-tone=\"success|warning|error|info\", .oc-dot (a legend dot) and .oc-bar (a horizontal bar) colored by --color (default --chart-1), the bar as long as --value (a percentage), .oc-field (a <label> around its text and control), .oc-input on an input, select or textarea, .oc-switch on a checkbox, .oc-segmented around <button>s (aria-pressed=\"true\" on the chosen one; also tabs). A line only where it means something, such as a divider between sections.",
   "Theme variables on :root, updated live on a theme switch: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --primary, --primary-foreground, --destructive, --warning, --success, --info, --code-background, --code-foreground, --chart-1 to --chart-6 (series), --radius, --font-sans, --font-mono. A base stylesheet already sets text color, font and size; the root font size is the chat's text size and follows the user's interface size, so size text in rem or em, not px. A page with its own colors, such as a mockup of the user's project, sets a color on all its text and gives itself a background: text without a color takes the theme's, and without a background the page shows the chat's.",
   "Scripts may add tooltips, tabs, toggles, sorting. On a phone a tap shows a hover tooltip, so keep tooltips and popups inside the page and flip them near an edge.",
-  `Images: https, data:, or a local PNG, JPEG, GIF or WebP named by absolute path in src, CSS url() or a quoted script string, at most 10 MB each and ${RENDER_PAGE_IMAGE_BUDGET_BYTES / (1024 * 1024)} MB together per page; the result names any that do not show. Save a screenshot for a page in ${OPENCODE_TEMP_DIRECTORY}.`,
+  `Images: https, data:, or local PNG, JPEG, GIF or WebP files named by complete absolute paths in src, CSS url() or quoted script strings. The renderer finds and inlines these paths before the page runs, so do not build paths from directory and filename fragments. To switch images, put each full path in a script string and assign the selected value to img.src, for example: const images = { a: '/absolute/path/a.png', b: '/absolute/path/b.png' }; image.src = images[key]. Each file can be 10 MB; all images together can be ${RENDER_PAGE_IMAGE_BUDGET_BYTES / (1024 * 1024)} MB per page. The result names any that do not show. Save a screenshot for a page in ${OPENCODE_TEMP_DIRECTORY}.`,
   "The page is sandboxed: no access to OpenChamber, the network session or local files; links open in the user's browser.",
 ].join(' ');
 
@@ -257,6 +267,13 @@ const RENDER_PARAMETER_PROPERTIES = {
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
+};
+
+// Its own names: `label` means something else in the web tool.
+const SECRET_PARAMETER_PROPERTIES = {
+  label: { type: 'string', description: `What the secret is, the card's title, such as Cloudflare API token. At most ${SECRET_REQUEST_MAX_LABEL_LENGTH} characters` },
+  reason: { type: 'string', description: `In the user's language: what you will do with it, and where to create it when that is not obvious. At most ${SECRET_REQUEST_MAX_REASON_LENGTH} characters` },
+  placeholder: { type: 'string', description: `The value's shape, such as sk-ant-...; at most ${SECRET_REQUEST_MAX_PLACEHOLDER_LENGTH} characters` },
 };
 
 // How to write a script lives on `script`, read while the agent writes it,
@@ -330,6 +347,10 @@ const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the
   + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "
   + "Without path the files go to OpenCode's temporary folder: move one into the project when it belongs there. Every call costs the user money: make what was asked, not extra variations.";
 
+const SECRET_TOOL_DESCRIPTION = "Ask the user for a secret (API key, token, password) on a private card in the chat, and wait for it. The card takes one line. "
+  + "A saved secret goes to a file only this user can read, deleted after 24 hours, and the call returns only its path. Read it inside the command that needs it (TOKEN=\"$(cat <file>)\" some-cli ...); never print, echo or log it, and never copy it into the project. "
+  + "The call returns status declined when the user declines, or answered: false when they wrote in the chat instead.";
+
 const WORKFLOW_TOOL_DESCRIPTION = 'Workflows: a script that fans a large task out to many agents, which OpenChamber runs in the background while you stay free. '
   + 'For work with many similar independent pieces (a review per file, an audit across many routes, a migration of many files, research cross-checked across sources) or a check that must run on every piece. A single feature or a few steps is not one: do it yourself or with a subagent. '
   + 'One action per call. Check a script with workflow.check, then workflow.run: the user approves the plan in the chat, and the report arrives as a message when the run ends. Read script before writing one.';
@@ -392,16 +413,17 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
 });
 
 /**
- * A page that waits for the user's answer (render.page with awaitAnswer)
- * holds its call open. A message the user writes in the chat meanwhile would
- * sit behind that call: OpenCode delivers it only after the call returns. So
+ * A call that waits for the user's answer (render.page with awaitAnswer, and
+ * every secret.request) holds its call open. A message the user writes in the
+ * chat meanwhile would sit behind that call: OpenCode delivers it only after
+ * the call returns. So
  * the call registers itself under its session, and the plugin's prompt hook
  * (createPluginSource) aborts it the moment any prompt for that session
  * arrives, whichever way it was sent. The call then returns "answered in the
  * chat" and the agent reads the message next.
  */
-const ANSWER_WAIT_SETUP = String.raw`        const chatController = new AbortController()
-        const waiting = args.awaitAnswer === true
+const answerWaitSetup = (waitsWhen) => String.raw`        const chatController = new AbortController()
+        const waiting = ${waitsWhen}
         if (waiting) {
           const set = pagesWaitingForChat.get(context.sessionID) ?? new Set()
           set.add(chatController)
@@ -431,10 +453,10 @@ const ANSWER_WAIT_RELEASE = String.raw` finally {
           releaseWait()
         }`;
 
-const ANSWER_CLOSED_IN_CHAT = String.raw`
+const answerClosedInChat = (note) => String.raw`
           if (chatController.signal.aborted && !context.signal?.aborted) {
             const answer = { answered: false, reason: "chat" }
-            const payload = { schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: true, action: args.action, data: { answer, note: ${JSON.stringify(RENDER_PAGE_CLOSED_IN_CHAT_NOTE)} } }
+            const payload = { schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: true, action: args.action, data: { answer, note: ${JSON.stringify(note)} } }
             await progress({ ok: true })
             return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer } } }
           }`;
@@ -531,7 +553,12 @@ const singleActionSchema = (definition) => ({
  * answer with an empty completion instead of an error, and the `oneOf` branches
  * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false }) => {
+/**
+ * `answers` makes a tool's call wait for the user: `waitsWhen` is the JS
+ * expression (over `args`) that says whether this call waits, and
+ * `closedInChatNote` what the agent reads when the user wrote in the chat.
+ */
+const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = null }) => {
   const normalizeBooleans = booleanNormalizationBlock(parameters);
   const reviveDependsOn = dependsOnRevivalBlock(parameters);
   const actionSchema = definitions.length === 1 ? singleActionSchema(definitions[0]) : multiActionSchema(definitions);
@@ -595,7 +622,7 @@ ${reviveDependsOn}${actionSchema.normalize}${normalizeBooleans}        const act
         if (!endpoint || !token) {
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
         }
-${answers ? ANSWER_WAIT_SETUP : ''}
+${answers ? answerWaitSetup(answers.waitsWhen) : ''}
         try {
           const response = await fetch(endpoint, {
             method: "POST",
@@ -617,7 +644,7 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
           await progress({ ok: valid && result.ok === true })
           if (valid) return { content, metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true${answers ? ANSWER_METADATA : ''} } } }
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
-        } catch (error) {${answers ? ANSWER_CLOSED_IN_CHAT : ''}
+        } catch (error) {${answers ? answerClosedInChat(answers.closedInChatNote) : ''}
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
         }${answers ? ANSWER_WAIT_RELEASE : ''}
       },
@@ -637,7 +664,7 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
  */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeWorkflow, codeMode }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow, codeMode }) => {
   const entries = [];
   if (includeControl) {
     entries.push(`    for (const id of ${JSON.stringify(OPENCODE_TOOLS_REPLACED_BY_CONTROL)}) tools.remove(id)
@@ -708,7 +735,19 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       // script, the call is only an entry in execute's list, so the page
       // never showed and an answer had no call to reach.
       codeMode: false,
-      answers: true,
+      answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
+    }));
+  }
+  if (includeSecret) {
+    entries.push(createToolEntry({
+      name: 'openchamber_secret',
+      description: SECRET_TOOL_DESCRIPTION,
+      definitions: OPENCHAMBER_SECRET_ACTION_DEFINITIONS,
+      parameters: SECRET_PARAMETER_PROPERTIES,
+      // Never behind Code Mode, like render: the chat draws the card from
+      // this tool's own call, and the answer has to reach that call.
+      codeMode: false,
+      answers: { waitsWhen: 'true', closedInChatNote: SECRET_REQUEST_CLOSED_IN_CHAT_NOTE },
     }));
   }
   if (includeImage) {
@@ -758,7 +797,8 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
   }
 }
 
-// Session id -> abort controllers of the calls whose page waits for an answer.
+// Session id -> abort controllers of the calls that wait for the user's answer
+// (a page, or a secret card).
 const pagesWaitingForChat = new Map()
 
 export default {
@@ -766,7 +806,7 @@ export default {
   setup: async (ctx) => {
     exemptCallbackFromProxy()
     await ctx.tool.transform((tools) => {
-${entries.join('')}    })${includeRender ? `
+${entries.join('')}    })${includeRender || includeSecret ? `
     await ctx.session.hook("prompt", (event) => {
       for (const controller of pagesWaitingForChat.get(event.sessionID) ?? []) controller.abort()
     })` : ''}
@@ -813,13 +853,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * change while it runs, so the source on disk always matches the settings —
    * the running OpenCode reloads the directory it already has configured.
    */
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeImage = false, includeWorkflow = false, codeMode = false } = {}) => {
-    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeWorkflow) {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeImage = false, includeSecret = false, includeWorkflow = false, codeMode = false } = {}) => {
+    if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeWorkflow) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeWorkflow, codeMode }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow, codeMode }), { mode: 0o600 });
     return pluginDirectory;
   };
 

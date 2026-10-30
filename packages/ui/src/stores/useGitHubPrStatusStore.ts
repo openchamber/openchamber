@@ -1247,7 +1247,7 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
             totalRequestCount: prev.totalRequestCount + 1,
           }));
           await acquirePrStatusNetworkSlot();
-          let next: SourceControlStatus | null;
+          let next: SourceControlStatus | null | undefined;
           try {
             next = await runBackgroundNetworkTask(async () => {
               if (!isCurrent()) return null;

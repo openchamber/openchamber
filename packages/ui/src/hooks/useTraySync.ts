@@ -20,7 +20,8 @@ import {
 } from '@/stores/useGlobalSessionsStore';
 import { createSessionLineage } from '@/stores/sessionLineage';
 import { useQuotaStore } from '@/stores/useQuotaStore';
-import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaValueLabel } from '@/lib/quota';
+import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
+import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGitStore } from '@/stores/useGitStore';
@@ -185,6 +186,8 @@ const resolveSessionSubtitle = (
 // user enabled for the dropdown AND that report as configured. Window rows only
 // (the headline limits) — model breakdowns stay in the full UI.
 const buildUsage = (): TrayUsage => {
+  const { dictionary } = useI18nStore.getState();
+  const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) => formatMessage(dictionary, key, params);
   const { results, dropdownProviderIds, displayMode } = useQuotaStore.getState();
   const mode: TrayUsage['mode'] = displayMode === 'remaining' ? 'remaining' : 'usage';
   if (!dropdownProviderIds.length) return { mode, groups: [] };
@@ -199,7 +202,7 @@ const buildUsage = (): TrayUsage => {
     const rows: TrayUsageRow[] = [];
     for (const [label, window] of Object.entries(result.usage?.windows ?? {})) {
       const percent = mode === 'remaining' ? window.remainingPercent : window.usedPercent;
-      rows.push({ label: formatWindowLabel(label), value: formatQuotaValueLabel(window.valueLabel, percent) });
+      rows.push({ label: formatWindowLabel(label), value: formatQuotaWindowValueLabel(window, percent, t) });
     }
 
     const status = !result.ok && result.error

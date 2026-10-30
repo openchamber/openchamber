@@ -47,6 +47,17 @@ const initialState: GlobalSessionStatusState = {
 export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => initialState);
 useGlobalSessionStatusStore.subscribe(() => countSyncPerformance('globalStatusPublications'));
 
+type SessionStatusTransitionListener = (sessionId: string, activeSessionIds: ReadonlySet<string>) => void;
+const transitionListeners = new Set<SessionStatusTransitionListener>();
+
+/** Runs synchronously for each ordered status event, before the batch is published.
+ * The active-ID draft is valid only during the callback; listeners must not retain it.
+ */
+export const subscribeSessionStatusTransitions = (listener: SessionStatusTransitionListener): (() => void) => {
+  transitionListeners.add(listener);
+  return () => { transitionListeners.delete(listener); };
+};
+
 /**
  * Replaces the status map wholesale and derives active membership from it.
  * This is the ONE sanctioned way to swap statusById from outside the event
@@ -239,12 +250,16 @@ export const applyGlobalSessionStatusEvents = (directory: string, payloads: read
   const draftStatuses = (): Map<string, GlobalSessionStatusEntry> => (statusById ??= new Map(state.statusById));
   const draftActiveIds = (): Set<string> => (activeSessionIds ??= new Set(state.activeSessionIds));
   const currentActiveIds = (): ReadonlySet<string> => activeSessionIds ?? state.activeSessionIds;
+  const notifyTransition = (sessionId: string): void => {
+    for (const listener of transitionListeners) listener(sessionId, currentActiveIds());
+  };
   const settledIds: string[] = [];
   const settle = (sessionId: string): void => {
     if (currentStatuses().has(sessionId)) {
       draftStatuses().delete(sessionId);
       draftActiveIds().delete(sessionId);
     }
+    notifyTransition(sessionId);
     orderingMutations.push({ type: 'observe', sessionId, phase: 'settled' });
     settledIds.push(sessionId);
     // The turn timer keeps running through a background-subagent or background-command pause.
@@ -272,6 +287,7 @@ export const applyGlobalSessionStatusEvents = (directory: string, payloads: read
         draftStatuses().set(sessionID, { status, directory: normalizedDirectory });
         if (!current) draftActiveIds().add(sessionID);
       }
+      notifyTransition(sessionID);
       orderingMutations.push({ type: 'observe', sessionId: sessionID, phase: 'active' });
       timingMutations.push({ type: 'observe', sessionId: sessionID, phase: 'active', turnStart });
       continue;

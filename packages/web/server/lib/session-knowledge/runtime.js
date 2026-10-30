@@ -26,6 +26,7 @@ export const KNOWLEDGE_ENTRY_KEYS = {
   pinned: 'openchamber.pinned',
   memory: 'openchamber.memory',
   guidance: 'openchamber.guidance',
+  responseStyle: 'openchamber.response-style',
 };
 
 /** Budget for each entry; anything past it is cut, loudly. */
@@ -201,12 +202,22 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
   + ' or needs results cross-checked at that scale, say so and offer a workflow; never start one unasked.'
   + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.';
 
-const buildGuidance = ({ linking, rendering, workflows, directTools }) => [
+/**
+ * When to ask for a secret on a card, stated in every session that has the
+ * `openchamber_secret` tool, and only here: an agent that needs a token asks
+ * for it before it thinks of the tool, and a token pasted in the chat stays in
+ * the transcript.
+ */
+export const SECRET_REQUEST_GUIDANCE = "The openchamber_secret tool asks the user for a secret (API key, token, password) on a private card in the chat."
+  + " Whenever you need one, call it: never ask for a secret in the chat or tell the user to paste one there.";
+
+const buildGuidance = ({ linking, rendering, secrets, workflows, directTools }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
   linking ? WORK_NAME_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
+  secrets ? SECRET_REQUEST_GUIDANCE : '',
   workflows ? WORKFLOW_GUIDANCE : '',
-  (linking || rendering || workflows) && directTools ? DIRECT_TOOLS_GUIDANCE : '',
+  (linking || rendering || secrets || workflows) && directTools ? DIRECT_TOOLS_GUIDANCE : '',
 ].filter(Boolean).join('\n\n');
 
 /**
@@ -214,12 +225,15 @@ const buildGuidance = ({ linking, rendering, workflows, directTools }) => [
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, workflows = false, directTools = true, checkout = null }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
-    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, workflows, directTools }),
+    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, secrets, workflows, directTools }),
   };
+  if (responseStyleInstruction !== undefined) {
+    entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();
+  }
   // The branch is told while the agent has the tool, whose worktree move is
   // the one thing it can do about a busy branch.
   if (!linking) entries[KNOWLEDGE_ENTRY_KEYS.checkout] = '';
@@ -243,6 +257,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     readPlaceholderBranch = null,
     // Whether this session's agent has the `openchamber_render` tool.
     isPageRenderingAvailable = async () => false,
+    // Whether this session's agent has the `openchamber_secret` tool.
+    isSecretRequestAvailable = async () => false,
     // Whether this session's agent has the `openchamber_workflow` tool.
     isWorkflowAvailable = async () => false,
     // Whether the managed tools run through Code Mode's catalog rather than
@@ -345,10 +361,11 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const checkout = branch !== null ? { directory, branch, placeholder } : null;
 
     const rendering = await Promise.resolve(isPageRenderingAvailable()).catch(() => false);
+    const secrets = await Promise.resolve(isSecretRequestAvailable()).catch(() => false);
     const workflows = await Promise.resolve(isWorkflowAvailable()).catch(() => false);
     const directTools = !(await Promise.resolve(areAgentToolsInCodeMode()).catch(() => false));
 
-    return { notes, plans, memory, linking, rendering, workflows, directTools, checkout };
+    return { notes, plans, memory, linking, rendering, secrets, workflows, directTools, checkout };
   };
 
   /**
@@ -408,11 +425,14 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
    * some context, a failed send costs the user their message. One entry that
    * will not write does not hold back the others.
    */
-  const sync = async (sessionId, directory) => {
+  const syncOnce = async (sessionId, directory, responseStyleInstruction) => {
     if (!instructionEntries || !sessionId) return false;
     try {
       const session = await readStoredSession(sessionId).catch(() => null);
-      const entries = buildKnowledgeEntries(await collect(directory, readPins(session)));
+      const entries = buildKnowledgeEntries({
+        ...await collect(directory, readPins(session)),
+        responseStyleInstruction,
+      });
       const writes = await Promise.allSettled(Object.entries(entries).map(([key, text]) => (text
         ? instructionEntries.put(sessionId, directory, key, text)
         : instructionEntries.remove(sessionId, directory, key))));
@@ -423,6 +443,19 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
       console.warn('[session-knowledge] sync failed:', error?.message || error);
       return false;
     }
+  };
+
+  const syncTails = new Map();
+  const sync = (sessionId, directory, responseStyleInstruction) => {
+    if (!sessionId) return Promise.resolve(false);
+    const previous = syncTails.get(sessionId) ?? Promise.resolve(false);
+    const current = previous
+      .catch(() => false)
+      .then(() => syncOnce(sessionId, directory, responseStyleInstruction));
+    syncTails.set(sessionId, current);
+    return current.finally(() => {
+      if (syncTails.get(sessionId) === current) syncTails.delete(sessionId);
+    });
   };
 
   const setPin = async (sessionId, directory, kind, id, pinned) => {

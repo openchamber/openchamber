@@ -12,12 +12,15 @@ export const getFileMentionAutocompleteQuery = ({
     inputSource = 'manual',
     insertedText,
     continuesPastSpace,
+    isCompleted,
 }: {
     value: string;
     cursorPosition: number;
     inputSource?: FileMentionAutocompleteInputSource;
     insertedText?: string;
     continuesPastSpace?: (query: string) => boolean;
+    /** Explicit selection completed the reference containing this @ offset. */
+    isCompleted?: (start: number) => boolean;
 }): string | null => {
     if (inputSource === 'paste' && insertedText?.includes('@')) {
         return null;
@@ -25,7 +28,7 @@ export const getFileMentionAutocompleteQuery = ({
 
     const textBeforeCursor = value.substring(0, cursorPosition);
     const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
-    if (lastAtSymbol === -1) {
+    if (lastAtSymbol === -1 || isCompleted?.(lastAtSymbol)) {
         return null;
     }
 

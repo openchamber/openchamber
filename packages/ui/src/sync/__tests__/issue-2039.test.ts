@@ -338,7 +338,7 @@ mock.module("../session-actions", () => ({
       sessionDirectoryRegistry.set(session.id, sessionDirectory)
     }
     const { useSessionUIStore: store } = await import("../session-ui-store")
-    store.getState().setCurrentSession(session.id, sessionDirectory, selectionTransition)
+    store.getState().setCurrentSession(session.id, sessionDirectory, { transition: selectionTransition })
     store.getState().markSessionAsOpenChamberCreated(session.id)
     return session
   }),

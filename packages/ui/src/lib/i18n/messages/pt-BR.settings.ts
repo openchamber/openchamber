@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'Conta o período de retenção a partir do arquivamento. As sessões expiradas são excluídas.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Conta o período de retenção a partir da última atividade da sessão. As sessões expiradas são arquivadas.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Conta o período de retenção a partir da última atividade da sessão. As sessões expiradas são excluídas.',
   'settings.sourceControl.ssh.title': 'Chaves SSH',
   'settings.sourceControl.ssh.load': 'Mostrar chaves',
   'settings.sourceControl.ssh.discover': 'Procurar chaves em ~/.ssh',
@@ -97,6 +100,7 @@ export const settingsDict = {
   "settings.view.unavailable.title": "Indisponível",
   "settings.view.unavailable.description": "Esta página de configurações não está disponível neste ambiente de execução.",
   "settings.view.badge.beta": "beta",
+  "settings.view.badge.new": "novo",
 
   "settings.view.actions.backToSettings": "Voltar às configurações",
   "settings.view.actions.closeSettings": "Fechar configurações",
@@ -1099,10 +1103,8 @@ export const settingsDict = {
   "settings.openchamber.messageSearch.actions.delete": "Excluir índice",
   "settings.openchamber.messageSearch.actions.working": "Processando…",
   "settings.openchamber.sessionWork.title": "Sessões em andamento",
-  "settings.openchamber.sessionWork.info": "Um bloco na barra lateral, abaixo das conversas, para as sessões em que você está trabalhando. A sessão entra ali assim que você envia uma mensagem nela, continua também no projeto e sai quando você a marca como concluída: passe o cursor e use o check, ou use o menu da sessão. Quando um turno parece o fim do trabalho, o check fica cinza como dica.",
+  "settings.openchamber.sessionWork.info": "Um bloco na barra lateral, abaixo das conversas, para as sessões em que você está trabalhando. A sessão aparece ali assim que você envia uma mensagem. Por padrão, ela aparece somente nesse bloco. Ative 'Mostrar também o que está em andamento nos projetos' no menu da barra lateral para mantê-la também no projeto. No VS Code, as sessões sempre aparecem nos projetos. Marque uma sessão como concluída pelo check ou pelo menu. Quando um turno parece o fim do trabalho, o check fica cinza como dica.",
   "settings.openchamber.sessionWork.field.enabled": "Mostrar sessões em andamento",
-  "settings.openchamber.sessionRetention.field.onlyArchived": "Somente sessões arquivadas",
-  "settings.openchamber.sessionRetention.field.onlyArchivedDescription": "Usa Excluir e conta o período de retenção a partir do arquivamento. As sessões não arquivadas são mantidas.",
   "settings.openchamber.sessionRetention.archivedTooltip": "Exclui sessões arquivadas cujo período de retenção terminou. Mantém as 5 sessões arquivadas mais recentemente, a sessão aberta, as sessões em execução e as compartilhadas. Uma sessão principal é mantida se sua exclusão também excluir uma sessão filha protegida.",
   "settings.openchamber.sessionRetention.tooltip": "Arquiva ou exclui sessões não arquivadas com base na última atividade. Mantém as 5 sessões mais recentes, a sessão aberta, as sessões em execução e as compartilhadas. As sessões arquivadas são mantidas. Uma sessão principal é mantida se sua exclusão também excluir uma sessão filha protegida.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Ativar limpeza automática",
@@ -1425,6 +1427,9 @@ export const settingsDict = {
   "settings.projects.page.toast.discoverIconFailed": "Não foi possível descobrir o ícone do projeto",
   "settings.projects.page.toast.customIconAlreadySet": "Ícone personalizado já definido para este projeto",
   "settings.projects.page.toast.iconDiscovered": "Ícone do projeto descoberto",
+  "settings.projects.page.toast.iconUnsupportedFormat": "Apenas PNG, JPEG e SVG são suportados",
+  "settings.projects.page.toast.iconEmpty": "O arquivo de ícone está vazio",
+  "settings.projects.page.toast.iconTooLarge": "O ícone excede o limite de tamanho (5 MB)",
   "settings.projects.page.toast.saveFailed": "Falha ao salvar as configurações do projeto",
   "settings.usage.sidebar.title": "Uso",
   "settings.usage.sidebar.total": "Total {count}",
@@ -2091,6 +2096,9 @@ export const settingsDict = {
   "settings.voice.page.section.speechRecognition": "Reconhecimento de voz",
   "settings.voice.page.field.enableVoiceInput": "Ativar entrada por voz",
   "settings.voice.page.field.enableVoiceInputAria": "Ativar entrada por voz (ditado)",
+  "settings.voice.page.field.dictationAutoSend": "Enviar ao parar o ditado",
+  "settings.voice.page.field.dictationAutoSendAria": "Enviar a mensagem ao parar o ditado",
+  "settings.voice.page.field.dictationAutoSendInfo": "Envia a transcrição automaticamente ao parar o ditado pelo atalho ou pela tecla Enter. Você ainda pode inserir sem enviar usando o botão de confirmação.",
   "settings.voice.page.section.playbackAndSummary": "Reprodução",
   "settings.voice.page.field.provider": "Provedor",
   "settings.voice.page.provider.browser": "Navegador",
@@ -2148,6 +2156,8 @@ export const settingsDict = {
   "settings.voice.page.toast.apiKeySaveFailed": "Não foi possível salvar a chave",
   "settings.voice.page.field.serverUrl": "URL do servidor",
   "settings.voice.page.field.serverUrlHint": "URL base do servidor compatível com TTS da OpenAI",
+  'settings.voice.page.field.endpointPath': 'Caminho do endpoint',
+  'settings.voice.page.field.endpointPathHint': 'Caminho do recurso no servidor; a requisição e a resposta continuam compatíveis com OpenAI',
   "settings.voice.page.field.model": "Modelo",
   "settings.voice.page.field.voice": "Voz",
   "settings.voice.page.field.voiceIdentifierHint": "Identificador de voz compatível com o servidor",
@@ -2675,4 +2685,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} foi ativado de novo',
   'settings.agents.sidebar.toast.disableFailed': 'Não foi possível desativar o agente: o arquivo de configuração não pôde ser gravado',
   'settings.agents.sidebar.toast.enableFailed': 'Não foi possível ativar o agente: o arquivo de configuração não pôde ser gravado',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "Pesquisar histórico de prompts",
+
 } as const;

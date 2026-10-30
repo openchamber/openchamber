@@ -41,6 +41,18 @@ describe('Gitea client', () => {
     expect(calls[0].url.href).toBe(`${ORIGIN}/api/v1/elsewhere.example.com/collect`);
   });
 
+  it('reads a named API namespace on the same origin and keeps every path inside it', async () => {
+    const { fetch, calls } = fakeGitea({ 'GET /forgejo/version': { version: '16.0.6+gitea-1.22.0' } });
+    const client = createGiteaClient({ origin: ORIGIN, token: 'pat-1', fetch, namespace: 'forgejo' });
+
+    await expect(client.get('/version')).resolves.toMatchObject({ version: '16.0.6+gitea-1.22.0' });
+    expect(calls[0].url.pathname).toBe('/api/forgejo/v1/version');
+    expect(calls[0].headers.authorization).toBe('token pat-1');
+    await expect(client.get('../../user')).rejects.toThrow('leaves the instance API');
+    expect(calls).toHaveLength(1);
+    expect(() => createGiteaClient({ origin: ORIGIN, fetch, namespace: '../forgejo' })).toThrow('plain API namespace');
+  });
+
   it('retries a read after 502 and 429, but sends a write once', async () => {
     let reads = 0;
     const { fetch, calls } = fakeGitea({

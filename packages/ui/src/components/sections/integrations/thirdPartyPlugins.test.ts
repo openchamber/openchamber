@@ -26,7 +26,8 @@ const registry = (spec: string, currentVersion: string | null, latestVersion = '
   currentVersion,
   latestVersion,
   versions: ['0.6.0', latestVersion],
-  hasUpdate: currentVersion !== null && currentVersion !== latestVersion,
+  // Mirrors the registry route: only an exact version can be behind the latest release.
+  hasUpdate: currentVersion !== null && /^\d+\.\d+\.\d+([-+][\w.-]+)?$/.test(currentVersion) && currentVersion !== latestVersion,
 });
 
 describe('third-party plugin catalog helpers', () => {
@@ -138,20 +139,32 @@ describe('third-party plugin catalog helpers', () => {
     })).toBeNull();
   });
 
-  test('chooses an update for a bare or outdated user-wide entry', () => {
-    const bare = getCatalogPluginState(
-      [entry(claudePackage)],
-      claudePackage,
-      { [claudePackage]: registry(claudePackage, null) },
-    );
+  test('chooses an update for an outdated exact version', () => {
     const outdated = getCatalogPluginState(
       [entry(`${claudePackage}@0.6.0`)],
       claudePackage,
       { [`${claudePackage}@0.6.0`]: registry(`${claudePackage}@0.6.0`, '0.6.0') },
     );
 
-    expect(getCatalogPluginPrimaryAction(bare, claudePackage)).toBe('update');
     expect(getCatalogPluginPrimaryAction(outdated, claudePackage)).toBe('update');
+  });
+
+  test('offers no update for a spec that already follows releases', () => {
+    const cases: Array<{
+      spec: string;
+      currentVersion: string | null;
+      status: ReturnType<typeof getCatalogPluginPresentation>['status'];
+    }> = [
+      { spec: claudePackage, currentVersion: null, status: 'unpinned' },
+      { spec: `${claudePackage}@latest`, currentVersion: 'latest', status: 'installed' },
+      { spec: `${claudePackage}@^0.6.0`, currentVersion: '^0.6.0', status: 'installed' },
+    ];
+
+    for (const { spec, currentVersion, status } of cases) {
+      const state = getCatalogPluginState([entry(spec)], claudePackage, { [spec]: registry(spec, currentVersion) });
+      expect(getCatalogPluginPrimaryAction(state, claudePackage)).toBe('setup');
+      expect(getCatalogPluginPresentation(state).status).toBe(status);
+    }
   });
 
   test('keeps setup as the primary action once the exact latest spec is installed', () => {

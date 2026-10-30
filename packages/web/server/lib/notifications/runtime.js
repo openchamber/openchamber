@@ -618,6 +618,12 @@ export const createNotificationTriggerRuntime = (deps) => {
       }
 
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
+        // Interrupted steps carry `aborted`; terminal execution failures still
+        // notify through session.error, including exhausted auto-resume attempts.
+        if (info?.error?.type === 'aborted') {
+          return;
+        }
+
         const settings = await readSettingsFromDisk();
         if (settings.notifyOnError === false) return;
 

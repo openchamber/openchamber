@@ -83,6 +83,7 @@ export const createSettingsHelpers = (dependencies) => {
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
   const STT_SERVER_URL_MAX_LENGTH = 2048;
+  const STT_ENDPOINT_PATH_MAX_LENGTH = 1024;
   const STT_MODEL_MAX_LENGTH = 256;
   const STT_LANGUAGE_MAX_LENGTH = 64;
   const VERSION_STRING_MAX_LENGTH = 128;
@@ -803,6 +804,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (agentImageModel && /^[^/\s]+\/\S+$/.test(agentImageModel)) {
       result.agentImageModel = agentImageModel;
     }
+    if (candidate.agentSecretToolEnabled === true || candidate.agentSecretToolEnabled === false) {
+      result.agentSecretToolEnabled = candidate.agentSecretToolEnabled;
+    }
     if (typeof candidate.agentToolsCodeMode === 'boolean') {
       result.agentToolsCodeMode = candidate.agentToolsCodeMode;
     }
@@ -1133,6 +1137,8 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.dictationEnabled === 'boolean') {
       result.dictationEnabled = candidate.dictationEnabled;
     }
+    const dictationAutoSend = z.boolean().safeParse(candidate.dictationAutoSend);
+    if (dictationAutoSend.success) result.dictationAutoSend = dictationAutoSend.data;
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
       if (provider === 'local' || provider === 'openai-compatible') {
@@ -1155,6 +1161,10 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
         result.sttModel = trimmed;
       }
+    }
+    const sttEndpointPath = z.string().trim().safeParse(candidate.sttEndpointPath);
+    if (sttEndpointPath.success && sttEndpointPath.data.length <= STT_ENDPOINT_PATH_MAX_LENGTH) {
+      result.sttEndpointPath = sttEndpointPath.data;
     }
     if (typeof candidate.sttLocalModel === 'string') {
       const trimmed = candidate.sttLocalModel.trim();

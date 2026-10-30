@@ -2,6 +2,7 @@ import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { isIsolatedSpacesPageVisible } from '@/lib/spaces/release';
 import { useUIStore } from '@/stores/useUIStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import type { TrackerDescriptor } from '@/lib/trackers/types';
 import type { ChangeRequestTerm, SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
@@ -32,7 +33,7 @@ export type SettingsSearchResult = SettingsSearchItem & {
   pageTitle: string;
 };
 
-interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
+export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContext {
   isMobile: boolean;
   isDesktopLocalOrigin: boolean;
   // macOS desktop shell — for controls that only render on darwin (e.g. dock badge).
@@ -679,8 +680,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: 'sessions.retention-only-archived',
     page: 'sessions',
-    titleKey: 'settings.openchamber.sessionRetention.field.onlyArchived',
-    descriptionKey: 'settings.openchamber.sessionRetention.field.onlyArchivedDescription',
+    titleKey: 'settings.layout.sessions.retention.target',
     keywords: ['archive', 'archived', 'only', 'delete', 'cleanup', 'retention'],
   },
   {
@@ -875,6 +875,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.field.agentRenderTool',
     descriptionKey: 'settings.openchamber.tools.field.agentRenderToolInfo',
     keywords: ['agent', 'tool', 'render', 'page', 'html', 'chart', 'table', 'diagram', 'generative', 'ui', 'openchamber'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'sessions.agent-secret-tool',
+    page: 'general',
+    titleKey: 'settings.openchamber.tools.field.agentSecretTool',
+    descriptionKey: 'settings.openchamber.tools.field.agentSecretToolInfo',
+    keywords: ['agent', 'tool', 'secret', 'token', 'api key', 'password', 'credential', 'openchamber'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -1468,6 +1476,35 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'qwen', 'microphone', 'misheard', 'correct', 'fix', 'small model'],
   },
   {
+    id: 'voice.dictation-auto-send',
+    page: 'voice',
+    titleKey: 'settings.voice.page.field.dictationAutoSend',
+    descriptionKey: 'settings.voice.page.field.dictationAutoSendInfo',
+    keywords: ['dictation', 'voice input', 'send', 'submit', 'automatic'],
+  },
+  {
+    id: 'voice.tts-endpoint-path',
+    page: 'voice',
+    titleKey: 'settings.voice.page.field.endpointPath',
+    descriptionKey: 'settings.voice.page.field.endpointPathHint',
+    keywords: ['tts', 'read aloud', 'endpoint path', 'custom endpoint', 'resource path'],
+    isAvailable: () => {
+      const state = useConfigStore.getState();
+      return (state.showMessageTTSButtons || state.autoReadAloudEnabled) && state.voiceProvider === 'openai-compatible';
+    },
+  },
+  {
+    id: 'voice.stt-endpoint-path',
+    page: 'voice',
+    titleKey: 'settings.voice.page.field.endpointPath',
+    descriptionKey: 'settings.voice.page.field.endpointPathHint',
+    keywords: ['stt', 'dictation', 'endpoint path', 'custom endpoint', 'resource path'],
+    isAvailable: () => {
+      const state = useConfigStore.getState();
+      return state.dictationEnabled && state.sttProvider === 'openai-compatible';
+    },
+  },
+  {
     id: 'tunnel.provider',
     page: 'tunnel',
     titleKey: 'settings.openchamber.tunnel.field.provider',
@@ -1621,6 +1658,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
   },
 ] as const;
+
+/** Static anchors used to seed the first-install baseline. */
+export const SETTINGS_ANCHOR_PAGES: ReadonlyMap<string, SettingsPageSlug> = new Map(
+  SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item.page] as const),
+);
+
+export const getAvailableSettingsAnchorPages = (ctx: SettingsSearchAvailabilityContext): ReadonlyMap<string, SettingsPageSlug> => new Map(
+  SETTINGS_SEARCH_ITEMS.filter((item) => {
+    const page = getSettingsPageMeta(item.page);
+    return page && (!page.isAvailable || page.isAvailable(ctx)) && (!item.isAvailable || item.isAvailable(ctx));
+  }).map((item) => [item.id, item.page] as const),
+);
 
 interface BuildSettingsSearchResultsOptions {
   query: string;

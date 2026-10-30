@@ -20,6 +20,7 @@ import {
   commit,
   createWorktree,
   getWorktreeBootstrapStatus,
+  waitForActiveWorktreeBootstrap,
   getBranches,
   getRepositoryRemoteUrls,
   parseRemoteListing,
@@ -851,12 +852,12 @@ describe('symlink diffs', () => {
 // ---------------------------------------------------------------------------
 
 describe.runIf(canRunGit())('diffs for status paths that are not plain files', () => {
-  const callDiffRoute = async (endpoint, query) => {
+  const callDiffRoute = async (endpoint, query, requestBody) => {
     const routes = new Map();
-    registerGitRoutes({ get: (url, handler) => routes.set(url, handler), post() {}, put() {}, delete() {} });
+    registerGitRoutes({ get: (url, handler) => routes.set(url, handler), post: (url, handler) => routes.set(url, handler), put() {}, delete() {} });
     let status = 200;
     let body;
-    await routes.get(`/api/git/${endpoint}`)({ query }, {
+    await routes.get(`/api/git/${endpoint}`)({ query, body: requestBody }, {
       status(value) { status = value; return this; },
       json(value) { body = value; },
     });
@@ -944,6 +945,31 @@ describe.runIf(canRunGit())('diffs for status paths that are not plain files', (
 
     expect((await postDiffs({ paths: [] })).status).toBe(400);
     expect((await postDiffs({ paths: ['ok', 7] })).status).toBe(400);
+  });
+
+  it.each(['plain directory', 'removed .git'])('reports a non-repository without logging for %s', async (scenario) => {
+    const directory = scenario === 'plain directory' ? createTempDir() : createRepositoryWithRemote().repository;
+    if (scenario === 'removed .git') {
+      for (const endpoint of ['diff', 'file-diff', 'diffs']) {
+        expect((await callDiffRoute(endpoint, { directory, path: 'README.md' }, { paths: ['README.md'] })).status).toBe(200);
+      }
+      fs.renameSync(path.join(directory, '.git'), path.join(directory, 'removed-git'));
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      for (const endpoint of ['diff', 'file-diff', 'diffs']) {
+        const result = await callDiffRoute(endpoint, { directory, path: 'notes.md' }, { paths: ['z.md', 'a.md'] });
+        expect(result).toEqual({ status: 409, body: { error: 'This directory is not a Git repository.', code: 'not_repository' } });
+      }
+      expect(warn).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+      expect((await callDiffRoute('diffs', { directory }, { paths: [] })).status).toBe(400);
+      expect((await callDiffRoute('diffs', { directory }, { paths: ['ok', 7] })).status).toBe(400);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it('describes a submodule whose checked-out commit moved', async () => {
@@ -1874,10 +1900,7 @@ describe('createWorktree', () => {
         error: null,
       });
 
-      await expect.poll(
-        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
-        { timeout: 5_000 },
-      ).toBe('setup-ready');
+      await waitForActiveWorktreeBootstrap(created.path);
       await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
         status: 'ready',
         phase: 'setup-ready',

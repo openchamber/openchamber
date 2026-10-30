@@ -3,9 +3,19 @@ import { guestMessageSchema, hostMessageSchema } from './protocol.ts';
 import { parseManifestJson } from './parse.ts';
 import { resolvePageEntry } from './manifest.ts';
 import { GUEST_STORAGE_VALUE_BYTES } from './workspace.ts';
+import { guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 
 const envelope = { channel: 'openchamber.sdk', v: 1, id: 'test' };
 describe('extension workspace contracts', () => {
+  test('session snapshots preserve agent names and accept older hosts without them', () => {
+    const session = { id: 'session', title: 'Session', projectId: 'project', directory: '/project',
+      parentId: null, createdAt: 1, updatedAt: 1, archivedAt: null, worktree: null,
+      activity: 'unknown', outcome: null, items: [] };
+    for (const record of [session, { ...session, agent: 'fixer' }]) {
+      const snapshot = { kind: 'sessions', projectId: 'project', state: 'ready', coverage: [], sessions: [record] };
+      expect(guestWorkspaceSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    }
+  });
   test('page shorthand and custom HTML require a panel entry', () => {
     const panel = { id: 'board', name: 'Board', icon: 'window', entry: 'panel/index.html' };
     const parse = (page: true | { entry: string; title?: string }, withEntry = true) => parseManifestJson(JSON.stringify({ apiVersion: 1,

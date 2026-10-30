@@ -5,6 +5,9 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.sessionRetention.field.archivedDescription': 'La durée de conservation commence à l\'archivage. Les sessions expirées sont supprimées.',
+  'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont archivées.',
+  'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont supprimées.',
   'settings.sourceControl.ssh.title': 'Clés SSH',
   'settings.sourceControl.ssh.load': 'Afficher les clés',
   'settings.sourceControl.ssh.discover': 'Chercher des clés dans ~/.ssh',
@@ -97,6 +100,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': 'Pas disponible',
   'settings.view.unavailable.description': 'Cette page de paramètres n\'est pas disponible dans ce runtime.',
   'settings.view.badge.beta': 'bêta',
+  'settings.view.badge.new': 'nouveau',
 
   'settings.view.actions.backToSettings': 'Retour aux paramètres',
   'settings.view.actions.closeSettings': 'Fermer les paramètres',
@@ -1002,10 +1006,8 @@ export const settingsDict = {
   'settings.openchamber.messageSearch.actions.delete': 'Supprimer l’index',
   'settings.openchamber.messageSearch.actions.working': 'En cours…',
   'settings.openchamber.sessionWork.title': 'Sessions en cours',
-  'settings.openchamber.sessionWork.info': 'Un bloc dans la barre latérale, sous les discussions, pour les sessions sur lesquelles vous travaillez. Une session y arrive dès que vous y envoyez un message, reste aussi dans son projet et en sort quand vous la marquez comme terminée : survolez-la et utilisez la coche, ou passez par le menu de la session. Quand un tour ressemble à la fin du travail, la coche devient grise en guise d\'indice.',
+  'settings.openchamber.sessionWork.info': 'Un bloc dans la barre latérale, sous les discussions, pour les sessions sur lesquelles vous travaillez. Une session y apparaît dès que vous lui envoyez un message. Par défaut, elle apparaît uniquement dans ce bloc. Activez « Afficher aussi le travail en cours sous les projets » dans le menu de la barre latérale pour la garder aussi dans son projet. Dans VS Code, les sessions restent toujours dans leur projet. Marquez une session comme terminée avec la coche ou son menu. Quand un tour ressemble à la fin du travail, la coche devient grise en guise d’indice.',
   'settings.openchamber.sessionWork.field.enabled': 'Afficher les sessions en cours',
-  'settings.openchamber.sessionRetention.field.onlyArchived': 'Uniquement les sessions archivées',
-  'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Utilise Supprimer et compte la période de conservation depuis l\'archivage. Les sessions non archivées sont conservées.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Supprime les sessions archivées dont la période de conservation a expiré. Conserve les 5 sessions archivées le plus récemment, la session ouverte, les sessions en cours et les sessions partagées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
   'settings.openchamber.sessionRetention.tooltip': 'Archive ou supprime les sessions non archivées selon leur dernière activité. Conserve les 5 sessions les plus récentes, la session ouverte, les sessions en cours et les sessions partagées. Les sessions archivées sont conservées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Activer le nettoyage automatique',
@@ -1328,6 +1330,9 @@ export const settingsDict = {
   'settings.projects.page.toast.discoverIconFailed': 'Échec de la découverte de l\'icône du projet',
   'settings.projects.page.toast.customIconAlreadySet': 'Icône personnalisée déjà définie pour ce projet',
   'settings.projects.page.toast.iconDiscovered': 'Icône de projet découverte',
+  'settings.projects.page.toast.iconUnsupportedFormat': 'Seuls les formats PNG, JPEG et SVG sont pris en charge',
+  'settings.projects.page.toast.iconEmpty': "Le fichier d'icône est vide",
+  'settings.projects.page.toast.iconTooLarge': "L'icône dépasse la limite de taille (5 Mo)",
   'settings.projects.page.toast.saveFailed': 'Échec de l\'enregistrement des paramètres du projet',
   'settings.usage.sidebar.title': 'Utilisation',
   'settings.usage.sidebar.total': 'Total {count}',
@@ -1994,6 +1999,9 @@ export const settingsDict = {
   'settings.voice.page.section.speechRecognition': 'Reconnaissance vocale',
   'settings.voice.page.field.enableVoiceInput': 'Activer la saisie vocale',
   'settings.voice.page.field.enableVoiceInputAria': 'Activer la saisie vocale (dictée)',
+  'settings.voice.page.field.dictationAutoSend': 'Envoyer à la fin de la dictée',
+  'settings.voice.page.field.dictationAutoSendAria': 'Envoyer le message à la fin de la dictée',
+  'settings.voice.page.field.dictationAutoSendInfo': 'Envoie automatiquement la transcription lorsque vous arrêtez la dictée avec le raccourci ou la touche Entrée. Vous pouvez toujours l’insérer sans l’envoyer avec le bouton de validation.',
   'settings.voice.page.section.playbackAndSummary': 'Lecture',
   'settings.voice.page.field.provider': 'Fournisseur',
   'settings.voice.page.provider.browser': 'Navigateur',
@@ -2051,6 +2059,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': 'Impossible d’enregistrer la clé',
   'settings.voice.page.field.serverUrl': 'URL du serveur',
   'settings.voice.page.field.serverUrlHint': 'URL de base du serveur TTS compatible OpenAI',
+  'settings.voice.page.field.endpointPath': 'Chemin de l\'endpoint',
+  'settings.voice.page.field.endpointPathHint': 'Chemin de la ressource sur le serveur ; la requête et la réponse restent compatibles OpenAI',
   'settings.voice.page.field.model': 'Modèle',
   'settings.voice.page.field.voice': 'Voix',
   'settings.voice.page.field.voiceIdentifierHint': 'Identifiant vocal pris en charge par le serveur',
@@ -2675,4 +2685,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} est de nouveau activé',
   'settings.agents.sidebar.toast.disableFailed': 'Impossible de désactiver l’agent : son fichier de configuration n’a pas pu être écrit',
   'settings.agents.sidebar.toast.enableFailed': 'Impossible d’activer l’agent : son fichier de configuration n’a pas pu être écrit',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "Rechercher dans l’historique des prompts",
+
 } as const;
