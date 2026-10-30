@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { ReadingPlayback } from '@/lib/voice/readingAudioFocus';
 
 interface ServerTTSStatusCache {
   available: boolean;
@@ -88,7 +89,7 @@ export interface UseServerTTSReturn {
 }
 
 interface SpeakOptions {
-  beforePlayback?: () => Promise<void>;
+  beforePlayback?: (playback: ReadingPlayback) => Promise<void>;
   /** Voice to use (defaults to coral) */
   voice?: string;
   /** Model to use (defaults to gpt-4o-mini-tts) */
@@ -571,7 +572,7 @@ export function useServerTTS(
             config,
             controller.signal,
           );
-          await options?.beforePlayback?.();
+          await options?.beforePlayback?.({ pause: () => ctx.suspend(), resume: () => ctx.resume() });
           if (controller.signal.aborted) return;
           const { source } = scheduleAudioChunk(ctx, audioBuffer, options, 0);
 
@@ -608,7 +609,7 @@ export function useServerTTS(
         };
 
         const result = await runChunkedTTSPlayback(chunks, {
-          beforePlayback: options?.beforePlayback,
+          beforePlayback: async () => options?.beforePlayback?.({ pause: () => ctx.suspend(), resume: () => ctx.resume() }),
           signal: controller.signal,
           fetchChunk: (chunk) =>
             fetchTTSAudioChunk(ctx, chunk, options, config, controller.signal),

@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { ReadingPlayback } from '@/lib/voice/readingAudioFocus';
 
 interface SayTTSStatusCache {
   available: boolean;
@@ -101,7 +102,7 @@ export interface UseSayTTSReturn {
 }
 
 interface SpeakOptions {
-  beforePlayback?: () => Promise<void>;
+  beforePlayback?: (playback: ReadingPlayback) => Promise<void>;
   /** Voice to use (defaults to Samantha) */
   voice?: string;
   /** Speech rate in words per minute (defaults to 200) */
@@ -261,7 +262,7 @@ export function useSayTTS(options: UseSayTTSOptions = {}): UseSayTTSReturn {
       console.log('[useSayTTS] Decoding audio data...');
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
       
-      await options?.beforePlayback?.();
+      await options?.beforePlayback?.({ pause: () => ctx.suspend(), resume: () => ctx.resume() });
       if (controller.signal.aborted) return;
 
       // Create source node

@@ -25,6 +25,8 @@
  * ```
  */
 
+import type { ReadingPlayback } from './readingAudioFocus';
+
 // Extend Window interface for SpeechRecognition
 declare global {
   interface Window {
@@ -432,7 +434,7 @@ class BrowserVoiceService {
     text: string,
     lang: string,
     onEnd?: SpeechEndCallback,
-    options?: { rate?: number; pitch?: number; volume?: number; voiceName?: string; beforePlayback?: () => Promise<void> }
+    options?: { rate?: number; pitch?: number; volume?: number; voiceName?: string; beforePlayback?: (playback: ReadingPlayback) => Promise<void>; onError?: () => void }
   ): Promise<void> {
     if (!('speechSynthesis' in window)) {
       throw new Error('Speech synthesis not supported');
@@ -447,7 +449,10 @@ class BrowserVoiceService {
     // Small delay to ensure audio context is ready
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    await options?.beforePlayback?.();
+    await options?.beforePlayback?.({
+      pause: () => window.speechSynthesis.pause(),
+      resume: () => window.speechSynthesis.resume(),
+    });
 
     // Set speaking state and pause listening to avoid hearing ourselves
     this.isSpeaking = true;
@@ -506,6 +511,7 @@ class BrowserVoiceService {
 
       utterance.onerror = (event) => {
         this.isSpeaking = false;
+        options?.onError?.();
         console.error('[BrowserVoiceService] Speech synthesis error:', event.error);
 
         // Track autoplay policy violations
