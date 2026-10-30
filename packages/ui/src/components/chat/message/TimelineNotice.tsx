@@ -49,6 +49,15 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
     const running = message.status === 'running';
     const failed = message.status === 'failed';
     const summary = message.summary.trim();
+    const model = message.status === 'completed' && message.model
+        ? `${message.model.providerID}/${message.model.id}`
+        : undefined;
+    const title = (
+        <>
+            {running ? t('chat.compaction.running') : failed ? t('chat.compaction.failed') : t('chat.compaction.completed')}
+            {model ? <bdi className="font-normal break-all" style={{ color: 'var(--tools-description)' }} title={model}> · {model}</bdi> : null}
+        </>
+    );
 
     // A compaction reads like a thinking row: one collapsible tool-style line
     // whose body is the summary as Markdown. The summary streams in while the
@@ -66,11 +75,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 presentation={{
                     icon: failed ? 'error-warning' : 'scissors',
                     iconClassName: failed ? 'text-[var(--status-error)]' : undefined,
-                    title: running
-                        ? t('chat.compaction.running')
-                        : failed
-                            ? t('chat.compaction.failed')
-                            : t('chat.compaction.completed'),
+                    title,
                     expandLabel: t('chat.compaction.showSummary'),
                     collapseLabel: t('chat.compaction.hideSummary'),
                     markdownVariant: 'assistant',
@@ -84,7 +89,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                         className={cn('h-3.5 w-3.5 shrink-0', failed && 'text-[var(--status-error)]')}
                         style={failed ? undefined : { color: 'var(--tools-icon)' }}
                     />
-                    <span className="font-medium">{failed ? t('chat.compaction.failed') : t('chat.compaction.completed')}</span>
+                    <span className="font-medium">{title}</span>
                 </div>
             ) : null}
             {message.error ? (
