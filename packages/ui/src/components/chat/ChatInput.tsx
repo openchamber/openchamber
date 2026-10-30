@@ -2267,6 +2267,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             try {
                 queuedMessagesToSend = await takeForSend(capturedTarget, queuedMessageId);
             } catch (error) {
+                // 409: the queue is already sending this message, so it goes out anyway.
+                if (queuedMessageId && error instanceof Error && 'status' in error && error.status === 409) return;
                 console.warn('[queue] failed to take queued messages for sending:', error);
                 toast.error(t('chat.queuedMessage.toast.takeFailed'));
                 return;
