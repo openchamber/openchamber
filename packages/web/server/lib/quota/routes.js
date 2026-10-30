@@ -3,6 +3,7 @@ import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readM
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
 import { fetchExeDevUsage } from './providers/exe-dev.js';
 import { aliases as zaiAliases, giftResetTypes as zaiGiftResetTypes, useZaiGiftReset } from './providers/zai.js';
+import { asNonEmptyString } from '../shared/guards.js';
 import { fetchQuota as fetchZenmuxQuota } from './providers/zenmux.js';
 
 // Keyed by the same provider ids as `normalizers`: a provider with a normalizer
@@ -108,11 +109,14 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
       if (!zaiAliases.includes(providerId)) {
         return res.status(404).json({ code: 'UNSUPPORTED_PROVIDER', error: 'Unsupported quota provider' });
       }
-      const { recordId, resetType } = req.body ?? {};
-      if (!Number.isFinite(recordId) || !zaiGiftResetTypes.includes(resetType)) {
+      const { recordId, resetType, grantType } = req.body ?? {};
+      const normalizedGrantType = asNonEmptyString(grantType);
+      if (!Number.isFinite(recordId)
+        || !zaiGiftResetTypes.includes(resetType)
+        || (grantType !== undefined && normalizedGrantType === null)) {
         return res.status(400).json({ code: 'INVALID_REQUEST', error: 'Invalid gift reset request' });
       }
-      await useZaiGiftReset({ recordId, resetType });
+      await useZaiGiftReset({ recordId, resetType, grantType: normalizedGrantType });
       res.json({ success: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : '';

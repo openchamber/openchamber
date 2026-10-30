@@ -20,6 +20,8 @@ type AuthFile = Record<string, AuthEntry>;
 type UsageWindowGiftReset = {
   recordId: number;
   expireAt: number;
+  /** Grant kind from the z.ai list record; sent back unchanged on activation. */
+  grantType?: string;
 };
 
 type UsageWindow = {
@@ -122,6 +124,7 @@ type ZaiGiftResetRecord = {
   recordId?: number;
   expireTime?: string;
   available?: boolean;
+  grantType?: string;
 };
 
 type ZaiGiftResetPayload = {
@@ -2762,6 +2765,10 @@ const pickZaiGiftReset = (records: ZaiGiftResetRecord[] | undefined): UsageWindo
     if (expireAt === null || expireAt <= now) continue;
     if (best === null || expireAt < best.expireAt) {
       best = { recordId: record.recordId, expireAt };
+      const grantType = asNonEmptyString(record.grantType);
+      if (grantType) {
+        best.grantType = grantType;
+      }
     }
   }
   return best;
@@ -2896,7 +2903,7 @@ const ZAI_GIFT_RESET_TYPES = ['FIVE_HOUR', 'WEEK'] as const;
 
 export type QuotaGiftResetType = (typeof ZAI_GIFT_RESET_TYPES)[number];
 
-const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaGiftResetType }): Promise<void> => {
+const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaGiftResetType; grantType?: string }): Promise<void> => {
   const auth = await readOpenCodeCredentials();
   // SAFETY: auth.json is untyped storage; the cast only reads the optional
   // key/token fields and no other shape is consumed.
@@ -2908,10 +2915,16 @@ const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaG
   if (!apiKey) {
     throw new Error('Not configured');
   }
-  if (!Number.isFinite(input.recordId) || !ZAI_GIFT_RESET_TYPES.includes(input.resetType)) {
+  const grantType = input.grantType === undefined ? undefined : asNonEmptyString(input.grantType);
+  if (!Number.isFinite(input.recordId)
+    || !ZAI_GIFT_RESET_TYPES.includes(input.resetType)
+    || (input.grantType !== undefined && grantType === undefined)) {
     throw new Error('Invalid gift reset request');
   }
 
+  // z.ai requires grantType (added to the contract in late Oct 2026). The value
+  // comes from the list record the user activates; GLOBAL is the only value
+  // observed so far, so it doubles as the fallback for records without one.
   const response = await fetch(ZAI_GIFT_RESET_USE_URL, {
     method: 'POST',
     headers: {
@@ -2923,6 +2936,7 @@ const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaG
       resetType: input.resetType,
       recordId: input.recordId,
       requestId: crypto.randomUUID(),
+      grantType: grantType ?? 'GLOBAL',
     }),
   });
 
@@ -2936,7 +2950,7 @@ const activateZaiGiftReset = async (input: { recordId: number; resetType: QuotaG
 
 export const activateQuotaGiftReset = async (
   providerId: string,
-  input: { recordId: number; resetType: QuotaGiftResetType },
+  input: { recordId: number; resetType: QuotaGiftResetType; grantType?: string },
 ): Promise<void> => {
   if (!ZAI_ALIASES.includes(providerId)) {
     throw new Error('Unsupported provider');

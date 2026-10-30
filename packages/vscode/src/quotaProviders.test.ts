@@ -1247,7 +1247,7 @@ describe('Z.ai quota provider (VS Code parity)', () => {
             { recordId: 111111, expireTime: '2020-01-01 00:00:00', available: true },
             { recordId: 666002, expireTime: 'not-a-date', available: true },
             { recordId: 462029, expireTime: '2099-09-11 06:01:35', available: true },
-            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true },
+            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true, grantType: 'GLOBAL' },
           ],
           weekResets: [
             { recordId: 777003, expireTime: '2099-03-01 08:00:00', available: true },
@@ -1269,6 +1269,7 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.deepEqual(windows['5h']!.giftReset, {
       recordId: 555501,
       expireAt: Date.parse('2099-06-15T12:30:00+08:00'),
+      grantType: 'GLOBAL',
     });
     assert.deepEqual(windows.weekly!.giftReset, {
       recordId: 777003,
@@ -1392,6 +1393,7 @@ describe('Z.ai gift reset activation (VS Code parity)', () => {
       return mockResponse({ code: 200, msg: 'success', data: 462029, success: true });
     });
 
+    // No grantType on the input: the provider falls back to GLOBAL.
     await activateQuotaGiftReset('zai-coding-plan', { recordId: 462029, resetType: 'FIVE_HOUR' });
 
     assert.equal(fetchCalls.length, 1);
@@ -1407,11 +1409,28 @@ describe('Z.ai gift reset activation (VS Code parity)', () => {
       resetType?: unknown;
       recordId?: unknown;
       requestId?: unknown;
+      grantType?: unknown;
     };
     assert.equal(body.targetType, 'PERSONAL');
     assert.equal(body.resetType, 'FIVE_HOUR');
     assert.equal(body.recordId, 462029);
+    assert.equal(body.grantType, 'GLOBAL');
     assert.match(String(body.requestId), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  test('threads the record grantType into the activation request unchanged', async () => {
+    const fetchCalls: Array<[string, RequestInit | undefined]> = [];
+    stubFetchReturning(async (url: string, init?: RequestInit) => {
+      fetchCalls.push([url, init]);
+      return mockResponse({ code: 200, msg: 'success', data: 1, success: true });
+    });
+
+    await activateQuotaGiftReset('zai-coding-plan', { recordId: 462029, resetType: 'WEEK', grantType: 'ACTIVITY' });
+
+    // SAFETY: body is the JSON stringified by activateQuotaGiftReset itself;
+    // only grantType is read back.
+    const body = JSON.parse(String(fetchCalls[0]?.[1]?.body)) as { grantType?: unknown };
+    assert.equal(body.grantType, 'ACTIVITY');
   });
 
   test('throws the API message when activation is rejected', async () => {

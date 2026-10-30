@@ -116,7 +116,7 @@ describe('Z.ai quota provider', () => {
             { recordId: 111111, expireTime: '2020-01-01 00:00:00', available: true },
             { recordId: 666002, expireTime: 'not-a-date', available: true },
             { recordId: 462029, expireTime: '2099-09-11 06:01:35', available: true },
-            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true },
+            { recordId: 555501, expireTime: '2099-06-15 12:30:00', available: true, grantType: 'GLOBAL' },
           ],
           weekResets: [
             { recordId: 777003, expireTime: '2099-03-01 08:00:00', available: true },
@@ -133,6 +133,7 @@ describe('Z.ai quota provider', () => {
     expect(windows['5h'].giftReset).toEqual({
       recordId: 555501,
       expireAt: Date.parse('2099-06-15T12:30:00+08:00'),
+      grantType: 'GLOBAL',
     });
     expect(windows.weekly.giftReset).toEqual({
       recordId: 777003,
@@ -235,6 +236,7 @@ describe('Z.ai gift reset activation', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
 
+    // No grantType on the input: the provider falls back to GLOBAL.
     await expect(useZaiGiftReset({ recordId: 462029, resetType: 'FIVE_HOUR' })).resolves.toBe(true);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -247,8 +249,24 @@ describe('Z.ai gift reset activation', () => {
       targetType: 'PERSONAL',
       resetType: 'FIVE_HOUR',
       recordId: 462029,
+      grantType: 'GLOBAL',
     });
     expect(body.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+
+  it('threads the record grantType into the activation request unchanged', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse({
+      code: 200,
+      msg: 'success',
+      data: 1,
+      success: true,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(useZaiGiftReset({ recordId: 462029, resetType: 'WEEK', grantType: 'ACTIVITY' })).resolves.toBe(true);
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body).grantType).toBe('ACTIVITY');
   });
 
   it('throws the API message when activation is rejected', async () => {

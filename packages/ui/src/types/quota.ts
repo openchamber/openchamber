@@ -30,6 +30,12 @@ export type QuotaProviderId =
 export interface UsageWindowGiftReset {
   recordId: number;
   expireAt: number;
+  /**
+   * Grant kind of the z.ai record, delivered per record by the list API and
+   * sent back unchanged on activation. Absent when the record carries none;
+   * the runtimes then fall back to 'GLOBAL'.
+   */
+  grantType?: string;
 }
 
 export interface UsageWindow {

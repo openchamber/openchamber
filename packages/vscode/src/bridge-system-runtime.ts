@@ -602,16 +602,17 @@ export async function handleSystemBridgeMessage(
       // SAFETY: bridge payloads are untrusted JSON from the webview; the cast
       // only reads the expected fields, and activateQuotaGiftReset re-validates
       // every value before any request leaves the extension host.
-      const { providerId, recordId, resetType } = (payload || {}) as {
+      const { providerId, recordId, resetType, grantType } = (payload || {}) as {
         providerId?: string;
         recordId?: number;
         resetType?: QuotaGiftResetType;
+        grantType?: string;
       };
-      if (!providerId || recordId === undefined || !Number.isFinite(recordId) || !resetType) {
+      if (!providerId || recordId === undefined || !Number.isFinite(recordId) || !resetType || grantType === '') {
         return { id, type, success: false, error: 'Invalid gift reset request' };
       }
       try {
-        await activateQuotaGiftReset(providerId, { recordId, resetType });
+        await activateQuotaGiftReset(providerId, { recordId, resetType, grantType });
         return { id, type, success: true, data: { success: true } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
