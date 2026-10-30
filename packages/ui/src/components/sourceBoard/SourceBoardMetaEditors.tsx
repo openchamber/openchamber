@@ -5,6 +5,7 @@ import type { CachedValue } from '@/components/references/referenceCache';
 import { labelColor, referenceNumberLabel } from '@/components/references/referencePickerItems';
 import { ReferenceLabelChips } from '@/components/references/ReferencePickerRow';
 import { toast } from '@/components/ui';
+import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
     Label,
@@ -25,12 +26,21 @@ const labelChoice = (label: Label): BoardChoice => ({
     content: <ReferenceLabelChips labels={[{ name: label.name, color: labelColor(label.color) }]} />,
 });
 
-const Person: React.FC<{ person: RepositoryReferenceReviewer }> = ({ person }) => (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-        {person.avatarUrl ? <img src={person.avatarUrl} alt="" className="size-4 shrink-0 rounded-full" loading="lazy" /> : null}
-        <span className="truncate">{person.login}</span>
-    </span>
-);
+const Person: React.FC<{ person: RepositoryReferenceReviewer }> = ({ person }) => {
+    const { broken, onError } = useAvatarImage(person.avatarUrl);
+    return (
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+            {person.avatarUrl && !broken ? (
+                <img src={person.avatarUrl} alt="" className="size-4 shrink-0 rounded-full" loading="lazy" onError={onError} />
+            ) : person.avatarUrl ? (
+                <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-surface-muted text-[0.625rem] leading-none">
+                    {person.login.slice(0, 1).toUpperCase()}
+                </span>
+            ) : null}
+            <span className="truncate">{person.login}</span>
+        </span>
+    );
+};
 
 const reviewerChoice = (person: RepositoryReferenceReviewer): BoardChoice => ({
     id: person.id,
