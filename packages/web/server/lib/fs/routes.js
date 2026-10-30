@@ -512,8 +512,14 @@ const deriveCloneDirectoryName = (remoteUrl) => {
 };
 
 const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProjectDirectory, path, os, fsPromises, normalizeDirectoryPath, managedRoots, chatsRoots }) => {
+  // Resolved file targets are exact names, not pasted directory inputs.
+  const normalizeReadPath = (value) => (
+    value === targetPath && typeof value === 'string' && path.isAbsolute(value)
+      ? value
+      : normalizeDirectoryPath(value)
+  );
   if (req.query?.allowOutsideWorkspace === 'true') {
-    const normalized = normalizeDirectoryPath(targetPath);
+    const normalized = normalizeReadPath(targetPath);
     if (!normalized || typeof normalized !== 'string') {
       return { ok: false, error: 'Path is required' };
     }
@@ -528,7 +534,7 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
     path,
     os,
     fsPromises,
-    normalizeDirectoryPath,
+    normalizeDirectoryPath: normalizeReadPath,
     managedRoots,
     chatsRoots,
   });
@@ -1112,7 +1118,7 @@ export const registerFsRoutes = (app, dependencies) => {
   });
 
   app.get('/api/fs/stat', async (req, res) => {
-    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const filePath = typeof req.query.path === 'string' ? req.query.path : '';
     const optional = req.query.optional === 'true';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
@@ -1163,7 +1169,7 @@ export const registerFsRoutes = (app, dependencies) => {
   });
 
   app.get('/api/fs/read', async (req, res) => {
-    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const filePath = typeof req.query.path === 'string' ? req.query.path : '';
     const optional = req.query.optional === 'true';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
@@ -1229,7 +1235,7 @@ export const registerFsRoutes = (app, dependencies) => {
   });
 
   app.get('/api/fs/raw', async (req, res) => {
-    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const filePath = typeof req.query.path === 'string' ? req.query.path : '';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
     }

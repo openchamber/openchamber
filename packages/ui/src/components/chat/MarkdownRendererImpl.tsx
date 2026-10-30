@@ -42,6 +42,7 @@ import {
   MarkdownPresentationContext,
   useMarkdownPresentation,
   type MermaidControls,
+  type FileReferenceSource,
 } from './markdown/MarkdownPresentationContext';
 import { MarkdownLink, MarkdownInlineCode } from './markdown/MarkdownLink';
 import { MarkdownCode } from './markdown/MarkdownCode';
@@ -364,18 +365,19 @@ export function MarkdownContent({
   const fileReferences = fileNavigation && !isMobileSurfaceRuntime();
   const confirmFile = React.useMemo(() => {
     const results = new Map<string, Promise<string | null>>();
-    return (source: string): Promise<string | null> => {
-      if (!fileReferences || !resolveMarkdownFile(source, directory) || getRuntimeKey() !== runtimeKey) {
+    return (source: string, inputKind: FileReferenceSource = 'path'): Promise<string | null> => {
+      if (!fileReferences || !resolveMarkdownFile(source, directory, 'probe', inputKind) || getRuntimeKey() !== runtimeKey) {
         return Promise.resolve(null);
       }
-      const existing = results.get(source);
+      const key = `${inputKind}:${source}`;
+      const existing = results.get(key);
       if (existing) return existing;
       if (results.size >= (isVSCode ? 40 : 80)) return Promise.resolve(null);
 
-      const request = confirmMarkdownFile(source, directory).then(
+      const request = confirmMarkdownFile(source, directory, inputKind).then(
         (path) => getRuntimeKey() === runtimeKey ? path : null,
       );
-      results.set(source, request);
+      results.set(key, request);
       return request;
     };
   }, [fileReferences, directory, runtimeKey, isVSCode]);

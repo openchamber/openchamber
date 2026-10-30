@@ -113,6 +113,10 @@ verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 
 ### UI state stores
 
+Absolute context-panel file targets retain filename edge spaces, including in path-derived tab deduplication keys. Trimming a resolved target would open or reuse a different file; relative text inputs still receive the existing whitespace cleanup.
+
+`useFilesViewTabsStore` also preserves whitespace in file and folder targets through selection, close, move, and expansion. These inputs come from resolved filesystem paths; only workspace-root inputs receive whitespace cleanup.
+
 Sidebar visibility and its persisted width are independent. Opening or closing
 the sidebar never writes a width; only resizing changes the saved choice.
 The initial width is separate from the component's minimum resize width.

@@ -918,6 +918,39 @@ describe('fs rename on a real disk', () => {
 });
 
 describe('fs read', () => {
+  it('preserves edge-space filenames through read normalization', async () => {
+    for (const filePath of ['/repo/  report.md', '/repo/report.md  ']) {
+      for (const allowOutsideWorkspace of [undefined, 'true']) {
+        const { app, getRoute } = createRouteRegistry();
+        const readFile = vi.fn(async () => 'edge-space file');
+        const open = openBytes(Buffer.from('edge-space file'));
+        registerFsRoutes(app, {
+          os: { homedir: () => '/home/user' },
+          path: path.posix,
+          fsPromises: {
+            realpath: async (targetPath) => targetPath,
+            stat: async () => ({ isFile: () => true, size: 15 }),
+            readFile,
+            open,
+          },
+          normalizeDirectoryPath: (value) => value.trim(),
+          resolveProjectDirectory: async () => ({ directory: '/repo' }),
+          openchamberUserConfigRoot: '/home/user/.config',
+        });
+        const res = createMockResponse();
+        await getRoute('GET', '/api/fs/read')({ query: { path: filePath, allowOutsideWorkspace } }, res);
+        expect(res.statusCode).toBe(200);
+        expect(readFile).toHaveBeenCalledWith(filePath, 'utf8');
+        const statRes = createMockResponse();
+        await getRoute('GET', '/api/fs/stat')({ query: { path: filePath, allowOutsideWorkspace } }, statRes);
+        expect(statRes.body.path).toBe(filePath);
+        const rawRes = await callRaw(getRoute('GET', '/api/fs/raw'), { path: filePath, allowOutsideWorkspace });
+        expect(rawRes.statusCode).toBe(200);
+        expect(open).toHaveBeenCalledWith(filePath, 'r');
+      }
+    }
+  });
+
   it('reads workspace files through symlinks that resolve outside the workspace', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => {
