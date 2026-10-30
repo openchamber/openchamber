@@ -717,6 +717,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     requestedAgent,
     requestedVariant,
     reuseSessionSelection = false,
+    clearResponseStyle = true,
     promptedBySessionId = null,
   }) => {
     let model = requestedModel;
@@ -834,7 +835,10 @@ export const createOpenChamberSessionService = (dependencies) => {
       try {
         const session = await client.session.get({ sessionID });
         const sessionDirectory = asNonEmptyString(session?.location?.directory);
-        if (sessionDirectory) await sessionKnowledgeRuntime.sync(sessionID, sessionDirectory);
+        if (sessionDirectory) {
+          if (clearResponseStyle) await sessionKnowledgeRuntime.sync(sessionID, sessionDirectory, '');
+          else await sessionKnowledgeRuntime.sync(sessionID, sessionDirectory);
+        }
       } catch (error) {
         console.warn('[OpenChamberSessions] Failed to read session directory for knowledge sync:', error?.message || error);
       }
@@ -1269,6 +1273,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         requestedAgent: asNonEmptyString(payload.agent),
         requestedVariant: asNonEmptyString(payload.variant),
         reuseSessionSelection: true,
+        clearResponseStyle: action === 'fork',
         promptedBySessionId: asNonEmptyString(payload.promptedBySessionId),
       });
       if (action === 'send' && dispatch.promptDispatched) await restoreAfterSend(client, targetSessionID);

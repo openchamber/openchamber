@@ -5,7 +5,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { expandSlashCommandGoalObjective, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
+import { expandSlashCommandGoalObjective, materializeOpenDraftSession, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
 import { ChildStoreManager } from './child-store';
 import { setSyncRefs } from './sync-refs';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
@@ -358,6 +358,7 @@ describe('routeMessage inline skills', () => {
 
 describe('sendMessage captured target', () => {
   let originalSendMessage;
+  let originalFetch;
   const calls = [];
 
   beforeEach(() => {
@@ -381,6 +382,14 @@ describe('sendMessage captured target', () => {
     });
 
     originalSendMessage = opencodeClient.sendMessage;
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      const url = input?.href ?? input?.url ?? String(input);
+      if (url.includes('/api/config/settings')) {
+        return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
+      }
+      return Response.json({});
+    };
     opencodeClient.sendMessage = async (params) => {
       calls.push(params);
       return 'msg';
@@ -389,6 +398,7 @@ describe('sendMessage captured target', () => {
 
   afterEach(() => {
     opencodeClient.sendMessage = originalSendMessage;
+    globalThis.fetch = originalFetch;
   });
 
   const sendToTarget = (target) => useSessionUIStore.getState().sendMessage(
@@ -2362,6 +2372,9 @@ describe('send does not wait for session knowledge before showing the message', 
     const writes = [];
     globalThis.fetch = async (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/config/settings')) {
+        return Response.json({ responseStyleEnabled: true, responseStylePreset: 'concise' });
+      }
       if (url.includes('/api/session-knowledge/sync')) {
         writes.push(JSON.parse(init.body));
         return new Promise((resolve) => {
@@ -2389,7 +2402,8 @@ describe('send does not wait for session knowledge before showing the message', 
 
     // The bubble is already there; the prompt request waits for the write.
     expect(added.map((message) => message.role)).toEqual(['user']);
-    expect(writes).toEqual([{ directory: '/repo', sessionId: 'session-knowledge' }]);
+    expect(writes).toHaveLength(1);
+    expect(JSON.stringify(writes[0])).toContain('Keep replies short.');
     expect(sendCalls).toHaveLength(0);
 
     finishWrite();
@@ -2400,5 +2414,103 @@ describe('send does not wait for session knowledge before showing the message', 
     expect(sendCalls).toHaveLength(1);
     expect(sendCalls[0].messageId).toBe(added[0].id);
     expect(sendCalls[0].context).toBeUndefined();
+  });
+
+  test('does not send when the runtime changes during the knowledge write', async () => {
+    let state = { session: [], message: {}, part: {}, session_status: {} };
+    const childStore = {
+      getState: () => state,
+      setState: (patch) => { state = { ...state, ...patch }; },
+    };
+    setActionRefs({ children: new Map(), ensureChild: () => childStore, getChild: () => childStore }, () => '/repo');
+    setOptimisticRefs(() => {}, () => {});
+
+    const originalSendMessage = opencodeClient.sendMessage;
+    const originalApiBaseUrl = getRuntimeApiBaseUrl();
+    const originalRuntimeKey = getRuntimeKey();
+    let finishKnowledge;
+    const knowledgeSync = new Promise((resolve) => { finishKnowledge = resolve; });
+    const sendCalls = [];
+    opencodeClient.sendMessage = async (params) => {
+      sendCalls.push(params);
+      return 'msg';
+    };
+
+    try {
+      const sending = routeMessage({
+        runtimeKey: originalRuntimeKey,
+        sessionId: 'session-knowledge',
+        directory: '/repo',
+        content: 'hello',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        ready: knowledgeSync,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-change.invalid', runtimeKey: 'runtime-changed' });
+      finishKnowledge();
+      await expect(sending).rejects.toThrow('runtime changed');
+      expect(sendCalls).toHaveLength(0);
+    } finally {
+      opencodeClient.sendMessage = originalSendMessage;
+      switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey });
+    }
+  });
+
+  test('keeps the draft open when the runtime changes during materialisation', async () => {
+    const originalCreateSession = opencodeClient.createSession;
+    const originalGetSdkClient = opencodeClient.getSdkClient;
+    const originalGetScopedSdkClient = opencodeClient.getScopedSdkClient;
+    const originalFetch = globalThis.fetch;
+    const originalApiBaseUrl = getRuntimeApiBaseUrl();
+    const originalRuntimeKey = getRuntimeKey();
+    const previousDraft = useSessionUIStore.getState().newSessionDraft;
+    const removedSessions = [];
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://cleanup-owner.test', runtimeKey: originalRuntimeKey });
+    opencodeClient.reconnectToRuntimeBaseUrl();
+    const oldSdkClient = {};
+    let currentSdkClient = oldSdkClient;
+    opencodeClient.getSdkClient = () => currentSdkClient;
+    opencodeClient.getScopedSdkClient = () => currentSdkClient;
+    globalThis.fetch = async (input, init) => {
+      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+      if (method === 'DELETE') removedSessions.push(String(input instanceof Request ? input.url : input).split('/').pop());
+      return new Response(null, { status: 204 });
+    };
+    let finishCreate;
+    opencodeClient.createSession = async () => {
+      await new Promise((resolve) => { finishCreate = resolve; });
+      return { id: 'session-created-on-old-runtime', directory: '/repo', metadata: {} };
+    };
+    useSessionUIStore.setState({
+      newSessionDraft: {
+        ...previousDraft,
+        open: true,
+        target: 'project',
+        directoryOverride: '/repo',
+        preserveDirectoryOverride: true,
+      },
+    });
+
+    try {
+      const materialising = materializeOpenDraftSession({ providerID: 'provider-a', modelID: 'model-a' }, undefined, originalRuntimeKey);
+      for (let tick = 0; tick < 50 && !finishCreate; tick += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-change.invalid', runtimeKey: 'runtime-changed' });
+      currentSdkClient = { session: { remove: async () => undefined } };
+      finishCreate();
+      await expect(materialising).rejects.toThrow('runtime changed');
+      expect(useSessionUIStore.getState().newSessionDraft.open).toBe(true);
+      expect(removedSessions).toEqual(['session-created-on-old-runtime']);
+    } finally {
+      opencodeClient.createSession = originalCreateSession;
+      opencodeClient.getSdkClient = originalGetSdkClient;
+      opencodeClient.getScopedSdkClient = originalGetScopedSdkClient;
+      globalThis.fetch = originalFetch;
+      useSessionUIStore.setState({ newSessionDraft: previousDraft });
+      switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey });
+      opencodeClient.reconnectToRuntimeBaseUrl();
+    }
   });
 });

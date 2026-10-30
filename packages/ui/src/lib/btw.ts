@@ -292,7 +292,12 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
           [...btwBoundaryParts(), ...(input.additionalParts ?? [])],
           input.variant ?? undefined,
           'normal',
-          { sessionId: forked.id, directory: sessionDirectory, skills: input.skills },
+          {
+            target: { runtimeKey: expectedRuntimeKey, sessionId: forked.id, directory: sessionDirectory },
+            sessionId: forked.id,
+            directory: sessionDirectory,
+            skills: input.skills,
+          },
         );
       } catch (error) {
         // A fork without its first question is not a usable btw session:

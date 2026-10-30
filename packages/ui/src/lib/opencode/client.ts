@@ -30,6 +30,7 @@ import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-err
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { runtimeFetch } from "@/lib/runtime-fetch"
+import { captureRuntimeCleanup } from "@/lib/runtime-cleanup"
 import { forgetOpenCodeTrustDeclines, isDeliberateOpenCodeRequest, openCodeTrustRefusalDirectory, requestOpenCodeTrust } from "@/lib/opencodeTrust"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { isSpaceDirectory, spaceIdOfDirectory } from "@/lib/spaces/space-route"
@@ -733,6 +734,30 @@ class OpencodeService {
   /** Raw client without a directory scope (global routes, event stream). */
   getSdkClient(): OpenCodeClient {
     return this.client
+  }
+
+  async setResponseStyleInstruction(directory: string, sessionID: string, instruction: string | null): Promise<void> {
+    const entry = this.getScopedSdkClient(directory).experimental.session.instructions.entry
+    const key = "openchamber.response-style"
+    const value = instruction?.trim()
+    if (value) await entry.put({ sessionID, key, value })
+    else await entry.remove({ sessionID, key })
+  }
+
+  async captureSessionCleanup(directory: string | null | undefined, runtimeKey: string): Promise<(sessionID: string) => Promise<void>> {
+    const cleanup = await captureRuntimeCleanup(runtimeKey)
+    return (sessionID) => cleanup(async ({ fetch, baseUrl }) => {
+      const client = OpenCode.make({
+        baseUrl: ensureAbsoluteBaseUrl(baseUrl || "/"),
+        headers: directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(directory) } : undefined,
+        fetch,
+      })
+      try {
+        await client.session.remove({ sessionID })
+      } catch (error) {
+        if (!isOpencodeNotFound(normalizeOpencodeError("session.remove", error))) throw error
+      }
+    })
   }
 
   /** Raw client whose every request resolves the given directory's Location. */

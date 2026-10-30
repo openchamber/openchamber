@@ -45,6 +45,26 @@ complete list alone sets authoritative coverage, reconciles missing sessions,
 and updates the root total. A later-page failure preserves the pages already
 published without claiming a complete snapshot.
 
+## Cleanup after a runtime switch
+
+Draft creation captures its cleanup owner before creating a session or chat
+folder. `lib/runtime-cleanup.ts` keeps direct HTTP cleanup on that owner's URL
+and credentials, bypassing the active runtime's fetch bridge. Chat cleanup
+accepts only descendants of the roots captured from that owner and never a
+shared root. Session cleanup uses the SDK with the captured transport and
+directory header.
+
+Relay and same-origin cleanup waits until the owner returns. Failed cleanup
+stays in an in-memory queue and retries on that owner's endpoint-change event
+with fresh credentials. The queue does not survive a page reload.
+
+### Why cleanup captures transport separately from the SDK client
+
+A cached SDK client still resolves authentication and transport at request
+time. Keeping the client alone can send a rollback to the newly selected
+server, or omit the old server's credentials. Only rollback captures transport;
+ordinary feature requests continue to resolve the active runtime at call time.
+
 ## OpenCode compatibility before bootstrap
 
 The desktop/web/VS Code App entry and MobileApp entry wrap the application in
@@ -1081,7 +1101,7 @@ Typing the first character in a managed Chat draft starts one deduplicated direc
 
 Enter in a draft makes it a session on the spot. `sendMessage` mints the session id (`descendingId("ses")`: OpenCode mints session ids counting down with time, so the client's lists where the server's would, and `session.create` accepts the id), opens an empty transcript for it (`openPendingSessionTranscript`), saves its selection, selects it with the `submitted-draft` transition (which closes the draft), and publishes a `pendingDraftSends` entry for it. The prompt then goes through the same `routeMessage` and `optimisticSend` as any other send: the user message is inserted at once, without marking the session busy (no agent works yet, so no working status shows next to "Creating session…"), and the request waits on `ready`, which is the session's creation (`createSession` with the minted id and `navigation: "preserve"`, so the response does not re-navigate), the post-creation bookkeeping, the busy mark, the armed goal and the knowledge write. Whether the server has the session is answered by the create response alone; a session created under another id than the minted one is not this one, counts as not created and is deleted best effort. A send that fails once the session exists (a goal or knowledge write, a command lookup, a lost connection before the insert) leaves the session in place, idle again, with its text back in its composer. The waits that decide where the session is shown (a worktree still being made, a chat folder being prepared) happen before the switch, with the draft still open and its own status line; the waits that only delay creation (a worktree's setup commands, the start folder inside a worktree, the missing-directory probe) run while the message is on screen, and a session that ends up in another directory than the one it was shown in has its transcript carried there by `adoptSessionMove`.
 
-The entry says what the composer shows: `sessionCreated` false is the "Creating session…" line (shown once the wait has held 300 ms, so a fast server never flashes it); while the entry exists, Send is disabled and Enter does nothing, so a second message cannot reach OpenCode before the first prompt. Context that must be fresh at send time (the response style, which another device may have changed) is read through `lateContext` while `ready` settles and admitted right before the request leaves, so neither the message nor the request waits for that read. The sidebar lists the session once the server has it, as before #5783; the early busy mark that listed it at once is gone. The entry goes when the request that starts the turn leaves the client (`beforeSend` from `opencodeClient.sendMessage` and `sendCommand` right before their last request, after the context parts ahead of it; before `shellSession`), never when it resolves: a prompt request can resolve only after the directory's services started, long after the agent began answering. A shell command therefore does not hold the composer for its lifetime. A draft is sent once (`sentDraftIds`): a second `sendMessage` with the same draft snapshot is refused at the store, creates nothing and keeps the caller's text.
+The entry says what the composer shows: `sessionCreated` false is the "Creating session…" line (shown once the wait has held 300 ms, so a fast server never flashes it); while the entry exists, Send is disabled and Enter does nothing, so a second message cannot reach OpenCode before the first prompt. The response style rides in the same knowledge sync that `ready` covers, so the first prompt reads it from the session's instructions and the message still appears without waiting for that read. The sidebar lists the session once the server has it, as before #5783; the early busy mark that listed it at once is gone. The entry goes when the request that starts the turn leaves the client (`beforeSend` from `opencodeClient.sendMessage` and `sendCommand` right before their last request, after the context parts ahead of it; before `shellSession`), never when it resolves: a prompt request can resolve only after the directory's services started, long after the agent began answering. A shell command therefore does not hold the composer for its lifetime. A draft is sent once (`sentDraftIds`): a second `sendMessage` with the same draft snapshot is refused at the store, creates nothing and keeps the caller's text.
 
 A rejected `ready` is a definite failure, not an ambiguous one: `optimisticSend` rolls the message back without a confirmation read. The store then reopens the same draft object (same `draftId` and `workDraftId`, so the composer's draft key is unchanged and the sent text returns there), clears the pointer a cold launch would restore, removes a chat's directory, and rejects with `DraftSendError`, which names the session, its directory and whether the server created it. The composer restores the text under the identity the error names: the created session's when it exists, the draft's otherwise, with the text typed meanwhile kept above it. A user who moved to another session or draft meanwhile is left where they are; the created session simply is in the sidebar, and a draft that failed to create stays listed.
 

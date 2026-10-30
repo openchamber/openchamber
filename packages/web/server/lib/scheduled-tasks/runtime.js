@@ -537,7 +537,7 @@ export const createScheduledTasksRuntime = (deps) => {
   // Never fails the run (`sync` does not throw): a task that executes without
   // its background is a lesser loss than a task that does not execute.
   const syncKnowledge = (sessionID, projectPath) => (sessionKnowledgeRuntime
-    ? sessionKnowledgeRuntime.sync(sessionID, projectPath)
+    ? sessionKnowledgeRuntime.sync(sessionID, projectPath, '')
     : Promise.resolve(false));
 
   const runPrompt = async ({ client, sessionID, projectPath, task }) => {

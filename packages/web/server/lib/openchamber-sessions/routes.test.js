@@ -4,6 +4,7 @@ import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSessionKnowledgeRuntime, KNOWLEDGE_ENTRY_KEYS } from '../session-knowledge/runtime.js';
 
 const createWorktreeMock = vi.fn(async () => ({
   head: 'abc123',
@@ -1586,8 +1587,33 @@ describe('openchamber session routes', () => {
       .post(`/api/openchamber/sessions/ses_source/${action}`)
       .send({ directory: '/repo/app', prompt: 'Continue', model: 'openai/gpt-5.5', agent: 'build' })
       .expect(200);
-    expect(sync).toHaveBeenCalledExactlyOnceWith(targetId, '/repo/worktrees/target');
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(sync.mock.calls[0]).toEqual(action === 'send'
+      ? [targetId, '/repo/worktrees/target']
+      : [targetId, '/repo/worktrees/target', '']);
     expect(sync.mock.invocationCallOrder[0]).toBeLessThan(sessionPromptMock.mock.invocationCallOrder[0]);
+  });
+
+  it('preserves the existing response style when session.send delivers a prompt', async () => {
+    const entries = new Map();
+    const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
+      resolveProjectId: async () => null,
+      instructionEntries: {
+        put: async (sessionID, directory, key, value) => { entries.set(key, value); },
+        remove: async (sessionID, directory, key) => { entries.delete(key); },
+      },
+    });
+    await sessionKnowledgeRuntime.sync('ses_source', '/repo/app', 'Keep replies short.');
+    expect(entries.get(KNOWLEDGE_ENTRY_KEYS.responseStyle)).toBe('Keep replies short.');
+
+    const { app } = createApp({ sessionKnowledgeRuntime });
+    await request(app)
+      .post('/api/openchamber/sessions/ses_source/send')
+      .send({ directory: '/repo/app', prompt: 'Continue', model: 'openai/gpt-5.5', agent: 'build' })
+      .expect(200);
+
+    expect(sessionPromptMock).toHaveBeenCalledWith({ sessionID: 'ses_source', text: 'Continue' });
+    expect(entries.get(KNOWLEDGE_ENTRY_KEYS.responseStyle)).toBe('Keep replies short.');
   });
 
   it.each(['missing', 'failed'])('preserves knowledge and sends when the target directory read is %s', async (mode) => {

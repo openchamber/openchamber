@@ -3,6 +3,7 @@ import type { Message, Part, Session } from '@/lib/opencode/model';
 import type { MessagePage } from '@/lib/opencode/client';
 import type { StartBtwInput } from './btw';
 import { normalizePath } from '@/lib/pathNormalization';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type ForkOptions = { before?: string; directory?: string | null };
 let forkSessionImpl: (sessionId: string, options?: ForkOptions) => Promise<Session>;
@@ -202,7 +203,11 @@ describe('startBtwSession', () => {
     expect(registeredDirectories).toEqual(['fork-1:/project']);
     expect(childStoreSessions.map((s) => s.id)).toEqual(['fork-1']);
     expect(sentText).toBe('wtf is kafka');
-    expect(sentOptions).toEqual({ sessionId: 'fork-1', directory: '/project' });
+    expect(sentOptions).toMatchObject({
+      sessionId: 'fork-1',
+      directory: '/project',
+      target: { runtimeKey: getRuntimeKey(), sessionId: 'fork-1', directory: '/project' },
+    });
     expect(metadataPatches).toEqual([
       { sessionId: 'fork-1', result: { openchamber: { kind: 'btw', originalSessionID: 'parent-1', btwBoundaryMessageID: 'msg-boundary' } } },
       { sessionId: 'parent-1', result: { openchamber: { btwSessionID: 'fork-1' } } },

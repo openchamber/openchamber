@@ -156,9 +156,6 @@ import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useI18n } from '@/lib/i18n';
 import { useDraftHeading } from './useDraftHeading';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
-import { wrapSystemReminder } from '@/lib/systemReminder';
-import { getSyncMessages } from '@/sync/sync-refs';
 import { useOpenCodeStartupStore } from '@/sync/opencode-startup-gate';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo, shortcutRegistry } from '@/lib/shortcuts';
 import {
@@ -356,10 +353,6 @@ const recordLinkedReferences = (
     const linked = references.flatMap((reference) => toLinkedIssue(reference, linkedAt) ?? []);
     if (linked.length === 0) return;
     void sessionActions.addLinkedIssues(sessionId, directory, linked).catch(() => undefined);
-};
-
-const hasUserMessages = (sessionId: string, directory?: string) => {
-    return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
 };
 
 const renderDraftTitle = (title: string, projectLabel: string | null): React.ReactNode => {
@@ -2179,10 +2172,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             delivery?: 'steer';
             skills?: SkillMentions;
             queuedGoal?: QueuedMessageGoal | null;
-            lateContext?: () => Promise<Array<{ text: string }>>;
         } | undefined;
         if (isBtwActive && btwSessionId && btwDirectory) {
             sendMessageOptions = {
+                target: { runtimeKey: submitRuntimeKey, sessionId: btwSessionId, directory: btwDirectory },
                 sessionId: btwSessionId,
                 directory: btwDirectory,
             };
@@ -2391,23 +2384,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 }
                 return;
             }
-        }
-
-        const currentSessionDirectory = capturedTarget?.directory ?? currentDirectory;
-        // btw mode: the fork already carries the question plus full history,
-        // so the response-style instruction never applies there.
-        const shouldAddResponseStyle = !isBtwActive && (newSessionDraftOpen || (currentSessionId ? !hasUserMessages(currentSessionId, currentSessionDirectory) : false));
-        if (shouldAddResponseStyle) {
-            // Read right before the prompt leaves, while the message is
-            // already on screen: a style set on another device applies from
-            // the next message without holding this one back for the read.
-            sendMessageOptions = {
-                ...sendMessageOptions,
-                lateContext: async () => {
-                    const responseStyleInstruction = await fetchResponseStyleInstruction().catch(() => null);
-                    return responseStyleInstruction ? [{ text: wrapSystemReminder(responseStyleInstruction) }] : [];
-                },
-            };
         }
 
         const expandOutgoingSnippets = async () => {

@@ -1046,22 +1046,29 @@ export async function createSession(
   navigation: "open" | "preserve" = "open",
   /** An id this client minted (`descendingId("ses")`), so records keyed by it before the response stay valid. */
   id?: string,
+  expectedRuntimeKey?: string,
 ): Promise<Session | null> {
-  const runtimeKey = getRuntimeKey()
+  const runtimeKey = expectedRuntimeKey ?? getRuntimeKey()
   const runtimeClient = opencodeClient.getSdkClient()
   try {
+    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) return null
     // Capture the effective directory used for session creation so we can fall
     // back to it when the server response omits the `directory` field.
     // Without this, setCurrentSession would fall through to a stale
     // opencodeClient.getDirectory() value and group the session under the
     // wrong project (closes #1637, #2270).
     const effectiveDirectory = directoryOverride ?? dir()
+    const cleanupSession = await opencodeClient.captureSessionCleanup(effectiveDirectory, runtimeKey)
+    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) return null
     const session = await opencodeClient.createSession(
       { id, title, metadata, model: selection?.model, agent: selection?.agent },
       effectiveDirectory,
     )
 
-    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) return null
+    if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== runtimeClient) {
+      await cleanupSession(session.id)
+      return null
+    }
     const sessionDirectory = session.directory || effectiveDirectory || null
     // Pre-populate routing index so SSE events arriving before session.created
     // can be routed to the correct child store

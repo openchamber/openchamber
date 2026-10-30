@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import type { ModelSelection, Session, SessionStatus } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import type { MessagePage } from "@/lib/opencode/client"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from "@/lib/runtime-switch"
 import { createPendingDraftWorktreeRequest, resolvePendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
@@ -11,6 +11,7 @@ import { sendRecoveredFormAnswer, setActionRefs, setOptimisticRefs } from "./ses
 import { resetRecoverableQuestions } from "./recoverable-questions"
 import { SessionMessageLoader, setImperativeSessionMessageLoader, type SessionMessagePageSource } from "./session-message-loader"
 import { DraftSendError, useSessionUIStore, type NewSessionDraftState, type PendingDraftSend } from "./session-ui-store"
+import { readLastActiveSession } from "./last-session-cache"
 import { setSyncRefs } from "./sync-refs"
 
 // The first message of a new session, sent from the draft. The real stores,
@@ -232,35 +233,6 @@ describe("the first message of a draft", () => {
     expect(messagesOf(sessionId)).toHaveLength(1)
   })
 
-  test("context read for the send is read while the session is being created and travels with the prompt", async () => {
-    let reads = 0
-    const lateRead = deferred<Array<{ text: string }>>()
-    const draft = openDraft(10)
-    useSessionUIStore.setState({ newSessionDraft: draft, currentSessionId: null, currentSessionDirectory: null })
-    const sending = useSessionUIStore.getState().sendMessage("hello", "provider", "model", "build", undefined, undefined, undefined, undefined, "normal", {
-      userInitiated: true,
-      draftSnapshot: draft,
-      lateContext: () => {
-        reads += 1
-        return lateRead.promise
-      },
-    })
-    await flush()
-    // The read started with the send; the message did not wait for it.
-    expect(reads).toBe(1)
-    expect(messagesOf(useSessionUIStore.getState().currentSessionId ?? "")).toHaveLength(1)
-    expect(sendCalls).toEqual([])
-
-    creation.resolve()
-    await flush()
-    expect(sendCalls).toEqual([])
-    lateRead.resolve([{ text: "style of the moment" }])
-    await sending
-
-    expect(sendCalls).toHaveLength(1)
-    expect(sendCalls[0].context).toEqual(["style of the moment"])
-  })
-
   test("a goal write that fails after the server created the session keeps the session, with Send free again", async () => {
     // The goal write reaches the network, which is refused here: it fails
     // after the create response.
@@ -472,5 +444,54 @@ describe("the first message of a draft", () => {
     expect(useSessionUIStore.getState().currentSessionId).toBe(sessionId)
     expect(messagesOf(sessionId)).toHaveLength(1)
     expect(historyReads).toBe(readsBefore)
+  })
+
+  test("a runtime switch during creation keeps the draft and its text on the captured runtime", async () => {
+    const originalRuntimeKey = getRuntimeKey()
+    const originalApiBaseUrl = getRuntimeApiBaseUrl()
+    try {
+      const { draft, sending } = await startDraftSend(13)
+
+      useSessionUIStore.getState().prepareForRuntimeSwitch(originalRuntimeKey)
+      switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-switched.test", runtimeKey: "runtime-switched" })
+      creation.resolve()
+      const error = await sending.then(() => null, (reason: DraftSendError) => reason)
+
+      expect(error).toBeInstanceOf(DraftSendError)
+      expect(error).toMatchObject({ sessionCreated: false })
+      // The captured runtime forgets the empty session and keeps the draft.
+      expect(readLastActiveSession(originalRuntimeKey)).toBeNull()
+
+      useSessionUIStore.getState().restoreForRuntimeSwitch(originalRuntimeKey, "runtime-switched")
+      const state = useSessionUIStore.getState()
+      expect(state.currentSessionId).toBeNull()
+      expect(state.newSessionDraft).toMatchObject({ open: true, draftId: draft.draftId })
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey })
+      useSessionUIStore.getState().restoreForRuntimeSwitch(originalRuntimeKey, "runtime-switched")
+    }
+  })
+
+  test("a runtime switch during creation keeps a draft the user opened afterwards", async () => {
+    const originalRuntimeKey = getRuntimeKey()
+    const originalApiBaseUrl = getRuntimeApiBaseUrl()
+    try {
+      const { sending } = await startDraftSend(14)
+      useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: "/other", preserveDirectoryOverride: true })
+      const newerDraftId = useSessionUIStore.getState().newSessionDraft.draftId
+
+      useSessionUIStore.getState().prepareForRuntimeSwitch(originalRuntimeKey)
+      switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-switched.test", runtimeKey: "runtime-switched-2" })
+      creation.resolve()
+      await sending.then(() => null, () => null)
+
+      useSessionUIStore.getState().restoreForRuntimeSwitch(originalRuntimeKey, "runtime-switched-2")
+      const state = useSessionUIStore.getState()
+      expect(state.currentSessionId).toBeNull()
+      expect(state.newSessionDraft).toMatchObject({ open: true, draftId: newerDraftId })
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl: originalApiBaseUrl, runtimeKey: originalRuntimeKey })
+      useSessionUIStore.getState().restoreForRuntimeSwitch(originalRuntimeKey, "runtime-switched-2")
+    }
   })
 })
