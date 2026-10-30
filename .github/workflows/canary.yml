@@ -33,7 +33,6 @@ jobs:
     outputs:
       build: ${{ steps.decide.outputs.build }}
       version: ${{ steps.decide.outputs.version }}
-      release_version: ${{ steps.decide.outputs.release_version }}
       sha: ${{ steps.decide.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,7 +60,6 @@ jobs:
           test -n "$RELEASE"
           NEXT=$(node -p "const [a, b, c] = '$RELEASE'.split('.').map(Number); [a, b, c + 1].join('.')")
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "release_version=$RELEASE" >> "$GITHUB_OUTPUT"
           echo "version=${NEXT}-canary.$(date -u +%Y%m%d).${RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           if [ "$EVENT" = "schedule" ] && [ "$SHA" = "$PUBLISHED" ]; then
             echo "main has not moved since the last Canary ($SHA)."
@@ -152,7 +150,6 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
-          OPENCHAMBER_CANARY_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
         run: |
           bun run build:web-assets
           bun run prepare:opencode-cli
@@ -274,8 +271,6 @@ jobs:
 
       - name: Bundle main process
         working-directory: packages/electron
-        env:
-          OPENCHAMBER_CANARY_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
         run: bun run bundle:main
 
       - name: Rebuild native modules
@@ -391,7 +386,6 @@ jobs:
         working-directory: packages/electron
         env:
           OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
-          OPENCHAMBER_CANARY_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
@@ -485,11 +479,19 @@ jobs:
             bun publish --access public --tag canary
           fi
 
+      # A re-run after a desktop build failed finds this version already there;
+      # the `canary` tag then already points at it, or at a newer night's build.
       - name: Publish to npm
         working-directory: packages/web
-        run: bun publish --access public --tag canary
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          if npm view "@openchamber/web@$VERSION" version >/dev/null 2>&1; then
+            echo "@openchamber/web@$VERSION is already published."
+          else
+            bun publish --access public --tag canary
+          fi
 
   # Last, after npm too: the release notes name the commit the next night
   # compares main against, so a build that did not reach npm is retried.
@@ -536,10 +538,17 @@ jobs:
         run: |
           set -euo pipefail
           NOTES="OpenChamber Canary ${VERSION}, built from ${SHA}. The nightly build of main. In the desktop app, or in the browser page of a server installed from npm (@openchamber/web@canary), Settings → About → Updates: pick Canary to update into it, Stable to go back. Expect rough edges."
+          # The notes name the published commit, which tells the next night
+          # whether main moved, so they are written last, once every file is up.
           if ! gh release view canary >/dev/null 2>&1; then
-            gh release create canary --prerelease --latest=false --target "$SHA" --title "OpenChamber Canary" --notes "$NOTES"
+            gh release create canary --prerelease --latest=false --target "$SHA" --title "OpenChamber Canary" --notes "OpenChamber Canary: the first build is being published."
           fi
           OLD_ASSETS=$(gh release view canary --json assets --jq '.assets[].name')
+          # The newest earlier build's files stay one more night: an app that
+          # found that build before this run downloads it from the addresses
+          # it read. Taken from the files, so a re-run of this version keeps it too.
+          PREVIOUS=$(printf '%s\n' "$OLD_ASSETS" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9]+\.[0-9]+' | grep -vxF "$VERSION" | sort -uV | tail -1 || true)
+          PREVIOUS=${PREVIOUS:-$VERSION}
           # New files first, then the manifests that name them, then the old
           # files: an updater always reads a manifest whose files exist.
           gh release upload canary files/OpenChamber-* --clobber
@@ -548,7 +557,7 @@ jobs:
             files/latest-linux.yml files/latest-linux-arm64.yml --clobber
           for asset in $OLD_ASSETS; do
             case "$asset" in
-              latest*.yml|*"-${VERSION}-"*) ;;
+              latest*.yml|*"-${VERSION}-"*|*"-${PREVIOUS}-"*) ;;
               *) gh release delete-asset canary "$asset" --yes ;;
             esac
           done

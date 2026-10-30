@@ -535,6 +535,7 @@ printf '4321\\n'`);
     manager.runRemoteCommand = async () => [
       '/home/pi/.openchamber/npm-global/bin/openchamber\t1.2.3',
       '/usr/bin/openchamber\t0.9.0',
+      '/opt/canary/bin/openchamber\t1.2.4-canary.20261030.7',
       '',
     ].join('\n');
 
@@ -543,6 +544,7 @@ printf '4321\\n'`);
     expect(candidates).toEqual([
       { binPath: '/home/pi/.openchamber/npm-global/bin/openchamber', version: '1.2.3' },
       { binPath: '/usr/bin/openchamber', version: '0.9.0' },
+      { binPath: '/opt/canary/bin/openchamber', version: '1.2.4-canary.20261030.7' },
     ]);
   });
 

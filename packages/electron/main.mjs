@@ -673,9 +673,7 @@ const refreshQuitRiskFlags = async () => {
 
 const sshManager = new ElectronSshManager({
   settingsFilePath: settingsFilePath(),
-  // A Canary version is not on npm, so a remote host gets the release the
-  // Canary was built on; the build compiles it in (scripts/bundle-main.mjs).
-  appVersion: process.env.OPENCHAMBER_CANARY_RELEASE_VERSION || APP_VERSION,
+  appVersion: APP_VERSION,
   emit: (event, detail) => emitToAllWindows(event, detail),
 });
 
