@@ -1669,6 +1669,21 @@ describe('openchamber session routes', () => {
       expect(restoredIds().sort()).toEqual(['ses_child', 'ses_grandchild', 'ses_root']);
     });
 
+    it('leaves the session archived when it was archived again while the send went out', async () => {
+      const tree = archivedTree.map((session) => ({ ...session, time: { ...session.time } }));
+      useTree(tree);
+      const listChildren = sessionListMock.getMockImplementation();
+      sessionListMock.mockImplementation(async (input) => {
+        tree[0].time.archived = 1800;
+        return listChildren(input);
+      });
+      const { app } = createApp();
+
+      await send(app, 'ses_root');
+
+      expect(restoredIds()).toEqual([]);
+    });
+
     it('leaves an archived subsession for its parent to bring back', async () => {
       useTree(archivedTree);
       const { app } = createApp();

@@ -1182,9 +1182,13 @@ export const createOpenChamberSessionService = (dependencies) => {
   const restoreAfterSend = async (client, sessionID) => {
     try {
       const session = await client.session.get({ sessionID });
-      if (session?.parentID || !(await sessionArchive.isArchived(sessionID))) return;
+      if (session?.parentID) return;
+      const archivedAt = await sessionArchive.archivedAt(sessionID);
+      if (!archivedAt) return;
       // Read before the root changes state, as the composer's tree restore does.
       const subsessionIDs = await listArchivedSubsessions(client, sessionID);
+      // A newer archive or a restore by someone else supersedes this one.
+      if (await sessionArchive.archivedAt(sessionID) !== archivedAt) return;
       const { failedIds } = await sessionArchive.unarchive([sessionID]);
       if (failedIds.length > 0) return;
       if (subsessionIDs.length > 0) await sessionArchive.unarchive(subsessionIDs);
