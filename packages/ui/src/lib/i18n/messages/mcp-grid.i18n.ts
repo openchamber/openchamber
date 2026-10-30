@@ -11,6 +11,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Connecting',
     'settings.mcp.grid.status.blockedByPolicy': 'Blocked by policy',
     'settings.mcp.grid.scope.project': 'Project',
+    'settings.mcp.grid.runtimeProvided': 'Provided by OpenCode',
     'settings.mcp.page.back': 'All servers',
   },
   nl: {
@@ -24,6 +25,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Verbinden',
     'settings.mcp.grid.status.blockedByPolicy': 'Geblokkeerd door beleid',
     'settings.mcp.grid.scope.project': 'Project',
+    'settings.mcp.grid.runtimeProvided': 'Geleverd door OpenCode',
     'settings.mcp.page.back': 'Alle servers',
   },
   uk: {
@@ -37,6 +39,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Підключення',
     'settings.mcp.grid.status.blockedByPolicy': 'Заблоковано політикою',
     'settings.mcp.grid.scope.project': 'Проєкт',
+    'settings.mcp.grid.runtimeProvided': 'Надається OpenCode',
     'settings.mcp.page.back': 'Усі сервери',
   },
   de: {
@@ -50,6 +53,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Verbindet',
     'settings.mcp.grid.status.blockedByPolicy': 'Durch Richtlinie blockiert',
     'settings.mcp.grid.scope.project': 'Projekt',
+    'settings.mcp.grid.runtimeProvided': 'Von OpenCode bereitgestellt',
     'settings.mcp.page.back': 'Alle Server',
   },
   es: {
@@ -63,6 +67,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Conectando',
     'settings.mcp.grid.status.blockedByPolicy': 'Bloqueado por política',
     'settings.mcp.grid.scope.project': 'Proyecto',
+    'settings.mcp.grid.runtimeProvided': 'Proporcionado por OpenCode',
     'settings.mcp.page.back': 'Todos los servidores',
   },
   fr: {
@@ -76,6 +81,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Connexion',
     'settings.mcp.grid.status.blockedByPolicy': 'Bloqué par une règle',
     'settings.mcp.grid.scope.project': 'Projet',
+    'settings.mcp.grid.runtimeProvided': 'Fourni par OpenCode',
     'settings.mcp.page.back': 'Tous les serveurs',
   },
   ja: {
@@ -89,6 +95,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': '接続中',
     'settings.mcp.grid.status.blockedByPolicy': 'ポリシーでブロック',
     'settings.mcp.grid.scope.project': 'プロジェクト',
+    'settings.mcp.grid.runtimeProvided': 'OpenCode が提供',
     'settings.mcp.page.back': 'すべてのサーバー',
   },
   ko: {
@@ -102,6 +109,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': '연결 중',
     'settings.mcp.grid.status.blockedByPolicy': '정책으로 차단됨',
     'settings.mcp.grid.scope.project': '프로젝트',
+    'settings.mcp.grid.runtimeProvided': 'OpenCode에서 제공',
     'settings.mcp.page.back': '모든 서버',
   },
   pl: {
@@ -115,6 +123,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Łączenie',
     'settings.mcp.grid.status.blockedByPolicy': 'Zablokowane przez zasadę',
     'settings.mcp.grid.scope.project': 'Projekt',
+    'settings.mcp.grid.runtimeProvided': 'Zapewniane przez OpenCode',
     'settings.mcp.page.back': 'Wszystkie serwery',
   },
   'pt-BR': {
@@ -128,6 +137,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Conectando',
     'settings.mcp.grid.status.blockedByPolicy': 'Bloqueado por política',
     'settings.mcp.grid.scope.project': 'Projeto',
+    'settings.mcp.grid.runtimeProvided': 'Fornecido pelo OpenCode',
     'settings.mcp.page.back': 'Todos os servidores',
   },
   tr: {
@@ -141,6 +151,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'Bağlanıyor',
     'settings.mcp.grid.status.blockedByPolicy': 'İlkeyle engellendi',
     'settings.mcp.grid.scope.project': 'Proje',
+    'settings.mcp.grid.runtimeProvided': 'OpenCode tarafından sağlanır',
     'settings.mcp.page.back': 'Tüm sunucular',
   },
   'zh-CN': {
@@ -154,6 +165,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': '连接中',
     'settings.mcp.grid.status.blockedByPolicy': '已被策略阻止',
     'settings.mcp.grid.scope.project': '项目',
+    'settings.mcp.grid.runtimeProvided': '由 OpenCode 提供',
     'settings.mcp.page.back': '所有服务器',
   },
   'zh-TW': {
@@ -167,6 +179,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': '連線中',
     'settings.mcp.grid.status.blockedByPolicy': '已被原則封鎖',
     'settings.mcp.grid.scope.project': '專案',
+    'settings.mcp.grid.runtimeProvided': '由 OpenCode 提供',
     'settings.mcp.page.back': '所有伺服器',
   },
   ar: {
@@ -180,6 +193,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'جارٍ الاتصال',
     'settings.mcp.grid.status.blockedByPolicy': 'محظور بموجب السياسة',
     'settings.mcp.grid.scope.project': 'المشروع',
+    'settings.mcp.grid.runtimeProvided': 'يوفّره OpenCode',
     'settings.mcp.page.back': 'كل الخوادم',
   },
   he: {
@@ -193,6 +207,7 @@ export const mcpGridI18n = {
     'settings.mcp.grid.status.pending': 'מתחבר',
     'settings.mcp.grid.status.blockedByPolicy': 'חסום על ידי מדיניות',
     'settings.mcp.grid.scope.project': 'פרויקט',
+    'settings.mcp.grid.runtimeProvided': 'מסופק על ידי OpenCode',
     'settings.mcp.page.back': 'כל השרתים',
   },
 } as const;
