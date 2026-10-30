@@ -30,6 +30,7 @@ const DIRECTORY = '/references-fixture';
 const location = { directory: DIRECTORY, project: { id: 'project', directory: DIRECTORY, canonical: DIRECTORY } };
 const responseFor = (input: RequestInfo | URL) => {
   const path = new URL(input instanceof Request ? input.url : input.toString(), 'http://localhost/').pathname;
+  if (path === '/api/config/settings') return Response.json({ projects: [{ id: 'project', path: DIRECTORY }] });
   if (path.endsWith('/event')) return new Response(new ReadableStream(), { headers: { 'content-type': 'text/event-stream' } });
   if (path.endsWith('/location')) return Response.json(location);
   if (path.endsWith('/session/active')) return Response.json({ data: {} });
@@ -87,6 +88,7 @@ const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
 const { ChatInput } = await import('../ChatInput');
 const { SyncProvider } = await import('@/sync/sync-context');
 const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { useSessionUIStore, DraftSendError } = await import('@/sync/session-ui-store');
 const { useConfigStore } = await import('@/stores/useConfigStore');
 const { EditorView } = await import('@codemirror/view');
@@ -126,6 +128,8 @@ const selectSession = (sessionId: string) => useSessionUIStore.setState({ curren
 const withComposer = async (run: (container: HTMLElement) => Promise<void>, pinnedSessionId?: string) => {
   const originalSend = useSessionUIStore.getState().sendMessage;
   useDirectoryStore.setState({ currentDirectory: DIRECTORY });
+  // Admit the fixture folder before mount; the settings answer keeps it registered.
+  useProjectsStore.setState({ projects: [{ id: 'project', path: DIRECTORY }] });
   useSessionUIStore.setState({ newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, open: false } });
   selectSession('session-a');
   useBtwStore.setState({ byParent: {} });

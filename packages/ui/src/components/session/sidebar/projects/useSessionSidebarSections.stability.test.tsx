@@ -32,6 +32,7 @@ const projectA = { id: 'a', path: '/a', normalizedPath: '/a' };
 const projectB = { id: 'b', path: '/b', normalizedPath: '/b' };
 const projectC = { id: 'c', path: '/c', normalizedPath: '/c' };
 const projects = [projectA, projectB, projectC];
+const knownDirectories = new Set(projects.map((project) => project.normalizedPath));
 const worktreesByProject = new Map([
   ['/a', [worktree('/a', 'one'), worktree('/a', 'two')]],
   ['/b', [worktree('/b', 'one'), worktree('/b', 'two')]],
@@ -65,7 +66,7 @@ const Harness = ({ inputs, capture }: { inputs: Inputs; capture: (sections: Sect
   const projection = buildSidebarSessionProjection({
     globalActiveSessions: allSessions,
     liveSessions: [],
-    knownDirectories: new Set(),
+    knownDirectories,
     isVSCode: false,
     pinnedSessionIds: stableMaps.pinnedSessionIds,
     sessionOrderRanks: inputs.ranks,

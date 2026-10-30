@@ -6,8 +6,10 @@ import type { Session } from '@/lib/opencode/model';
 import { openSession } from '@/lib/router/openSessionFromRoute';
 import { navigateFromNotification } from '@/lib/router/notificationNavigation';
 import { applyVSCodeSessionNavigation, vscodeSessionNavigationSchema } from '@/apps/vscodeSessionNavigation';
+import { opencodeClient } from '@/lib/opencode/client';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useBtwStore } from '@/stores/useBtwStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useRouter } from './useRouter';
@@ -39,6 +41,7 @@ beforeEach(() => {
     originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, value });
   }
+  useProjectsStore.setState({ projects: [{ id: 'project', path: '/project' }] });
   useSessionUIStore.getState().setCurrentSession('previous', '/project');
   useUIStore.setState({ isSettingsDialogOpen: false });
   useGlobalSessionsStore.setState({
@@ -155,6 +158,8 @@ for (const source of ['initial route', 'PWA notification']) {
     let resolveLoading!: (value: typeof snapshot) => void;
     const loading = new Promise<typeof snapshot>((resolve) => { resolveLoading = resolve; });
     const load = spyOn(useGlobalSessionsStore.getState(), 'loadSessions').mockImplementation(() => loading);
+    // Before the list loads, opening an unknown link reads its folder from the server.
+    const detail = spyOn(opencodeClient, 'getSession').mockResolvedValue(fork);
     useGlobalSessionsStore.setState({ activeSessions: [], entityById: new Map(), hasLoaded: false, status: 'loading' });
     try {
       await act(async () => {
@@ -178,6 +183,7 @@ for (const source of ['initial route', 'PWA notification']) {
     } finally {
       resolveLoading(snapshot);
       load.mockRestore();
+      detail.mockRestore();
     }
   });
 }
