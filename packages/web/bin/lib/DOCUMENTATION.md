@@ -107,6 +107,10 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-control.js`
   - Sends one typed action request to the authenticated OpenChamber control endpoint and maps HTTP failures to CLI exit behavior.
   - Must not reproduce session, scheduled-task, project-resolution, or wait orchestration.
+  - Every session create reserves the provisioning HTTP window, including a retry in an existing checkout, because it can still await checkout setup before selection. An explicit HTTP timeout remains authoritative.
+
+- `cli-shell.js`
+  - Quotes replay arguments for PowerShell on Windows and POSIX shells elsewhere. Session recovery and tunnel replay commands share this formatter.
 
 - `cli-api-target.js`
   - Resolves the target OpenChamber runtime for control-plane commands, preferring desktop unless a port is explicit.

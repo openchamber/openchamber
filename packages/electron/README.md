@@ -118,6 +118,12 @@ metadata together through Electron's `ClipboardItem` API. `electron-context-menu
 handler preserves menu order, visibility and live translations. Copy failures are
 logged without clipboard data.
 
+Linux exposes a second clipboard, PRIMARY, that the web Clipboard API cannot
+reach. The local-page preload bridge publishes `clipboard.selection` only on
+Linux, with `readText` and `writeText` for terminal selection and middle-click
+paste. Both commands stay out of `COMMANDS_SAFE_FOR_REMOTE`; remote pages never
+receive the bridge.
+
 `scripts/smoke-context-menu.mjs`, run with Electron on an isolated display and
 clipboard, checks the real dependency's menu identity, translations and native
 clipboard writes. On Linux, run it inside a disposable container with its own Xvfb

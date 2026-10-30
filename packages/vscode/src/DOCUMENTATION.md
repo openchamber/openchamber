@@ -147,6 +147,10 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - Google quota refresh uses `packages/web/server/lib/quota/providers/google/oauth.js` for OAuth client selection and safe refresh errors. Gemini credentials keep their `gemini/` quota names and daily windows after an Antigravity client fallback. Standalone Antigravity quota uses its own client without fallback, and takes its request headers from `packages/web/server/lib/quota/providers/antigravity/client.js`, the module the web provider uses, so both runtimes send the same client identity.
   - OpenCode Zen quota refresh uses the shared `packages/web/server/lib/quota/providers/opencode-zen.js` reader for Console requests, parsing and window construction. Its contract is in `packages/web/server/lib/quota/DOCUMENTATION.md`, section "OpenCode Zen credential and quota semantics". Each service-account budget stays in its own named window; workspace counters remain separate, and model reads include every page. Windows carry structured `value` data for shared UI localization without another Console request. The extension owns credential discovery and result envelopes. OpenCode Go meters remain on the separate `opencode-go` provider.
 
+### Why Kimi deadlines use an AbortController
+
+Kimi quota requests combine the 25-second refresh deadline and a 5-second request deadline through an `AbortController`. VS Code 1.85 runs Node 18.15, which lacks `AbortSignal.any`; both deadlines must still abort response body reads. Listeners detach when either deadline expires.
+
 - OpenCode compatibility recovery
   - `api:opencode/compatibility` is available even when managed startup rejects v1 or a 2.x older than the supported minimum. The UI checks it before configuration and session bootstrap.
   - `api:opencode/install-v2` accepts the same managed CLI versions for which compatibility offers installation. It runs the shared `v2-install.js` installer on macOS, Linux and Windows through the manager queue. Concurrent webviews share the operation. The extension selects the verified binary in the effective VS Code configuration scope, restarts, and requires a connected, supported v2 status before reporting success. Stop invalidates pending restart work.
@@ -183,6 +187,31 @@ Provider authentication, capabilities, issues, change requests, contributor dest
   - Webview side: `webview/inlineCommentTarget.ts` decides where a delivered comment is filed. A session panel stamps its session on every comment it delivers and the webview waits until it shows that session; the sidebar files on its current session or open draft. Filing on the first snapshot with a directory put the draft under `draft` while a fresh panel was still loading its session list, a key that composer never reads. `webview/inlineCommentRemovals.ts` remembers removals that arrive before a delayed delivery lands, so a comment dropped while its panel was still booting does not appear as a chip later. The extension is not activated on startup for this; the right-click command activates it, and the gutter `+` appears from then on.
 
 ## Shared webview message ordering
+
+### Chats in empty windows
+
+With no workspace folder, sidebar and editor drafts use the shared managed Chats
+creation flow. The filesystem home bridge names the host's
+`~/.config/openchamber/chats` root and its canonical path when it exists.
+Reading home does not create directories. Empty-window directory bootstrap
+creates the shared root before publishing it as ready for OpenCode reads; a
+failed root allocation leaves bootstrap retryable. The draft owner allocates
+a separate directory per Chat, and a failed draft allocation blocks only that draft.
+The workspace folder list stays empty; the Chats root is never a workspace project.
+Editor tabs resolve the requested session through the global index before selecting
+its directory. The sidebar's archived toggle exposes a Chats archive bucket with
+top-level sessions; restoring one uses the shared subtree restore action.
+
+The filesystem bridge runs on the extension host. An external OpenCode on another
+host does not receive these directories, so projectless Chats require OpenCode
+to share the extension host's filesystem. No remote directory transport is provided.
+
+### Why Chats is limited to empty windows
+
+The approved no-folder flow needs a session directory without asking the user to
+open a project. Windows with workspace folders keep their project-only behavior.
+Shared draft and visibility rules read the host's workspace list, so a previous
+session's directory cannot select the wrong mode.
 
 The editor-panel host owns a singleton Settings tab separately from its session panels. `openchamber.showSettings` reveals that tab, including when the sidebar has never resolved or no folder is open. Settings receives theme, connection, settings-save and permission-policy broadcasts through the same panel bridge, but is excluded from chat attention, attachment routing and active-editor selection broadcasts. Closing or reloading its webview aborts only its own SSE streams.
 

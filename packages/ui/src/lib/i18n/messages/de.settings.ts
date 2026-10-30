@@ -93,6 +93,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': 'Nicht verfügbar',
   'settings.view.unavailable.description': 'Diese Einstellungsseite ist in dieser Laufzeitumgebung nicht verfügbar.',
   'settings.view.badge.beta': 'Beta',
+  'settings.view.badge.new': 'Neu',
   'settings.view.actions.backToSettings': 'Zurück zu Einstellungen',
   'settings.view.actions.closeSettings': 'Einstellungen schließen',
   'settings.view.actions.closeSettingsWithShortcut': 'Einstellungen schließen ({shortcut}+,)',

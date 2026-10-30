@@ -11,6 +11,7 @@
 - `registry-snapshot.ts` — renders the plain-JSON snapshot for the two consumers that cannot import the UI's TypeScript: the OpenChamber server (`packages/web/server/lib/opencode/settings-registry.json`) and the VS Code extension host (`packages/vscode/src/settings-registry.json`). Regenerate with `bun run settings-registry:generate`; `registry.test.ts` fails when a checked-in copy is stale.
 - `metadata.ts`, `search.ts` — Settings page metadata and the search index (unchanged by the registry; see `.agents/skills/settings-ui-patterns`). Entries for what the connected server serves are generated, not listed: each source-control provider adds `integrations.source-control.<id>` (titled by its literal label) and `.connect`, each tracker with words of its own adds `integrations.<id>` and, by capability, `.add-workspace` and `.mapping`. `SettingsView` passes both registries' descriptors to `buildSettingsSearchResults`, so a provider the server adds is searchable with no entry here. A title is a key with optional params, or a literal for a product name.
 - `vscodeNavigation.ts` defines and parses navigation intent crossing the extension-host bridge. It carries a page, optional item and Settings directory, plus provider-connect and new-snippet entry intent. It carries no saved settings, credentials or conversation content. `apps/vscodeSettingsNavigation.ts` connects chat-side Settings requests to the native tab and applies delivered intent there; settings persistence keeps its existing owner.
+- `newSettings.ts` owns the "new" badge and its best-effort browser-storage baseline (`openchamber.settings.newBadgeSeen.v1`). It compares static search anchors with that baseline once per load, then filters pending anchors by current device availability. `getNewSettingPages` returns pending pages and `acknowledgeNewSettingPage` acknowledges available anchors on one page. `isNewSetting` retains the load-time answer for row badges; rendered rows opt in through `labelAccessory`.
 
 ## Invariants
 
@@ -31,5 +32,16 @@
 2. Run `bun run settings-registry:generate` and commit both JSON snapshots.
 3. If the server must validate the value beyond the registry gate, add its branch to `sanitizeSettingsUpdate` in `packages/web/server/lib/opencode/settings-helpers.js`; the drift test in `settings-helpers.test.js` needs a valid sample value for the new key.
 4. Add the Settings control and search entry per `.agents/skills/settings-ui-patterns`.
+5. Optionally mark a rendered control's row with `labelAccessory={isNewSetting('<anchorId>') ? <SettingsBadge>{t('settings.view.badge.new')}</SettingsBadge> : undefined}`. Page badges are automatic and count only available controls. Opening a visible page acknowledges its available anchors; hidden anchors remain pending. Row badges stay for the rest of the load. On mobile the title badge appears only on the navigation stage and counts visible pages. A fresh install seeds every build anchor and starts without badges.
 
-`DesktopSettings`, `SettingsPayload`, the client sanitizer, the mirror, the apply step and the auto-save all follow from step 1; there is no second list to update.
+`DesktopSettings`, `SettingsPayload`, the client sanitizer, the mirror, the apply step and the auto-save all follow from step 1; no second list has to stay in step for persistence.
+
+## Decisions
+
+### Why badges use item-level availability
+
+Badges and acknowledgment use the search registry's page and item availability predicates with the current device context. Hidden controls remain pending until opened on a device that can show them. Filtering only whole pages would announce and acknowledge controls the user cannot see. The initial baseline still seeds every build anchor so a fresh install starts without announcements.
+
+### Why the first baseline comes from the build and not from a list of announcements
+
+A client with no baseline seeds every anchor the build has, so a fresh install sees nothing new. The alternative, listing the anchors this release announces, cannot tell a fresh install from an upgrade that predates the feature, and it lights up a new install that has nothing to compare against. The cost is that controls shipped in the same release as the badge are never announced. The seed runs when the client first renders Settings, which keeps the search table out of the startup path; a client whose first render comes after an update therefore seeds past that update's anchors too.

@@ -18,7 +18,9 @@ mock.module("@/lib/runtime-switch", () => ({
     return () => captured === runtimeKey
   },
 }))
+const runtimeFetchModule = await import("@/lib/runtime-fetch");
 mock.module("@/lib/runtime-fetch", () => ({
+  ...runtimeFetchModule,
   runtimeFetch: async (input: string | URL | Request) => {
     paths.push(new URL(input instanceof Request ? input.url : input, "http://runtime.test").pathname)
     const response = responses.shift()

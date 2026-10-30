@@ -210,6 +210,26 @@ other.
   worktree root. Send/fork fallback uses that same owner. Configured model IDs
   and effort preferences survive missing catalog entries rather than silently
   dispatching with a different model.
+- A create with a prompt resolves its selection in the target directory before
+  creating an OpenCode session. It reads discovery once with a 10-second request
+  deadline. Unavailable agent/config reads, an empty agent list, or a configured
+  agent absent from the list produce 503; no fallback model is dispatched from
+  those snapshots. A missing saved default agent is named in the error with a
+  hint to update the default or pass an explicit agent; it never silently picks
+  another agent. An explicit agent that needs only a model does not require the
+  saved default agent to exist. Model precedence stays unchanged.
+  Explicit model/agent pairs keep their existing validation,
+  and send/fork reuse the session selection before requesting defaults.
+- Worktree-dependent operations await the tracked bootstrap promises, including
+  setup, with a 60-second deadline, then check the final status once. Git-ready
+  alone is insufficient. Creating in an existing checkout subdirectory checks
+  bootstrap at the checkout root while retaining the session's requested folder.
+  If a create prerequisite fails after making a worktree,
+  the error carries `partialAction: worktree-created` and `directory`, with no
+  session ID. The caller can retry that directory without a `worktree` parameter.
+  The CLI prints the retained directory and a retry command preserving the
+  prompt and selection options without creating another worktree.
+  An empty-session create without a prompt keeps its existing selection behavior.
 - Usage errors name the missing or conflicting input so CLI and agent-tool
   callers can correct an invalid request without an upfront usage manual.
 - Explicit `projectId` or `directory` scope takes precedence over the managed
@@ -312,6 +332,13 @@ other.
   forwards the action like the rest.
 
 ## Decisions
+
+### Why selection is checked before creating a session
+
+The target directory's agent snapshot determines its model bindings. Missing
+discovery cannot establish the default choice. Checking it once before creation
+lets the caller retry a known directory without polling, sending a prompt with
+an unintended model, or accumulating empty sessions.
 
 ### Why a dispatched session links back from its prompt and does not nest in the sidebar
 

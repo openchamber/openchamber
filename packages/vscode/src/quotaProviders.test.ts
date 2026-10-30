@@ -54,7 +54,7 @@ const baseCredentialList = (): CredentialEntry[] => [
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
 
-import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota, listConfiguredQuotaProviders } from './quotaProviders';
 
 type MockResponseInit = { ok?: boolean; status?: number };
 
@@ -2674,6 +2674,164 @@ describe('Charm Hyper quota provider (VS Code parity)', () => {
 });
 
 describe('Kimi for Coding credential lookup (VS Code parity)', () => {
+  const twoKeys = () => ({ 'kimi-for-coding': { key: 'first' }, 'kimi-code-plan-global': { key: 'second' } });
+  const originalAny = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+
+  // VS Code 1.85 runs Node 18.15, which has timeout but no AbortSignal.any.
+  beforeEach(() => {
+    Object.defineProperty(AbortSignal, 'any', { configurable: true, value: undefined });
+  });
+
+  afterEach(() => {
+    if (originalAny) Object.defineProperty(AbortSignal, 'any', originalAny);
+    else Reflect.deleteProperty(AbortSignal, 'any');
+  });
+
+  for (const status of [401, 403]) {
+    test(`tries the next credential after HTTP ${status} and failed balance`, async () => {
+      const calls: { url: string; authorization: string | null }[] = [];
+      const result = await fetchKimiQuota({
+        readAuth: twoKeys,
+        fetchImpl: async (url, init) => {
+          const authorization = new Headers(init.headers).get('Authorization');
+          calls.push({ url, authorization });
+          return authorization === 'Bearer first'
+            ? new Response(null, { status })
+            : Response.json({ usage: { limit: 100, used: 25 } });
+        },
+      });
+      assert.equal(result.usage?.windows.weekly?.usedPercent, 25);
+      assert.deepEqual(calls, [
+        { url: 'https://api.kimi.com/coding/v1/usages', authorization: 'Bearer first' },
+        { url: 'https://api.moonshot.ai/v1/users/me/balance', authorization: 'Bearer first' },
+        { url: 'https://api.kimi.ai/coding/v1/usages', authorization: 'Bearer second' },
+      ]);
+    });
+  }
+
+  test('reports the preferred error after every key is rejected', async () => {
+    const result = await fetchKimiQuota({
+      readAuth: twoKeys,
+      fetchImpl: async (_url, init) => new Response(null, {
+        status: new Headers(init.headers).get('Authorization') === 'Bearer first' ? 401 : 403,
+      }),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.error, 'API error: 401');
+    assert.equal(result.usage, null);
+  });
+
+  test('deduplicates keys at the same endpoint while preserving regional candidates', async () => {
+    const urls: string[] = [];
+    const result = await fetchKimiQuota({
+      readAuth: () => ({ 'kimi-code-plan-cn': { key: 'shared' }, kimi: { key: 'shared' }, 'kimi-code-plan-global': { key: 'shared' } }),
+      fetchImpl: async (url) => {
+        urls.push(url);
+        return url === 'https://api.kimi.ai/coding/v1/usages'
+          ? Response.json({ usages: { limit_5h: { used_ratio: 0.25 } } })
+          : new Response(null, { status: 401 });
+      },
+    });
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 25);
+    assert.deepEqual(urls, ['https://api.kimi.com/coding/v1/usages', 'https://api.moonshot.ai/v1/users/me/balance', 'https://api.kimi.ai/coding/v1/usages']);
+  });
+
+  test('stays configured when only a later alias holds a usable key', async () => {
+    configureOpenCodeCredentials({ list: async () => [key('kimi-code-plan-global')] });
+    try {
+      assert.ok((await listConfiguredQuotaProviders()).includes('kimi-for-coding'));
+    } finally {
+      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
+    }
+  });
+
+  for (const status of [429, 500]) {
+    test(`does not switch accounts after HTTP ${status}`, async () => {
+      let requests = 0;
+      const result = await fetchKimiQuota({
+        readAuth: twoKeys,
+        fetchImpl: async () => {
+          requests += 1;
+          return requests === 1 ? new Response(null, { status }) : Response.json({ usage: { limit: 100, used: 25 } });
+        },
+      });
+      assert.equal(requests, 1);
+      assert.equal(result.error, `API error: ${status}`);
+      assert.equal(result.usage, null);
+    });
+  }
+
+  for (const failure of ['transport', 'json']) {
+    test(`does not switch accounts after a ${failure} failure`, async () => {
+      let requests = 0;
+      const result = await fetchKimiQuota({
+        readAuth: twoKeys,
+        fetchImpl: async () => {
+          requests += 1;
+          if (failure === 'transport') throw new Error('Connection failed');
+          return new Response('{');
+        },
+      });
+      assert.equal(requests, 1);
+      assert.equal(result.ok, false);
+      assert.equal(result.usage, null);
+    });
+  }
+
+  test('returns a successful Moonshot balance before trying another credential', async () => {
+    const keys: (string | null)[] = [];
+    const result = await fetchKimiQuota({
+      readAuth: twoKeys,
+      fetchImpl: async (url, init) => {
+        keys.push(new Headers(init.headers).get('Authorization'));
+        return url === 'https://api.moonshot.ai/v1/users/me/balance'
+          ? Response.json({ data: { available_balance: 5 } })
+          : new Response(null, { status: 403 });
+      },
+    });
+    assert.equal(result.usage?.windows.credits_balance?.valueLabel, '$5.00');
+    assert.deepEqual(keys, ['Bearer first', 'Bearer first']);
+  });
+
+  for (const expired of ['probe', 'refresh', 'usage']) {
+    test(`honors the ${expired} deadline during body reads`, async () => {
+      const deadlines: { ms: number; controller: AbortController }[] = [];
+      const originalTimeout = AbortSignal.timeout;
+      AbortSignal.timeout = (ms) => {
+        const controller = new AbortController();
+        deadlines.push({ ms, controller });
+        return controller.signal;
+      };
+      try {
+        const result = await fetchKimiQuota({
+          readAuth: twoKeys,
+          fetchImpl: async (url, init) => {
+            if (expired === 'usage' || url === 'https://api.moonshot.ai/v1/users/me/balance') {
+              return new Response(new ReadableStream({ start(controller) {
+                init.signal!.addEventListener('abort', () => controller.error(init.signal!.reason), { once: true });
+                deadlines[expired === 'refresh' ? 0 : expired === 'usage' ? 1 : 2].controller.abort(new DOMException('Timed out', 'TimeoutError'));
+              } }));
+            }
+            return new Headers(init.headers).get('Authorization') === 'Bearer first'
+              ? new Response(null, { status: 401 })
+              : Response.json({ usage: { limit: 100, used: 25 } });
+          },
+        });
+        if (expired === 'probe') {
+          assert.equal(result.usage?.windows.weekly?.usedPercent, 25);
+          assert.deepEqual(deadlines.map(({ ms }) => ms), [25_000, 5_000, 5_000, 5_000]);
+        } else {
+          assert.equal(result.ok, false);
+          assert.equal(result.usage, null);
+          assert.deepEqual(deadlines.map(({ ms }) => ms), expired === 'usage' ? [25_000, 5_000] : [25_000, 5_000, 5_000]);
+        }
+      } finally {
+        AbortSignal.timeout = originalTimeout;
+      }
+    });
+  }
+
   const sentKey = async (auth: Record<string, { type?: string; key: string; token?: string }>) => {
     let authorization: string | undefined;
     const result = await fetchKimiQuota({

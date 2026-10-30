@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
 import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useI18n } from '@/lib/i18n';
@@ -178,13 +179,17 @@ export function NewWorktreeBranchPicker({
         className="flex max-h-[min(var(--available-height),24rem)] w-[var(--anchor-width)] min-w-[16rem] flex-col overflow-hidden p-0"
         ref={desktopContentRef}
       >
-        <Command shouldFilter={false}>
+        <Command
+          shouldFilter={false}
+          // Let cmdk handle navigation before stopping the menu's typeahead.
+          onKeyDown={(event) => { if (!shouldDismissDropdown(event)) event.stopPropagation(); }}
+        >
           <CommandInput
+            // Chromium's focus scan skips candidates under the display: contents portal.
+            autoFocus
             placeholder={t('session.newWorktree.searchBranches')}
             value={query}
             onValueChange={setQuery}
-            // Typing must reach the search field, not the menu's typeahead.
-            onKeyDown={(event) => event.stopPropagation()}
           />
           <CommandList disableHorizontal>
             {status ? (

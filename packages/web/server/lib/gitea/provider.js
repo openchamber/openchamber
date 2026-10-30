@@ -132,11 +132,19 @@ export function createGiteaFamilyProvider({
   const { label } = descriptor;
   const verify = (origin, token) => verifyGiteaToken({ origin, token, fetch: fetchImpl, timeoutMs, label });
   const probe = async (origin, token = null) => {
-    const { version, supported } = await probeGiteaVersion({ origin, token, fetch: fetchImpl, timeoutMs, label });
-    return supported ? { version, supported } : { version, supported, message: `${label} ${version} is older than OpenChamber supports (${edition.minimum})` };
+    const { version, supported, edition: probed } = await probeGiteaVersion({ origin, token, fetch: fetchImpl, timeoutMs, label });
+    return supported
+      ? { version, supported, edition: probed }
+      : { version, supported, edition: probed, message: `${label} ${version} is older than OpenChamber supports (${edition.minimum})` };
   };
-  /** An instance belongs to the edition its `/version` names, so it is connected on one card only. */
-  const ownerElsewhere = ({ version }) => (edition.serves(version) ? null : otherEditions(edition).find((other) => other.serves(version)) ?? null);
+  /**
+   * An instance belongs to the edition its own API namespace names, else the
+   * one its `/version` names, so it is connected on one card only.
+   */
+  const servesEdition = (target, { version, edition: probed }) => (probed ? probed === target.id : target.serves(version));
+  const ownerElsewhere = (probeResult) => (servesEdition(edition, probeResult)
+    ? null
+    : otherEditions(edition).find((other) => servesEdition(other, probeResult)) ?? null);
   const identityFor = (origin, accountId) => ({ provider: descriptor.id, instance: origin, accountId });
   const accounts = createPatAccountAuth({ descriptor, store, events, verify, probe, classifyFailure: classifyGiteaFailure, ownerElsewhere });
 

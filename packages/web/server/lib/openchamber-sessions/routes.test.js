@@ -124,6 +124,7 @@ vi.mock('@opencode/client', () => ({
 vi.mock('../git/index.js', () => ({
   createWorktree: (...args) => globalThis.__openchamberCreateWorktreeMock(...args),
   getWorktreeBootstrapStatus: (...args) => globalThis.__openchamberGetWorktreeBootstrapStatusMock(...args),
+  waitForActiveWorktreeBootstrap: vi.fn(async () => undefined),
   resolvePrimaryWorktreeRoot: (...args) => globalThis.__openchamberResolvePrimaryWorktreeRootMock(...args),
   // Only moving a session into a worktree reaches these; the route tests
   // inject their own through the service dependencies.
@@ -1383,15 +1384,14 @@ describe('openchamber session routes', () => {
   });
 
   it('waits for the worktree bootstrap to complete before creating the session', async () => {
-    const statuses = [
-      { status: 'pending', phase: 'directory-created', error: null, updatedAt: 1 },
-      { status: 'pending', phase: 'git-ready', error: null, updatedAt: 2 },
-      { status: 'ready', phase: 'setup-ready', error: null, updatedAt: 3 },
-    ];
-    getWorktreeBootstrapStatusMock.mockImplementation(async () => statuses.shift() || statuses[statuses.length - 1]);
-
-    const { app } = createApp();
-    const response = await request(app)
+    const started = Promise.withResolvers();
+    const bootstrap = Promise.withResolvers();
+    const waitForActiveWorktreeBootstrap = vi.fn(() => {
+      started.resolve();
+      return bootstrap.promise;
+    });
+    const { app } = createApp({ waitForActiveWorktreeBootstrap });
+    const pending = request(app)
       .post('/api/openchamber/sessions')
       .send({
         directory: '/repo/app',
@@ -1399,10 +1399,15 @@ describe('openchamber session routes', () => {
         prompt: 'Run this',
         model: 'openai/gpt-5.5',
       })
-      .expect(200);
+      .expect(200).then((response) => response);
+    await started.promise;
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+    expect(getWorktreeBootstrapStatusMock).not.toHaveBeenCalled();
+    bootstrap.resolve();
+    const response = await pending;
 
     expect(response.body.promptDispatched).toBe(true);
-    expect(getWorktreeBootstrapStatusMock).toHaveBeenCalled();
+    expect(getWorktreeBootstrapStatusMock).toHaveBeenCalledTimes(1);
     expect(getWorktreeBootstrapStatusMock.mock.invocationCallOrder[0])
       .toBeLessThan(sessionCreateMock.mock.invocationCallOrder[0]);
     expect(sessionCreateMock.mock.invocationCallOrder[0])
@@ -1426,7 +1431,10 @@ describe('openchamber session routes', () => {
         prompt: 'Run this',
         model: 'openai/gpt-5.5',
       })
-      .expect(500, { error: 'Worktree bootstrap failed: branch already exists' });
+      .expect(500, {
+        error: 'Worktree bootstrap failed: branch already exists',
+        partial: true, partialAction: 'worktree-created', directory: '/repo/worktrees/side-task',
+      });
 
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
@@ -1496,14 +1504,7 @@ describe('openchamber session routes', () => {
   });
 
   it('does not treat a missing bootstrap record as ready', async () => {
-    getWorktreeBootstrapStatusMock
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        status: 'failed',
-        phase: 'directory-created',
-        error: 'Bootstrap state is missing',
-        updatedAt: Date.now(),
-      });
+    getWorktreeBootstrapStatusMock.mockResolvedValueOnce(null);
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ id: 'ses_123' }) }));
     try {
@@ -1511,8 +1512,12 @@ describe('openchamber session routes', () => {
       await request(app)
         .post('/api/openchamber/sessions')
         .send({ directory: '/repo/app', worktree: { name: 'side-task' } })
-        .expect(500, { error: 'Worktree bootstrap failed: Bootstrap state is missing' });
+        .expect(503, {
+          error: 'Worktree bootstrap has not completed',
+          partial: true, partialAction: 'worktree-created', directory: '/repo/worktrees/side-task',
+        });
       expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(sessionCreateMock).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;
     }

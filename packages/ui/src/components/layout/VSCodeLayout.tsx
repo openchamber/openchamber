@@ -140,14 +140,17 @@ export const VSCodeLayout: React.FC = () => {
       return state.session.find((session) => session.id === currentSessionId)?.title || null;
     }, [currentSessionId]),
   );
-  const initialSessionExists = useDirectorySync(
+  const initialGlobalSessionDirectory = useGlobalSessionsStore((state) => {
+    const session = initialSessionId ? state.entityById.get(initialSessionId) : null;
+    return session ? resolveGlobalSessionDirectory(session) : null;
+  });
+  const initialLocalSessionDirectory = useDirectorySync(
     React.useCallback((state) => {
-      if (!initialSessionId) {
-        return false;
-      }
-      return state.session.some((session) => session.id === initialSessionId);
+      const session = state.session.find((session) => session.id === initialSessionId);
+      return session ? resolveGlobalSessionDirectory(session) : null;
     }, [initialSessionId]),
   );
+  const initialSessionDirectory = initialGlobalSessionDirectory ?? initialLocalSessionDirectory;
 
   const activeSessionTitle = currentSessionId
     ? activeSessionTitleValue || t('vscodeLayout.title.sessionFallback')
@@ -455,13 +458,13 @@ export const VSCodeLayout: React.FC = () => {
       return;
     }
 
-    if (!initialSessionExists) {
+    if (!initialSessionDirectory) {
       return;
     }
 
     hasAppliedInitialSession.current = true;
-    void useSessionUIStore.getState().setCurrentSession(initialSessionId);
-  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
+    void useSessionUIStore.getState().setCurrentSession(initialSessionId, initialSessionDirectory);
+  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionDirectory, initialSessionId, openNewSessionDraft, viewMode]);
 
   // Track container width for the expanded sessions/chat layout.
   React.useEffect(() => {
@@ -587,6 +590,7 @@ export const VSCodeLayout: React.FC = () => {
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
               title={chatTitle}
+              showArchiveToggle
               showMcp
               showContextUsage
               showRateLimits
@@ -652,6 +656,7 @@ interface VSCodeHeaderProps {
   showBack?: boolean;
   onBack?: () => void;
   onArchiveAll?: () => void;
+  showArchiveToggle?: boolean;
   onNewSession?: () => void;
   onSettings?: () => void;
   showMcp?: boolean;
@@ -661,7 +666,7 @@ interface VSCodeHeaderProps {
 }
 
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onArchiveAll, showArchiveToggle = Boolean(onArchiveAll), onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher }) => {
   const { t } = useI18n();
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
   const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
@@ -771,7 +776,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         <SessionsTabTitle title={title} />
       )}
       <div className="min-w-0 flex-1" />
-      {onArchiveAll && (
+      {showArchiveToggle && (
         <button
           type="button"
           onClick={toggleArchivedSessions}

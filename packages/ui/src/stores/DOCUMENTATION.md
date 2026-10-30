@@ -195,7 +195,8 @@ keeps the app unmounted, because the home resolution waits for the chats root
 too. Without a chats root the home stays the directory, still not ready, so a
 server that answered 401 before login is asked again after it; the home is
 the lasting answer only when the server cannot name the chats root after that,
-and in VS Code, which has no managed chats. The chats root comes from the
+and in VS Code windows with workspace folders. Empty VS Code windows resolve
+the Chats root through the extension host before selecting a directory. The chats root comes from the
 server's answer itself (`resolveChatsRootDirectory`): the cache behind
 `getChatsRoot` is keyed by the runtime key at request time, which can still
 change while the page starts.

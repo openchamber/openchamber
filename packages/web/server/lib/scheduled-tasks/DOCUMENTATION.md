@@ -154,6 +154,18 @@ policy. Only definitive before-send target or task 404 or 409 refusals are
 terminal, including removed or retargeted tasks and moved targets. Model or
 prompt send errors use the ordinary retry path.
 
+## Slash-command prompts
+
+Slash-command prompts share one parser with the session routes. After trimming
+the whole prompt, the first token after `/` names the command. Arguments retain
+interior spaces, tabs, blank lines, indentation and CRLF. Only spaces or tabs
+after the command token and at most one following line break are removed.
+
+### Why arguments are sliced from the prompt
+
+Slicing preserves instructions and formatting in later paragraphs. Splitting
+and rejoining tokens would discard line breaks and collapse argument spacing.
+
 ## New-session selection
 
 A task either pins them (`execution.providerID`, `modelID`, `variant`, `agent`)

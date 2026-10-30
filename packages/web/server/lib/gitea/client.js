@@ -2,7 +2,9 @@ import { isPlainObject, isString } from '../shared/guards.js';
 
 /**
  * Gitea's REST API v1 over fetch. The token goes in an `Authorization:
- * token <pat>` header, only ever to `<origin>/api/v1/...`:
+ * token <pat>` header, only ever to `<origin>/api/v1/...` (or the namespace
+ * asked for, `<origin>/api/<namespace>/v1/...`; Forgejo serves its own
+ * edition at `/api/forgejo/v1/`):
  * - redirects are never followed (`redirect: 'manual'`); a redirect answer
  *   is an error, so the header cannot be replayed to another address;
  * - every URL is built from the instance origin and checked against it;
@@ -62,7 +64,8 @@ const hasNextLink = (link) => isString(link) && /<[^>]+>\s*;\s*rel="?next"?/i.te
  * Reads answer the parsed JSON body (text for `text`, null for 204). `page`
  * reads one page with `hasMore` from Gitea's `Link` header, or from
  * `x-total-count` when there is none. `label` names the server in the errors
- * a person reads (Gitea, Forgejo).
+ * a person reads (Gitea, Forgejo); `namespace` names an API namespace beside
+ * `v1` on the same origin, such as Forgejo's `forgejo`.
  */
 export function createGiteaClient({
   origin,
@@ -71,15 +74,20 @@ export function createGiteaClient({
   timeoutMs = DEFAULT_TIMEOUT_MS,
   delay = defaultDelay,
   label = 'Gitea',
+  namespace = null,
 }) {
+  if (namespace !== null && !/^[a-z][a-z0-9-]*$/.test(namespace)) {
+    throw new Error(`${label} client needs a plain API namespace`);
+  }
   const base = new URL(origin);
   if (base.origin !== origin) throw new Error(`${label} client needs a normalized instance origin`);
-  const apiRoot = `${origin}/api/v1/`;
+  const apiPath = `/api/${namespace === null ? '' : `${namespace}/`}v1/`;
+  const apiRoot = `${origin}${apiPath}`;
 
   const urlOf = (path, query) => {
     const relative = String(path).replace(/^\/+/, '');
     const url = new URL(relative, apiRoot);
-    if (url.origin !== base.origin || !url.pathname.startsWith('/api/v1/')) {
+    if (url.origin !== base.origin || !url.pathname.startsWith(apiPath)) {
       throw new GiteaRequestError('provider-error', `${label} request path leaves the instance API`);
     }
     for (const [key, value] of Object.entries(query ?? {})) {

@@ -100,6 +100,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': 'غير متاح',
   'settings.view.unavailable.description': 'صفحة الإعدادات هذه غير متاحة في بيئة التشغيل هذه.',
   'settings.view.badge.beta': 'تجريبي',
+  'settings.view.badge.new': 'جديد',
   'settings.view.actions.backToSettings': 'العودة إلى الإعدادات',
   'settings.view.actions.closeSettings': 'إغلاق الإعدادات',
   'settings.view.actions.closeSettingsWithShortcut': 'إغلاق الإعدادات ({shortcut}+,)',

@@ -50,6 +50,7 @@ import {
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
 import { dispatchPromptHistorySearch } from '@/components/chat/composer/state/promptHistorySearchRoute';
+import { isLinuxPlatform } from '@/lib/platform';
 import { canUseDigitShortcut, hasActiveBtwComposer, hasOpenDropdown, isEditableEventTarget, shouldStopDropdownImeEscape } from './keyboard-shortcut-dom';
 
 const dropdownTargetSelector = [
@@ -603,8 +604,10 @@ export const useKeyboardShortcuts = () => {
       if (!useUIStore.getState().isMobile && !hasOverlayOpen()) inputRedirect.redirectKey(event);
     };
     const handlePaste = (event: ClipboardEvent) => {
-      if (useUIStore.getState().isMobile || hasOverlayOpen() || hasActiveSelectionToolbar()) return;
-      inputRedirect.redirectPaste(event);
+      const allowComposerFallback = !useUIStore.getState().isMobile
+        && !hasOverlayOpen()
+        && !hasActiveSelectionToolbar();
+      inputRedirect.redirectPaste(event, allowComposerFallback);
     };
     let windowFocusFrame: number | null = null;
     const handleWindowFocus = () => {
@@ -620,6 +623,7 @@ export const useKeyboardShortcuts = () => {
       });
     };
     const handleKeyHoldDown = (event: KeyboardEvent) => {
+      inputRedirect.clearPendingMiddleClick();
       heldKeysRef.current.add(event.key.toLowerCase());
       heldKeysRef.current.add(resolveShortcutEventKey(event).toLowerCase());
     };
@@ -642,12 +646,28 @@ export const useKeyboardShortcuts = () => {
     window.addEventListener('keydown', handleAbortEscapeKeyDown);
     window.addEventListener('blur', handleBlur);
     window.addEventListener('pointerdown', inputRedirect.rememberColumn, true);
+    window.addEventListener('pointerup', inputRedirect.releaseMiddleClick, true);
+    window.addEventListener('pointercancel', inputRedirect.releaseMiddleClick, true);
     window.addEventListener('focusin', inputRedirect.rememberColumn, true);
+    // Pair a Linux middle click with its paste before a focused editor can
+    // consume it. Keyboard paste keeps the bubble listener below.
+    const captureMiddleClickPaste = isLinuxPlatform();
+    const handleMiddleClickPaste = (event: ClipboardEvent) => {
+      inputRedirect.captureMiddleClickPaste(event);
+    };
+    if (captureMiddleClickPaste) {
+      window.addEventListener('paste', handleMiddleClickPaste, true);
+    }
     window.addEventListener('paste', handlePaste);
     window.addEventListener('focus', handleWindowFocus);
     return () => {
       window.removeEventListener('pointerdown', inputRedirect.rememberColumn, true);
+      window.removeEventListener('pointerup', inputRedirect.releaseMiddleClick, true);
+      window.removeEventListener('pointercancel', inputRedirect.releaseMiddleClick, true);
       window.removeEventListener('focusin', inputRedirect.rememberColumn, true);
+      if (captureMiddleClickPaste) {
+        window.removeEventListener('paste', handleMiddleClickPaste, true);
+      }
       window.removeEventListener('paste', handlePaste);
       window.removeEventListener('focus', handleWindowFocus);
       if (windowFocusFrame !== null) cancelAnimationFrame(windowFocusFrame);

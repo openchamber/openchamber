@@ -20,6 +20,7 @@ import {
   commit,
   createWorktree,
   getWorktreeBootstrapStatus,
+  waitForActiveWorktreeBootstrap,
   getBranches,
   getRepositoryRemoteUrls,
   parseRemoteListing,
@@ -1899,10 +1900,7 @@ describe('createWorktree', () => {
         error: null,
       });
 
-      await expect.poll(
-        async () => (await getWorktreeBootstrapStatus(created.path)).phase,
-        { timeout: 5_000 },
-      ).toBe('setup-ready');
+      await waitForActiveWorktreeBootstrap(created.path);
       await expect(getWorktreeBootstrapStatus(created.path)).resolves.toMatchObject({
         status: 'ready',
         phase: 'setup-ready',

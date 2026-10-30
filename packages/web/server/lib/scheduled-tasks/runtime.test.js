@@ -122,6 +122,22 @@ describe('scheduled-tasks runtime helpers', () => {
   it('returns null when prompt is not a slash command', () => {
     expect(parseScheduledCommandPrompt('Summarize open issues')).toBeNull();
     expect(parseScheduledCommandPrompt('/')).toBeNull();
+    expect(parseScheduledCommandPrompt(undefined)).toBeNull();
+    expect(parseScheduledCommandPrompt('/ review')).toBeNull();
+    expect(parseScheduledCommandPrompt('/\nreview')).toBeNull();
+  });
+
+  it.each([
+    ['/review first line\n\n  indented text\nlast line', 'first line\n\n  indented text\nlast line'],
+    ['/review \t\n  first line\n\n    indented text', '  first line\n\n    indented text'],
+    ['/review\n\n  indented text', '\n  indented text'],
+    ['/review\r\n  first line\r\n\r\n    indented text', '  first line\r\n\r\n    indented text'],
+    ['/review first  second\tthird', 'first  second\tthird'],
+    ['  /review \t first second \t\r\n', 'first second'],
+    ['/review', ''],
+    ['/review \t\r\n', ''],
+  ])('preserves the argument body of %j after outer trimming', (prompt, argumentsText) => {
+    expect(parseScheduledCommandPrompt(prompt)).toEqual({ command: 'review', arguments: argumentsText });
   });
 
   it('expands command arguments into the goal objective', () => {
@@ -303,6 +319,51 @@ Run daily.
 describe('scheduled-tasks runtime prompt dispatch', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('sends the complete multiline command body to OpenCode', async () => {
+    const posts = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
+      if (pathname === '/api/session/ses_run/command') return new Response(null, { status: 204 });
+      const data = pathname === '/api/session' ? { id: 'ses_run' } : pathname === '/api/command' ? [{ name: 'review' }] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: '/review\r\nfirst  line\r\n\r\n  indented text', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    try {
+      await runtime.start();
+      const result = await runtime.runNow('proj', 'task-1');
+      expect(result.error).toBeUndefined();
+      expect(result).toMatchObject({ ok: true });
+      expect(posts.find((post) => post.pathname === '/api/session/ses_run/command')?.body).toEqual({
+        name: 'review',
+        text: 'first  line\r\n\r\n  indented text',
+      });
+      expect(posts.some((post) => post.pathname.endsWith('/prompt'))).toBe(false);
+    } finally {
+      runtime.stop();
+    }
   });
 
   it('parks the briefing with resume: false so execution starts on the task prompt', async () => {

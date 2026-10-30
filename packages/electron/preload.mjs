@@ -12,6 +12,10 @@ const readArgValue = (name) => {
 };
 
 const localOrigin = readArgValue('--openchamber-local-origin');
+// Desktop dev renders from Vite on its own origin while the local server keeps
+// another. Both main.mjs (isLocalSender) and this preload treat only the exact
+// HMR origin as local, and only in development.
+const devUiOrigin = readArgValue('--openchamber-dev-ui-origin');
 const apiBaseUrl = readArgValue('--openchamber-api-base-url');
 const clientToken = readArgValue('--openchamber-client-token');
 const runtimeHeadersRaw = readArgValue('--openchamber-runtime-headers');
@@ -30,7 +34,8 @@ const nativeFrame = readArgValue('--openchamber-native-frame') === '1';
 //    title bar offsets, etc.). Expose unconditionally.
 //  - __OPENCHAMBER_DESKTOP__ is the IPC channel to the main process. It is
 //    exposed broadly, but privileged commands are gated in main.mjs.
-//    Local-only globals below stay limited to packaged UI / exact localOrigin.
+//    Local-only globals below stay limited to packaged UI, the exact localOrigin,
+//    or the exact HMR UI origin in development (main.mjs trusts it too).
 // Everything driven by localOrigin (home dir, macOS hints) also stays
 // local-only since it leaks info about the Electron host machine.
 const currentOrigin = (() => {
@@ -42,7 +47,8 @@ const currentOrigin = (() => {
 })();
 const isLocalPage = currentOrigin !== 'null'
   && (currentOrigin === 'openchamber-ui://app'
-  || (localOrigin && currentOrigin === localOrigin));
+  || (localOrigin && currentOrigin === localOrigin)
+  || (devUiOrigin && currentOrigin === devUiOrigin));
 
 // Remote pages need __OPENCHAMBER_LOCAL_ORIGIN__ so the HostSwitcher knows
 // the URL of the Local entry (isDesktopLocalOriginActive() falls back to
@@ -220,6 +226,14 @@ const desktopBridge = {
 
 if (isLocalPage) {
   desktopBridge.pickThemeFile = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {});
+  // PRIMARY is not reachable from the web Clipboard API; expose it only to the
+  // local Linux page. Remote pages never receive this bridge.
+  if (process.platform === 'linux') {
+    desktopBridge.clipboard = {
+      readSelection: () => ipcRenderer.invoke('openchamber:invoke', 'desktop_clipboard_read_selection', {}),
+      writeSelection: (text) => ipcRenderer.invoke('openchamber:invoke', 'desktop_clipboard_write_selection', { text }),
+    };
+  }
   desktopBridge.relayDevTunnelListen = (handler) => {
     relayDevTunnelHandler = typeof handler === 'function' ? handler : null;
   };

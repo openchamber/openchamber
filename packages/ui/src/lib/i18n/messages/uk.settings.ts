@@ -100,6 +100,7 @@ export const settingsDict = {
   "settings.view.unavailable.title": "Недоступно",
   "settings.view.unavailable.description": "Ця сторінка налаштувань недоступна в цьому середовищі виконання.",
   "settings.view.badge.beta": "бета-версія",
+  "settings.view.badge.new": "нове",
 
   "settings.view.actions.backToSettings": "Назад до налаштувань",
   "settings.view.actions.closeSettings": "Закрити налаштування",

@@ -18,6 +18,7 @@ import {
   SETTINGS_NUMBER_INPUT_CLASS,
   SETTINGS_NUMBER_STEPPER_ROW_CLASS,
   SETTINGS_NUMBER_UNIT_CLASS,
+  SettingsBadge,
   SETTINGS_OPTION_STACK_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -36,6 +37,7 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { MobileWorkspaceTabsSettings } from './MobileWorkspaceTabsSettings';
+import { isNewSetting } from '@/lib/settings/newSettings';
 
 const MESSAGE_STREAM_TRANSPORT_OPTIONS: Array<{ id: 'auto' | 'ws' | 'sse'; labelKey: I18nKey; descriptionKey: I18nKey }> = [
   {
@@ -92,6 +94,9 @@ const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
         <SettingsFieldRow
           label={t('settings.openchamber.visual.field.fileEditorKeymap')}
           settingsItem="appearance.file-editor-keymap"
+          labelAccessory={isNewSetting('appearance.file-editor-keymap') ? (
+            <SettingsBadge>{t('settings.view.badge.new')}</SettingsBadge>
+          ) : undefined}
         >
           <SettingsChipGroup
             value={fileEditorKeymap}
@@ -151,6 +156,9 @@ const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
           ariaLabel={t('settings.openchamber.visual.field.autoSaveEnabledAria')}
           info={t('settings.openchamber.visual.field.autoSaveEnabledInfo')}
           settingsItem="appearance.auto-save-enabled"
+          labelAccessory={isNewSetting('appearance.auto-save-enabled') ? (
+            <SettingsBadge>{t('settings.view.badge.new')}</SettingsBadge>
+          ) : undefined}
         />
         {showTreeControls ? (
           <SettingsCheckboxRow

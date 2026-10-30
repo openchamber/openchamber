@@ -46,6 +46,7 @@ This module provides notification message preparation utilities for the web serv
   - `maybeSendPushForTrigger(payload)`
 - Owns:
   - completion/error/question/permission trigger routing (a page an agent shows that waits for the user's answer, `openchamber:page-waiting` from this server, notifies exactly like a form, with the page title as the ask); permission suppression consults the authoritative permission-auto-accept runtime
+  - an interrupted step marked `aborted` after Stop, steering, or question dismissal emits no external error notification. Terminal execution failures through `session.error` still notify, including exhausted auto-resume attempts with error type `aborted`. In-app `SessionErrorNotice` diagnostics and VS Code's separate notification path are unchanged.
   - session parent cache for subtask suppression
   - no ready notification on a `session.idle` while a subagent of that session is still running (a background-subagent pause; OpenCode runs the parent again with the result and its next idle announces). The check comes from `../opencode/session-activity.js`; when it cannot be made, the idle announces as before
   - an MCP elicitation form (session id `global`, owned by no session) notifies without a session: no session title lookup, and the deep link opens the app
@@ -133,6 +134,10 @@ The `settings` parameter for `prepareNotificationLastMessage` supports `maxLastM
 - Always applies `maxLastMessageLength` truncation to final result.
 
 ## Notes for contributors
+
+### Why interruption suppression is limited to steps
+
+OpenCode uses `aborted` for both interrupted steps and exhausted auto-resume attempts. Only the step event identifies the interruption this filter suppresses; filtering terminal `session.error` events by that type would hide a failure that requires the user's attention.
 
 ### Adding new notification helpers
 1. Add new helper functions to `packages/web/server/lib/notifications/message.js`.

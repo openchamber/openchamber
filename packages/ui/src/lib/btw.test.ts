@@ -6,6 +6,8 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 type ForkOptions = { before?: string; directory?: string | null };
+// Stands in for the 404 OpenCode answers when a fork's `before` names a record it does not hold.
+const forkBeforeNotFound = new Error('session.fork failed (404): message not found');
 let forkSessionImpl: (sessionId: string, options?: ForkOptions) => Promise<Session>;
 let getSessionMessagesImpl: (id: string, options?: { limit?: number }, directory?: string | null) => Promise<MessagePage>;
 let sendMessageImpl: (...args: unknown[]) => Promise<unknown>;
@@ -25,6 +27,7 @@ const parentSyncMessages: Message[] = [];
 const sessionMessageReads: string[] = [];
 
 mock.module('@/lib/opencode/client', () => ({
+  isOpencodeNotFound: (error: Error) => error === forkBeforeNotFound,
   opencodeClient: {
     forkSession: (sessionId: string, options?: ForkOptions) => forkSessionImpl(sessionId, options),
     getSessionMessages: (id: string, options?: { limit?: number }, directory?: string | null) => {
@@ -116,7 +119,7 @@ beforeEach(() => {
   childStoreSessions.length = 0;
   currentSessionSwitches.length = 0;
   metadataPatches.length = 0;
-  parentSyncMessages.length = 0;
+  parentSyncMessages.splice(0, parentSyncMessages.length, assistantMessage('msg-finished', 10), userMessage('msg-pending'));
   sessionMessageReads.length = 0;
   writtenModes.length = 0;
   useUIStore.setState({ permissionDefaultMode: 'auto' });
@@ -183,8 +186,7 @@ describe('startBtwSession', () => {
   test('forks, marks the fork, links the parent, and routes the question to the fork', async () => {
     forkSessionImpl = (sessionId, options) => {
       expect(sessionId).toBe('parent-1');
-      // No parent turns at all: an omitted `before` forks the whole transcript.
-      expect(options?.before).toBeUndefined();
+      expect(options?.before).toBe('msg-pending');
       return Promise.resolve(makeSession('fork-1', options?.directory ?? '/project'));
     };
     let sentText: unknown = null;
@@ -259,8 +261,46 @@ describe('startBtwSession', () => {
     expect(childStoreSessions.map((s) => s.id)).toEqual(['fork-1']);
   });
 
-  test('forks at the last completed assistant turn, not at the in-flight one', async () => {
-    parentSyncMessages.push(assistantMessage('msg-1', 10), userMessage('msg-2'), assistantMessage('msg-3'));
+  test('rejects an unbounded fork when the server has a prompt missing from the idle local history, then allows retry', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    const serverMessages = [...parentSyncMessages, userMessage('msg-3'), assistantMessage('msg-4')];
+    const boundaries: Array<string | undefined> = [];
+    let inherited: Message[] = [];
+    forkSessionImpl = (_sessionId, options) => {
+      boundaries.push(options?.before);
+      const cut = serverMessages.findIndex((message) => message.id === options?.before);
+      inherited = cut < 0 ? serverMessages : serverMessages.slice(0, cut);
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    await expect(startBtwSession(startInput)).rejects.toThrow('No safe transcript boundary to fork from');
+    expect(boundaries).toEqual([]);
+    expect(inherited).toEqual([]);
+    expect(metadataPatches).toEqual([]);
+    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+
+    parentSyncMessages.push(serverMessages[2], serverMessages[3]);
+    await startBtwSession(startInput);
+
+    expect(boundaries).toEqual(['msg-3']);
+    expect(inherited.map((message) => message.id)).toEqual(['msg-1', 'msg-2']);
+  });
+
+  test('does not copy an unfinished first turn', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2'));
+    let attempts = 0;
+    forkSessionImpl = () => {
+      attempts += 1;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+    await expect(startBtwSession(startInput)).rejects.toThrow('No completed turn to fork from');
+    expect(attempts).toBe(0);
+    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+  });
+
+  test('keeps the last finished answer and cuts before the running prompt and its context', async () => {
+    const carrier: Message = { id: 'msg-2', sessionID: 'parent-1', role: 'synthetic', time: { created: 1 }, text: 'quoted selection' };
+    parentSyncMessages.splice(0, parentSyncMessages.length, assistantMessage('msg-1', 10), carrier, userMessage('msg-3'), assistantMessage('msg-4'));
     const boundaries: Array<string | undefined> = [];
     forkSessionImpl = (_sessionId, options) => {
       boundaries.push(options?.before);
@@ -269,11 +309,79 @@ describe('startBtwSession', () => {
 
     await startBtwSession(startInput);
 
-    expect(boundaries).toEqual(['msg-1']);
+    expect(boundaries).toEqual(['msg-2']);
+  });
+
+  test('cuts before a background command result that woke the parent again', async () => {
+    const completion: Message = {
+      id: 'msg-2',
+      sessionID: 'parent-1',
+      role: 'synthetic',
+      time: { created: 1 },
+      text: '<shell>\ndone\n</shell>',
+      metadata: { source: 'shell', shellID: 'shell-1', state: 'completed' },
+    };
+    parentSyncMessages.splice(0, parentSyncMessages.length, assistantMessage('msg-1', 10), completion, assistantMessage('msg-3', 20, 'tool-calls'), assistantMessage('msg-4'));
+    const boundaries: Array<string | undefined> = [];
+    forkSessionImpl = (_sessionId, options) => {
+      boundaries.push(options?.before);
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    await startBtwSession(startInput);
+
+    expect(boundaries).toEqual(['msg-2']);
+  });
+
+  test('keeps the cut when a new turn reaches the server between attempts', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, assistantMessage('msg-1', 10), userMessage('msg-2'));
+    const boundaries: Array<string | undefined> = [];
+    const serverMessages = [assistantMessage('msg-1', 10)];
+    let inherited: Message[] = [];
+    forkSessionImpl = (_sessionId, options) => {
+      boundaries.push(options?.before);
+      if (boundaries.length === 1) {
+        serverMessages.push(userMessage('msg-2'), assistantMessage('msg-3'));
+        return Promise.reject(forkBeforeNotFound);
+      }
+      const cut = serverMessages.findIndex((message) => message.id === options?.before);
+      inherited = cut < 0 ? serverMessages : serverMessages.slice(0, cut);
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    expect((await startBtwSession(startInput)).id).toBe('fork-1');
+    expect(boundaries).toEqual(['msg-2', 'msg-2']);
+    expect(inherited.map((message) => message.id)).toEqual(['msg-1']);
+  });
+
+  test('a persistent 404 leaves the panel retryable without creating a fork', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, assistantMessage('msg-1', 10), userMessage('msg-2'));
+    const boundaries: Array<string | undefined> = [];
+    forkSessionImpl = (_sessionId, options) => {
+      boundaries.push(options?.before);
+      return Promise.reject(forkBeforeNotFound);
+    };
+
+    await expect(startBtwSession(startInput)).rejects.toThrow('message not found');
+    expect(boundaries).toEqual(['msg-2', 'msg-2']);
+    expect(metadataPatches).toEqual([]);
+    expect(childStoreSessions).toEqual([]);
+    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+  });
+
+  test('does not retry transport failures', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, assistantMessage('msg-1', 10), userMessage('msg-2'));
+    let attempts = 0;
+    forkSessionImpl = () => {
+      attempts += 1;
+      return Promise.reject(new Error('transport failure'));
+    };
+    await expect(startBtwSession(startInput)).rejects.toThrow('transport failure');
+    expect(attempts).toBe(1);
   });
 
   test('the boundary falls back to the fork point when the cloned tail reads empty', async () => {
-    parentSyncMessages.push(assistantMessage('msg-1', 10));
+    parentSyncMessages.splice(0, parentSyncMessages.length, assistantMessage('msg-1', 10), userMessage('msg-2'));
     forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project'));
     getSessionMessagesImpl = () => Promise.resolve(page([]));
 
@@ -330,11 +438,17 @@ describe('startBtwSession', () => {
     ]);
   });
 
-  test('an empty parent produces a marker without a boundary', async () => {
-    forkSessionImpl = () => Promise.resolve(makeSession('fork-1', '/project'));
-    getSessionMessagesImpl = () => Promise.resolve(page([]));
-    await startBtwSession(startInput);
-    expect(metadataPatches[0]?.result).toEqual({ openchamber: { kind: 'btw', originalSessionID: 'parent-1' } });
+  test('an empty local history cannot authorize copying an unknown server transcript', async () => {
+    parentSyncMessages.length = 0;
+    let attempts = 0;
+    forkSessionImpl = () => {
+      attempts += 1;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+    await expect(startBtwSession(startInput)).rejects.toThrow('No completed turn to fork from');
+    expect(attempts).toBe(0);
+    expect(metadataPatches).toEqual([]);
+    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
   });
 
   test('a failed first send unlinks the parent and deletes the fork', async () => {

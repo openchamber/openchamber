@@ -387,7 +387,9 @@ Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
 citation, and sends it through the same attachment pipeline as a manually
 picked `.txt` file. In `ask`, `ui/LargeTextPasteChoice` floats above the
-composer's start edge, styled like the chat text-selection menu. Its actions read live composer/attachment state so
+composer's start edge, styled like the chat text-selection menu. In focus mode
+the composer fills the surface, so there is no room above it and the choice
+sits just inside the composer's start edge instead. Its actions read live composer/attachment state so
 typing or other attaches between paste and choice stay consistent. Short text,
 images, and URL wraps keep their existing paths.
 In `inline-double-paste`, the first paste uses CodeMirror's native paste path.
@@ -644,6 +646,17 @@ and the send path reading the same grammar.
 
 ## Ordering rules worth knowing
 
+### Why mention deduplication requires a full path
+
+Send and queue skip mention conversion and extraction only when the composer's
+attachments contain the same normalized full path. Restored `file://` URLs use
+the shared dropped-path decoder. VS Code selections never suppress a whole-file
+mention: their source path identifies only the selected excerpt. Path case is preserved because the remote
+filesystem may be case-sensitive. Filenames alone cannot establish identity,
+so data URLs without a retained source path and files in different worktrees
+remain separate. Queue projections never suppress composer mentions because a
+command can leave the queue untouched and delivery can take only part of it.
+
 - `editor/ComposerEditor.tsx` forwards a click on the composer's padding by
   focusing the view *before* setting the selection: CodeMirror reveals its
   drawn caret through a class it only writes while applying an update, so the
@@ -899,6 +912,17 @@ goes as its own context part (`sessionReferences.ts`, kinds `session` and
   one records nothing on the session.
 - VS Code keeps session links inert (its sessions live on its own OpenCode),
   so it offers neither the `@` sessions nor the chips.
+
+## Paste routing
+
+On Linux, a middle-click paste belongs to the editable field or terminal under
+the pointer. The global capture pairs the native paste event with the recent
+middle click and suppresses it when the pointer was over page chrome, so it
+cannot land in whichever composer kept focus. A terminal canvas and its hidden
+textarea count as one owner. For the composer, the capture moves CodeMirror's
+caret to the pointer; the browser and `ChatInput.handlePaste` still handle the
+text. Keyboard paste keeps the existing composer fallback and overlay rules.
+Other platforms do not use this routing.
 
 ## Input recall ownership
 

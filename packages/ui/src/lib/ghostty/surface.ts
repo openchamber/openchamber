@@ -548,6 +548,10 @@ function shouldReportTerminalMouse(
   return tracking && !event.shiftKey && !event.ctrlKey && !event.metaKey;
 }
 
+// Chromium fires a middle click's PRIMARY paste right after its release. Bound
+// the wait so a click without a paste cannot swallow a later menu paste.
+const MIDDLE_CLICK_PASTE_WINDOW_MS = 1000;
+
 type TerminalMouseAction = 'press' | 'release' | 'motion';
 
 export interface TerminalMouseDataResolution {
@@ -695,6 +699,11 @@ export interface GhosttyTerminalSurfaceOptions {
   readonly onData: (data: string) => void;
   readonly onResize: (cols: number, rows: number) => void;
   readonly onSelectionChange?: () => void;
+  /**
+   * Reads PRIMARY on platforms with native selection access. When absent, the
+   * browser handles its own middle-click paste through the focused textarea.
+   */
+  readonly onMiddleClickPaste?: () => void;
   /** Return false to keep a key press from reaching the terminal (host shortcuts). */
   readonly beforeKey?: (event: KeyboardEvent) => boolean;
   readonly onLinkActivate?: (text: string, event: MouseEvent) => void;
@@ -771,6 +780,7 @@ export class GhosttyTerminalSurface {
   private theme: GhosttyTheme;
   private readonly suppressedKeyCodes = new Set<string>();
   private readonly pasteArbiter = new TerminalPasteArbiter();
+  private middleClickPasteAt: number | null = null;
   private copyShortcutToken = 0;
   private clearSelectionAfterCopy = false;
   private primedCopySelection = '';
@@ -1106,11 +1116,14 @@ export class GhosttyTerminalSurface {
   }
 
   /**
-   * Pastes clipboard text read by the host (context menu) with the same
-   * bracketed-paste encoding as a native paste event. The read joins the same
-   * race the paste shortcut uses — the token is claimed before it starts — so
-   * a shortcut or native paste arriving during the read supersedes this one
-   * instead of both reaching the shell.
+   * Pastes clipboard text read by the host (context menu or middle click) with
+   * the same bracketed-paste encoding as a native paste event. The read joins
+   * the same race the paste shortcut uses — the token is claimed before it
+   * starts — so a shortcut or native paste arriving during the read supersedes
+   * this one instead of both reaching the shell.
+   *
+   * A middle click's native paste event is swallowed in `onPaste`, so this
+   * explicit read is the only delivery.
    */
   async pasteFromClipboard(
     readText: () => Promise<string>,
@@ -1120,8 +1133,7 @@ export class GhosttyTerminalSurface {
     const text = await readText();
     if (this.disposed || !isCurrent()) return;
     // Settling invalidates any other clipboard read still in flight, so it
-    // cannot land after this text reaches the shell. A menu read has no
-    // native paste event behind it.
+    // cannot land after this text reaches the shell.
     if (!this.pasteArbiter.settleRead(token, false, performance.now())) return;
     if (text.length === 0) return;
     const encoded = this.core.encodePaste(text);
@@ -1265,6 +1277,9 @@ export class GhosttyTerminalSurface {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
+    // A keyboard shortcut ends any middle-click gesture that never produced its
+    // native paste, so its timestamp cannot swallow this key's paste.
+    this.middleClickPasteAt = null;
     this.restoreRestingCaret();
     this.updateLinkModifier(event);
     // Presses handled outside the terminal must also swallow their release:
@@ -1526,6 +1541,18 @@ export class GhosttyTerminalSurface {
     // would receive (for example an html-only clipboard converted to text)
     // leaks through onInput without bracketed-paste encoding.
     event.preventDefault();
+    // With the local selection bridge, the surface either reads PRIMARY or
+    // sends the middle click to a mouse-reporting application. Chromium still
+    // emits a paste event for either path, so suppress that follow-up paste.
+    const middleClickPasteAt = this.middleClickPasteAt;
+    this.middleClickPasteAt = null;
+    if (
+      middleClickPasteAt !== null
+      && event.timeStamp >= middleClickPasteAt
+      && event.timeStamp - middleClickPasteAt <= MIDDLE_CLICK_PASTE_WINDOW_MS
+    ) {
+      return;
+    }
     const data = event.clipboardData?.getData('text/plain') ?? '';
     if (data.length === 0) return;
     // An empty native paste leaves the clipboard read as the only path. With
@@ -1601,8 +1628,35 @@ export class GhosttyTerminalSurface {
 
   private readonly onPointerDown = (event: PointerEvent) => {
     if (this.ignoresTouchPointer(event)) return;
+    const mouseTracking = this.core.isMouseTracking();
+    const onMiddleClickPaste = this.options.onMiddleClickPaste;
+    const middleClick = event.button === 1;
+    // Shift bypasses mouse reporting, as it did before the bridge. There the
+    // host reads PRIMARY directly; a terminal without the bridge keeps the
+    // browser's own middle-click paste.
+    const shiftBypassesMouse = middleClick && event.shiftKey;
+    const reportsMouse = shouldReportTerminalMouse(mouseTracking, event);
+    // A middle click pastes PRIMARY only when the application is not taking
+    // mouse events: tracking is off, or Shift bypassed it. While an
+    // application tracks the mouse, the click belongs to it.
+    const suppressesNativeMiddleClickPaste = Boolean(onMiddleClickPaste)
+      && middleClick
+      && !event.ctrlKey
+      && !event.metaKey;
+    const pastesPrimary = suppressesNativeMiddleClickPaste
+      && (!mouseTracking || shiftBypassesMouse);
+    // The bridge also suppresses Chromium's paste when a TUI owns the mouse
+    // click, or its mouse event would be followed by clipboard text in the PTY.
+    this.middleClickPasteAt = suppressesNativeMiddleClickPaste ? event.timeStamp : null;
     this.focus();
-    if (shouldReportTerminalMouse(this.core.isMouseTracking(), event)) {
+    if (pastesPrimary) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.canvas.setPointerCapture(event.pointerId);
+      onMiddleClickPaste?.();
+      return;
+    }
+    if (reportsMouse) {
       const button = ghosttyMouseButton(event.button);
       if (button === null) return;
       event.preventDefault();
@@ -1682,7 +1736,7 @@ export class GhosttyTerminalSurface {
       return;
     }
     this.lastMouseMotionData = '';
-    if (!this.selectionAnchorScreen || !this.canvas.hasPointerCapture(event.pointerId)) {
+    if (!(event.buttons & 1) || !this.selectionAnchorScreen || !this.canvas.hasPointerCapture(event.pointerId)) {
       this.updateHoverCursor(event);
       return;
     }
@@ -1793,6 +1847,13 @@ export class GhosttyTerminalSurface {
 
   private readonly onPointerUp = (event: PointerEvent) => {
     if (this.ignoresTouchPointer(event)) return;
+    if (event.type === 'pointercancel') {
+      this.middleClickPasteAt = null;
+    } else if (event.button === 1 && this.middleClickPasteAt !== null) {
+      // Chromium fires the PRIMARY paste on release, so refresh the timestamp
+      // there. A held click then stays inside the suppression window.
+      this.middleClickPasteAt = event.timeStamp;
+    }
     this.setSelectionAutoscroll(0);
     if (this.linkActivationPointerId === event.pointerId) {
       event.preventDefault();

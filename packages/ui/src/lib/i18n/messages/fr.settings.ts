@@ -100,6 +100,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': 'Pas disponible',
   'settings.view.unavailable.description': 'Cette page de paramètres n\'est pas disponible dans ce runtime.',
   'settings.view.badge.beta': 'bêta',
+  'settings.view.badge.new': 'nouveau',
 
   'settings.view.actions.backToSettings': 'Retour aux paramètres',
   'settings.view.actions.closeSettings': 'Fermer les paramètres',

@@ -55,6 +55,9 @@ const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; s
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 const globalArchivedSessions: Session[] = []
 let runtimeKey = "default-runtime"
+const permissionPolicy = new Map<string, boolean>()
+let permissionPolicyRevision = 0
+const goalObjectives = new Map<string, string>()
 const AMBIGUOUS_TRANSPORT_FAILURE = Symbol("ambiguous-transport-failure")
 
 const notFound = (kind: string) => Object.assign(new Error(`${kind}NotFoundError`), { status: 404 })
@@ -62,6 +65,7 @@ const notFound = (kind: string) => Object.assign(new Error(`${kind}NotFoundError
 const sdkClient = {}
 
 mock.module("@/lib/opencode/client", () => ({
+  isOpencodeNotFound: (error: unknown) => error instanceof Error && "status" in error && error.status === 404,
   ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
     getDirectory: () => "/test/project",
@@ -333,6 +337,19 @@ mock.module("@/lib/runtime-fetch", () => ({
     const payload = JSON.parse(String(init?.body ?? "{}"))
     openchamberRouteRequests.push({ path, body: payload })
     beforeArchiveRouteResolve?.(path)
+    if (path.startsWith("/api/goals/objective/")) {
+      const sessionId = path.slice("/api/goals/objective/".length)
+      if (typeof payload.content === "string") goalObjectives.set(sessionId, payload.content)
+      return Response.json({ content: goalObjectives.get(sessionId) })
+    }
+    if (path.startsWith("/api/permission-auto-accept")) {
+      const sessionId = path.split("/sessions/")[1]
+      if (sessionId) {
+        permissionPolicy.set(decodeURIComponent(sessionId), payload.enabled)
+        permissionPolicyRevision += 1
+      }
+      return Response.json({ sessions: Object.fromEntries(permissionPolicy), revision: permissionPolicyRevision })
+    }
     const answer = path.endsWith("/unarchive")
       ? unarchiveBatchResponse
       : path.endsWith("/links")
@@ -435,6 +452,8 @@ mock.module("./session-deletion-cleanup", () => ({
 }))
 
 mock.module("./sync-refs", () => ({
+  getAllSyncSessionMap: () => sessionRecords,
+  getDirectoryState: () => undefined,
   getSyncSessionDirectory: () => null,
   registerSessionDirectory: (sessionID: string, directory: string) => {
     registeredSessionDirectories.push({ sessionID, directory })
@@ -2420,6 +2439,72 @@ describe("forkAfterMessage", () => {
     expect(inputState.pendingComposerRestore).toBeNull()
   })
 
+  for (const entrypoint of ["forkAfterMessage", "forkFromLastCompletedTurn"] as const) {
+    test(`${entrypoint} retries a missing cut without copying a later turn`, async () => {
+      const messages = [
+        message("msg-user-1", "user"),
+        { ...message("msg-answer-1", "assistant"), time: { created: 1, completed: 2 }, finish: "stop" },
+        message("msg-user-2", "user"),
+      ] as Message[]
+      const source = createStore({}, {
+        session: [sourceSession], message: { [sourceSession.id]: messages },
+        session_status: { [sourceSession.id]: { type: "busy" } },
+      })
+      const actions = await import("./session-actions")
+      actions.setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+      sessionForkError = notFound("Message")
+      let attempts = 0
+      beforeSessionForkResolve = () => {
+        attempts += 1
+        if (attempts === 1) messages.push(message("msg-answer-2", "assistant"))
+        else sessionForkError = null
+      }
+
+      if (entrypoint === "forkAfterMessage") await actions.forkAfterMessage(sourceSession.id, "msg-answer-1")
+      else await actions.forkFromLastCompletedTurn(sourceSession.id)
+
+      expect(replyCalls.filter((call) => call.method === "session.fork").map((call) => call.params.messageID))
+        .toEqual(["msg-user-2", "msg-user-2"])
+      expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+    })
+
+    test(`${entrypoint} leaves the source open after two 404s`, async () => {
+      const messages = [
+        message("msg-user-1", "user"),
+        { ...message("msg-answer-1", "assistant"), time: { created: 1, completed: 2 }, finish: "stop" },
+        message("msg-user-2", "user"),
+      ] as Message[]
+      const source = createStore({}, {
+        session: [sourceSession], message: { [sourceSession.id]: messages },
+        session_status: { [sourceSession.id]: { type: "busy" } },
+      })
+      const actions = await import("./session-actions")
+      actions.setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+      sessionForkError = notFound("Message")
+
+      const result = entrypoint === "forkAfterMessage"
+        ? actions.forkAfterMessage(sourceSession.id, "msg-answer-1")
+        : actions.forkFromLastCompletedTurn(sourceSession.id)
+      await expect(result).rejects.toThrow("MessageNotFoundError")
+      expect(replyCalls.filter((call) => call.method === "session.fork").map((call) => call.params.messageID))
+        .toEqual(["msg-user-2", "msg-user-2"])
+      expect(selectedSessions).toEqual([])
+      expect(source.getState().session).toEqual([sourceSession])
+    })
+  }
+
+  test("does not retry the cut on another runtime", async () => {
+    const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+    const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+    sessionForkError = notFound("Message")
+    beforeSessionForkResolve = () => { runtimeKey = "another-runtime" }
+
+    await expect(forkAfterMessage(sourceSession.id, "msg-answer-1")).rejects.toThrow("runtime changed")
+    expect(replyCalls.filter((call) => call.method === "session.fork")).toHaveLength(1)
+    expect(selectedSessions).toEqual([])
+  })
+
   test("leaves a compaction that followed the answer out of the fork", async () => {
     const compacted = [...transcript.slice(0, 2), message("msg-compaction", "compaction"), ...transcript.slice(2)]
     const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: compacted } })
@@ -2431,6 +2516,28 @@ describe("forkAfterMessage", () => {
     expect(replyCalls).toEqual([{
       method: "session.fork",
       params: { sessionID: sourceSession.id, messageID: "msg-compaction", directory: sourceSession.directory },
+    }])
+  })
+
+  test("leaves a workflow report that followed the answer out of the fork", async () => {
+    const workflowReport: Message = {
+      id: "msg-workflow-report",
+      role: "synthetic",
+      sessionID: sourceSession.id,
+      time: { created: 1 },
+      metadata: { source: "openchamber-workflow", runId: "run-1", name: "Review", state: "completed" },
+      text: "<openchamber-workflow>\nreview done\n</openchamber-workflow>",
+    }
+    const messages = [...transcript.slice(0, 2), workflowReport, ...transcript.slice(2)]
+    const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: messages } })
+    const { forkAfterMessage, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+
+    await forkAfterMessage(sourceSession.id, "msg-answer-1")
+
+    expect(replyCalls).toEqual([{
+      method: "session.fork",
+      params: { sessionID: sourceSession.id, messageID: workflowReport.id, directory: sourceSession.directory },
     }])
   })
 
@@ -2456,6 +2563,117 @@ describe("forkAfterMessage", () => {
     expect(replyCalls).toEqual([])
     expect(selectedSessions).toEqual([])
   })
+
+  for (const enabled of [false, true]) {
+    for (const forkPoint of ["answer", "prompt"] as const) {
+      test(`persists the source permission choice in VS Code (${enabled}, ${forkPoint})`, async () => {
+        const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+        const { usePermissionStore } = await import("@/stores/permissionStore")
+        usePermissionStore.getState().reset()
+        Object.defineProperty(globalThis, "window", { configurable: true, value: { __VSCODE_CONFIG__: {} } })
+        permissionPolicy.clear()
+        permissionPolicy.set(sourceSession.id, enabled)
+        permissionPolicyRevision = 0
+        sessionRecords.set(sourceSession.id, sourceSession)
+        const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+        try {
+          const { forkAfterMessage, forkFromMessage, setActionRefs } = await import("./session-actions")
+          setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+          if (forkPoint === "answer") await forkAfterMessage(sourceSession.id, "msg-answer-2")
+          else await forkFromMessage(sourceSession.id, "msg-user-2")
+          expect(permissionPolicy.get(forkedSession.id)).toBe(enabled)
+          expect(usePermissionStore.getState().getSessionMode(forkedSession.id)).toBe(enabled ? "auto" : "ask")
+        } finally {
+          if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow)
+          else Reflect.deleteProperty(globalThis, "window")
+          usePermissionStore.getState().reset()
+          sessionRecords.delete(sourceSession.id)
+        }
+      })
+    }
+  }
+
+  for (const forkPoint of ["answer", "prompt"] as const) {
+    for (const outcome of ["runtime-switch", "read-failure", "write-failure", "write-failure-after-switch"] as const) {
+      test(`retains the VS Code fork and repairs metadata after ${outcome} (${forkPoint})`, async () => {
+        const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+        const { usePermissionStore } = await import("@/stores/permissionStore")
+        usePermissionStore.getState().reset()
+        Object.defineProperty(globalThis, "window", { configurable: true, value: { __VSCODE_CONFIG__: {} } })
+        permissionPolicy.clear()
+        permissionPolicy.set(sourceSession.id, true)
+        permissionPolicyRevision = 0
+        sessionRecords.set(sourceSession.id, sourceSession)
+        const inheritedFork: Session = {
+          ...forkedSession,
+          metadata: { openchamber: {
+            kind: "scheduled",
+            btwSessionID: "source-btw",
+            reviewSessionID: "source-review",
+            goal: { id: "goal-1", objective: "fallback", objectiveFile: true, status: "active" },
+          } },
+        }
+        sessionForkResult = inheritedFork
+        sessionRecords.set(forkedSession.id, inheritedFork)
+        goalObjectives.set(sourceSession.id, "fork objective")
+        const repairedMetadata = { openchamber: {
+          goal: { id: "goal-1", objective: "fallback", objectiveFile: true, status: "paused", statusReason: "paused in fork" },
+        } }
+        const previousArchiveResponse = archiveBatchResponse
+        archiveBatchResponse = { status: 200, body: { metadata: repairedMetadata } }
+        openchamberRouteRequests.length = 0
+        beforeArchiveRouteResolve = (path) => {
+          if (!path.startsWith("/api/permission-auto-accept")) return
+          if (outcome === "runtime-switch") runtimeKey = "another-runtime"
+          else if (outcome === "read-failure" || path.includes("/sessions/")) {
+            if (outcome === "write-failure-after-switch") runtimeKey = "another-runtime"
+            throw new Error("policy unavailable")
+          }
+        }
+        const source = createStore({}, { session: [sourceSession], message: { [sourceSession.id]: transcript } })
+        try {
+          const { forkAfterMessage, forkFromMessage, setActionRefs } = await import("./session-actions")
+          setActionRefs(createChildStores([[sourceSession.directory, source]]), () => sourceSession.directory)
+          if (forkPoint === "answer") {
+            expect(await forkAfterMessage(sourceSession.id, "msg-answer-2")).toBe(inheritedFork)
+          } else {
+            await forkFromMessage(sourceSession.id, "msg-user-2")
+          }
+          expect(permissionPolicy.get(forkedSession.id)).toBeUndefined()
+          expect(usePermissionStore.getState().getSessionMode(forkedSession.id)).toBe("ask")
+          expect(selectedSessions).toEqual([{ sessionId: forkedSession.id, directoryHint: sourceSession.directory }])
+          const metadataRequest = openchamberRouteRequests.find((entry) => entry.path.endsWith(`/${forkedSession.id}/metadata`))
+          const objectiveRequests = openchamberRouteRequests.filter((entry) => entry.path.startsWith("/api/goals/objective/"))
+          if (outcome === "runtime-switch" || outcome === "write-failure-after-switch") {
+            expect(metadataRequest).toBeUndefined()
+            expect(objectiveRequests).toEqual([])
+            expect(source.getState().session).toEqual([sourceSession, inheritedFork])
+          } else {
+            expect(metadataRequest?.body).toEqual({ patch: { openchamber: {
+              kind: null, btwSessionID: null, reviewSessionID: null,
+              goal: { status: "paused", statusReason: "paused in fork" },
+            } } })
+            expect(objectiveRequests).toEqual([
+              { path: `/api/goals/objective/${sourceSession.id}`, body: {} },
+              { path: `/api/goals/objective/${forkedSession.id}`, body: { content: "fork objective" } },
+            ])
+            expect(goalObjectives.get(forkedSession.id)).toBe("fork objective")
+            expect(source.getState().session[1]?.metadata).toEqual(repairedMetadata)
+          }
+        } finally {
+          if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow)
+          else Reflect.deleteProperty(globalThis, "window")
+          beforeArchiveRouteResolve = null
+          runtimeKey = "fork-runtime"
+          usePermissionStore.getState().reset()
+          sessionRecords.delete(sourceSession.id)
+          sessionRecords.delete(forkedSession.id)
+          archiveBatchResponse = previousArchiveResponse
+          goalObjectives.clear()
+        }
+      })
+    }
+  }
 })
 
 describe("forkFromLastCompletedTurn", () => {
@@ -2553,10 +2771,24 @@ describe("forkFromLastCompletedTurn", () => {
     sessionID: sourceSession.id,
     time: { created: 1 },
   } as Message
+  const shellCompletion: Message = {
+    id: "msg-shell-completion",
+    role: "synthetic",
+    sessionID: sourceSession.id,
+    time: { created: 1 },
+    metadata: { source: "shell", shellID: "shell-1", state: "completed" },
+    text: "<shell>\ndone\n</shell>",
+  }
 
   test("finds the finished reply when the running turn resumed from a background subagent", async () => {
     const { findLastCompletedTurnMessageId } = await import("./session-actions")
     const transcript = [message("u1", "user"), message("a1", "assistant", 2), subagentReport, message("a-live", "assistant")]
+    expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
+  })
+
+  test("finds the finished reply when the running turn resumed from a background command", async () => {
+    const { findLastCompletedTurnMessageId } = await import("./session-actions")
+    const transcript = [message("u1", "user"), message("a1", "assistant", 2), shellCompletion, message("a-live", "assistant")]
     expect(findLastCompletedTurnMessageId(transcript, true)).toBe("a1")
   })
 

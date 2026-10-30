@@ -107,9 +107,12 @@ session of an isolated space has the space's name where the branch goes and
 `inSpace` set on its location, so the zone rows of the desktop and the phone
 mark it with the container icon the space's group carries, never with the
 branch icon. The phone lists the same rows (see The phone). VS Code excludes
-worktrees and managed
-Chats, while retaining its workspace-scoped grouped list and inline archived
-buckets.
+worktrees and, when a workspace folder is open, managed Chats. Empty VS Code
+windows show Chats. Folder windows retain their workspace-scoped grouped list
+and inline archived buckets. In empty windows the archived toggle shows a Chats
+archive bucket containing top-level sessions only. Restoring a root restores
+its archived descendants through the shared action. Web, Electron, hosted mobile
+and Capacitor keep their existing Chats and Archive views.
 
 A project lists its worktree works among the works of its root, not in a
 block after them: the row model (`mergeWorktreeEntries` in

@@ -100,6 +100,7 @@ export const settingsDict = {
   "settings.view.unavailable.title": "Indisponível",
   "settings.view.unavailable.description": "Esta página de configurações não está disponível neste ambiente de execução.",
   "settings.view.badge.beta": "beta",
+  "settings.view.badge.new": "novo",
 
   "settings.view.actions.backToSettings": "Voltar às configurações",
   "settings.view.actions.closeSettings": "Fechar configurações",

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
-import { buildSettingsSearchResults } from './search';
+import { buildSettingsSearchResults, SETTINGS_ANCHOR_PAGES } from './search';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { dict as ukDict } from '@/lib/i18n/messages/uk';
 
@@ -232,6 +232,36 @@ describe('settings search', () => {
 
     const unserved = buildSettingsSearchResults({ query: 'gitlab', runtimeCtx, t, getPageTitle: (page) => page });
     expect(unserved.some((result) => result.id.startsWith('integrations.source-control.'))).toBe(false);
+  });
+
+  test('server-served integration entries never enter the new-badge anchor map', () => {
+    const providerResults = buildSettingsSearchResults({
+      query: 'acme',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+      sourceControlProviders: [...sourceControlProviders, acmeDescriptor()],
+    });
+    const providerIds = providerResults.map((result) => result.id);
+    expect(providerIds).toEqual([
+      'integrations.source-control.acme',
+      'integrations.source-control.acme.connect',
+    ]);
+
+    const trackerResults = buildSettingsSearchResults({
+      query: 'linear',
+      runtimeCtx,
+      t,
+      getPageTitle: (page) => page,
+      trackers,
+    });
+    const trackerIds = trackerResults.map((result) => result.id)
+      .filter((id) => id.startsWith('integrations.linear'));
+    expect(trackerIds.length).toBeGreaterThan(0);
+
+    for (const id of [...providerIds, ...trackerIds]) {
+      expect(SETTINGS_ANCHOR_PAGES.has(id)).toBe(false);
+    }
   });
 
   test('keeps repository transport and provider controls out of VS Code Settings search', () => {

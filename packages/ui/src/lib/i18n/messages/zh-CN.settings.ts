@@ -100,6 +100,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': '不可用',
   'settings.view.unavailable.description': '此设置页面在当前运行环境中不可用。',
   'settings.view.badge.beta': '测试版',
+  'settings.view.badge.new': '新',
 
   'settings.view.actions.backToSettings': '返回设置',
   'settings.view.actions.closeSettings': '关闭设置',
