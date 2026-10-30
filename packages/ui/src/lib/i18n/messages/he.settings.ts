@@ -2176,6 +2176,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': 'לא ניתן היה לשמור את המפתח',
   'settings.voice.page.field.serverUrl': 'URL של השרת',
   'settings.voice.page.field.serverUrlHint': 'URL הבסיס של שרת ה-TTS התואם OpenAI',
+  'settings.voice.page.field.endpointPath': 'נתיב נקודת הקצה',
+  'settings.voice.page.field.endpointPathHint': 'נתיב המשאב בשרת; הבקשה והתגובה נשארות תואמות OpenAI',
   'settings.voice.page.field.model': 'מודל',
   'settings.voice.page.field.voice': 'קול',
   'settings.voice.page.field.voiceIdentifierHint': 'מזהה קול שהשרת תומך בו',

@@ -2155,6 +2155,8 @@ export const settingsDict = {
   "settings.voice.page.toast.apiKeySaveFailed": "Не вдалося зберегти ключ",
   "settings.voice.page.field.serverUrl": "URL сервера",
   "settings.voice.page.field.serverUrlHint": "Базовий URL OpenAI-сумісного TTS-сервера",
+  'settings.voice.page.field.endpointPath': 'Шлях ендпоінта',
+  'settings.voice.page.field.endpointPathHint': 'Шлях до ресурсу на сервері; запит і відповідь лишаються сумісними з OpenAI',
   "settings.voice.page.field.model": "Модель",
   "settings.voice.page.field.voice": "Голос",
   "settings.voice.page.field.voiceIdentifierHint": "Голосовий ідентифікатор, який підтримується сервером",

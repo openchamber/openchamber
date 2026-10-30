@@ -83,6 +83,7 @@ export const createSettingsHelpers = (dependencies) => {
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
   const STT_SERVER_URL_MAX_LENGTH = 2048;
+  const STT_ENDPOINT_PATH_MAX_LENGTH = 1024;
   const STT_MODEL_MAX_LENGTH = 256;
   const STT_LANGUAGE_MAX_LENGTH = 64;
   const VERSION_STRING_MAX_LENGTH = 128;
@@ -1160,6 +1161,10 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
         result.sttModel = trimmed;
       }
+    }
+    const sttEndpointPath = z.string().trim().safeParse(candidate.sttEndpointPath);
+    if (sttEndpointPath.success && sttEndpointPath.data.length <= STT_ENDPOINT_PATH_MAX_LENGTH) {
+      result.sttEndpointPath = sttEndpointPath.data;
     }
     if (typeof candidate.sttLocalModel === 'string') {
       const trimmed = candidate.sttLocalModel.trim();

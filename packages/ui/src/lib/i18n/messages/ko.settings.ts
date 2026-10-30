@@ -2155,6 +2155,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': '키를 저장하지 못했습니다',
   'settings.voice.page.field.serverUrl': '서버 URL',
   'settings.voice.page.field.serverUrlHint': 'OpenAI 호환 TTS 서버의 base URL',
+  'settings.voice.page.field.endpointPath': '엔드포인트 경로',
+  'settings.voice.page.field.endpointPathHint': '서버의 리소스 경로입니다. 요청과 응답은 OpenAI 호환 형식을 유지합니다',
   'settings.voice.page.field.model': '모델',
   'settings.voice.page.field.voice': '음성',
   'settings.voice.page.field.voiceIdentifierHint': '서버에서 지원하는 음성 식별자',

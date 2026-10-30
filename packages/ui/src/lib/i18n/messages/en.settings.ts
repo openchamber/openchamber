@@ -2193,6 +2193,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': 'Couldn\'t save the key',
   'settings.voice.page.field.serverUrl': 'Server URL',
   'settings.voice.page.field.serverUrlHint': 'Base URL of the OpenAI-compatible TTS server',
+  'settings.voice.page.field.endpointPath': 'Endpoint path',
+  'settings.voice.page.field.endpointPathHint': 'Path to the resource on the server; the request and response stay OpenAI-compatible',
   'settings.voice.page.field.model': 'Model',
   'settings.voice.page.field.voice': 'Voice',
   'settings.voice.page.field.voiceIdentifierHint': 'Voice identifier supported by the server',

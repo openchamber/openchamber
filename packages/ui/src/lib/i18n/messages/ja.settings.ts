@@ -2188,6 +2188,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': 'キーを保存できませんでした',
   'settings.voice.page.field.serverUrl': 'サーバー URL',
   'settings.voice.page.field.serverUrlHint': 'OpenAI 互換 TTS サーバーのベース URL',
+  'settings.voice.page.field.endpointPath': 'エンドポイントパス',
+  'settings.voice.page.field.endpointPathHint': 'サーバー上のリソースパス。リクエストとレスポンスは OpenAI 互換のままです',
   'settings.voice.page.field.model': 'モデル',
   'settings.voice.page.field.voice': '音声',
   'settings.voice.page.field.voiceIdentifierHint': 'サーバーがサポートする音声識別子',

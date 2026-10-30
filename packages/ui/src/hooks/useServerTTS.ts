@@ -111,6 +111,8 @@ interface SpeakOptions {
   threshold?: number;
   /** Custom base URL for OpenAI-compatible server */
   baseURL?: string;
+  /** Optional resource path for the OpenAI-compatible speech endpoint */
+  endpointPath?: string;
   /** Callback when playback starts */
   onStart?: () => void;
   /** Callback when playback ends */
@@ -206,7 +208,7 @@ interface TTSRequestConfig {
   currentModelId: string;
 }
 
-function buildTTSRequestBody(
+export function buildTTSRequestBody(
   text: string,
   options: SpeakOptions | undefined,
   config: TTSRequestConfig,
@@ -224,6 +226,7 @@ function buildTTSRequestBody(
     // No key: the server adds the one stored for this kind of server.
     // Send custom base URL for OpenAI-compatible servers
     baseURL: options?.baseURL || undefined,
+    endpointPath: options?.endpointPath || undefined,
   };
 }
 

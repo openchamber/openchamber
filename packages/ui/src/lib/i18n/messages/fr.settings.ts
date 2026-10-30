@@ -2058,6 +2058,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': 'Impossible d’enregistrer la clé',
   'settings.voice.page.field.serverUrl': 'URL du serveur',
   'settings.voice.page.field.serverUrlHint': 'URL de base du serveur TTS compatible OpenAI',
+  'settings.voice.page.field.endpointPath': 'Chemin de l\'endpoint',
+  'settings.voice.page.field.endpointPathHint': 'Chemin de la ressource sur le serveur ; la requête et la réponse restent compatibles OpenAI',
   'settings.voice.page.field.model': 'Modèle',
   'settings.voice.page.field.voice': 'Voix',
   'settings.voice.page.field.voiceIdentifierHint': 'Identifiant vocal pris en charge par le serveur',

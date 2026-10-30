@@ -3,6 +3,8 @@ import type { I18nKey, I18nParams } from '@/lib/i18n/store';
 import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
 import { buildSettingsSearchResults } from './search';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { dict as ukDict } from '@/lib/i18n/messages/uk';
 
 const trackers = [linearLikeTrackerDescriptor()];
 const sourceControlProviders = [githubLikeDescriptor(), gitlabLikeDescriptor()];
@@ -32,6 +34,35 @@ describe('settings search', () => {
     expect(target?.description).toBeNull();
   });
 
+  test('finds localized endpoint fields only while their controls are visible', () => {
+    const initial = useConfigStore.getState();
+    try {
+      for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isMobile: true }, { ...runtimeCtx, isVSCode: true }]) {
+        for (const enabled of [false, true]) {
+          for (const custom of [false, true]) {
+            useConfigStore.setState({
+              voiceProvider: custom ? 'openai-compatible' : 'local',
+              sttProvider: custom ? 'openai-compatible' : 'local',
+              showMessageTTSButtons: enabled,
+              autoReadAloudEnabled: false,
+              dictationEnabled: enabled,
+            });
+            for (const query of ['endpoint path', 'custom endpoint', 'resource path', ukDict['settings.voice.page.field.endpointPath']]) {
+              const results = buildSettingsSearchResults({ query, runtimeCtx: context, t: (key) => ukDict[key], getPageTitle: (page) => page });
+              const ids = results.map((result) => result.id);
+              expect(ids.includes('voice.tts-endpoint-path')).toBe(enabled && custom && !context.isVSCode);
+              expect(ids.includes('voice.stt-endpoint-path')).toBe(enabled && custom && !context.isVSCode);
+            }
+          }
+        }
+      }
+      useConfigStore.setState({ voiceProvider: 'openai-compatible', showMessageTTSButtons: false, autoReadAloudEnabled: true });
+      expect(buildSettingsSearchResults({ query: 'endpoint path', runtimeCtx, t, getPageTitle: (page) => page })
+        .some((result) => result.id === 'voice.tts-endpoint-path')).toBe(true);
+    } finally {
+      useConfigStore.setState(initial);
+    }
+  });
   test('finds double-paste on every shared Settings surface', () => {
     for (const query of ['double paste', 'ctrl v', 'cmd v']) {
       for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {

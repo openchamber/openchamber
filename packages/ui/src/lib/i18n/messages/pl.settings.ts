@@ -2467,6 +2467,8 @@ export const settingsDict = {
   'settings.voice.page.field.selectVoicePlaceholder': 'Wybierz głos',
   'settings.voice.page.field.serverUrl': 'URL serwera',
   'settings.voice.page.field.serverUrlHint': 'Bazowy URL serwera TTS zgodnego z OpenAI',
+  'settings.voice.page.field.endpointPath': 'Ścieżka endpointu',
+  'settings.voice.page.field.endpointPathHint': 'Ścieżka zasobu na serwerze; żądanie i odpowiedź pozostają zgodne z OpenAI',
   'settings.voice.page.field.silenceHold': 'Podtrzymanie ciszy',
   'settings.voice.page.field.silenceThreshold': 'Próg ciszy',
   'settings.voice.page.field.transcribeOnStopAria': 'Transkrybuj po zatrzymaniu nagrania',

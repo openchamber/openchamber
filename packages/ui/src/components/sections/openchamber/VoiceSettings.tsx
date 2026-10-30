@@ -723,6 +723,8 @@ export const VoiceSettings: React.FC = () => {
     const setOpenaiCompatibleVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
     const setOpenaiCompatibleTtsModel = useConfigStore((state) => state.setOpenaiCompatibleTtsModel);
+    const openaiCompatibleTtsEndpointPath = useConfigStore((state) => state.openaiCompatibleTtsEndpointPath);
+    const setOpenaiCompatibleTtsEndpointPath = useConfigStore((state) => state.setOpenaiCompatibleTtsEndpointPath);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const autoReadAloudEnabled = useConfigStore((state) => state.autoReadAloudEnabled);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
@@ -736,6 +738,8 @@ export const VoiceSettings: React.FC = () => {
     const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
     const sttModel = useConfigStore((state) => state.sttModel);
     const setSttModel = useConfigStore((state) => state.setSttModel);
+    const sttEndpointPath = useConfigStore((state) => state.sttEndpointPath);
+    const setSttEndpointPath = useConfigStore((state) => state.setSttEndpointPath);
     const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
     const setSttLocalModel = useConfigStore((state) => state.setSttLocalModel);
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
@@ -1024,6 +1028,7 @@ export const VoiceSettings: React.FC = () => {
                     model: openaiCompatibleTtsModel || undefined,
                     speed: speechRate,
                     baseURL: openaiCompatibleUrl,
+                    endpointPath: openaiCompatibleTtsEndpointPath || undefined,
                 }),
             });
 
@@ -1055,7 +1060,7 @@ export const VoiceSettings: React.FC = () => {
             setCompatiblePreviewAudio(null);
             setIsCompatiblePreviewPlaying(false);
         }
-    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, speechRate, compatiblePreviewAudio, t]);
+    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, openaiCompatibleTtsEndpointPath, speechRate, compatiblePreviewAudio, t]);
 
     useEffect(() => {
         return () => {
@@ -1193,6 +1198,21 @@ export const VoiceSettings: React.FC = () => {
                                         value={openaiCompatibleTtsModel}
                                         onChange={(e) => setOpenaiCompatibleTtsModel(e.target.value)}
                                         placeholder="speaches-ai/Kokoro-82M-v1.0-ONNX"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                                <SettingsStackedField
+                                    settingsItem="voice.tts-endpoint-path"
+                                    label={t('settings.voice.page.field.endpointPath')}
+                                    info={t('settings.voice.page.field.endpointPathHint')}
+                                >
+                                    <input
+                                        type="text"
+                                        value={openaiCompatibleTtsEndpointPath}
+                                        aria-label={t('settings.voice.page.field.endpointPath')}
+                                        dir="ltr"
+                                        onChange={(e) => setOpenaiCompatibleTtsEndpointPath(e.target.value)}
+                                        placeholder="/audio/speech"
                                         className={VOICE_TEXT_INPUT_CLASS}
                                     />
                                 </SettingsStackedField>
@@ -1490,6 +1510,21 @@ export const VoiceSettings: React.FC = () => {
                                         value={sttModel}
                                         onChange={(e) => setSttModel(e.target.value)}
                                         placeholder="deepdml/faster-whisper-large-v3-turbo-ct2"
+                                        className={VOICE_TEXT_INPUT_CLASS}
+                                    />
+                                </SettingsStackedField>
+                                <SettingsStackedField
+                                    settingsItem="voice.stt-endpoint-path"
+                                    label={t('settings.voice.page.field.endpointPath')}
+                                    info={t('settings.voice.page.field.endpointPathHint')}
+                                >
+                                    <input
+                                        type="text"
+                                        value={sttEndpointPath}
+                                        aria-label={t('settings.voice.page.field.endpointPath')}
+                                        dir="ltr"
+                                        onChange={(e) => setSttEndpointPath(e.target.value)}
+                                        placeholder="/audio/transcriptions"
                                         className={VOICE_TEXT_INPUT_CLASS}
                                     />
                                 </SettingsStackedField>

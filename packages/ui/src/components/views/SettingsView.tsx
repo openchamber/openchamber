@@ -5,6 +5,7 @@ import {
   getEffectiveShortcutCombo,
 } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useEnterpriseMode, useJevBlockedByEnterprise } from '@/stores/useEnterprisePolicyStore';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -341,6 +342,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const trackers = useTrackerDescriptors();
   const sourceControlProviders = useSourceControlProviders();
+  // Search availability reads these values from the config store.
+  const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+  const autoReadAloudEnabled = useConfigStore((state) => state.autoReadAloudEnabled);
+  const voiceProvider = useConfigStore((state) => state.voiceProvider);
+  const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+  const sttProvider = useConfigStore((state) => state.sttProvider);
   const settingsSearchResults = React.useMemo(() => {
     return buildSettingsSearchResults({
       query: settingsSearchQuery,
@@ -351,7 +358,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       trackers,
       sourceControlProviders,
     });
-  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, sourceControlProviders, t, trackers, visiblePageSlugs]);
+  }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, sourceControlProviders, t, trackers, visiblePageSlugs, showMessageTTSButtons, autoReadAloudEnabled, voiceProvider, dictationEnabled, sttProvider]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
     if (result.id.startsWith('agents.')) {

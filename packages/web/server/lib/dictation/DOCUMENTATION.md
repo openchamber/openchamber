@@ -54,8 +54,11 @@ response carries `X-Speech-Model` and `X-Speech-Language`.
     OpenAI-compatible `/v1/audio/transcriptions` endpoint
     (`openai-compatible-session.js`, reuses `../tts/stt.js`). `connect()`
     runs the same URL check as every transcription
-    (`normalizeCustomOpenAIBaseURL`), so a refused host — any remote one in
-    enterprise mode — fails before the user dictates.
+    (`normalizeCustomOpenAIBaseURL`) and the same endpoint path check
+    (`normalizeEndpointPath`), so a refused host or a malformed path — any
+    remote host in enterprise mode — fails before the user dictates. A
+    configured `endpointPath` replaces the fixed resource path on each
+    committed segment.
 - `local/` — worker process + client (IPC, idle shutdown TTL), sherpa
   recognizer engine and segment session (one decode per committed segment),
   model catalog and downloader. The native `sherpa-onnx-node` addon is only
@@ -75,9 +78,11 @@ Server → client: `ready`, `ack {ackSeq}`, `partial {text}`,
 
 `options` in `start` carries the client-selected provider config:
 `{ provider: 'local' | 'openai-compatible', language?, localModel?,
-openaiCompatible?: { baseUrl, model, apiKey }, correct? }`. With
+openaiCompatible?: { baseUrl, model, apiKey, endpointPath }, correct? }`. With
 `correct: true` the final text goes through the correction pass first, and
 `finish_accepted.timeoutMs` includes its budget (`CORRECTION_TIMEOUT_MS`).
+An empty or
+absent `endpointPath` keeps the OpenAI `/v1/audio/transcriptions` path.
 
 ## Segmentation
 

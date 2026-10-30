@@ -2040,6 +2040,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': '無法儲存金鑰',
   'settings.voice.page.field.serverUrl': '伺服器 URL',
   'settings.voice.page.field.serverUrlHint': 'OpenAI 相容 TTS 伺服器的基礎 URL',
+  'settings.voice.page.field.endpointPath': '端點路徑',
+  'settings.voice.page.field.endpointPathHint': '伺服器上的資源路徑；請求與回應仍維持 OpenAI 相容',
   'settings.voice.page.field.model': '模型',
   'settings.voice.page.field.voice': '聲音',
   'settings.voice.page.field.voiceIdentifierHint': '伺服器支援的聲音識別碼',

@@ -256,6 +256,9 @@
     "sttServerUrl": {
       "scope": "instance"
     },
+    "sttEndpointPath": {
+      "scope": "instance"
+    },
     "sttModel": {
       "scope": "instance"
     },

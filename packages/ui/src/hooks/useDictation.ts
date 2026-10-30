@@ -49,7 +49,7 @@ const DURATION_TICK_MS = 1000;
 const toError = (value: unknown): Error =>
     value instanceof Error ? value : new Error(String(value));
 
-const getDictationStartOptions = (): DictationStartOptions => {
+export const getDictationStartOptions = (): DictationStartOptions => {
     const state = useConfigStore.getState();
     const language = state.sttLanguage?.trim();
     const correct = state.sttCorrectTranscript ? { correct: true } : {};
@@ -61,6 +61,7 @@ const getDictationStartOptions = (): DictationStartOptions => {
             openaiCompatible: {
                 baseUrl: state.sttServerUrl,
                 model: state.sttModel,
+                endpointPath: state.sttEndpointPath || undefined,
             },
         };
     }

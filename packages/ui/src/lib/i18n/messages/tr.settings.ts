@@ -2077,6 +2077,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': 'Anahtar kaydedilemedi',
   'settings.voice.page.field.serverUrl': 'Sunucu URL\'si',
   'settings.voice.page.field.serverUrlHint': 'OpenAI uyumlu TTS sunucusunun temel URL\'si',
+  'settings.voice.page.field.endpointPath': 'Uç nokta yolu',
+  'settings.voice.page.field.endpointPathHint': 'Sunucudaki kaynağın yolu; istek ve yanıt OpenAI uyumlu kalır',
   'settings.voice.page.field.model': 'Model',
   'settings.voice.page.field.voice': 'Ses',
   'settings.voice.page.field.voiceIdentifierHint': 'Sunucunun desteklediği ses tanımlayıcısı',

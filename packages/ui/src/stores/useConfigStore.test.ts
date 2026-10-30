@@ -4195,3 +4195,29 @@ describe('getModelMetadata descriptive fallback', () => {
     }
   });
 });
+
+describe('voice endpoint path settings', () => {
+  beforeEach(() => {
+    storage = new Map<string, string>();
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: makeStorage() });
+  });
+
+  test('defaults both endpoint paths to empty', () => {
+    expect(useConfigStore.getState().openaiCompatibleTtsEndpointPath).toBe('');
+    expect(useConfigStore.getState().sttEndpointPath).toBe('');
+  });
+
+  test('keeps the tts endpoint path in local storage', () => {
+    useConfigStore.getState().setOpenaiCompatibleTtsEndpointPath('/custom/speech');
+
+    expect(useConfigStore.getState().openaiCompatibleTtsEndpointPath).toBe('/custom/speech');
+    expect(localStorage.getItem('openaiCompatibleTtsEndpointPath')).toBe('/custom/speech');
+  });
+
+  test('keeps the stt endpoint path in local storage', () => {
+    useConfigStore.getState().setSttEndpointPath('/speech_to_text');
+
+    expect(useConfigStore.getState().sttEndpointPath).toBe('/speech_to_text');
+    expect(localStorage.getItem('sttEndpointPath')).toBe('/speech_to_text');
+  });
+});

@@ -46,6 +46,7 @@ const ADD_PROVIDER_SENTINEL = "__add_provider__";
 const GIT_UTILITY_PROVIDER_ID = "zen";
 const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 const PROVIDER_CONFIG_REFRESH_CONCURRENCY = 4;
+
 const PROVIDERS_RETRY_SOURCE = "loadProviders:retryAfterFailure";
 const PROVIDERS_RETRY_DELAY_MS = 3000;
 
@@ -62,6 +63,7 @@ interface OpenChamberDefaults {
     dictationAutoSend?: boolean;
     sttProvider?: 'local' | 'openai-compatible';
     sttServerUrl?: string;
+    sttEndpointPath?: string;
     sttModel?: string;
     sttLocalModel?: string;
     sttLanguage?: string;
@@ -150,6 +152,7 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         dictationAutoSend: data.dictationAutoSend,
         sttProvider: data.sttProvider,
         sttServerUrl: data.sttServerUrl,
+        sttEndpointPath: data.sttEndpointPath,
         sttModel: data.sttModel,
         sttLocalModel: data.sttLocalModel,
         sttLanguage: data.sttLanguage,
@@ -1522,12 +1525,16 @@ interface ConfigStore {
     openaiCompatibleUrl: string;
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
+    /** Optional resource path for the OpenAI-compatible speech endpoint. */
+    openaiCompatibleTtsEndpointPath: string;
     // STT (dictation) settings
     dictationEnabled: boolean;
     dictationAutoSend: boolean;
     sttProvider: 'local' | 'openai-compatible';
     sttServerUrl: string;
     sttModel: string;
+    /** Optional resource path for the OpenAI-compatible transcription endpoint. */
+    sttEndpointPath: string;
     sttLocalModel: string;
     sttLanguage: string;
     sttCorrectTranscript: boolean;
@@ -1559,11 +1566,13 @@ interface ConfigStore {
     setOpenaiCompatibleUrl: (url: string) => void;
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
+    setOpenaiCompatibleTtsEndpointPath: (path: string) => void;
     setDictationEnabled: (enabled: boolean) => void;
     setDictationAutoSend: (enabled: boolean) => void;
     setSttProvider: (provider: 'local' | 'openai-compatible') => void;
     setSttServerUrl: (url: string) => void;
     setSttModel: (model: string) => void;
+    setSttEndpointPath: (path: string) => void;
     setSttLocalModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
     setSttCorrectTranscript: (enabled: boolean) => void;
@@ -1930,6 +1939,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'kokoro';
                 })(),
+                openaiCompatibleTtsEndpointPath: getSafeStorage().getItem('openaiCompatibleTtsEndpointPath') ?? '',
                 // Voice input (dictation) master toggle - default enabled
                 dictationEnabled: (() => {
                     if (typeof window !== 'undefined') {
@@ -1964,6 +1974,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'deepdml/faster-whisper-large-v3-turbo-ct2';
                 })(),
+                sttEndpointPath: getSafeStorage().getItem('sttEndpointPath') ?? '',
                 sttLocalModel: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('sttLocalModel');
@@ -2843,6 +2854,7 @@ export const useConfigStore = create<ConfigStore>()(
                             sttProvider: defaults.sttProvider ?? state.sttProvider,
                             sttServerUrl: defaults.sttServerUrl ?? state.sttServerUrl,
                             sttModel: defaults.sttModel ?? state.sttModel,
+                            sttEndpointPath: defaults.sttEndpointPath ?? state.sttEndpointPath,
                             sttLocalModel: defaults.sttLocalModel ?? state.sttLocalModel,
                             sttLanguage: defaults.sttLanguage ?? state.sttLanguage,
                             sttCorrectTranscript: defaults.sttCorrectTranscript ?? state.sttCorrectTranscript,
@@ -4022,6 +4034,11 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
+                setOpenaiCompatibleTtsEndpointPath: (path: string) => {
+                    set({ openaiCompatibleTtsEndpointPath: path });
+                    getSafeStorage().setItem('openaiCompatibleTtsEndpointPath', path);
+                },
+
                 setDictationEnabled: (enabled: boolean) => {
                     set({ dictationEnabled: enabled });
                     if (typeof window !== 'undefined') {
@@ -4065,6 +4082,12 @@ export const useConfigStore = create<ConfigStore>()(
                         localStorage.setItem('sttModel', model);
                     }
                     updateDesktopSettings({ sttModel: model }).catch(() => {});
+                },
+
+                setSttEndpointPath: (path: string) => {
+                    set({ sttEndpointPath: path });
+                    getSafeStorage().setItem('sttEndpointPath', path);
+                    updateDesktopSettings({ sttEndpointPath: path }).catch(() => {});
                 },
 
                 setSttLocalModel: (model: string) => {

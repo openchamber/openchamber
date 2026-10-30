@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 
-import { runChunkedTTSPlayback, splitSentencesForTTS } from './useServerTTS';
+import { buildTTSRequestBody, runChunkedTTSPlayback, splitSentencesForTTS } from './useServerTTS';
+
+describe('buildTTSRequestBody', () => {
+  const config = { currentProviderId: 'provider', currentModelId: 'model' };
+
+  test('adds the endpoint path only when one is given', () => {
+    expect(buildTTSRequestBody('Hello', { baseURL: 'http://127.0.0.1:9/v1' }, config).endpointPath).toBeUndefined();
+    expect(buildTTSRequestBody('Hello', { baseURL: 'http://127.0.0.1:9/v1', endpointPath: '/custom/speech' }, config).endpointPath)
+      .toBe('/custom/speech');
+  });
+});
 
 /** Minimum characters a standalone chunk must have; shorter fragments merge into neighbors. */
 const MIN_CHUNK_LENGTH = 40;

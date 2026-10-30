@@ -2176,6 +2176,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': 'تعذّر حفظ المفتاح',
   'settings.voice.page.field.serverUrl': 'عنوان URL للخادم',
   'settings.voice.page.field.serverUrlHint': 'عنوان URL الأساسي لخادم TTS المتوافق مع OpenAI',
+  'settings.voice.page.field.endpointPath': 'مسار نقطة النهاية',
+  'settings.voice.page.field.endpointPathHint': 'مسار المورد على الخادم؛ يبقى الطلب والاستجابة متوافقين مع OpenAI',
   'settings.voice.page.field.model': 'النموذج',
   'settings.voice.page.field.voice': 'الصوت',
   'settings.voice.page.field.voiceIdentifierHint': 'معرّف الصوت الذي يدعمه الخادم',

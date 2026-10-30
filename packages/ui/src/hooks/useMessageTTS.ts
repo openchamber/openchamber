@@ -92,6 +92,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
+    const openaiCompatibleTtsEndpointPath = useConfigStore((state) => state.openaiCompatibleTtsEndpointPath);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const autoReadAloudEnabled = useConfigStore((state) => state.autoReadAloudEnabled);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
@@ -167,6 +168,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                 const voice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
                 const baseURL = voiceProvider === 'openai-compatible' ? openaiCompatibleUrl : undefined;
                 const model = voiceProvider === 'openai-compatible' ? openaiCompatibleTtsModel : undefined;
+                const endpointPath = voiceProvider === 'openai-compatible' ? openaiCompatibleTtsEndpointPath : undefined;
                 await speakServerTTS(textToSpeak, {
                     voice,
                     model,
@@ -176,6 +178,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     summarize: false,
                     baseURL,
                     beforePlayback,
+                    endpointPath,
                     onEnd: finish,
                     onError: finish,
                 });
@@ -237,6 +240,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
         openaiCompatibleVoice,
         openaiCompatibleUrl,
         openaiCompatibleTtsModel,
+        openaiCompatibleTtsEndpointPath,
         isServerTTSAvailable,
         isSayTTSAvailable,
         ttsInputMode,

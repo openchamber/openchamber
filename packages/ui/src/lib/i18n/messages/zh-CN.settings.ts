@@ -2155,6 +2155,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': '无法保存密钥',
   'settings.voice.page.field.serverUrl': '服务器 URL',
   'settings.voice.page.field.serverUrlHint': 'OpenAI 兼容 TTS 服务器的基础 URL',
+  'settings.voice.page.field.endpointPath': '端点路径',
+  'settings.voice.page.field.endpointPathHint': '服务器上的资源路径；请求和响应仍保持 OpenAI 兼容',
   'settings.voice.page.field.model': '模型',
   'settings.voice.page.field.voice': '声音',
   'settings.voice.page.field.voiceIdentifierHint': '服务器支持的声音标识符',

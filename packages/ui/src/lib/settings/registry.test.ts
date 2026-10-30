@@ -273,3 +273,11 @@ describe('settings registry', () => {
     for (const key of DESKTOP_SHELL_KEYS) expect(snapshot.fields[key].owner).toBe('desktop-shell');
   });
 });
+
+describe('custom stt endpoint path setting', () => {
+  test('is an instance setting that trims and caps the path', () => {
+    expect(SETTINGS_REGISTRY.sttEndpointPath.scope).toBe('instance');
+    expect(parseSettingsDocument({ sttEndpointPath: ' /speech_to_text ' })).toEqual({ sttEndpointPath: '/speech_to_text' });
+    expect(parseSettingsDocument({ sttEndpointPath: `/${'a'.repeat(1024)}` })).toEqual({});
+  });
+});

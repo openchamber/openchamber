@@ -2178,6 +2178,8 @@ export const settingsDict = {
   'settings.voice.page.toast.apiKeySaveFailed': 'De sleutel kon niet worden opgeslagen',
   'settings.voice.page.field.serverUrl': 'Server-URL',
   'settings.voice.page.field.serverUrlHint': 'Basis-URL van de OpenAI-compatibele TTS-server',
+  'settings.voice.page.field.endpointPath': 'Eindpuntpad',
+  'settings.voice.page.field.endpointPathHint': 'Pad naar de bron op de server; verzoek en antwoord blijven OpenAI-compatibel',
   'settings.voice.page.field.model': 'Model',
   'settings.voice.page.field.voice': 'Stem',
   'settings.voice.page.field.voiceIdentifierHint': 'Stemidentifier die de server ondersteunt',
