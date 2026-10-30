@@ -14,6 +14,7 @@ import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { ensureLineTerminalPunctuation, sanitizeForTTS } from '@/lib/voice/summarize';
 import { requestSmallModel } from '@/lib/smallModelRequest';
 import {
+    createReadingPlaybackGuard,
     finishReading,
     isCurrentReading,
     startReading,
@@ -53,6 +54,8 @@ async function summarizeForSpeech(
 }
 
 export interface PlayMessageTTSOptions {
+    /** Rechecked immediately before the first audio starts, after preparation. */
+    canStart?: () => boolean;
     /** False reads the text as-is even when the voice settings ask for a summary. */
     summarize?: boolean;
 }
@@ -133,6 +136,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
         const token = startReading(key, stopPlayback);
         ownTokenRef.current = token;
         const finish = () => finishReading(token);
+        const beforePlayback = createReadingPlaybackGuard(token, options?.canStart);
         
         try {
             // Summarized mode: replace long replies with a short spoken-prose
@@ -171,6 +175,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     volume: speechVolume,
                     summarize: false,
                     baseURL,
+                    beforePlayback,
                     onEnd: finish,
                     onError: finish,
                 });
@@ -180,6 +185,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     speakerId: localTtsVoiceId,
                     speed: speechRate,
                     language: ttsFollowTextLanguage ? 'auto' : undefined,
+                    beforePlayback,
                     onEnd: finish,
                     onError: finish,
                 });
@@ -189,6 +195,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                     voice: sayVoice,
                     rate: wordsPerMinute,
                     language: ttsFollowTextLanguage ? 'auto' : undefined,
+                    beforePlayback,
                     onEnd: finish,
                     onError: finish,
                 });
@@ -206,10 +213,15 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                         pitch: speechPitch,
                         volume: speechVolume,
                         voiceName: browserVoice || undefined,
+                        beforePlayback,
                     }
                 );
             }
         } catch (err) {
+            if (err instanceof Error && err.name === 'AbortError') {
+                finish();
+                return;
+            }
             console.error('[useMessageTTS] Playback error:', err);
             finish();
         }

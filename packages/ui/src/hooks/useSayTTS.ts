@@ -101,6 +101,7 @@ export interface UseSayTTSReturn {
 }
 
 interface SpeakOptions {
+  beforePlayback?: () => Promise<void>;
   /** Voice to use (defaults to Samantha) */
   voice?: string;
   /** Speech rate in words per minute (defaults to 200) */
@@ -219,7 +220,8 @@ export function useSayTTS(options: UseSayTTSOptions = {}): UseSayTTSReturn {
     
     try {
       // Create abort controller for this request
-      abortControllerRef.current = new AbortController();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
       
       // Fetch audio from server
       const response = await runtimeFetch('/api/tts/say/speak', {
@@ -233,7 +235,7 @@ export function useSayTTS(options: UseSayTTSOptions = {}): UseSayTTSReturn {
           rate: options?.rate || 200,
           language: options?.language,
         }),
-        signal: abortControllerRef.current.signal,
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -259,6 +261,9 @@ export function useSayTTS(options: UseSayTTSOptions = {}): UseSayTTSReturn {
       console.log('[useSayTTS] Decoding audio data...');
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
       
+      await options?.beforePlayback?.();
+      if (controller.signal.aborted) return;
+
       // Create source node
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
