@@ -1,4 +1,6 @@
-import type { Occasion } from '@/lib/easter-eggs/calendar';
+import type { Celebration } from '@/lib/easter-eggs/calendar';
+
+import type { HolidayOrnament } from './holidayOrnaments';
 
 /** What is being celebrated. A merge is worth more than a push, so it fires more volleys. */
 export type CelebrationKind = 'push' | 'merge' | 'deletion';
@@ -27,10 +29,15 @@ export interface FireworksBurst {
 }
 
 export interface FireworksShow {
-  /** Confetti every day, a firework salute at New Year, ghosts tossing candy on Halloween. */
-  particle: 'confetti' | 'salute' | 'ghost';
+  /**
+   * Confetti every day, a firework salute at New Year, ghosts tossing candy on
+   * Halloween, drawn things (hearts, flags, leaves) on the other holidays.
+   */
+  particle: 'confetti' | 'salute' | 'ghost' | 'holiday';
   /** Every colour of the show: confetti mixes them within one burst. */
   palette: readonly string[];
+  /** The drawn things a holiday burst throws, repeated in this order. */
+  ornaments: readonly HolidayOrnament[];
   bursts: readonly FireworksBurst[];
 }
 
@@ -48,6 +55,27 @@ const PALETTES = {
   candy: ['--status-warning', '--primary-base', '--status-error'],
 } as const;
 
+// The order repeats through every burst, so an ornament listed twice is thrown twice as often.
+const HOLIDAY_ORNAMENTS = {
+  valentines: ['heart'],
+  stPatricks: ['clover'],
+  lunarNewYear: ['lantern', 'envelope'],
+  eidAlFitr: ['crescent', 'fanous', 'goldStar', 'crescent', 'fanous', 'crescent'],
+  winterHolidays: ['tree', 'bauble', 'gift', 'bauble', 'dreidel', 'bauble'],
+  ukraineIndependence: ['uaFlag', 'sunflower', 'uaStar'],
+  usIndependence: ['usFlag', 'usStar', 'usStar'],
+  thanksgiving: ['turkey', 'pie', 'mapleLeaf', 'mapleLeaf'],
+  spring: ['flower'],
+  summer: ['sunglasses', 'beachUmbrella', 'cocktail'],
+  autumn: ['mapleLeaf', 'mapleLeaf', 'rainUmbrella', 'mapleLeaf', 'mapleLeaf', 'book'],
+  winter: ['snowflake'],
+} satisfies Record<Exclude<Celebration, 'halloween' | 'newYear'>, readonly HolidayOrnament[]>;
+
+// Hearts and flowers read at confetti size; everything else has details that need more room.
+const CONFETTI_SIZED: ReadonlySet<HolidayOrnament> = new Set(['heart', 'flower']);
+
+export const holidayOrnamentScale = (ornament: HolidayOrnament): number => (CONFETTI_SIZED.has(ornament) ? 1 : 1.5);
+
 const VOLLEY_GAP_MS = 450;
 const VOLLEY_SHIFT_X = [0, -9, 9, -4, 4] as const;
 const MAX_VOLLEYS = VOLLEY_SHIFT_X.length;
@@ -61,11 +89,12 @@ const ORIGIN_RADIUS = 140;
 
 export const fireworksShowFor = (
   { kind = 'push', volleys }: CelebrationOptions,
-  occasion: Occasion | null,
+  celebration: Celebration | null,
   origin: BurstOrigin | null = null,
 ): FireworksShow => {
-  const newYear = occasion === 'newYearsEve' || occasion === 'newYearsDay';
-  const particle = occasion === 'halloween' ? 'ghost' : newYear ? 'salute' : 'confetti';
+  const newYear = celebration === 'newYear';
+  const ornaments = celebration && celebration !== 'halloween' && celebration !== 'newYear' ? HOLIDAY_ORNAMENTS[celebration] : [];
+  const particle = celebration === 'halloween' ? 'ghost' : newYear ? 'salute' : ornaments.length > 0 ? 'holiday' : 'confetti';
   const palette = particle === 'ghost'
     ? PALETTES.candy
     : newYear ? PALETTES.newYear : kind === 'deletion' ? PALETTES.deletion : PALETTES.default;
@@ -79,10 +108,11 @@ export const fireworksShowFor = (
     delay: burst.delay + volley * VOLLEY_GAP_MS,
     colorVar: palette[(index + volley) % palette.length],
   }))).flat();
-  if (!origin) return { particle, palette, bursts };
+  if (!origin) return { particle, palette, ornaments, bursts };
   return {
     particle,
     palette,
+    ornaments,
     bursts: [
       { id: 'origin', x: origin.x, y: origin.y, delay: 0, radius: ORIGIN_RADIUS, colorVar: palette[0] },
       ...bursts.map((burst) => ({ ...burst, delay: burst.delay + AFTER_ORIGIN_MS })),

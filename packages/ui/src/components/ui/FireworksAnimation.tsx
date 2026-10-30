@@ -1,6 +1,7 @@
 import * as React from 'react';
 
-import type { FireworksBurst, FireworksShow } from './fireworksShows';
+import { holidayOrnamentScale, type FireworksBurst, type FireworksShow } from './fireworksShows';
+import { HolidayOrnamentIcon, type HolidayOrnament } from './holidayOrnaments';
 import '@/styles/fireworks.css';
 
 // New Year: a salute of streaks with glowing heads that droop as they fade.
@@ -23,6 +24,10 @@ const GHOST_ANGLES = [-155, -115, -65, -25].map((degrees) => (degrees * Math.PI)
 const CANDY_COUNT = 6;
 const GHOST_DURATION_MS = 1900;
 const CANDY_DURATION_MS = 1300;
+
+// Other holidays: drawn things thrown like confetti, turning slower so they stay readable.
+const HOLIDAY_COUNT = 18;
+const HOLIDAY_DURATION_MS = 2100;
 
 type BurstStyle = React.CSSProperties & Record<`--${string}`, string>;
 
@@ -55,6 +60,21 @@ const CONFETTI_PIECES = Array.from({ length: CONFETTI_COUNT }, (_, index) => {
   };
 });
 const CANDY_VECTORS = ringVectors(CANDY_COUNT, 40);
+
+const HOLIDAY_PIECES = Array.from({ length: HOLIDAY_COUNT }, (_, index) => {
+  const angle = -Math.PI / 2 + (noise(index + 1) - 0.5) * Math.PI * 1.6;
+  const speed = 0.55 + noise(index + 7) * 0.6;
+  return {
+    x: Math.cos(angle) * speed,
+    y: Math.sin(angle) * speed,
+    size: Math.round(12 + noise(index + 3) * 8),
+    spin: Math.round((noise(index + 13) - 0.5) * 360),
+    flip: Math.round(noise(index + 19) * 360),
+    fall: Math.round(140 + noise(index + 23) * 120),
+    drift: Math.round((noise(index + 29) - 0.5) * 60),
+    delay: Math.floor(noise(index + 31) * 90),
+  };
+});
 
 const particleStyle = (x: number, y: number, delay: number, extra: BurstStyle = {}): BurstStyle => ({
   '--translate-x': `${x}px`,
@@ -122,6 +142,29 @@ const ConfettiBurst = ({ burst, palette }: { burst: FireworksBurst; palette: rea
   );
 };
 
+const HolidayBurst = ({ burst, ornaments, burstIndex }: { burst: FireworksBurst; ornaments: readonly HolidayOrnament[]; burstIndex: number }) => (
+  <>
+    {HOLIDAY_PIECES.map((piece, index) => {
+      const ornament = ornaments[index % ornaments.length];
+      return (
+        <span
+          key={index}
+          className="firework-holiday"
+          style={particleStyle(piece.x * burst.radius, piece.y * burst.radius, piece.delay, {
+            '--piece-size': `${Math.round(piece.size * holidayOrnamentScale(ornament))}px`,
+            '--spin': `${piece.spin}deg`,
+            '--flip': `${piece.flip}deg`,
+            '--fall': `${piece.fall}px`,
+            '--drift': `${piece.drift}px`,
+          })}
+        >
+          <HolidayOrnamentIcon ornament={ornament} variant={index + burstIndex} />
+        </span>
+      );
+    })}
+  </>
+);
+
 const GhostBurst = ({ burst }: { burst: FireworksBurst }) => (
   <>
     {GHOST_ANGLES.map((angle, index) => (
@@ -155,8 +198,8 @@ export const FireworksAnimation: React.FC<{ isActive: boolean; burstKey: number;
   }
 
   return (
-    <div className="fireworks-overlay pointer-events-none" aria-hidden="true" data-burst-key={burstKey}>
-      {show.bursts.map((burst) => {
+    <div className="fireworks-overlay pointer-events-none" aria-hidden="true" data-burst-key={burstKey} data-particle={show.particle}>
+      {show.bursts.map((burst, burstIndex) => {
         const burstStyle: BurstStyle = {
           '--burst-delay': `${burst.delay}ms`,
           '--burst-x': `${burst.x}%`,
@@ -166,11 +209,13 @@ export const FireworksAnimation: React.FC<{ isActive: boolean; burstKey: number;
           '--confetti-duration': `${CONFETTI_DURATION_MS}ms`,
           '--ghost-duration': `${GHOST_DURATION_MS}ms`,
           '--candy-duration': `${CANDY_DURATION_MS}ms`,
+          '--holiday-duration': `${HOLIDAY_DURATION_MS}ms`,
         };
 
         return (
           <div key={`${burst.id}-${burstKey}`} className="firework-burst" style={burstStyle}>
-            {show.particle === 'ghost' ? <GhostBurst burst={burst} />
+            {show.particle === 'holiday' ? <HolidayBurst burst={burst} ornaments={show.ornaments} burstIndex={burstIndex} />
+              : show.particle === 'ghost' ? <GhostBurst burst={burst} />
               : show.particle === 'salute' ? <SaluteBurst burst={burst} />
                 : <ConfettiBurst burst={burst} palette={show.palette} />}
           </div>

@@ -11,6 +11,11 @@
   mix-blend-mode: screen;
 }
 
+/* Screen blending turns dark paint transparent: sunglasses would lose their lenses. */
+.dark .fireworks-overlay[data-particle='holiday'] {
+  mix-blend-mode: normal;
+}
+
 .fireworks-overlay[data-muted="true"] {
   display: none;
 }
@@ -60,6 +65,51 @@
         calc(-50% + var(--translate-y, 0px) + var(--fall, 160px))
       )
       rotate(var(--spin, 0deg)) rotateX(var(--flip, 0deg)) scale(1);
+  }
+}
+
+/* Other holidays: drawn things thrown like confetti. They turn about half as
+   far, and around the vertical axis, so a flag or a tree stays recognisable. */
+.firework-holiday {
+  position: absolute;
+  width: var(--piece-size, 16px);
+  height: var(--piece-size, 16px);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.5);
+  animation: holiday-fly var(--holiday-duration, 2100ms) forwards;
+  animation-delay: calc(var(--burst-delay, 0ms) + var(--particle-delay, 0ms));
+}
+
+.firework-holiday svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes holiday-fly {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(0deg) rotateY(0deg) scale(0.5);
+    animation-timing-function: cubic-bezier(0.1, 0.75, 0.3, 1);
+  }
+  6% {
+    opacity: 1;
+  }
+  35% {
+    transform: translate(calc(-50% + var(--translate-x, 0px)), calc(-50% + var(--translate-y, 0px)))
+      rotate(calc(var(--spin, 0deg) * 0.35)) rotateY(calc(var(--flip, 0deg) * 0.35)) scale(1);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.8, 0.6);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(
+        calc(-50% + var(--translate-x, 0px) + var(--drift, 0px)),
+        calc(-50% + var(--translate-y, 0px) + var(--fall, 160px))
+      )
+      rotate(var(--spin, 0deg)) rotateY(var(--flip, 0deg)) scale(1);
   }
 }
 
