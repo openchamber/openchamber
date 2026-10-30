@@ -140,7 +140,10 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       deviceClass: normalizeDeviceClass(options.deviceClass),
       platform,
       arch,
-      channel: 'stable',
+      // A Canary build (2.5.4-canary.20261030.123) checks in as such, so the
+      // usage counts tell the channels apart. Updates themselves come from
+      // the desktop updater, which reads the channel the person chose.
+      channel: /-canary\./.test(currentVersion) ? 'canary' : 'stable',
       currentVersion,
       installId: reportUsage ? (options.installId || getOrCreateInstallId(appType)) : undefined,
       instanceMode: options.instanceMode || 'unknown',

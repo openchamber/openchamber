@@ -10,7 +10,9 @@ import { Button } from '@/components/ui/button';
 import { AboutLogo } from '@/components/ui/AboutLogo';
 import { Icon } from "@/components/icon/Icon";
 import { Spinner } from '@/components/ui/spinner';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
+import { getDesktopUpdateChannel, setDesktopUpdateChannel } from '@/lib/desktop';
+import { formatCanaryBuildDate, parseCanaryVersion, type UpdateChannel } from '@/lib/updateChannel';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
@@ -19,6 +21,7 @@ import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
 import {
+  SettingsChipGroup,
   SettingsSection,
   SETTINGS_BRAND_TITLE_CLASS,
   SETTINGS_FIELD_LABEL_CLASS,
@@ -216,9 +219,35 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       runtimeType: updateStore.runtimeType,
     };
 
-  const currentVersion = openChamberVersion || update.info?.currentVersion || 'unknown';
-  const appVersion = desktopAppVersion || updateStore.info?.currentVersion || 'unknown';
+  // A Canary build reads as the release it leads to and the day it was made:
+  // "2.5.4 Canary · 30 Oct" for 2.5.4-canary.20261030.123.
+  const describeVersion = (version: string) => {
+    const canary = parseCanaryVersion(version);
+    return canary
+      ? t('settings.openchamber.about.canaryVersion', {
+        version: canary.release,
+        date: formatCanaryBuildDate(canary.builtOn, getCurrentIntlLocale()),
+      })
+      : version;
+  };
+  const currentVersion = describeVersion(openChamberVersion || update.info?.currentVersion || 'unknown');
+  const appVersion = describeVersion(desktopAppVersion || updateStore.info?.currentVersion || 'unknown');
   const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
+
+  // The desktop app's update channel. Picking Canary checks at once, so the
+  // update to the Canary build shows up where every update does.
+  const isDesktopApp = updateStore.runtimeType === 'desktop';
+  const [updateChannel, setUpdateChannel] = React.useState<UpdateChannel | null>(null);
+  React.useEffect(() => {
+    if (!isDesktopApp) return;
+    let cancelled = false;
+    void getDesktopUpdateChannel().then((channel) => {
+      if (!cancelled) setUpdateChannel(channel);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDesktopApp]);
   const openCode = useOpenCodeUpgrade(t('opencodeUpdate.toast.failed.description'));
   const openCodeVersion = openCode.status?.currentVersion ?? null;
   const openCodeUpdateVersion = openCode.phase.kind === 'installed' ? null : openCode.status?.availableVersion ?? null;
@@ -228,13 +257,13 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   // the server the phone is connected to (or the desktop app serving it),
   // never the phone app itself, which updates through its store.
   const serverUpdateLabel = (info: UpdateInfo | null) => {
-    const version = info?.version || '';
+    const version = describeVersion(info?.version || '');
     return info?.packageManager === 'electron'
       ? t('settings.openchamber.about.actions.updateDesktopToVersion', { version })
       : t('settings.openchamber.about.actions.updateServerToVersion', { version });
   };
   const openChamberUpdateLabel = (() => {
-    const version = update.info?.version || '';
+    const version = describeVersion(update.info?.version || '');
     if (isNativeApp) return serverUpdateLabel(update.info);
     return isDesktopRemote
       ? t('settings.openchamber.about.actions.updateAppToVersion', { version })
@@ -243,6 +272,39 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   const isInstallBlocked = (info: UpdateInfo | null) => Boolean(info?.installBlocked);
   const installBlocked = update.available && isInstallBlocked(update.info);
   const remoteHostInstallBlocked = Boolean(remoteHostUpdate?.available && isInstallBlocked(remoteHostUpdate.info));
+
+  const chooseUpdateChannel = async (channel: UpdateChannel) => {
+    if (channel === updateChannel) return;
+    const previous = updateChannel;
+    setUpdateChannel(channel);
+    const stored = await setDesktopUpdateChannel(channel);
+    if (stored !== channel) {
+      setUpdateChannel(previous);
+      toast.error(t('settings.openchamber.about.toast.updateChannelNotSaved'));
+      return;
+    }
+    void update.checkForUpdates();
+  };
+  const updateChannelControl = updateChannel && (
+    <SettingsChipGroup
+      value={updateChannel}
+      onChange={(channel) => void chooseUpdateChannel(channel)}
+      aria-label={t('settings.openchamber.about.field.updateChannel')}
+      className="flex-nowrap"
+      options={[
+        {
+          value: 'stable',
+          label: t('settings.openchamber.about.option.updateChannel.stable'),
+          tooltip: t('settings.openchamber.about.option.updateChannel.stableHint'),
+        },
+        {
+          value: 'canary',
+          label: t('settings.openchamber.about.option.updateChannel.canary'),
+          tooltip: t('settings.openchamber.about.option.updateChannel.canaryHint'),
+        },
+      ]}
+    />
+  );
 
   const checkAll = () => {
     void update.checkForUpdates();
@@ -457,6 +519,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <InstanceServiceUrls />
         </div>
 
+        {updateChannelControl && <div className="flex justify-center">{updateChannelControl}</div>}
+
         <div className="flex justify-center">
           {!update.available && !update.error && (
             <Button
@@ -592,7 +656,14 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
             <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.openCodeVersion')}</span>
             <span className="typography-meta text-muted-foreground font-mono">{openCodeVersion || t('settings.openchamber.about.state.unknown')}</span>
           </div>
-          
+
+          {updateChannelControl && (
+            <div className="flex shrink-0 flex-col gap-1">
+              <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.updateChannel')}</span>
+              {updateChannelControl}
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             {/* The action leads; its outcome reads after it. */}
             <Button size="sm"

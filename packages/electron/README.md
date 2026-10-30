@@ -191,8 +191,8 @@ IPC results if its endpoint changes while the read is pending.
 | `scripts/opencode-cli-version.mjs` | Reads the pinned OpenCode CLI version and parses `opencode --version` output |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/{entry,main,early-startup}.mjs` for packaging |
 | `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
-| `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing |
-| `resources/` | Packaged web assets, icons, macOS entitlements, and the NSIS include for the Windows installer. Every file in `resources/icons` is written by `bun run brand:generate` (`scripts/brand`); do not edit them by hand |
+| `scripts/package.mjs` | Runs `electron-builder`, with unsigned Windows builds when signing env is missing. With `OPENCHAMBER_DESKTOP_CHANNEL=canary` it passes the configuration from `scripts/canary-build-config.mjs`, which swaps in the Canary icons |
+| `resources/` | Packaged web assets, icons, macOS entitlements, and the NSIS include for the Windows installer. Every file in `resources/icons` is written by `bun run brand:generate` (`scripts/brand`); do not edit them by hand. `resources/icons-canary` holds Canary's: its `AppIcon.icon` is hand-made, the rest is generated from it |
 
 ## Development
 
@@ -460,6 +460,29 @@ Add new native capabilities in this order:
 2. Add the real command handling in `main.mjs` under `openchamber:invoke`.
 3. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities. A command added to `COMMANDS_SAFE_FOR_REMOTE` takes input from, and answers, another server's page: parse what it stores and strip credentials from what it returns (`remote-page-policy.mjs`). Splash colours, for example, end up in the trusted splash page, and `desktop_hosts_get` hands remote pages the host list without tokens or auth headers.
 4. Keep shared UI runtime contracts in `packages/ui` and server/runtime APIs in `packages/web` when the behavior is not inherently native.
+
+## Update channels and Canary
+
+The desktop app updates from one of two channels, chosen under Settings → About → Updates and stored as `desktopUpdateChannel` in `settings.json`:
+
+- **Stable**: the latest full release on GitHub (the `github` provider of electron-updater).
+- **Canary**: the nightly build of `main`. `.github/workflows/canary.yml` builds it when `main` moved and replaces the files of one pre-release tagged `canary`; the app reads that pre-release's manifests directly (the `generic` provider on `releases/download/canary/`). Stable never sees them, because the GitHub provider reads only the latest full release.
+
+Picking Canary checks at once and offers the Canary build as an ordinary update; after it installs, the app is Canary and keeps updating from Canary. Picking Stable from a Canary build offers the latest release, which is older: `applyUpdaterChannel` (`main.mjs`) sets `allowDowngrade` for exactly that case, and `updater-check.mjs` takes electron-updater's verdict instead of comparing versions itself. A release build never downgrades. On a Linux .deb or .rpm install the downgrade tells the package manager the older package is wanted (`linux-package-install.mjs`), or it would keep the newer one. Every check re-reads the stored channel, so a switch needs no restart; a switch during a running check waits for that check first, because electron-updater answers a running check for the feed it started on.
+
+A Canary build is the release app with other icons: same name, bundle id, install location, profile and `openchamber://` registration, so an update replaces one with the other in place. `OPENCHAMBER_DESKTOP_CHANNEL=canary` while packaging makes `scripts/package.mjs` apply `scripts/canary-build-config.mjs`, which only swaps `resources/icons` for `resources/icons-canary` (Dock and taskbar icon, menu bar and tray glyphs). Its version is the release it leads to with a `canary` pre-release part, `2.5.4-canary.20261030.123` on a `main` at 2.5.3: above the latest release, so Stable installs update into it, and below the next one; the workflow sets it in every workspace. A remote host reached over SSH gets the release the Canary was built on (`OPENCHAMBER_CANARY_RELEASE_VERSION`, compiled in by `scripts/bundle-main.mjs`), because Canary versions are not on npm.
+
+### Why a channel switch and not a separate Canary app
+
+A separate app (own name, id, profile) was built first. It meant two installs, two Dock icons and two sets of windows for one set of data, and most of the identity code existed only to keep them apart. One app that moves between channels is what people know from browsers' release channels, and going back is one update.
+
+### Why Stable after Canary downgrades at once and not at the next release
+
+Waiting for the next release would leave the person on a build they asked to leave for up to a few days. The downgrade is offered right away, knowing that a Canary build may have written settings or data in a form the older release does not read yet.
+
+### Why one rolling pre-release and not a release per night
+
+The download link stays the same, the releases page does not fill up with nightly entries, and the update feed is one fixed address.
 
 ## Logs And Data
 

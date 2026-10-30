@@ -99,7 +99,7 @@ Load `.agents/skills/communication-style/SKILL.md` and run its pattern scan over
 Determine the base and read everything through `HEAD`:
 
 ```bash
-BASE=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+BASE=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
 git log --oneline "$BASE"..HEAD
 git diff --stat "$BASE"..HEAD
 ```

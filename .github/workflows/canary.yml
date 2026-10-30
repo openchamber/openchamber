@@ -1,0 +1,493 @@
+name: Canary
+
+# OpenChamber Canary: the nightly desktop build of main. It is the release app
+# with the Canary icons (OPENCHAMBER_DESKTOP_CHANNEL=canary) and a version
+# ahead of the latest release, 2.5.4-canary.20261030.123, so an app on the
+# Canary channel (Settings → About) updates into it, and one that goes back to
+# Stable updates into the latest release. It is published to one pre-release,
+# tagged `canary`, whose files are replaced on every run; the Stable channel
+# reads only the latest full release and never sees them. The tag is created
+# once and never moved (a moved tag breaks `git fetch --tags` for everyone);
+# each build's commit is in the release notes.
+
+on:
+  schedule:
+    # Nightly, and only when main moved since the last Canary.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  OPENCHAMBER_DESKTOP_CHANNEL: canary
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      version: ${{ steps.decide.outputs.version }}
+      release_version: ${{ steps.decide.outputs.release_version }}
+      sha: ${{ steps.decide.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Decide whether to build
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          # The build's commit is in the release notes; the tag itself stays put.
+          PUBLISHED=$(gh release view canary --json body --jq '.body' 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)
+          # Canary leads to the patch after the latest release, so it orders
+          # after that release and before the one after it; the day and the
+          # ever-growing run number order the builds. The release comes from
+          # GitHub, which is what npm has too (main's package.json may already
+          # carry a version that is still being released).
+          RELEASE=$(gh release view --json tagName --jq '.tagName' | sed 's/^v//')
+          test -n "$RELEASE"
+          NEXT=$(node -p "const [a, b, c] = '$RELEASE'.split('.').map(Number); [a, b, c + 1].join('.')")
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "release_version=$RELEASE" >> "$GITHUB_OUTPUT"
+          echo "version=${NEXT}-canary.$(date -u +%Y%m%d).${RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = "schedule" ] && [ "$SHA" = "$PUBLISHED" ]; then
+            echo "main has not moved since the last Canary ($SHA)."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-macos:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.build == 'true' }}
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: blacksmith-6vcpu-macos-26
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+          - target: x86_64-apple-darwin
+            arch: x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Every workspace, so the app, its server and the UI agree on the version.
+      - name: Set the Canary version
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          npm pkg set version="$VERSION" \
+            --workspace @openchamber/electron \
+            --workspace @openchamber/web \
+            --workspace @openchamber/ui \
+            --include-workspace-root
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        run: echo "version=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bundled OpenCode CLI artifact
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Install Apple Certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/electron-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build Canary
+        working-directory: packages/electron
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
+          OPENCHAMBER_CANARY_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+        run: |
+          bun run build:web-assets
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+          bun run prepare:ripgrep
+          bun run bundle:main
+          bun run rebuild:native
+          # package.mjs applies the Canary icons (scripts/canary-build-config.mjs).
+          node ./scripts/package.mjs --mac --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
+
+      - name: Verify signature + entitlements + notarization
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find packages/electron/dist/mac* -maxdepth 1 -name "OpenChamber.app" -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: OpenChamber.app not found"
+            ls -la packages/electron/dist/
+            exit 1
+          fi
+          codesign -vv --deep --strict "$APP_PATH"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "flags=.*runtime"
+          xcrun stapler validate "$APP_PATH"
+          # The same app as the release, at the Canary version.
+          test "$(defaults read "$PWD/$APP_PATH/Contents/Info" CFBundleIdentifier)" = "dev.openchamber.desktop"
+          test "$(defaults read "$PWD/$APP_PATH/Contents/Info" CFBundleShortVersionString)" = "$VERSION"
+
+      - name: Upload macOS files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: canary-files-macos-${{ matrix.arch }}
+          path: |
+            packages/electron/dist/OpenChamber-*.dmg
+            packages/electron/dist/OpenChamber-*.zip
+            packages/electron/dist/OpenChamber-*.blockmap
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload macOS update manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: latest-yml-${{ matrix.target }}
+          path: packages/electron/dist/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 3
+
+  build-windows:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.build == 'true' }}
+    name: Build Windows (${{ matrix.arch }})
+    # windows-latest resolves to a runner with Visual Studio 18, which this
+    # Electron/node-gyp stack does not detect correctly.
+    runs-on: windows-2022
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Every workspace, so the app, its server and the UI agree on the version.
+      - name: Set the Canary version
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          npm pkg set version="$VERSION" \
+            --workspace @openchamber/electron \
+            --workspace @openchamber/web \
+            --workspace @openchamber/ui \
+            --include-workspace-root
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        shell: bash
+        run: echo "version=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bundled OpenCode CLI artifact
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Build web assets
+        working-directory: packages/electron
+        run: bun run build:web-assets
+
+      - name: Prepare bundled OpenCode CLI
+        working-directory: packages/electron
+        shell: bash
+        env:
+          # Windows arm64 builds on an x64 runner; OpenCode and ripgrep need the target arch.
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+          bun run prepare:ripgrep
+
+      - name: Bundle main process
+        working-directory: packages/electron
+        env:
+          OPENCHAMBER_CANARY_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+        run: bun run bundle:main
+
+      - name: Rebuild native modules
+        working-directory: packages/electron
+        shell: bash
+        env:
+          ELECTRON_BUILDER_ARCH: ${{ matrix.arch }}
+        run: node ./scripts/rebuild-native.mjs
+
+      - name: Build Canary
+        working-directory: packages/electron
+        shell: bash
+        env:
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          node ./scripts/package.mjs --win --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
+
+      - name: Upload Windows files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: canary-files-windows-${{ matrix.arch }}
+          path: |
+            packages/electron/dist/OpenChamber-*.exe
+            packages/electron/dist/OpenChamber-*.blockmap
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload Windows update manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: latest-yml-${{ matrix.target }}
+          path: packages/electron/dist/latest.yml
+          if-no-files-found: error
+          retention-days: 3
+
+  build-linux:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.build == 'true' }}
+    name: Build Linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: blacksmith-4vcpu-ubuntu-2404
+            arch: x64
+            host_arch: x86_64
+            artifact_arch: x86_64
+            deb_arch: amd64
+            rpm_arch: x86_64
+            manifest: latest-linux.yml
+          - runner: blacksmith-4vcpu-ubuntu-2404-arm
+            arch: arm64
+            host_arch: aarch64
+            artifact_arch: arm64
+            deb_arch: arm64
+            rpm_arch: aarch64
+            manifest: latest-linux-arm64.yml
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Verify native Linux architecture
+        env:
+          EXPECTED_HOST_ARCH: ${{ matrix.host_arch }}
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "$EXPECTED_HOST_ARCH"
+          test "$(node -p 'process.arch')" = "$OPENCHAMBER_TARGET_ARCH"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Every workspace, so the app, its server and the UI agree on the version.
+      - name: Set the Canary version
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          npm pkg set version="$VERSION" \
+            --workspace @openchamber/electron \
+            --workspace @openchamber/web \
+            --workspace @openchamber/ui \
+            --include-workspace-root
+
+      - name: Install rpmbuild for the .rpm package
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Get bundled OpenCode CLI version
+        id: opencode_cli_version
+        run: echo "version=$(node -p "require('./packages/electron/package.json').opencodeCli.version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache bundled OpenCode CLI artifact
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: packages/electron/.cache/opencode-cli
+          key: opencode-cli-${{ runner.os }}-${{ matrix.arch }}-${{ steps.opencode_cli_version.outputs.version }}
+          restore-keys: |
+            opencode-cli-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Build Canary AppImage, .deb and .rpm
+        working-directory: packages/electron
+        env:
+          OPENCHAMBER_TARGET_ARCH: ${{ matrix.arch }}
+          OPENCHAMBER_CANARY_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          bun run build:web-assets
+          bun run prepare:opencode-cli
+          bun run verify:opencode-cli
+          bun run prepare:ripgrep
+          bun run bundle:main
+          bun run rebuild:native
+          node ./scripts/package.mjs --linux --${{ matrix.arch }} --publish=never
+          bun run verify:opencode-cli:packaged
+          node ./scripts/verify-linux-appimage.mjs "dist/OpenChamber-${VERSION}-linux-${{ matrix.artifact_arch }}.AppImage"
+
+      - name: Validate Linux update manifest
+        working-directory: packages/electron
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ARTIFACT_ARCH: ${{ matrix.artifact_arch }}
+          DEB_ARCH: ${{ matrix.deb_arch }}
+          RPM_ARCH: ${{ matrix.rpm_arch }}
+          MANIFEST: ${{ matrix.manifest }}
+        run: |
+          set -euo pipefail
+          node ./scripts/verify-update-manifest.mjs "dist/${MANIFEST}" "$VERSION" \
+            "dist/OpenChamber-${VERSION}-linux-${ARTIFACT_ARCH}.AppImage" \
+            "dist/OpenChamber-${VERSION}-linux-${DEB_ARCH}.deb" \
+            "dist/OpenChamber-${VERSION}-linux-${RPM_ARCH}.rpm"
+
+      - name: Upload Linux files and manifest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: canary-files-linux-${{ matrix.arch }}
+          path: |
+            packages/electron/dist/OpenChamber-*.AppImage
+            packages/electron/dist/OpenChamber-*.deb
+            packages/electron/dist/OpenChamber-*.rpm
+            packages/electron/dist/${{ matrix.manifest }}
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: [prepare, build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+
+      - name: Download update manifests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: latest-yml-*
+          path: manifests
+
+      - name: Download files
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: canary-files-*
+          path: files
+          merge-multiple: true
+
+      - name: Combine macOS and Windows manifests
+        env:
+          LATEST_YML_DIR: ${{ github.workspace }}/manifests
+          OPENCHAMBER_VERSION: ${{ needs.prepare.outputs.version }}
+        run: node packages/electron/scripts/finalize-latest-yml.mjs
+
+      - name: Publish to the canary pre-release
+        run: |
+          set -euo pipefail
+          NOTES="OpenChamber Canary ${VERSION}, built from ${SHA}. The nightly build of main. In the desktop app, Settings → About → Updates: pick Canary to update into it, Stable to go back. Expect rough edges."
+          if ! gh release view canary >/dev/null 2>&1; then
+            gh release create canary --prerelease --latest=false --target "$SHA" --title "OpenChamber Canary" --notes "$NOTES"
+          fi
+          OLD_ASSETS=$(gh release view canary --json assets --jq '.assets[].name')
+          # New files first, then the manifests that name them, then the old
+          # files: an updater always reads a manifest whose files exist.
+          gh release upload canary files/OpenChamber-* --clobber
+          gh release upload canary \
+            "$RUNNER_TEMP/latest-mac.yml" "$RUNNER_TEMP/latest.yml" "$RUNNER_TEMP/latest-arm64.yml" \
+            files/latest-linux.yml files/latest-linux-arm64.yml --clobber
+          for asset in $OLD_ASSETS; do
+            case "$asset" in
+              latest*.yml|*"-${VERSION}-"*) ;;
+              *) gh release delete-asset canary "$asset" --yes ;;
+            esac
+          done
+          gh release edit canary --prerelease --latest=false --notes "$NOTES"

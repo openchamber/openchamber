@@ -6,7 +6,25 @@ const isMissingUpdateFeedError = (error) => {
   return MISSING_UPDATE_FEED_RE.test(message);
 };
 
-export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendingUpdate, compareVersions }) => {
+const releaseNumbers = (version) => String(version ?? '').replace(/^v/, '').split('-')[0].split('.')
+  .map((part) => Number.parseInt(part, 10) || 0);
+
+/**
+ * Whether installing `nextVersion` over `currentVersion` goes back to an
+ * older release. Only Stable after Canary does: the release before the one
+ * the Canary build leads to (2.5.3 over 2.5.4-canary.20261030.1). The
+ * release with the build's own number (2.5.4) is newer than the build.
+ */
+export const isDowngrade = (nextVersion, currentVersion) => {
+  const next = releaseNumbers(nextVersion);
+  const current = releaseNumbers(currentVersion);
+  for (let index = 0; index < 3; index += 1) {
+    if ((next[index] || 0) !== (current[index] || 0)) return (next[index] || 0) < (current[index] || 0);
+  }
+  return false;
+};
+
+export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendingUpdate }) => {
   let updateResult;
   try {
     updateResult = await autoUpdater.checkForUpdates();
@@ -28,15 +46,20 @@ export const checkForDesktopUpdate = async ({ autoUpdater, currentVersion, pendi
   }
 
   const updateInfo = updateResult?.updateInfo;
-  const nextVersion =
-    (typeof updateInfo?.version === 'string' && updateInfo.version) ||
-    currentVersion;
-  const available = compareVersions(nextVersion, currentVersion) > 0;
+  // electron-updater's own verdict. It compares semver and honours
+  // `allowDowngrade`, which is how Stable after Canary offers the latest
+  // release even though that release is older than the Canary build.
+  const available = updateResult?.isUpdateAvailable === true
+    && typeof updateInfo?.version === 'string'
+    && updateInfo.version.length > 0;
+  const nextVersion = available ? updateInfo.version : currentVersion;
+  // Linux package managers refuse an older package unless told it is wanted.
+  const downgrade = available && isDowngrade(nextVersion, currentVersion);
   return {
     available,
     updateInfo,
     updateResult,
     nextVersion,
-    pendingUpdate: available ? { version: nextVersion, electronUpdate: updateResult } : null,
+    pendingUpdate: available ? { version: nextVersion, electronUpdate: updateResult, downgrade } : null,
   };
 };

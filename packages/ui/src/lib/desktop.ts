@@ -5,6 +5,7 @@ import { getRuntimeBearerTokenSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
+import { isUpdateChannel, type UpdateChannel } from '@/lib/updateChannel';
 
 export type UpdateInfo = {
   available: boolean;
@@ -230,6 +231,41 @@ export const setDesktopLaunchAtLogin = async (enabled: boolean): Promise<LaunchA
     return result;
   } catch (error) {
     console.warn('Failed to set launch at login status', error);
+    return null;
+  }
+};
+
+// What main answers; the channel is checked, not trusted, like the other statuses.
+type UpdateChannelStatus = { channel?: string };
+
+const parseUpdateChannelStatus = (result: UpdateChannelStatus | null): UpdateChannel | null => (
+  isUpdateChannel(result?.channel) ? result.channel : null
+);
+
+/** The update channel the desktop app follows; null where the app does not update itself. */
+export const getDesktopUpdateChannel = async (): Promise<UpdateChannel | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    return parseUpdateChannelStatus(await invokeDesktop<UpdateChannelStatus>('desktop_get_update_channel'));
+  } catch (error) {
+    console.warn('Failed to get the update channel', error);
+    return null;
+  }
+};
+
+/** Stores the channel; the next update check reads it. Returns the stored channel, or null when it was not saved. */
+export const setDesktopUpdateChannel = async (channel: UpdateChannel): Promise<UpdateChannel | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    return parseUpdateChannelStatus(await invokeDesktop<UpdateChannelStatus>('desktop_set_update_channel', { channel }));
+  } catch (error) {
+    console.warn('Failed to set the update channel', error);
     return null;
   }
 };

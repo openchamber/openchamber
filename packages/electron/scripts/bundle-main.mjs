@@ -48,6 +48,9 @@ const result = await Bun.build({
   naming: '[name].mjs',
   define: {
     __OPENCHAMBER_UPDATER_E2E_BUILD__: updaterE2eBuild ? 'true' : 'false',
+    // A Canary build names the release it was built on, for remote hosts over
+    // SSH, where the Canary version is not on npm. Empty in a release build.
+    'process.env.OPENCHAMBER_CANARY_RELEASE_VERSION': JSON.stringify(process.env.OPENCHAMBER_CANARY_RELEASE_VERSION ?? ''),
   },
 });
 

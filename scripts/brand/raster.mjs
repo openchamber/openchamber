@@ -47,13 +47,54 @@ const PIXEL_COLORS = {
   roof: [0x1d, 0x1e, 0x21],
   edge: [0xf5, 0xf5, 0xf7],
   outline: [0, 0, 0],
+  tiers: [[0x78, 0x7a, 0x80], [0x9f, 0xa1, 0xa6], [0xd4, 0xd5, 0xd8]],
+  singleTier: [0xb8, 0xba, 0xc0],
 };
 
-/** Tiers per size: [half-width in px (even), colour], outer to core. */
+/** The Canary cube: violet glass, as in its app icon; no bird at these sizes. */
+export const CANARY_PIXEL_COLORS = {
+  leftWall: [0x7a, 0x68, 0xdc],
+  rightWall: [0x6b, 0x58, 0xd4],
+  roof: [0x55, 0x42, 0xc4],
+  edge: [0xf7, 0xf5, 0xff],
+  outline: [0, 0, 0],
+  tiers: [[0x8c, 0x7b, 0xea], [0xb3, 0xa7, 0xf4], [0xe6, 0xe0, 0xfd]],
+  singleTier: [0xc4, 0xba, 0xf7],
+  bird: [0xff, 0xd2, 0x1f],
+  birdLight: [0xff, 0xf0, 0x7a],
+  birdOrange: [0xf0, 0x9a, 0x2a],
+};
+
+/**
+ * Canary's bird for the pixel cubes: a round chick facing left, one design at
+ * three levels of detail, standing at the lower right over the cube (Iuliia's
+ * pick, 2026-10-30; a slender canary did not read at these sizes). K black,
+ * Y yellow, L light yellow, O orange, '.' leaves the cube. Windows shows the
+ * 24 px frame on the taskbar and in the tray at 150%, 16 and 20 at 100%.
+ */
+export const PIXEL_BIRDS = {
+  24: [
+    '....KKKK...',
+    '..KKYYYYK..',
+    '.KYYLLYYYK.',
+    'KKYKYYYYYYK',
+    'OOYKYYYYYYK',
+    'KKYYYYYYYYK',
+    '.KYYYLLOYYK',
+    '.KYYLLOOYYK',
+    '.KYYYOOYYK.',
+    '..KKYYYYK..',
+    '....KKKK...',
+  ],
+  20: ['...KKK...', '..KYYYK..', '.KYYKYYK.', 'OOYYYYYK.', '.KYYYYYYK', '.KYYLLOYK', '.KYYYOOYK', '..KYYYYK.', '...KKKK..'],
+  16: ['..KKK..', '.KYYYK.', 'OYYKYYK', '.KYYYYK', '.KYLOYK', '..KYYK.', '...KK..'],
+};
+
+/** Tiers per size: [half-width in px (even), index into the palette's tiers or 'single'], outer to core. */
 export const PIXEL_CUBES = {
-  16: { halfWidth: 6, wallHeight: 7, tiers: [[4, [0xb8, 0xba, 0xc0]]] },
-  20: { halfWidth: 8, wallHeight: 9, tiers: [[6, [0x78, 0x7a, 0x80]], [4, [0xd4, 0xd5, 0xd8]]] },
-  24: { halfWidth: 10, wallHeight: 11, tiers: [[8, [0x78, 0x7a, 0x80]], [6, [0x9f, 0xa1, 0xa6]], [4, [0xd4, 0xd5, 0xd8]]] },
+  16: { halfWidth: 6, wallHeight: 7, tiers: [[4, 'single']] },
+  20: { halfWidth: 8, wallHeight: 9, tiers: [[6, 0], [4, 2]] },
+  24: { halfWidth: 10, wallHeight: 11, tiers: [[8, 0], [6, 1], [4, 2]] },
 };
 
 const createCanvas = (size) => {
@@ -108,7 +149,8 @@ const drawLine = (canvas, [x0, y0], [x1, y1], color) => {
 };
 
 /** Raw RGBA pixels of the pixel-exact cube at `size` (16, 20 or 24); `tape` for a development copy. */
-export const pixelCube = (size, { tape = false } = {}) => {
+/** `bird` adds Canary's bird (PIXEL_BIRDS). */
+export const pixelCube = (size, { tape = false, colors = PIXEL_COLORS, bird = false } = {}) => {
   const spec = PIXEL_CUBES[size];
   if (!spec) throw new Error(`No pixel cube for ${size} px`);
   const { halfWidth: hw, wallHeight: h, tiers } = spec;
@@ -125,15 +167,16 @@ export const pixelCube = (size, { tape = false } = {}) => {
   const BR = [R[0], R[1] + h];
 
   const art = createCanvas(size);
-  fillPolygon(art, size, [L, F, B, BL], PIXEL_COLORS.leftWall);
-  fillPolygon(art, size, [F, R, BR, B], PIXEL_COLORS.rightWall);
-  fillPolygon(art, size, [T, R, F, L], PIXEL_COLORS.roof);
+  fillPolygon(art, size, [L, F, B, BL], colors.leftWall);
+  fillPolygon(art, size, [F, R, BR, B], colors.rightWall);
+  fillPolygon(art, size, [T, R, F, L], colors.roof);
   const cy = y0 + rise;
-  for (const [k, color] of tiers) {
+  for (const [k, tier] of tiers) {
+    const color = tier === 'single' ? colors.singleTier : colors.tiers[tier];
     fillPolygon(art, size, [[c, cy - k / 2], [c + k, cy], [c, cy + k / 2], [c - k, cy]], color);
   }
   for (const [a, b] of [[T, L], [T, R], [L, F], [F, R], [L, BL], [R, BR], [BL, B], [B, BR], [F, B]]) {
-    drawLine(art, a, b, PIXEL_COLORS.edge);
+    drawLine(art, a, b, colors.edge);
   }
 
   const out = createCanvas(size);
@@ -141,15 +184,26 @@ export const pixelCube = (size, { tape = false } = {}) => {
     for (let x = 0; x < size; x += 1) {
       if (art.alpha(x, y)) continue;
       if (art.alpha(x + 1, y) || art.alpha(x - 1, y) || art.alpha(x, y + 1) || art.alpha(x, y - 1)) {
-        out.set(x, y, PIXEL_COLORS.outline);
+        out.set(x, y, colors.outline);
       }
     }
   }
   for (let i = 0; i < art.data.length; i += 4) {
     if (art.data[i + 3]) out.data.set(art.data.subarray(i, i + 4), i);
   }
+  // Over the finished cube: the drawing carries its own outline.
+  if (bird) drawPixelBird(out, size, colors);
   if (tape) drawPixelTape(out, size);
   return out.data;
+};
+
+const drawPixelBird = (canvas, size, colors) => {
+  const rows = PIXEL_BIRDS[size];
+  const left = size - rows[0].length;
+  const top = size - rows.length;
+  rows.forEach((row, dy) => [...row].forEach((cell, dx) => {
+    if (cell !== '.') canvas.set(left + dx, top + dy, { K: colors.outline, Y: colors.bird, L: colors.birdLight, O: colors.birdOrange }[cell]);
+  }));
 };
 
 const TAPE_COLORS = { yellow: [0xd6, 0xa2, 0x3c], dark: [0x1b, 0x1b, 0x1b] };

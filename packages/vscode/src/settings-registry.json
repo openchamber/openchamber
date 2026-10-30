@@ -68,6 +68,12 @@
         "desktop"
       ]
     },
+    "desktopUpdateChannel": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
     "desktopMacMenuBarEnabled": {
       "scope": "instance",
       "surfaces": [

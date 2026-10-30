@@ -237,7 +237,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     // Never in VS Code (decision 16 of the design); before the feature's first release only with the key on.
     isAvailable: (ctx) => !ctx.isVSCode && isIsolatedSpacesPageVisible(),
   },
-  { slug: 'about', title: 'About', group: 'general', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog'], isAvailable: (ctx) => !ctx.isVSCode },
+  { slug: 'about', title: 'About', group: 'general', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog', 'canary', 'channel'], isAvailable: (ctx) => !ctx.isVSCode },
   { slug: 'integrations', title: 'Integrations', group: 'general', kind: 'single', keywords: ['integration', 'connect', 'oauth', 'github', 'linear', 'extension', 'claude', 'plugin'], isAvailable: (ctx) => !ctx.isVSCode },
   {
     slug: 'extensions',

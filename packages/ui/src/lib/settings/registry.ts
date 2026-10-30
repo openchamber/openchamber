@@ -243,6 +243,7 @@ export const SETTINGS_REGISTRY = {
   desktopLanAccessEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
   desktopKeepAwakeEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
   desktopMinimizeToTrayEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
+  desktopUpdateChannel: field({ scope: 'instance', surfaces: ['desktop'], parse: parseOneOf(['stable', 'canary']) }),
   desktopMacMenuBarEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
   desktopLinuxNativeFrame: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),
   // Write-only: the desktop network page learns whether one is set from
