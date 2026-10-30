@@ -149,6 +149,7 @@ let directoryAvailability: 'available' | 'missing' | 'unknown' = 'available';
 mock.module('@/lib/opencode/client', () => ({
   OpencodeApiError: Error,
   normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
+  isOpencodeNotFound: () => false,
   opencodeClient: {
     setDirectory: mock(() => undefined),
     getDirectory: mock(() => DIRECTORY),
@@ -201,7 +202,9 @@ mock.module('@/contexts/runtimeAPIRegistry', () => ({
   getRegisteredRuntimeAPIs: mock(() => null),
 }));
 
+const runtimeFetchModule = await import('@/lib/runtime-fetch');
 mock.module('@/lib/runtime-fetch', () => ({
+  ...runtimeFetchModule,
   runtimeFetch: mock(async () => new Response(JSON.stringify({}), {
     headers: { 'Content-Type': 'application/json' },
   })),

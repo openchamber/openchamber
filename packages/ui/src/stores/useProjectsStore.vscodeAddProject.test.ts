@@ -73,6 +73,7 @@ const opencodeClientStub = new Proxy(
 mock.module('@/lib/opencode/client', () => ({
   OpencodeApiError: Error,
   normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
+  isOpencodeNotFound: () => false,
   opencodeClient: opencodeClientStub,
 }));
 mock.module('@/lib/persistence', () => ({

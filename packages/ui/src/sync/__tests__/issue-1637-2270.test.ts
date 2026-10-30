@@ -21,11 +21,13 @@ const runtimeSdkClient = {}
 
 let idCounter = 0
 mock.module("@/lib/opencode/client", () => ({
+  isOpencodeNotFound: () => false,
   ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
     getSdkClient: () => runtimeSdkClient,
     getDirectory: () => currentDirectory,
     setDirectory: mock(() => undefined),
+    captureSessionCleanup: async () => async () => undefined,
     createSession: mock(async (params: unknown, directory?: string | null) => {
       nextCreateSessionCalls.push({ params, directory })
       return nextCreateSessionResponse

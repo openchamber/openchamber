@@ -32,7 +32,7 @@ mock.module('@/lib/opencode/client', () => ({ opencodeClient: {
     return { home, chatsRoot };
   },
 } }));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'vscode-chats-startup', subscribeRuntimeEndpointChanged: () => () => {} }));
+mock.module('@/lib/runtime-switch', () => ({ getRuntimeApiBaseUrl: () => '', getRuntimeKey: () => 'vscode-chats-startup', subscribeRuntimeEndpointChanged: () => () => {} }));
 mock.module('@/lib/persistence', () => ({ updateDesktopSettings: async () => {} }));
 mock.module('@/stores/useFileSearchStore', () => ({ useFileSearchStore: { getState: () => ({ invalidateDirectory() {} }) } }));
 

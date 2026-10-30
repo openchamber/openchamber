@@ -27,6 +27,7 @@ let mockIdCounter = 0;
 mock.module('@/lib/opencode/client', () => ({
   OpencodeApiError: Error,
   normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
+  isOpencodeNotFound: () => false,
   ascendingId: (prefix: string) => `${prefix}_${(mockIdCounter += 1).toString(16).padStart(12, '0')}`,
   opencodeClient: {
     getDirectory: () => '/repo',
