@@ -124,7 +124,7 @@ sessions count too (`buildWorktreeArchiveAnchors` in `works/sidebarWorks.ts`,
 `orderSidebarWorks`): archiving the newest session in a worktree is not work,
 so the worktree keeps the place that session gave it instead of falling to
 the next one's, and a worktree whose sessions are all archived stays where it
-was. A worktree spends one slot of the root's Show more limit, like a run; one
+was. A worktree spends one slot of the root's reveal limit, like a run; one
 that never had a session closes the list, the newest first (`useSessionGrouping`). An isolated
 space is listed the same way: it is a work of its own (see Works). Worktrees and spaces filed
 in a folder stay in the folder; the archive bucket follows the list. There is no worktree sort and no worktree dragging, on the phone either:
@@ -471,7 +471,7 @@ the draft rows of its folder. The row is the worktree's (`WorktreeWorkRow`,
 - A space nobody has chatted in yet leads its project's list (and the list by
   time) while it is being made or runs (`liveSpaceIds`), where a worktree
   without sessions closes it: it was made to be used now, and at the end it
-  fell under Show more and looked missing. One whose making failed or whose
+  fell under the reveal limit and looked missing. One whose making failed or whose
   container is gone closes the list like that worktree. While it is
   made, the draft that waits for it sits on the project root and names the
   space by its creation request (`spaceOfCreationRequest`); the row counts
@@ -506,10 +506,10 @@ while In work is), Detailed rows, "Name worktrees by branch", then Collapse
 all / Expand all.
 
 - Chats rows are one line with the tree's slot (`'tree-chat'`). Chats open
-  with a reveal of 3 and 7 more per Show more; pinned chats are always shown
+  with a reveal of 3 and 7 more per reveal step; pinned chats are always shown
   and never spend that limit. Pinned sessions under a project do spend its
   limit, so a project or worktree list never opens with more than 7.
-  Collapsing a zone header resets its Show more state.
+  Collapsing a zone header resets its reveal state.
 - Zone collapse state lives in `useSessionProjectViewState` next to project
   collapse and is saved in local storage (`oc.sessions.activityCollapse`). The
   display menu's Collapse all / Expand all set every project and the zones
@@ -534,10 +534,15 @@ all / Expand all.
   zones made the list read as a document of sections, and a quiet label with
   an icon in the projects' column read as one more row (maintainer,
   2026-10-28). Projects are set apart by
-  space (`sectionSpacingAfter`): 12px before every project, so a project
-  section's faded hairline (`oc-sidebar-project-divider`) has room above the
-  next header. A flush hairline between projects was tried and dropped: with
-  projects collapsed it striped every row (maintainer, 2026-10-28).
+  space (`sectionSpacingAfter`): 12px before every project, so an open
+  project section's faded hairline (`oc-sidebar-project-divider`) has room
+  above the next header. A closed project shows only its header; the line
+  belongs to the open list. The line's inset follows the list it closes: a
+  zone boundary spans the sidebar, a project's line starts under its label,
+  and a worktree's sits one level in. The hit area stays the full row, so a
+  shorter line still drags from either side. A flush hairline between every
+  project was tried and dropped: with projects collapsed it striped every row
+  (maintainer, 2026-10-28).
 - Rows of zones that mix projects (Pinned, In work, the list by time) are
   `'mixed-compact'`: one line with no project icon (the room goes to the
   title; the whole-row tooltip names the project, branch and model), the PR
@@ -563,15 +568,16 @@ all / Expand all.
   its number, as a detailed session row's does. Its sessions stay one-line tree rows under it: they
   share the work's project, branch and reference, so a second line would only
   repeat them. Row keys carry the placement, so a worktree kept in
-  its project too never collides; collapse and Show more state stay keyed by
+  its project too never collides; collapse and reveal state stay keyed by
   the group and are shared.
 - Grouped by time, all-projects mode replaces the project headers with one
   `timeline` zone: project-root drafts first, then every work Pinned and In
   work do not list, by the lifecycle order of its latest session, then the
-  worktrees nobody has started a session in. It is virtualized, so it has no
-  reveal limit, and ends with the statuses a project header would show for
-  projects it lists nothing for (one loading line, one line per failed
-  directory). Single-project mode keeps its project header and groups by
+  worktrees nobody has started a session in. It closes with the same reveal
+  line as a project: every work shows until the line is dragged up, and the
+  phone keeps its header toggle. It ends with the statuses a project header
+  would show for projects it lists nothing for (one loading line, one line per
+  failed directory). Single-project mode keeps its project header and groups by
   project.
 - An isolated space without chats still has its work row: it leads its
   project's list while it is made or runs, and closes it otherwise (see
@@ -602,6 +608,15 @@ or folder (`movedSessionIds`, `movedGroupKeys`) unless "Also show in work
 under projects" is on; search lists every zone session once, in its zone,
 either way. VS Code always keeps them in place. Chats are never in work and
 offer no Track action. An empty zone is not rendered.
+
+On a computer Pinned, In work and the list by time close with the same reveal
+line as a project when they are open. Pinned and the list by time start with
+every row shown; In work starts with its five newest works, so older ones wait
+behind the line. Dragging the line up hides rows and closes the zone at its
+header; a closed zone shows only its header, and clicking it opens the default
+again. The phone keeps its header toggle. Search lists every matching row in a
+zone and draws no reveal line, so the count in the sidebar header matches the
+rows it shows.
 
 Search in a zone keeps a root whose subsession matches, since the one-line
 rows open to it; with Detailed rows the root stays listed though its row
@@ -859,7 +874,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   The row model works out each row's lines (`treeGuides`, from
   `computeSessionTreeGuides` over the rows' tree levels); a line runs through
   a child's own subtree only while a later sibling follows. Headers of
-  projects and zones, Show more and status lines, and detailed zone rows are outside
+  projects and zones, reveal lines and status lines, and detailed zone rows are outside
   the tree and break every line. The lines draw over the row, so they show on
   its hover and selection fills, inside a box that contains the row's margins
   so neighbouring rows' lines meet.
@@ -871,7 +886,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   always open: a collapse saved while it had sessions is dropped, so its first
   new session shows at once. A group counts as empty only once its sessions
   have loaded; before that it only looks empty, and the saved collapse stays. Collapsing a project or a worktree group, from its
-  header or Collapse all, forgets its Show more state. The project
+  header or Collapse all, forgets its reveal state. The project
   header stays the sticky zone band above its tree. Root sessions and the
   root's folders sit at level 0; worktree, space and archive headers sit at
   level 0 with their folders and sessions at level 1; a folder's sessions sit
@@ -904,7 +919,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   a PR or an issue carries its state's colour; its number stays neutral. Session, run, worktree and space work
   and draft rows take the same faint hover fill; archive and folder
   headers take none, so a pointer moving down the
-  sidebar tells sessions from their containers. Show more, empty and
+  sidebar tells sessions from their containers. The reveal row, empty and
   status rows carry the level whose text they line up with.
 - A row's `depth` is its tree level as above, not its parentage. Do not read
   `depth > 0` as "this is a subagent".
@@ -952,8 +967,9 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   closing row stayed legible until the rows sliding up cut through it, which
   read as old content lingering over the new. An opening fade on a clock of
   its own (clear for the first 20%) left the first rows under the header
-  empty while the rows below already slid away. Collapse all, search, Show more and
-  live list changes do not animate, nor does anything under reduced motion.
+  empty while the rows below already slid away. Collapse all, search, dragging the reveal line and
+  live list changes use no disclosure motion; a reveal drag eases the rows it
+  uncovers with its own 120ms transform. Nothing animates under reduced motion.
   The phone's list is drawn by the same renderer and animates the same way.
 - Shift selection and Ctrl/Cmd+A consume the model's logical row order. API
   session IDs are deduplicated only at the action boundary, after hidden
@@ -997,13 +1013,14 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   collapsed folder headers. It includes descendant activity without mounting
   those sessions; a subtask is never unread on its own. Expanded and archived
   folders do not derive hidden activity.
-- Single-project flat mode reveals 20 root sessions initially and 20 per Show
-  more; Show less resets to 20. Chats keeps its reveal of 3. Elsewhere a
-  Tree worktree group reveals 7 sessions, 7 more per Show more, and 10 in
-  VS Code. Show more and Show less share one row under the list, in the
-  micro size so it reads as a control rather than a row: Show more while
-  something is hidden, Show less once more than the first batch shows
-  (maintainer, 2026-10-27). Reveal
+- Single-project flat mode reveals 20 root sessions initially and a Page Down
+  reveals 20 more; Chats keeps its reveal of 3. Elsewhere a worktree group
+  reveals 7 sessions and VS Code 10. On a computer the faded hairline that
+  closes an open list is the reveal control: dragging it down shows another
+  row for each 34px, and dragging it up folds rows back and closes the section
+  at its header. A closed section shows only its header; click it to open.
+  Home folds it closed and End shows every row. Arrow keys move one row and
+  Page Up and Page Down one batch. The phone keeps its Show more row. Reveal
   controls change the logical list, not the viewport's bounded mounted window.
 - Archiving or deleting a session includes its OpenCode subsessions and linked review sessions on every surface. Forks and promoted `/btw` sessions stay active. Rows pass only their `parentID` descendants (`collectParentIdDescendantIds`); `collectSessionSubtreeIds` adds global action lineage from `stores/sessionLineage.ts`, including reviews linked by `originalSessionID`, even when a row renders no children or a review lives in another directory. Archive reaches active descendants below archived intermediates without restamping those intermediates; delete includes archived descendants too. Restore brings back archived subsessions and reviews, stopping at active intermediates. `sessions/sessionSubtreeActions.ts` owns the store calls, partial-failure toasts and exact-ID Undo. The project menu's "Archive all" includes descendants of each selected session in the same batch; its dialog and success toast count top-level sessions.
 - Subsessions belong to the agent run that spawned them, not to the user. They appear only nested under an active parent: the archive (sidebar bucket, auto folders and the Archive page) lists top-level sessions only, an archived subsession or one under an archived parent is hidden rather than promoted to a row of its own, and there is no restore for a subsession; it comes back when its parent is restored. A subsession whose parent is not loaded yet stays visible as a root.
@@ -1100,7 +1117,7 @@ tooltip names its project and time, and the room goes to the title.
 A worktree was a block of its own under the project, after every session of
 the project root, with its own sort (recent, manual with dragging, A to Z).
 Once a worktree became a work like a root session, that block hid it: a
-worktree with the newest session sat under Show more, below sessions days
+worktree with the newest session fell under the reveal limit, below sessions days
 old. The maintainer decided (2026-10-24) that a worktree is a task like any
 other of the project, with a collapsible group of its own, so it is listed
 among them by its latest activity, and the worktree sort, the saved drag
