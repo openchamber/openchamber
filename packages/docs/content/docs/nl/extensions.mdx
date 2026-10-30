@@ -46,7 +46,10 @@ Een paneel tonen en lezen welk project en welke sessie geopend zijn, vereist gee
 - **Uw Small Model gebruiken:** eenmalige tekstgeneratie buiten uw sessies, met het model uit Instellingen → Sessies → Small Model. Dit verbruikt tokens.
 - **Verbinding maken met een externe dienst:** met het account dat u bij Instellingen → Integraties verbindt.
 - **Een sessiegesprek lezen:** alleen wanneer u de extensieactie op die sessie uitvoert.
-- **Een lokale service uitvoeren:** een apart programma met uw volledige gebruikerstoegang. Sta dit alleen toe als u de maker vertrouwt.
+- **Een lokale service uitvoeren:** een apart programma met uw volledige gebruikerstoegang. Sta dit alleen toe als u de maker vertrouwt. Wil de extensie te horen krijgen wat er in uw sessies gebeurt, dan noemt deze regel ook de momenten waarover ze wordt ingelicht: een beurt is afgerond, een beurt mislukt, de agent vraagt toestemming, de agent stelt een vraag. Ze hoort ervan in elk project, zonder geopend venster, en krijgt alleen identificatiegegevens: de sessie, het project en de items die u eraan hebt gekoppeld.
+- **Lezen wat de agent op de achtergrond zegt:** het eindantwoord van elke beurt, de vragen die de agent stelt en waarvoor hij toestemming vraagt, in elk project, verstuurd naar de lokale service van de extensie. Sta dit alleen toe als u vertrouwt waar de extensie het naartoe stuurt.
+
+Een extensie die uw meldingen bezorgt, aan Slack, Matrix of een eigen server, zegt dat ook onder **Een lokale service uitvoeren**, met een regel die begint met **Bezorgt uw meldingen**. Er gaat niets uit totdat u er een account voor verbindt bij [Instellingen → Integraties](/nl/integrations/#meldingskanalen-van-extensies). Daarna krijgt ze wat uw telefoon zou krijgen, en de extensie pauzeren stopt het.
 
 Vraagt een nieuwe versie om meer rechten dan u eerder toestond, dan toont de kaart **Goedkeuring nodig** en **Rechten bekijken**. De extensie blijft uit totdat u de nieuwe lijst goedkeurt.
 

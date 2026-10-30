@@ -186,6 +186,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` 遵循与 `request` 相同的规则。声明本地服务会把 `service` 加入用户在安装时批准的能力；在批准之前，每次 `serviceRequest` 都是 `NO_SERVICE`。完整约定见包内文件 `GUEST_SERVICES.md`。
 
+## 会话事件
+
+你的页面只在会话打开时知道它的存在。你的服务可以知道更多。在 `contributes.service` 旁边声明 `contributes.sessionEvents`，OpenChamber 就会把你列出的事件从每个项目发送给服务，无论是否打开了窗口。
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+事件有四种。`turn-finished` 表示智能体已经完成并且不再等待任何东西，没有运行中的子智能体，没有未答复的权限或问题，也没有目标步骤。另外三种是 `turn-failed`、`permission-asked` 和 `question-asked`。用户停止的一轮对话不发送任何事件。批准扩展就是订阅，对话框会在服务那一行下方列出这些事件。没有 `content` 时服务只收到标识符，即会话、它的项目目录和用户附加到它的条目。设为 `"content": true` 时，清单还会请求一项权限，用户会看到它单独占一行，**在后台读取代理所说的内容**。此时每个事件都带有智能体的最终回答、问题的字段或权限的详情。
+
+每个事件以一次带服务 bearer 令牌的 `POST /session-events` 到达。用 `readSessionEventRequest` 读取并回答 `{ "ok": true }`。
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+每个项目的事件都会发送。把 `event.project.directory` 与你自己的设置比较，其余的回答 `{ "ok": true }` 即可。投递至多一次、按顺序进行，一次只发一个请求。回答失败会让你的事件被丢弃 30 秒，OpenChamber 或你的服务停机期间的事件不会重放。服务不需要面板来做这件事。示例 `session-events-log` 把每个事件记录到一个文件中。
+
+## 通知渠道
+
+服务可以在桌面端和手机之外投递用户的通知。声明 `provides: ["notifications"]`，并在 `contributes.notifications` 中描述这个渠道。
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+OpenChamber 根据这段描述在设置 → 集成中为该渠道绘制一张账户卡片，并保管账户。用户在那里连接账户，令牌保留在 OpenChamber 中，你的服务永远看不到它。账户连接后，OpenChamber 会发给手机的每条通知也会发给你的服务，遵循用户自己的通知设置，并且只在没有窗口可见时发送，除非用户选择了始终接收通知。暂停扩展即可停止。
+
+OpenChamber 把三种调用转发到 `POST /notifications`。`auth.probe` 问这个服务器是否是你投递的目标，`auth.verify` 问这个令牌属于谁，`notify` 送来一条通知。每种都用 `readNotificationsProviderRequest` 读取，并且只通过出站助手访问渠道的服务器。助手把你的请求连同调用的句柄一起发给 OpenChamber，OpenChamber 加上令牌，并把请求限制在该账户的服务器上。
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+哪个项目发到哪个房间或频道由你的扩展自己决定。通知携带 `directory` 和 `sessionName`。在企业模式下它只携带通用标题，和手机一样。示例 `notification-webhook` 是一个完整的渠道，并带有一个可以用来试验的接收端。
+
 ## 文件
 
 相对路径位于打开的项目中，需要 `files` 能力。以 `/` 或 `~/` 开头的路径必须匹配已声明的 `contributes.filesystem` 模式，需要 `filesystem` 能力。规则见[构建扩展](/sdk/#文件)。

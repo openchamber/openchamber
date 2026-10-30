@@ -186,6 +186,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` folgt denselben Regeln wie bei `request`. Einen Dienst zu deklarieren fügt `service` zu den Berechtigungen hinzu, die der Nutzer bei der Installation bestätigt; bis dahin ist jeder `serviceRequest` ein `NO_SERVICE`. Vollständiger Vertrag: die Paketdatei `GUEST_SERVICES.md`.
 
+## Sitzungsereignisse
+
+Deine Seite weiß nur von einer Sitzung, solange sie offen ist. Dein Dienst kann mehr wissen: Deklariere `contributes.sessionEvents` neben `contributes.service`, und OpenChamber schickt die Ereignisse, die du auflistest, an den Dienst, aus jedem Projekt, ob ein Fenster offen ist oder nicht.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+Die vier Ereignisse sind `turn-finished` (der Agent ist fertig und wartet auf nichts: kein laufender Subagent, keine offene Erlaubnis oder Frage, kein Goal-Schritt), `turn-failed`, `permission-asked` und `question-asked`. Ein Zug, den der Nutzer gestoppt hat, schickt nichts. Die Freigabe der Erweiterung ist das Abonnement; der Dialog listet die Ereignisse unter der Zeile des Dienstes auf. Ohne `content` bekommt der Dienst nur Kennungen: die Sitzung, ihr Projektverzeichnis, die Einträge, die der Nutzer mit ihr verknüpft hat. Mit `"content": true` fordert das Manifest zusätzlich eine Berechtigung an, die der Nutzer als eigene Zeile sieht, **Lesen, was der Agent im Hintergrund sagt**, und jedes Ereignis trägt die endgültige Antwort des Agenten, die Felder der Frage oder die Details der Erlaubnis.
+
+Jedes Ereignis kommt als ein `POST /session-events` mit dem Bearer-Token des Dienstes an. Lies es mit `readSessionEventRequest` und antworte mit `{ "ok": true }`:
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+Die Ereignisse jedes Projekts werden geschickt; vergleiche `event.project.directory` mit deinen eigenen Einstellungen und antworte für den Rest mit `{ "ok": true }`. Die Zustellung erfolgt höchstens einmal und in Reihenfolge, eine Anfrage nach der anderen; eine fehlgeschlagene Antwort verwirft deine Ereignisse für 30 Sekunden, und nichts wird nachgeliefert, nachdem OpenChamber oder dein Dienst nicht erreichbar war. Der Dienst braucht dafür kein Panel. Das Beispiel `session-events-log` schreibt jedes Ereignis in eine Datei.
+
+## Benachrichtigungskanäle
+
+Ein Dienst kann die Benachrichtigungen des Nutzers zustellen, neben Desktop und Telefon: Deklariere `provides: ["notifications"]` und beschreibe den Kanal in `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+OpenChamber zeichnet aus dieser Beschreibung eine Kontokarte für den Kanal unter Einstellungen → Integrationen und verwaltet das Konto: Der Nutzer verbindet es dort, das Token bleibt in OpenChamber, und dein Dienst sieht es nie. Sobald ein Konto verbunden ist, geht jede Benachrichtigung, die OpenChamber ans Telefon schicken würde, auch an deinen Dienst, nach den Benachrichtigungseinstellungen des Nutzers und nur, solange kein Fenster sichtbar ist, es sei denn, der Nutzer hat gewählt, immer benachrichtigt zu werden. Das Pausieren der Erweiterung beendet es.
+
+OpenChamber leitet drei Aufrufe an `POST /notifications` weiter: `auth.probe` (ist dieser Server einer, an den du zustellst), `auth.verify` (wem gehört dieses Token) und `notify` (eine Benachrichtigung). Lies jeden mit `readNotificationsProviderRequest` und erreiche den Server des Kanals nur über den Outbound-Helfer, der deine Anfrage mit dem Handle des Aufrufs an OpenChamber schickt; OpenChamber fügt das Token hinzu und hält die Anfrage auf dem Server des Kontos.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+In welchen Raum oder Kanal ein Projekt geht, entscheidet deine Erweiterung selbst: Die Benachrichtigung trägt `directory` und `sessionName`. Im Enterprise-Modus trägt sie nur den allgemeinen Titel, wie das Telefon. Das Beispiel `notification-webhook` ist ein vollständiger Kanal mit einem Empfänger zum Ausprobieren.
+
 ## Dateien
 
 Ein relativer Pfad liegt innerhalb des offenen Projekts und braucht die Berechtigung `files`. Ein Pfad, der mit `/` oder `~/` beginnt, muss zu einem deklarierten `contributes.filesystem`-Muster passen und braucht die Berechtigung `filesystem`. Die Regeln stehen unter [Eine Erweiterung bauen](/sdk/#dateien).

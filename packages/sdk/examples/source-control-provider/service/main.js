@@ -60,6 +60,10 @@ function installGuestScrollbarActivity(doc) {
   }, { capture: true, passive: true });
 }
 var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
+// packages/sdk/src/session-events.ts
+var GUEST_SESSION_EVENT_TYPES = ["turn-finished", "turn-failed", "permission-asked", "question-asked"];
+var SESSION_EVENTS_IDLE_MS = 10 * 60000;
+var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
 // packages/sdk/src/file-editor.ts
 var patternExpressions = new Map;
 // packages/sdk/src/contract.ts
@@ -218,47 +222,49 @@ class SourceControlForgeError extends Error {
     this.status = status;
   }
 }
+var postOutbound = async (url, handle, request, timeoutMs, fail) => {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${handle}`, "content-type": "application/json" },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(timeoutMs + 5000)
+    });
+  } catch (error) {
+    throw fail(`OpenChamber did not answer: ${error instanceof Error ? error.message : String(error)}`, "HOST_UNAVAILABLE", 0);
+  }
+  let answer;
+  try {
+    answer = Object(await response.json());
+  } catch {
+    throw fail("OpenChamber answered with something other than JSON", "HOST_UNAVAILABLE", response.status);
+  }
+  if (!response.ok) {
+    const message = answer.error?.message;
+    const code = answer.error?.code;
+    throw fail(String(message) === message && message.length > 0 ? message : `OpenChamber refused the request (${response.status})`, String(code) === code && code.length > 0 ? code : "OUTBOUND_REFUSED", response.status);
+  }
+  if (!Number.isSafeInteger(answer.status) || String(answer.body) !== answer.body) {
+    throw fail("OpenChamber relayed a malformed answer", "HOST_UNAVAILABLE", response.status);
+  }
+  const headers = {};
+  for (const [name, text] of Object.entries(Object(answer.headers ?? {}))) {
+    if (String(text) === text)
+      headers[name] = text;
+  }
+  return { status: Number(answer.status), headers, body: answer.body };
+};
 var createSourceControlForge = ({ env }) => {
   const base = env[OPENCHAMBER_HOST_CALLBACK_URL];
   if (!base)
     throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "source-control" can reach a forge.`);
   const url = `${base.replace(/\/+$/, "")}${SOURCE_CONTROL_OUTBOUND_PATH}`;
   return {
-    async request(handle, request) {
-      let response;
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: { authorization: `Bearer ${handle}`, "content-type": "application/json" },
-          body: JSON.stringify(request),
-          signal: AbortSignal.timeout(SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS + 5000)
-        });
-      } catch (error) {
-        throw new SourceControlForgeError(`OpenChamber did not answer: ${error instanceof Error ? error.message : String(error)}`, "HOST_UNAVAILABLE", 0);
-      }
-      let answer;
-      try {
-        answer = Object(await response.json());
-      } catch {
-        throw new SourceControlForgeError("OpenChamber answered with something other than JSON", "HOST_UNAVAILABLE", response.status);
-      }
-      if (!response.ok) {
-        const message = answer.error?.message;
-        const code = answer.error?.code;
-        throw new SourceControlForgeError(String(message) === message && message.length > 0 ? message : `OpenChamber refused the request (${response.status})`, String(code) === code && code.length > 0 ? code : "OUTBOUND_REFUSED", response.status);
-      }
-      if (!Number.isSafeInteger(answer.status) || String(answer.body) !== answer.body) {
-        throw new SourceControlForgeError("OpenChamber relayed a malformed forge answer", "HOST_UNAVAILABLE", response.status);
-      }
-      const headers = {};
-      for (const [name, text] of Object.entries(Object(answer.headers ?? {}))) {
-        if (String(text) === text)
-          headers[name] = text;
-      }
-      return { status: Number(answer.status), headers, body: answer.body };
-    }
+    request: (handle, request) => postOutbound(url, handle, request, SOURCE_CONTROL_OUTBOUND_TIMEOUT_MS, (message, code, status) => new SourceControlForgeError(message, code, status))
   };
 };
+var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);

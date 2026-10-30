@@ -40,6 +40,7 @@ import {
   GUEST_STATUS_SECTION_HEIGHT_MAX,
   GUEST_STATUS_SECTION_HEIGHT_MIN,
   GUEST_STATUS_SECTION_TITLE_MAX,
+  NOTIFICATIONS_GUEST_ID_MAX,
   SOURCE_CONTROL_DEFAULT_INSTANCES_MAX,
   SOURCE_CONTROL_GUEST_ID_MAX,
   SOURCE_CONTROL_URL_TEMPLATES_MAX,
@@ -48,6 +49,7 @@ import {
   type SourceControlContribution,
 } from './manifest.ts';
 import { isGuestRequestPath } from './contract.ts';
+import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_MAX, GUEST_STATUS_SOURCE_INTERVAL_MIN } from './status-view.ts';
 import {
   GUEST_FILE_EDITORS_MAX,
@@ -388,6 +390,38 @@ const sourceControlSchema = z.object({
   });
 });
 
+// The token block of a notification channel follows the Git host's rules: a
+// bare token travels only as `private-token`, and `basic` needs the login.
+const notificationsTokenSchema = z.object({
+  header: z.enum(['authorization', 'private-token']),
+  scheme: z.enum(['bearer', 'token', 'basic', 'none']),
+  username: z.boolean().optional(),
+  scopes: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
+  createPath: z.string().trim().max(256).refine(isSafeApiPath, { message: 'must be a path on the instance starting with "/", with no "." or ".." segment' }).optional(),
+}).strict().refine(
+  (token) => (token.header === 'private-token') === (token.scheme === 'none'),
+  { message: 'private-token takes the bare token; authorization takes a bearer, token or basic scheme' },
+).refine(
+  (token) => (token.scheme === 'basic') === (token.username === true),
+  { message: 'the basic scheme needs username: true, and username is only for the basic scheme' },
+);
+
+const notificationsSchema = z.object({
+  label: literalSchema,
+  instances: z.union([
+    z.object({
+      kind: z.literal('fixed'),
+      origin: z.string().trim().refine(isHttpsOrigin, { message: 'must be an https origin with no path, like https://slack.com' }),
+    }).strict(),
+    z.object({
+      kind: z.literal('user'),
+      label: literalSchema,
+      placeholder: z.string().trim().max(256).optional(),
+    }).strict(),
+  ]),
+  token: notificationsTokenSchema,
+}).strict();
+
 const uniqueBy = <T,>(items: T[], key: (item: T) => string): boolean => (
   new Set(items.map(key)).size === items.length
 );
@@ -479,6 +513,12 @@ const contributesSchema = z.object({
   tools: toolsSchema.optional(),
   fileEditors: fileEditorsSchema.optional(),
   sourceControl: sourceControlSchema.optional(),
+  sessionEvents: z.object({
+    events: z.array(z.enum(GUEST_SESSION_EVENT_TYPES)).min(1).max(GUEST_SESSION_EVENT_TYPES.length)
+      .refine((events) => new Set(events).size === events.length, { message: 'event types must be unique' }),
+    content: z.literal(true).optional(),
+  }).strict().optional(),
+  notifications: notificationsSchema.optional(),
 });
 
 /**
@@ -500,11 +540,11 @@ const runtimeContributions = (contributes: z.output<typeof contributesSchema>): 
   if (contributes.attach !== undefined && contributes.attach !== false) declared.push('attach');
   if (contributes.capabilities && contributes.capabilities.length > 0) declared.push('capabilities');
   if (contributes.integration !== undefined) declared.push('integration');
-  // A service the host starts itself (it provides a role or a surface) needs
-  // no frame; one that only answers a panel's `serviceRequest` has no caller
-  // without one.
+  // A service the host starts itself (it provides a role or a surface, or
+  // receives session events) needs no frame; one that only answers a panel's
+  // `serviceRequest` has no caller without one.
   if (contributes.service !== undefined && !contributes.service.provides?.length && !contributes.service.surface
-    && !hasStatusSource(contributes)) declared.push('service');
+    && !hasStatusSource(contributes) && contributes.sessionEvents === undefined) declared.push('service');
   if (contributes.filesystem !== undefined) declared.push('filesystem');
   if (contributes.origins !== undefined) declared.push('origins');
   if (contributes.actions !== undefined) declared.push('actions');
@@ -535,6 +575,22 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
+    // The notification channel and the role that serves it come together, named `ext-<panel.id>` as well.
+    const providesNotifications = contributes.service?.provides?.includes('notifications') === true;
+    if (providesNotifications !== (contributes.notifications !== undefined)) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: 'service.provides "notifications" and contributes.notifications come together: declare both or neither.',
+      });
+      return;
+    }
+    if (providesNotifications && contributes.panel.id.length > NOTIFICATIONS_GUEST_ID_MAX) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: `A notifications extension's panel.id is at most ${NOTIFICATIONS_GUEST_ID_MAX} characters: OpenChamber names its channel "ext-<panel.id>".`,
+      });
+      return;
+    }
     // Docking only means something for a page beside a shared surface.
     const docked = contributes.panel.dock !== undefined || contributes.panel.size !== undefined;
     if (docked && !(contributes.service?.surface && hasGuestPage(contributes))) {
@@ -557,6 +613,14 @@ export const openChamberManifestSchema = z.object({
       ctx.addIssue({
         code: 'custom', path: ['statusSection', 'source'],
         message: 'contributes.statusSection.source is read from the extension\'s service; declare contributes.service.',
+      });
+      return;
+    }
+    // Session events are posted to the extension's service; without one there is nothing to post to.
+    if (contributes.sessionEvents !== undefined && !contributes.service) {
+      ctx.addIssue({
+        code: 'custom', path: ['sessionEvents'],
+        message: 'contributes.sessionEvents are posted to the extension\'s service; declare contributes.service.',
       });
       return;
     }
@@ -728,6 +792,11 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       `contributes.fileEditors lists 1 to ${GUEST_FILE_EDITORS_MAX} editors with a unique kebab-case id, a title of 1 to ${GUEST_FILE_EDITOR_TITLE_MAX} characters, match: 1 to ${GUEST_FILE_EDITOR_PATTERNS_MAX} file-name patterns (no "/", not only wildcards, like "*.excalidraw"), an entry ending in .html inside the package, and optional content "text" or "binary".`,
     );
   }
+  if (path === 'contributes.sessionEvents' || path.startsWith('contributes.sessionEvents.')) {
+    return fail('invalid-session-events', issue.code === 'custom' && path === 'contributes.sessionEvents'
+      ? issue.message
+      : `contributes.sessionEvents is { events: [1 to ${GUEST_SESSION_EVENT_TYPES.length} distinct of ${GUEST_SESSION_EVENT_TYPES.map((type) => `"${type}"`).join(', ')}], content?: true }.`);
+  }
   if (path.startsWith('contributes.integration')) {
     return fail(
       'invalid-integration',
@@ -741,10 +810,16 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       ? `${field}: ${issue.message}`
       : `${field} is invalid: see "contributes.sourceControl" in GUEST_SERVICES.md for every field.`);
   }
+  if (path.startsWith('contributes.notifications')) {
+    const field = fieldPath(issue.path);
+    return fail('invalid-service', issue.code === 'custom'
+      ? `${field}: ${issue.message}`
+      : `${field} is invalid: see "contributes.notifications" in GUEST_SERVICES.md for every field.`);
+  }
   if (path.startsWith('contributes.service')) {
     return fail('invalid-service', issue.code === 'custom'
       ? issue.message
-      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control"), and optional surface (true).');
+      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control", "notifications"), and optional surface (true).');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };

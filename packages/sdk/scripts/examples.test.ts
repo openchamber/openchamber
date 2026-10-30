@@ -69,16 +69,20 @@ describe('checked-in SDK examples', () => {
     for (const entry of ['hello-kit/panel/main', 'hello-kit/background/main', 'github-token/panel/main', 'config-editor/panel/main', 'service-echo/panel/main',
       'service-echo/service/main', 'browser-provider-stub/service/main', 'browser-provider-stub/panel/main', 'tools-only/mcp', 'tasks-demo/panel/main', 'tasks-demo/panel/attach', 'tasks-demo/panel/page',
       'git-graph-status/status/main', 'git-graph-status/service/main', 'checklist-editor/editor/main',
-      'source-control-provider/service/main']) {
+      'source-control-provider/service/main', 'session-events-log/service/main', 'notification-webhook/service/main']) {
       const node = entry.includes('/service/') || entry === 'tools-only/mcp';
       const output = path.join(temporary, 'bundle.js');
       const result = spawnSync('bun', [fileURLToPath(new URL('./bundle-guest.ts', import.meta.url)), ...(node ? ['--node'] : []), fileURLToPath(new URL(`${entry}.ts`, examples)), output], {
         cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env }, encoding: 'utf8',
       });
       if (result.status !== 0) throw new Error(`${entry}: ${result.stderr}`);
-      // Bun's unminified source comments are relative to the command's working directory.
-      const normalize = (source: string) => source.replace(/^\/\/ (?:packages\/sdk\/)?examples\//gm, '// examples/');
-      expect(Bun.hash(normalize(await readFile(output, 'utf8')))).toBe(Bun.hash(normalize(await readFile(new URL(`${entry}.js`, examples), 'utf8'))));
+      // Bun's source comments vary with the working directory and symlinked worktree dependencies.
+      const normalize = (source: string) => source
+        .replace(/^\/\/ (?:packages\/sdk\/)?examples\//gm, '// examples/')
+        .replace(/^\/\/ (?:\.\.\/)+[^\n]*?\/node_modules\//gm, '// node_modules/');
+      const actual = normalize(await readFile(output, 'utf8'));
+      const expected = normalize(await readFile(new URL(`${entry}.js`, examples), 'utf8'));
+      expect(actual, entry).toBe(expected);
     }
     } finally { await rm(temporary, { recursive: true, force: true }); }
   });

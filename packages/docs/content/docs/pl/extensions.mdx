@@ -50,7 +50,10 @@ Pokazywanie panelu i odczyt, który projekt i sesja są otwarte, nie wymaga upra
 - **Używanie twojego Small Model**: jednorazowe generowanie tekstu poza Twoimi sesjami, z modelem z Ustawienia → Sesje → Small Model. Kosztuje tokeny.
 - **Łączenie z usługą zewnętrzną**: z kontem, które połączysz w Ustawienia → Integracje.
 - **Czytanie rozmowy sesji**: tylko gdy uruchamiasz akcję rozszerzenia na tej sesji.
-- **Uruchamianie lokalnej usługi**: osobny program z pełnymi uprawnieniami Twojego konta. Zezwalaj tylko, jeśli ufasz autorowi.
+- **Uruchamianie lokalnej usługi**: osobny program z pełnymi uprawnieniami Twojego konta. Zezwalaj tylko, jeśli ufasz autorowi. Gdy rozszerzenie chce wiedzieć, co dzieje się w Twoich sesjach, ten wiersz wymienia też momenty, o których się dowiaduje: tura się kończy, tura kończy się błędem, agent prosi o uprawnienie, agent zadaje pytanie. Dowiaduje się o nich w każdym projekcie, bez otwartego okna, i dostaje same identyfikatory: sesję, jej projekt i elementy, które do niej dołączyłeś.
+- **Czytać, co agent mówi w tle**: końcowa odpowiedź każdej tury, pytania, które agent zadaje, i to, o jakie uprawnienia prosi, w każdym projekcie, wysyłane do lokalnej usługi rozszerzenia. Zezwalaj tylko, jeśli ufasz miejscu, do którego rozszerzenie to wysyła.
+
+Rozszerzenie, które dostarcza Twoje powiadomienia, na Slack, Matrix albo na własny serwer, również mówi o tym pod **Uruchamianie lokalnej usługi**, wierszem zaczynającym się od **Dostarcza Twoje powiadomienia**. Nic nie wychodzi, dopóki nie podłączysz dla niego konta w [Ustawienia → Integracje](/pl/integrations/#kanały-powiadomień-z-rozszerzeń); potem dostaje to, co dostałby Twój telefon, a wstrzymanie rozszerzenia to zatrzymuje.
 
 Gdy nowsza wersja prosi o więcej, niż pozwoliłeś, karta pokazuje **Wymaga zgody** i przycisk **Sprawdź uprawnienia**. Dopóki nie zezwolisz na nową listę, to rozszerzenie pozostaje wyłączone.
 

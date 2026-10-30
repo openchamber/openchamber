@@ -50,7 +50,10 @@ Panel göstermek ve hangi proje ile oturumun açık olduğunu okumak izin gerekt
 - **Small Model’inizi kullanma**: oturumlarınızın dışında tek seferlik metin üretimi, Ayarlar → Oturumlar → Small Model'deki modelle. Jeton harcar.
 - **Dış bir hizmete bağlanma**: Ayarlar → Entegrasyonlar altında bağladığınız hesapla.
 - **Bir oturumun konuşmasını okuma**: yalnızca o oturumda uzantının eylemini çalıştırdığınızda.
-- **Yerel servis çalıştırma**: kullanıcı hesabınızın tüm erişimine sahip ayrı bir program. Yalnızca yazara güveniyorsanız izin verin.
+- **Yerel servis çalıştırma**: kullanıcı hesabınızın tüm erişimine sahip ayrı bir program. Yalnızca yazara güveniyorsanız izin verin. Uzantı oturumlarınızda olanların kendisine bildirilmesini istiyorsa bu satır haber alacağı anları da listeler: bir tur biter, bir tur başarısız olur, ajan izin ister, ajan soru sorar. Bunları her projede, açık bir pencere olmadan öğrenir ve yalnızca tanımlayıcıları alır: oturum, projesi ve oturuma iliştirdiğiniz öğeler.
+- **Ajanın arka planda söylediklerini okuma**: her turun son yanıtı, ajanın sorduğu sorular ve ne için izin istediği, her projede, uzantının yerel servisine gönderilir. Yalnızca uzantının bunları gönderdiği yere güveniyorsanız izin verin.
+
+Bildirimlerinizi Slack'e, Matrix'e ya da kendi sunucusuna ileten bir uzantı bunu da **Yerel servis çalıştırma** altında, **Bildirimlerinizi** sözcüğüyle başlayan bir satırla söyler. [Ayarlar → Entegrasyonlar](/tr/integrations/#uzantı-bildirim-kanalları)'da onun için bir hesap bağlamadan önce hiçbir şey dışarı çıkmaz; sonrasında telefonunuzun alacağını alır ve uzantıyı duraklatmak bunu durdurur.
 
 Daha yeni bir sürüm izin verdiğinizden fazlasını istediğinde kart **Onay gerekli** ve bir **İzinleri incele** düğmesi gösterir. Yeni listeye izin verene kadar o uzantı kapalı kalır.
 

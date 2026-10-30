@@ -186,6 +186,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` підкоряється тим самим правилам, що й у `request`. Оголошення сервісу додає `service` до дозволів, які користувач підтверджує під час встановлення; до того кожен `serviceRequest` - `NO_SERVICE`. Повний контракт: файл пакета `GUEST_SERVICES.md`.
 
+## Події сесій
+
+Ваша сторінка знає про сесію, лише доки та відкрита. Ваш сервіс може знати більше: оголосіть `contributes.sessionEvents` поруч із `contributes.service`, і OpenChamber надсилатиме сервісу перелічені події з усіх проєктів, є відкрите вікно чи ні.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+Чотири події: `turn-finished` (агент закінчив і нічого не чекає: немає запущеного підагента, відкритого дозволу чи питання, кроку цілі), `turn-failed`, `permission-asked` і `question-asked`. Хід, який зупинив користувач, нічого не надсилає. Схвалення розширення і є підпискою; діалог перелічує події під рядком сервісу. Без `content` сервіс отримує лише ідентифікатори: сесію, теку її проєкту, елементи, які користувач до неї прикріпив. З `"content": true` маніфест просить ще й дозвіл, який користувач бачить окремим рядком, **Читати, що агент каже у фоні**, і кожна подія несе фінальну відповідь агента, поля питання або деталі дозволу.
+
+Кожна подія приходить одним `POST /session-events` із bearer-токеном сервісу. Прочитайте її через `readSessionEventRequest` і відповідьте `{ "ok": true }`:
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+Надсилаються події всіх проєктів; порівняйте `event.project.directory` зі своїми налаштуваннями, а на решту відповідайте `{ "ok": true }`. Доставка щонайбільше одноразова і по порядку, по одному запиту за раз; невдала відповідь відкидає ваші події на 30 секунд, а після простою OpenChamber чи вашого сервісу нічого не надсилається повторно. Панель для цього сервісу не потрібна. Приклад `session-events-log` записує кожну подію у файл.
+
+## Канали сповіщень
+
+Сервіс може доставляти сповіщення користувача поруч із десктопом і телефоном: оголосіть `provides: ["notifications"]` і опишіть канал у `contributes.notifications`.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+За цим описом OpenChamber малює картку облікового запису каналу в Налаштування → Інтеграції і зберігає обліковий запис: користувач підключає його там, токен лишається в OpenChamber, а ваш сервіс ніколи його не бачить. Коли обліковий запис підключено, кожне сповіщення, яке OpenChamber надіслав би на телефон, надходить і вашому сервісу, після перемикачів сповіщень користувача і лише поки жодне вікно не видиме, якщо тільки користувач не вибрав отримувати сповіщення завжди. Пауза розширення це зупиняє.
+
+OpenChamber передає три виклики на `POST /notifications`: `auth.probe` (чи це сервер, на який ви доставляєте), `auth.verify` (кому належить цей токен) і `notify` (одне сповіщення). Читайте кожен через `readNotificationsProviderRequest`, а до сервера каналу звертайтеся лише через вихідний помічник, який надсилає ваш запит в OpenChamber разом із дескриптором виклику; OpenChamber додає токен і не випускає запит за межі сервера облікового запису.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+У яку кімнату чи канал іде проєкт, вирішує ваше розширення: сповіщення несе `directory` і `sessionName`. У корпоративному режимі воно несе лише загальний заголовок, як і телефон. Приклад `notification-webhook` є повним каналом із приймачем, на якому його можна випробувати.
+
 ## Файли
 
 Відносний шлях лежить усередині відкритого проєкту і потребує дозволу `files`. Шлях, що починається з `/` або `~/`, має збігатися з оголошеним шаблоном `contributes.filesystem` і потребує дозволу `filesystem`. Правила див. у [Зробити розширення](/sdk/#файли).

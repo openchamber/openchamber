@@ -97,7 +97,7 @@ For a board, use `host.storage` for persistent JSON and the project/worktree/ses
 
 `contributes.integration` is optional. It adds a card at Settings → Integrations where the user connects an account. See [Accounts and network](#accounts-and-network).
 
-`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel.
+`contributes.service` is optional. It declares a local process OpenChamber starts next to the extension, for things a web page cannot reach, like a Docker socket. That process runs with the user's full access and no sandbox, so the approval dialog warns about it; declare one only when the page cannot do the job. See the package file `GUEST_SERVICES.md`. A service with `provides: ["browser"]` can also stand in for the agent's browser: it answers the `browser.*` actions on the server, so agents browse with no desktop app open, and the user picks it under Settings → OpenChamber Tools. Such a service needs no panel. A service can also be told what happens in the user's sessions: declare `contributes.sessionEvents` next to it, and OpenChamber posts each turn that finishes or fails and each permission or question the agent asks to the service, from every project, with no window open. See [Session events](/sdk/host/#session-events). And a service with `provides: ["notifications"]` delivers the user's notifications next to the desktop and the phone, to Slack, Matrix or a server of your own; the user connects the account in Settings → Integrations and the token stays in OpenChamber. See [Notification channels](/sdk/host/#notification-channels).
 
 ## Capabilities
 
@@ -111,7 +111,7 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
 | `shells` | watch the shell commands your agents run in the background, read their output, and stop them (`onRunningShells`, `readShellOutput`, `stopShell`) |
 
-Five more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, and `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)).
+Six more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), and `transcript` when `sessionEvents` asks for `content` (see [Session events](/sdk/host/#session-events)).
 
 The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
 

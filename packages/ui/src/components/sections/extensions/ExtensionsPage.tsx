@@ -33,6 +33,7 @@ import { GuestApprovalDialog } from './GuestApprovalDialog';
 import { toast } from '@/components/ui';
 import { setGuestServiceSocketPath } from '@/lib/guests/service';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
+import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getGuestSourceUrl } from '@/lib/guests/source-url';
@@ -460,6 +461,16 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
         <SettingsSection title={t('settings.extensions.detail.section.permissions')} contentClassName="space-y-3">
           {permissions ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.permissions', { list: permissions })}</p>
+          ) : null}
+          {guest.sessionEvents ? (
+            <p className="typography-meta text-foreground">
+              {t('settings.extensions.service.sessionEvents', {
+                list: guest.sessionEvents.events.map((type) => t(SESSION_EVENT_LABEL_KEYS[type])).join(', '),
+              })}
+            </p>
+          ) : null}
+          {guest.notifications ? (
+            <p className="typography-meta text-foreground">{t('settings.extensions.service.providesNotifications')}</p>
           ) : null}
           {guest.service ? (
             // A security warning: stays visible.

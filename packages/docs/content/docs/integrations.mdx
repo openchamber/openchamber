@@ -91,6 +91,12 @@ Turn on **Session comments** in the Linear card and a session started from an is
 
 Integrations install for your user, so they work in every project. You can update or remove them from the same card at any time.
 
+## Extension notification channels
+
+An [extension](/extensions/) can deliver your notifications to Slack, Matrix or a server of its own. Once you allow it in **Settings → Extensions**, it gets a card under **Extension accounts** on this page. Enter the account's token there, and the server's address when the card asks for one, and connect: from then on the extension gets the same notifications your phone would, following your [notification toggles](/notifications/). The token stays in OpenChamber; the extension's service sends through OpenChamber and never sees it.
+
+If the server refuses the token later, the card says the account needs attention; connect again with a new token. Disconnect to stop deliveries without removing the extension, or pause the extension. Removing the extension forgets the account.
+
 ## Claude Code
 
 Claude Code uses your Claude Pro or Max plan through the Claude Code CLI on your machine — no API keys.

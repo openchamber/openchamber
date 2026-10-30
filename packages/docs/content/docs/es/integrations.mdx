@@ -91,6 +91,12 @@ Activa **Session comments** en la tarjeta de Linear y una sesión iniciada desde
 
 Las integraciones se instalan para tu usuario, así que funcionan en todos los proyectos. Puedes actualizarlas o eliminarlas desde la misma tarjeta en cualquier momento.
 
+## Canales de notificación de extensiones
+
+Una [extensión](/es/extensions/) puede entregar tus notificaciones a Slack, Matrix o a un servidor propio. Una vez que la permites en **Settings → Extensions**, recibe una tarjeta bajo **Extension accounts** en esta página. Introduce ahí el token de la cuenta, y la dirección del servidor cuando la tarjeta la pida, y conecta: a partir de ahí la extensión recibe las mismas notificaciones que tu teléfono, siguiendo tus [ajustes de notificaciones](/es/notifications/). El token se queda en OpenChamber; el servicio de la extensión envía a través de OpenChamber y nunca lo ve.
+
+Si el servidor rechaza el token más adelante, la tarjeta indica que la cuenta necesita atención; conecta de nuevo con un token nuevo. Desconecta para detener las entregas sin quitar la extensión, o pausa la extensión. Quitar la extensión olvida la cuenta.
+
 ## Claude Code
 
 Claude Code usa tu plan Claude Pro o Max a través de la CLI de Claude Code en tu equipo — sin claves de API.

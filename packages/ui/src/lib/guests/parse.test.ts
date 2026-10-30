@@ -358,3 +358,41 @@ describe('parseInstalledGuestJson', () => {
     expect(junkUpdate).toBeNull();
   });
 });
+
+describe('session events on a catalog row', () => {
+  test('keeps the subscription a service declares, and drops a slice with an unknown event type without the row', () => {
+    const slice = { events: ['turn-finished', 'question-asked'], content: true };
+    const row = (sessionEvents: { events: string[]; content: boolean }) => ({
+      id: 'journal', name: 'Journal', icon: 'book',
+      capabilities: { requested: ['service', 'transcript'], granted: [] },
+      service: { runtime: 'host', granted: false },
+      sessionEvents,
+    });
+    const [guest, newer] = readGuests(JSON.stringify({
+      guests: [row(slice), { ...row({ events: ['turn-finished', 'turn-started'], content: false }), id: 'newer' }],
+    })) ?? [];
+    expect(guest?.sessionEvents).toEqual(slice);
+    expect(guest?.capabilities.requested).toEqual(['service', 'transcript']);
+    expect(newer?.id).toBe('newer');
+    expect(newer?.sessionEvents).toBeUndefined();
+  });
+});
+
+describe('notification channels on a catalog row', () => {
+  test('keeps the channel a service declares, and drops a malformed slice without the row', () => {
+    const slice = { label: 'Slack', instances: { kind: 'fixed', origin: 'https://slack.com' }, token: { scheme: 'bearer', username: false, scopes: ['chat:write'] } };
+    const row = (notifications: { label: string; instances: { kind: string; origin?: string }; token: { scheme: string; username: boolean; scopes: string[] } }) => ({
+      id: 'slack-bridge', name: 'Slack Bridge', icon: 'notification-3',
+      capabilities: { requested: ['service'], granted: [] },
+      service: { runtime: 'host', granted: false, provides: ['notifications'] },
+      notifications,
+    });
+    const [guest, malformed] = readGuests(JSON.stringify({
+      guests: [row(slice), { ...row({ label: 'Slack', instances: { kind: 'dynamic' }, token: { scheme: 'bearer', username: false, scopes: [] } }), id: 'other' }],
+    })) ?? [];
+    expect(guest?.service?.provides).toEqual(['notifications']);
+    expect(guest?.notifications).toEqual(slice);
+    expect(malformed?.id).toBe('other');
+    expect(malformed?.notifications).toBeUndefined();
+  });
+});

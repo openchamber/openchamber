@@ -1,9 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
-import { browserProviderResultSchema, sourceControlProviderSchemasV1 } from './service-provider-schemas.ts';
+import { browserProviderResultSchema, notificationsProviderSchemasV1, sourceControlProviderSchemasV1 } from './service-provider-schemas.ts';
 import {
   BROWSER_CONTROL_ACTIONS,
+  GUEST_NOTIFICATION_KINDS,
+  NOTIFICATIONS_OUTBOUND_PATH,
+  NOTIFICATIONS_PROVIDER_METHODS,
+  NotificationsOutboundError,
   OPENCHAMBER_HOST_CALLBACK_URL,
+  createNotificationsOutbound,
+  isNotificationsProviderMethod,
+  notificationsProviderTimeoutMs,
+  readNotificationsProviderRequest,
   SOURCE_CONTROL_OUTBOUND_PATH,
   SOURCE_CONTROL_PROVIDER_METHODS,
   SourceControlForgeError,
@@ -220,5 +228,79 @@ describe('source-control provider contract', () => {
     expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
     expect(schemas.outboundRequest.safeParse({ method: 'GET', path: '/x', headers: { authorization: 'token x' } }).success).toBe(false);
     expect(schemas.outboundRequest.safeParse({ method: 'HEAD', path: '/x' }).success).toBe(false);
+  });
+});
+
+describe('notifications provider contract', () => {
+  const session = { instance: 'https://slack.com', handle: 'h-1', account: { id: 'U123', login: 'mona' } };
+  const notification = { kind: 'ready', title: 'Done', body: 'The parser passes.', tag: 'ready-ses_1', at: 1, sessionId: 'ses_1', sessionName: 'Fix', directory: '/repo', url: 'https://openchamber.example/s/ses_1' };
+  const call = <T,>(patch?: T) => JSON.stringify({
+    v: 1, requestId: 'req-1', method: 'notify', provider: 'ext-slack-bridge', session, input: { notification }, ...patch,
+  });
+
+  test('reads the body the host posts and refuses anything else', () => {
+    expect(readNotificationsProviderRequest(call())).toEqual({
+      v: 1, requestId: 'req-1', method: 'notify', provider: 'ext-slack-bridge', session, input: { notification },
+    });
+    expect(readNotificationsProviderRequest(call({ method: 'auth.verify', session: { ...session, account: null }, input: {} }))?.session.account).toBeNull();
+    expect(readNotificationsProviderRequest(call({ session: { ...session, account: { id: 'U1', login: null } } }))?.session.account).toEqual({ id: 'U1', login: null });
+
+    expect(readNotificationsProviderRequest('not json')).toBeNull();
+    expect(readNotificationsProviderRequest(call({ v: 2 }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ method: 'listChannels' }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ provider: '' }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ session: null }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ session: { ...session, account: { id: 7, login: 'mona' } } }))).toBeNull();
+    expect(readNotificationsProviderRequest(call({ input: [] }))).toBeNull();
+  });
+
+  test('the three methods and their deadlines', () => {
+    expect(NOTIFICATIONS_PROVIDER_METHODS).toEqual(['auth.verify', 'auth.probe', 'notify']);
+    expect(isNotificationsProviderMethod('notify')).toBe(true);
+    expect(isNotificationsProviderMethod('browser.open')).toBe(false);
+    expect(notificationsProviderTimeoutMs('notify')).toBe(10_000);
+    expect(notificationsProviderTimeoutMs('auth.verify')).toBe(15_000);
+    expect(GUEST_NOTIFICATION_KINDS).toEqual(['ready', 'error', 'question', 'permission', 'review', 'goal_complete', 'goal_blocked', 'goal_budget']);
+  });
+
+  test('the outbound helper posts to its own callback route with the handle', async () => {
+    const seen: Array<{ url: string; authorization: string | null }> = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      async fetch(request) {
+        seen.push({ url: new URL(request.url).pathname, authorization: request.headers.get('authorization') });
+        if (request.headers.get('authorization') === 'Bearer expired') {
+          return Response.json({ error: { message: 'This call has ended', code: 'HANDLE_EXPIRED' } }, { status: 403 });
+        }
+        return Response.json({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"ok":true}' });
+      },
+    });
+    try {
+      expect(() => createNotificationsOutbound({ env: {} })).toThrow(OPENCHAMBER_HOST_CALLBACK_URL);
+      const outbound = createNotificationsOutbound({ env: { [OPENCHAMBER_HOST_CALLBACK_URL]: `http://127.0.0.1:${server.port}` } });
+      const answer = await outbound.request('h-1', { method: 'POST', path: '/api/chat.postMessage', headers: { 'content-type': 'application/json' }, body: '{}' });
+      expect(answer).toEqual({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"ok":true}' });
+      expect(seen[0]).toEqual({ url: NOTIFICATIONS_OUTBOUND_PATH, authorization: 'Bearer h-1' });
+      const refused = await outbound.request('expired', { method: 'GET', path: '/x' }).catch((error: Error) => error);
+      expect(refused).toBeInstanceOf(NotificationsOutboundError);
+      expect(refused).toMatchObject({ code: 'HANDLE_EXPIRED', status: 403 });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test('the host checks the account, the probe and the delivery answer', () => {
+    const schemas = notificationsProviderSchemasV1;
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: 'U123', login: 'mona', name: 'Mona' } }).success).toBe(true);
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: '', login: 'mona' } }).success).toBe(false);
+    expect(schemas.data['auth.verify'].safeParse({ user: { id: 7, login: 'mona' } }).success).toBe(false);
+    expect(schemas.data['auth.probe'].safeParse({ supported: true }).success).toBe(true);
+    expect(schemas.data.notify.safeParse({ delivered: true }).success).toBe(true);
+    expect(schemas.data.notify.safeParse({ delivered: false }).success).toBe(false);
+    expect(schemas.data.notify.safeParse({ delivered: true, echo: notification }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'channel_not_found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
+    expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
   });
 });

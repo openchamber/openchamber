@@ -9,6 +9,8 @@ import type {
   PublicService,
   PublicGuestCapabilities,
   PublicIntegration,
+  PublicNotifications,
+  PublicSessionEvents,
   PublicSourceControl,
 } from '@openchamber/sdk';
 
@@ -54,6 +56,10 @@ export type InstalledGuest = {
   service?: PublicService;
   /** The Git host from `contributes.sourceControl`, when the service provides `source-control`. */
   sourceControl?: PublicSourceControl;
+  /** The session events the service subscribed to (`contributes.sessionEvents`), for the approval dialog and the card. */
+  sessionEvents?: PublicSessionEvents;
+  /** The notification channel from `contributes.notifications`, when the service provides `notifications`. */
+  notifications?: PublicNotifications;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
   /** Declared `contributes.commands`; the composer routes them only for an active guest. */

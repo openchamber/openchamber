@@ -97,7 +97,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 
 `contributes.integration`은 선택 사항입니다. 설정 → 통합 에 카드를 추가하고, 사용자는 거기서 계정을 연결합니다. [계정과 네트워크](#계정과-네트워크)를 참고하세요.
 
-`contributes.service`는 선택 사항입니다. Docker 소켓처럼 웹 페이지가 닿을 수 없는 것을 위해, OpenChamber가 확장 옆에서 시작하는 로컬 프로세스를 선언합니다. 그 프로세스는 사용자의 전체 권한으로, 샌드박스 없이 실행되므로 승인 대화상자가 이를 경고합니다. 페이지로 처리할 수 없을 때만 선언하세요. 패키지 파일 `GUEST_SERVICES.md`를 참고하세요. `provides: ["browser"]`를 가진 서비스는 에이전트의 브라우저를 대신할 수도 있습니다. 서버에서 `browser.*` 동작에 응답하므로 데스크톱 앱을 열지 않아도 에이전트가 탐색할 수 있고, 사용자는 설정 → OpenChamber 도구에서 선택합니다. 이런 서비스에는 패널이 필요 없습니다.
+`contributes.service`는 선택 사항입니다. Docker 소켓처럼 웹 페이지가 닿을 수 없는 것을 위해, OpenChamber가 확장 옆에서 시작하는 로컬 프로세스를 선언합니다. 그 프로세스는 사용자의 전체 권한으로, 샌드박스 없이 실행되므로 승인 대화상자가 이를 경고합니다. 페이지로 처리할 수 없을 때만 선언하세요. 패키지 파일 `GUEST_SERVICES.md`를 참고하세요. `provides: ["browser"]`를 가진 서비스는 에이전트의 브라우저를 대신할 수도 있습니다. 서버에서 `browser.*` 동작에 응답하므로 데스크톱 앱을 열지 않아도 에이전트가 탐색할 수 있고, 사용자는 설정 → OpenChamber 도구에서 선택합니다. 이런 서비스에는 패널이 필요 없습니다. 서비스는 사용자의 세션에서 일어나는 일을 전달받을 수도 있습니다. 그 옆에 `contributes.sessionEvents`를 선언하면 OpenChamber가 끝나거나 실패한 각 턴과 에이전트가 요청한 각 권한이나 질문을 모든 프로젝트에서, 창을 열지 않아도 서비스로 보냅니다. [세션 이벤트](/sdk/host/#세션-이벤트)를 참고하세요. 그리고 `provides: ["notifications"]`를 가진 서비스는 데스크톱과 휴대폰에 더해 Slack, Matrix 또는 직접 운영하는 서버로 사용자의 알림을 전달합니다. 사용자는 설정 → 통합에서 계정을 연결하고 토큰은 OpenChamber에 남습니다. [알림 채널](/sdk/host/#알림-채널)을 참고하세요.
 
 ## 권한
 
@@ -110,7 +110,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 | `files` | 열린 프로젝트 안의 파일 읽고 쓰기(상대 경로를 쓰는 `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | 세션 밖에서 사용자의 Small Model로 일회성 텍스트 생성(`generate`) |
 
-다섯 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`입니다([작업, 명령, 배지](#작업-명령-배지) 참고).
+여섯 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`([작업, 명령, 배지](#작업-명령-배지) 참고), `sessionEvents`가 `content`를 요청하면 `transcript`입니다([세션 이벤트](/sdk/host/#세션-이벤트) 참고).
 
 사용자는 확장을 설치할 때 전체 목록을 한 번 보고, 승인하거나 확장을 제거합니다. 새 버전이 더 많은 권한을 요구하면 대화상자가 다시 나타납니다. 사용자가 승인하지 않은 권한이 필요한 호출은 `NOT_GRANTED`로 실패합니다.
 

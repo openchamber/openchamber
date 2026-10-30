@@ -50,7 +50,10 @@ Ein Panel anzeigen und lesen, welches Projekt und welche Sitzung offen sind, bra
 - **Dein Small Model verwenden**: einmalige Textgenerierung außerhalb deiner Sitzungen, mit dem Modell aus Einstellungen → Sessions → Small Model. Kostet Tokens.
 - **Mit einem externen Dienst verbinden**: mit dem Konto, das du unter Einstellungen → Integrationen verbindest.
 - **Den Gesprächsverlauf einer Sitzung lesen**: nur wenn du die Aktion der Erweiterung auf dieser Sitzung ausführst.
-- **Lokalen Dienst ausführen**: ein separates Programm mit deinen vollen Benutzerrechten. Erlaube das nur, wenn du dem Autor vertraust.
+- **Lokalen Dienst ausführen**: ein separates Programm mit deinen vollen Benutzerrechten. Erlaube das nur, wenn du dem Autor vertraust. Will die Erweiterung erfahren, was in deinen Sitzungen passiert, listet diese Zeile auch die Momente auf, von denen sie hört: ein Zug ist beendet, ein Zug schlägt fehl, der Agent bittet um Erlaubnis, der Agent stellt eine Frage. Sie hört davon in jedem Projekt, ohne geöffnetes Fenster, und bekommt nur Kennungen: die Sitzung, ihr Projekt und die Einträge, die du mit ihr verknüpft hast.
+- **Lesen, was der Agent im Hintergrund sagt**: die endgültige Antwort jedes Zugs, die Fragen, die der Agent stellt, und wofür er um Erlaubnis bittet, in jedem Projekt, gesendet an den lokalen Dienst der Erweiterung. Erlaube das nur, wenn du vertraust, wohin die Erweiterung es schickt.
+
+Eine Erweiterung, die deine Benachrichtigungen zustellt, an Slack, Matrix oder einen eigenen Server, sagt das ebenfalls unter **Lokalen Dienst ausführen**, mit einer Zeile, die mit **Stellt deine Benachrichtigungen** beginnt. Nichts geht hinaus, bis du dafür unter [Einstellungen → Integrationen](/integrations/#benachrichtigungskanäle-aus-erweiterungen) ein Konto verbindest; danach bekommt sie, was dein Telefon bekommen würde, und das Pausieren der Erweiterung beendet es.
 
 Wenn eine neuere Version mehr verlangt, als du erlaubt hast, zeigt die Karte **Freigabe nötig** und eine Schaltfläche **Berechtigungen prüfen**. Bis du die neue Liste erlaubst, bleibt die Erweiterung aus.
 

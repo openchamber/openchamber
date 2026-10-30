@@ -1,7 +1,7 @@
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
-import { truncateNotificationText } from './message.js';
+import { genericNotificationTitle, truncateNotificationText } from './message.js';
 import {
   defaultNotificationTemplates,
   notificationTexts,
@@ -37,6 +37,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     // `(sessionId, turnEndedAt)`: whether that turn was a step of an
     // auto-review loop; the loop's end notifies once (`notifyAutoReviewEnded`).
     isInAutoReview = () => false,
+    // `({ notification, requireHidden })`: extension notification channels
+    // (`extension-channels.js`), called where push is, with the text push gets.
+    deliverToExtensionChannels = null,
   } = deps;
   let getIsSessionAutoAccepting = deps.getIsSessionAutoAccepting;
   // Where a session is read: the host's OpenCode for its own sessions, the OpenCode inside the
@@ -96,18 +99,7 @@ export const createNotificationTriggerRuntime = (deps) => {
   // Generic notification for native push (per the mobile design): a fixed, scenario-based
   // title + the session name as the body. No model/project/message content crosses the relay
   // in the clear; a phone with a push key gets what happened sealed (`sealed` below).
-  const APNS_TITLE_BY_TYPE = {
-    ready: 'Agent response is ready',
-    error: 'Agent hit an error',
-    question: 'Agent needs your input',
-    permission: 'Agent needs permission',
-    goal_complete: 'Goal complete',
-    goal_blocked: 'Goal blocked',
-    goal_budget: 'Goal reached its token budget',
-    review: 'Review finished',
-  };
-
-  const genericTitleOf = (payload) => APNS_TITLE_BY_TYPE[payload?.data?.type] || 'Agent update';
+  const genericTitleOf = (payload) => genericNotificationTitle(payload?.data?.type);
 
   const toApnsGenericPayload = (payload) => {
     const data = payload?.data && typeof payload.data === 'object' ? payload.data : {};
@@ -174,6 +166,32 @@ export const createNotificationTriggerRuntime = (deps) => {
             console.warn('[APNs] fanout failed:', error?.message ?? error);
           }),
     ]);
+  };
+
+  /**
+   * What an extension channel receives: the same text as web push, after the
+   * user's templates, and in enterprise mode the same generic title with no
+   * body, session name or directory, since the channel's server is outside
+   * the boundary. Sent beside `fanoutPush`, after the same toggles and
+   * suppressions; the channel module applies the visibility gate itself.
+   */
+  const sendToChannels = ({ kind, title, body, tag, sessionId, directory, sessionName }, settings) => {
+    if (typeof deliverToExtensionChannels !== 'function') return;
+    const enterprise = isEnterpriseMode();
+    const notification = {
+      kind,
+      title: enterprise ? genericNotificationTitle(kind) : title,
+      body: enterprise ? '' : body,
+      tag,
+      at: Date.now(),
+      sessionId: sessionId || null,
+      sessionName: enterprise ? null : (typeof sessionName === 'string' && sessionName.trim() ? sessionName.trim() : null),
+      directory: enterprise ? null : (typeof directory === 'string' && directory ? directory : null),
+      url: sessionId ? buildSessionDeepLinkUrl(sessionId) : null,
+    };
+    Promise.resolve(deliverToExtensionChannels({ notification, requireHidden: settings?.notificationMode !== 'always' })).catch((error) => {
+      console.warn('[Notification] extension channel delivery failed:', error?.message ?? error);
+    });
   };
 
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
@@ -615,6 +633,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'ready', title, body, tag: `ready-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }
 
       if (info?.role === 'assistant' && info?.finish === 'error' && sessionId) {
@@ -698,6 +717,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'error', title, body, tag: `error-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }
 
       return;
@@ -790,6 +810,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'question', title, body, tag: `question-${sessionId}`, sessionId: formSessionId, directory: notificationDirectory, sessionName }, settings);
       }, PUSH_QUESTION_DEBOUNCE_MS);
 
       pushQuestionDebounceTimers.set(sessionId, timer);
@@ -934,6 +955,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           },
           { requireNoSse: true },
         );
+        sendToChannels({ kind: 'permission', title, body, tag: `permission-${sessionId}`, sessionId, directory: notificationDirectory, sessionName }, settings);
       }, PUSH_PERMISSION_DEBOUNCE_MS);
 
       pushPermissionDebounceTimers.set(sessionId, { timer, requestKey });
@@ -975,6 +997,9 @@ export const createNotificationTriggerRuntime = (deps) => {
       },
       { requireNoSse: true },
     );
+    if (typeof deliverToExtensionChannels === 'function') {
+      sendToChannels({ kind: type, title, body, tag, sessionId, directory, sessionName }, await readSettingsFromDisk());
+    }
   };
 
   const sendGoalSettlePush = ({ sessionId, directory, status, title, body }) => sendSettlePush({

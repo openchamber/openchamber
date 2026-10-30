@@ -7,7 +7,9 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { IntegrationCatalogCard } from './IntegrationCatalogCard';
+import { NotificationChannelCard } from './NotificationChannelCard';
 import { focusDesktopWindow, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { loadNotificationChannels, type NotificationChannel } from '@/lib/notifications/channels';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
@@ -434,17 +436,41 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
+  const [channels, setChannels] = React.useState<NotificationChannel[]>([]);
+  const [ownerRuntimeKey] = React.useState(getRuntimeKey);
+  // Whether the last channel load failed: the section refreshes on every catalog change, and one failure is told once.
+  const channelsLoadFailedRef = React.useRef(false);
+
+  // The channels an approved extension serves, with their accounts; a load that
+  // fails keeps the last list, never an empty one.
+  const refreshChannels = React.useCallback(async () => {
+    const loaded = await loadNotificationChannels();
+    if (getRuntimeKey() !== ownerRuntimeKey) return;
+    if (loaded === null) {
+      if (!channelsLoadFailedRef.current) toast.error(t('settings.integrations.channels.toast.loadFailed'));
+      channelsLoadFailedRef.current = true;
+      return;
+    }
+    channelsLoadFailedRef.current = false;
+    setChannels(loaded);
+  }, [ownerRuntimeKey, t]);
 
   React.useEffect(() => {
     void loadGuestCatalog();
   }, []);
+
+  React.useEffect(() => {
+    if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return;
+    void refreshChannels();
+    // Approving or pausing an extension changes which channels exist.
+  }, [refreshChannels, guests]);
 
   if (isVSCodeRuntime() || isMobileSurfaceRuntime()) {
     return null;
   }
 
   const cards = guests.filter((guest) => guest.source !== 'bundled' && guest.integration && isGuestActive(guest));
-  if (cards.length === 0) {
+  if (cards.length === 0 && channels.length === 0) {
     return null;
   }
 
@@ -458,6 +484,14 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
     >
       {cards.map((guest) => (
         <GuestIntegrationCard key={`${runtimeKey}:${guest.id}`} guest={guest} />
+      ))}
+      {channels.map((channel) => (
+        <NotificationChannelCard
+          key={`${runtimeKey}:${channel.providerId}`}
+          channel={channel}
+          guest={guests.find((guest) => guest.id === channel.guestId) ?? null}
+          onChanged={refreshChannels}
+        />
       ))}
     </SettingsSection>
   );

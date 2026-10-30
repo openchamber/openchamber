@@ -186,6 +186,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path`는 `request`와 같은 규칙을 따릅니다. 로컬 서비스를 선언하면 설치 시 사용자가 승인하는 권한에 `service`가 추가됩니다. 승인 전에는 모든 `serviceRequest`가 `NO_SERVICE`입니다. 전체 계약은 패키지 파일 `GUEST_SERVICES.md`에 있습니다.
 
+## 세션 이벤트
+
+페이지는 세션이 열려 있는 동안에만 세션에 대해 알 수 있습니다. 서비스는 더 많이 알 수 있습니다. `contributes.service` 옆에 `contributes.sessionEvents`를 선언하면 OpenChamber가 나열한 이벤트를 모든 프로젝트에서, 창이 열려 있든 아니든 서비스로 보냅니다.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+이벤트는 네 가지입니다. `turn-finished`는 에이전트가 일을 마치고 아무것도 기다리지 않는 상태입니다. 실행 중인 하위 에이전트도, 답하지 않은 권한이나 질문도, 목표 단계도 없습니다. 그 밖에 `turn-failed`, `permission-asked`, `question-asked`가 있습니다. 사용자가 중지한 턴은 아무것도 보내지 않습니다. 확장을 승인하는 것이 곧 구독이며, 대화 상자는 서비스 줄 아래에 이벤트를 나열합니다. `content`가 없으면 서비스는 식별자만 받습니다. 세션, 그 프로젝트 디렉터리, 사용자가 세션에 첨부한 항목입니다. `"content": true`로 하면 매니페스트는 권한도 요청하며, 사용자는 이를 **백그라운드에서 에이전트의 말을 읽기**라는 별도 줄로 봅니다. 그러면 각 이벤트에 에이전트의 최종 답변, 질문의 필드 또는 권한의 세부 내용이 담깁니다.
+
+각 이벤트는 서비스 bearer 토큰과 함께 한 번의 `POST /session-events`로 도착합니다. `readSessionEventRequest`로 읽고 `{ "ok": true }`로 답하세요.
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+모든 프로젝트의 이벤트가 전송됩니다. `event.project.directory`를 자신의 설정과 비교하고 나머지에는 `{ "ok": true }`로 답하세요. 전달은 최대 한 번, 순서대로, 한 번에 요청 하나씩입니다. 응답에 실패하면 30초 동안 이벤트가 버려지고, OpenChamber나 서비스가 꺼져 있던 동안의 이벤트는 다시 보내지 않습니다. 이를 위해 서비스에 패널이 필요하지는 않습니다. `session-events-log` 예제는 모든 이벤트를 파일에 기록합니다.
+
+## 알림 채널
+
+서비스는 데스크톱과 휴대폰에 더해 사용자의 알림을 전달할 수 있습니다. `provides: ["notifications"]`를 선언하고 `contributes.notifications`에 채널을 기술하세요.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+OpenChamber는 그 기술을 바탕으로 설정 → 통합에 채널의 계정 카드를 그리고 계정을 관리합니다. 사용자는 거기서 계정을 연결하고, 토큰은 OpenChamber에 남으며, 서비스는 토큰을 결코 보지 못합니다. 계정이 연결되면 OpenChamber가 휴대폰으로 보내는 모든 알림이 서비스로도 갑니다. 사용자 자신의 알림 설정을 따르고, 사용자가 항상 알림받기를 선택하지 않았다면 창이 보이지 않는 동안에만 갑니다. 확장을 일시 중지하면 멈춥니다.
+
+OpenChamber는 세 가지 호출을 `POST /notifications`로 전달합니다. `auth.probe`는 이 서버가 전달 대상인지, `auth.verify`는 이 토큰이 누구의 것인지, `notify`는 알림 하나입니다. 각각을 `readNotificationsProviderRequest`로 읽고, 채널의 서버에는 아웃바운드 헬퍼를 통해서만 접근하세요. 헬퍼는 호출의 핸들을 붙여 요청을 OpenChamber에 보내고, OpenChamber가 토큰을 추가하고 요청을 계정의 서버로만 보냅니다.
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+어떤 프로젝트를 어느 방이나 채널로 보낼지는 확장이 정합니다. 알림에는 `directory`와 `sessionName`이 담겨 있습니다. 엔터프라이즈 모드에서는 휴대폰과 마찬가지로 일반적인 제목만 담깁니다. `notification-webhook` 예제는 완성된 채널이며, 시험해 볼 수신기도 들어 있습니다.
+
 ## 파일
 
 상대 경로는 열린 프로젝트 안을 가리키며 `files` 권한이 필요합니다. `/` 또는 `~/`로 시작하는 경로는 선언된 `contributes.filesystem` 패턴과 일치해야 하며 `filesystem` 권한이 필요합니다. 규칙은 [확장 만들기](/sdk/#파일)를 참고하세요.

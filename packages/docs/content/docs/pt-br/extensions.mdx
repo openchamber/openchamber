@@ -50,7 +50,10 @@ Mostrar um painel e ler qual projeto e sessão estão abertos não precisa de pe
 - **Usar seu Small Model**: geração de texto avulsa fora das suas sessões, com o modelo de Configurações → Sessões → Small Model. Custa tokens.
 - **Conectar a um serviço externo**: com a conta que você conecta em Configurações → Integrações.
 - **Ler a conversa de uma sessão**: só quando você executa a ação da extensão naquela sessão.
-- **Executar um serviço local**: um programa separado com todo o acesso do seu usuário. Permita só se confiar no autor.
+- **Executar um serviço local**: um programa separado com todo o acesso do seu usuário. Permita só se confiar no autor. Quando a extensão quer ser avisada do que acontece nas suas sessões, esta linha também lista os momentos de que ela fica sabendo: um turno termina, um turno falha, o agente pede permissão, o agente faz uma pergunta. Ela fica sabendo deles em todos os projetos, sem nenhuma janela aberta, e recebe só identificadores: a sessão, o projeto dela e os itens que você anexou a ela.
+- **Ler o que o agente diz em segundo plano**: a resposta final de cada turno, as perguntas que o agente faz e o que ele pede permissão para fazer, em todos os projetos, enviados ao serviço local da extensão. Permita só se confiar no destino para onde a extensão envia isso.
+
+Uma extensão que entrega suas notificações, para o Slack, o Matrix ou um servidor próprio, diz isso também em **Executar um serviço local**, com uma linha que começa com **Entrega suas notificações**. Nada sai até você conectar uma conta para ela em [Configurações → Integrações](/pt-br/integrations/#canais-de-notificação-por-extensões); depois disso ela recebe o que o seu celular receberia, e pausar a extensão interrompe isso.
 
 Quando uma versão mais nova pede mais do que você permitiu, o card mostra **Precisa de aprovação** e um botão **Revisar permissões**. Até você permitir a nova lista, essa extensão fica desligada.
 

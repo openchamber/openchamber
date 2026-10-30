@@ -48,10 +48,23 @@ const capabilityScopeSchema = z.object({
       defaultInstances: z.array(z.string().min(1)),
       custom: z.boolean(),
     }).optional(),
+    // The session events the service subscribed to and whether their text was
+    // approved (`grant-scope.js`); absent for other services. Without this key
+    // the schema would strip a stored subscription and the card would ask
+    // again after every restart.
+    sessionEvents: z.object({
+      events: z.array(z.string().min(1)),
+      content: z.boolean(),
+    }).optional(),
+    // Where a notification channel's account lives (`grant-scope.js`); absent for other services.
+    notifications: z.union([
+      z.object({ kind: z.literal('fixed'), origin: z.string().min(1) }),
+      z.object({ kind: z.literal('user') }),
+    ]).optional(),
   }).optional(),
 });
 
-/** @returns {Record<string, { filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean } } }>} */
+/** @returns {Record<string, { filesystem?: string[], apiOrigin?: string, service?: { exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean }, sessionEvents?: { events: string[], content: boolean } } }>} */
 const knownScopesOnly = (scopes) => {
   const cleaned = {};
   for (const [guestId, raw] of Object.entries(scopes)) {

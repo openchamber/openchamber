@@ -97,7 +97,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 
 `contributes.integration` 可选。它会在 设置 → 集成 中添加一张卡片，用户在那里连接账户。见[账户与网络](#账户与网络)。
 
-`contributes.service` 可选。它声明一个由 OpenChamber 在扩展旁启动的本地进程，用于网页无法访问的东西，比如 Docker socket。该进程以用户的完整权限运行，且没有沙箱隔离，因此批准对话框会对此发出警告；只有当网页无法完成这项工作时才声明它。见包内文件 `GUEST_SERVICES.md`。 带有 `provides: ["browser"]` 的服务还可以替代智能体的浏览器：它在服务器上响应 `browser.*` 动作，因此智能体无需打开桌面应用即可浏览，用户在设置 → OpenChamber 工具中选择它。这样的服务不需要面板。
+`contributes.service` 可选。它声明一个由 OpenChamber 在扩展旁启动的本地进程，用于网页无法访问的东西，比如 Docker socket。该进程以用户的完整权限运行，且没有沙箱隔离，因此批准对话框会对此发出警告；只有当网页无法完成这项工作时才声明它。见包内文件 `GUEST_SERVICES.md`。 带有 `provides: ["browser"]` 的服务还可以替代智能体的浏览器：它在服务器上响应 `browser.*` 动作，因此智能体无需打开桌面应用即可浏览，用户在设置 → OpenChamber 工具中选择它。这样的服务不需要面板。服务还可以得知用户会话中发生的事。在它旁边声明 `contributes.sessionEvents`，OpenChamber 就会把每一轮完成或失败的对话，以及智能体请求的每个权限和提出的每个问题，从每个项目发送给服务，无需打开窗口。见[会话事件](/sdk/host/#会话事件)。带有 `provides: ["notifications"]` 的服务则在桌面端和手机之外，把用户的通知投递到 Slack、Matrix 或你自己的服务器。用户在设置 → 集成中连接账户，令牌保留在 OpenChamber 中。见[通知渠道](/sdk/host/#通知渠道)。
 
 ## 能力
 
@@ -110,7 +110,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 | `files` | 读写打开项目中的文件（使用相对路径的 `readFile`、`writeFile`、`listDir`、`stat`） |
 | `model` | 使用用户的 Small Model 进行一次性文本生成（`generate`），不在任何会话中 |
 
-另有五项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，声明了 `origins` 时加上 `origins`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)）。
+另有六项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，声明了 `origins` 时加上 `origins`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)），`sessionEvents` 请求 `content` 时加上 `transcript`（见[会话事件](/sdk/host/#会话事件)）。
 
 用户在安装扩展时会看到完整列表一次，然后批准或移除扩展。如果新版本请求更多权限，对话框会再次出现。调用需要用户尚未批准的能力时，会以 `NOT_GRANTED` 失败。
 

@@ -13,6 +13,7 @@ import { registerTrackerRoutes } from '../trackers/routes.js';
 import { registerGuestRoutes, settleGuestDeactivationListeners } from '../guests/routes.js';
 import { listInstalledGuests, registerBuiltInGuests } from '../guests/catalog.js';
 import { setHostCallbackRoute } from '../guests/host-callback.js';
+import { registerNotificationChannelRoutes } from '../notifications/channel-routes.js';
 import { createOutboundHandles } from '../source-control/outbound-handles.js';
 import { createExtensionProviders } from '../source-control/extension-providers.js';
 import { SOURCE_CONTROL_OUTBOUND_PATH } from '@openchamber/sdk';
@@ -221,6 +222,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createFsSearchRuntime,
       openchamberDataDir,
       onGuestDeactivated,
+      onExtensionSessionEventsChanged = () => {},
+      extensionNotificationChannels = null,
       surfaceViewerHeaders,
       openchamberUserConfigRoot,
       managedChatsRoot,
@@ -726,14 +729,31 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       onGuestDeactivated: settleGuestDeactivationListeners([
         { name: 'hand back an extension role', listener: onGuestDeactivated },
         { name: 'withdraw an extension Git host', listener: (event) => extensionSourceControlProviders.deactivated(event) },
+        { name: 'drop an extension\'s session event subscription', listener: () => onExtensionSessionEventsChanged() },
+        { name: 'withdraw an extension notification channel', listener: (event) => extensionNotificationChannels?.deactivated(event) },
       ]),
-      onGuestActivated: () => extensionSourceControlProviders.reconcile(),
+      // One failing reconcile never skips another; each failure is logged by the route.
+      onGuestActivated: async () => {
+        const results = await Promise.allSettled([
+          extensionSourceControlProviders.reconcile(),
+          onExtensionSessionEventsChanged(),
+          extensionNotificationChannels?.reconcile(),
+        ]);
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed) throw failed.reason;
+      },
       surfaceViewerHeaders, trackers,
     });
     // The providers extensions served before the restart, before any request reads the list.
     await extensionSourceControlProviders.reconcile().catch((error) => {
       console.warn('Failed to load extension Git hosts:', error?.message ?? error);
     });
+    if (extensionNotificationChannels) {
+      registerNotificationChannelRoutes(app, { channels: extensionNotificationChannels });
+      await extensionNotificationChannels.reconcile().catch((error) => {
+        console.warn('Failed to load extension notification channels:', error?.message ?? error);
+      });
+    }
     gitWorktreeCreation = registerGitRoutes(app, {
       // Identities for accounts connected before identities carried one are
       // made the first time identities are listed: a moment someone asked for,

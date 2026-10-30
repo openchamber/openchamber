@@ -186,6 +186,77 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 
 `path` は `request` と同じ規則に従います。ローカルサービスを宣言すると、インストール時にユーザーが承認する権限に `service` が加わります。承認されるまで、すべての `serviceRequest` は `NO_SERVICE` です。完全な契約はパッケージ内のファイル `GUEST_SERVICES.md` にあります。
 
+## セッションイベント
+
+ページがセッションについて知れるのは、そのセッションが開いている間だけです。サービスはそれ以上を知ることができます。`contributes.service` の隣に `contributes.sessionEvents` を宣言すると、OpenChamber は列挙したイベントを、すべてのプロジェクトから、ウィンドウが開いているかどうかに関係なくサービスに送ります。
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+イベントは 4 つです。`turn-finished` はエージェントが作業を終え、何も待っていない状態です。実行中のサブエージェントも、未応答の許可や質問も、ゴールのステップもありません。ほかに `turn-failed`、`permission-asked`、`question-asked` があります。ユーザーが停止したターンは何も送りません。拡張機能を承認することが購読にあたり、ダイアログはサービスの行の下にイベントを列挙します。`content` がなければ、サービスは識別子だけを受け取ります。セッション、そのプロジェクトのディレクトリ、ユーザーがそのセッションに添付した項目です。`"content": true` にするとマニフェストは権限も求め、ユーザーには **バックグラウンドでエージェントの発言を読む** という独立した行として表示されます。このとき各イベントには、エージェントの最終回答、質問のフィールド、または許可の詳細が付きます。
+
+各イベントは、サービスの bearer トークンを付けた 1 回の `POST /session-events` として届きます。`readSessionEventRequest` で読み取り、`{ "ok": true }` を返します。
+
+```ts
+import { SESSION_EVENTS_PATH, readSessionEventRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === SESSION_EVENTS_PATH) {
+  const request = readSessionEventRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: "not a session event" });
+  const { event, content } = request;
+  if (event.type === "turn-finished" && event.project.directory === myProject) {
+    await postComment(event.linked, content?.type === "turn-finished" ? content.reply : "");
+  }
+  return json(res, 200, { ok: true });
+}
+```
+
+すべてのプロジェクトのイベントが送られます。`event.project.directory` を自分の設定と比較し、それ以外には `{ "ok": true }` を返してください。配信は最大 1 回で順序どおり、同時に 1 リクエストずつです。応答に失敗すると 30 秒間イベントが破棄され、OpenChamber またはサービスが停止していた間のイベントは再送されません。この用途にサービスのパネルは不要です。`session-events-log` の例は、すべてのイベントをファイルに記録します。
+
+## 通知チャネル
+
+サービスは、デスクトップとスマートフォンに加えてユーザーの通知を届けることができます。`provides: ["notifications"]` を宣言し、`contributes.notifications` でチャネルを記述します。
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"] }
+}
+```
+
+OpenChamber はその記述から、設定 → 連携 にチャネルのアカウントカードを描き、アカウントを管理します。ユーザーはそこでアカウントを接続し、トークンは OpenChamber に保持され、サービスがそれを見ることはありません。アカウントが接続されると、OpenChamber がスマートフォンに送るすべての通知がサービスにも届きます。ユーザー自身の通知の設定に従い、ウィンドウが表示されていない間だけ届きますが、ユーザーが常に通知を受け取る設定を選んでいればそのときも届きます。拡張機能を一時停止すると止まります。
+
+OpenChamber は 3 種類の呼び出しを `POST /notifications` に転送します。`auth.probe` はこのサーバーが配信先かどうか、`auth.verify` はこのトークンが誰のものか、`notify` は 1 件の通知です。それぞれ `readNotificationsProviderRequest` で読み取り、チャネルのサーバーには送信ヘルパー経由でのみアクセスします。ヘルパーは呼び出しのハンドルを付けてリクエストを OpenChamber に送り、OpenChamber がトークンを加え、リクエストをアカウントのサーバーに限定します。
+
+```ts
+import { NOTIFICATIONS_PROVIDER_PATH, createNotificationsOutbound, readNotificationsProviderRequest } from "@openchamber/sdk";
+
+const outbound = createNotificationsOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
+  const request = readNotificationsProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a notifications call" } });
+  if (request.method === "notify") {
+    const { notification } = request.input as { notification: GuestNotification };
+    const answer = await outbound.request(request.session.handle, {
+      method: "POST", path: "/api/chat.postMessage",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "#agents", text: `${notification.title}: ${notification.body}` }),
+    });
+    return json(res, 200, answer.status === 200 ? { ok: true, data: { delivered: true } } : { ok: false, error: { message: `Slack answered ${answer.status}`, status: answer.status } });
+  }
+  // auth.probe → { ok: true, data: { supported: true } }; auth.verify → { ok: true, data: { account: { id, login } } }
+}
+```
+
+どのプロジェクトをどのルームやチャンネルに送るかは拡張機能が決めます。通知には `directory` と `sessionName` が含まれます。エンタープライズモードでは、スマートフォンと同じく汎用的なタイトルだけが含まれます。`notification-webhook` の例は完成したチャネルで、試すための受信側も付いています。
+
 ## ファイル
 
 相対パスは開いているプロジェクトの中を指し、`files` 権限が必要です。`/` または `~/` で始まるパスは、宣言済みの `contributes.filesystem` パターンに一致する必要があり、`filesystem` 権限が必要です。規則は [拡張機能を作る](/sdk/#ファイル) を参照してください。

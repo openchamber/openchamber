@@ -125,6 +125,16 @@ The panel never receives `OPENCHAMBER_SERVICE_TOKEN` and never dials the port it
 
 VS Code and mobile stay `unsupported` for the guest catalog. They do not spawn services.
 
+| Runtime | Extension services |
+|---|---|
+| Web | Supported on the connected OpenChamber server |
+| Electron desktop | Supported through the connected OpenChamber server |
+| VS Code | Unsupported; the extension catalog is unavailable |
+| Hosted mobile | Unsupported; the extension catalog is unavailable |
+| Capacitor mobile | Unsupported; the extension catalog is unavailable |
+
+Services approved on a web or desktop instance continue on that server regardless of which clients are connected. Mobile clients do not expose extension setup.
+
 ## Service process contract
 
 Env the host sets:
@@ -132,7 +142,7 @@ Env the host sets:
 - `OPENCHAMBER_SERVICE_PORT` — port to bind on `127.0.0.1`
 - `OPENCHAMBER_SERVICE_TOKEN` — shared secret
 - `OPENCHAMBER_SERVICE_SOCKETS` — JSON map `{ [socketId]: absolutePath }` for every binding that resolved (override or first existing candidate)
-- `OPENCHAMBER_HOST_CALLBACK_URL` — only for a service that provides `source-control`: OpenChamber's callback listener for forge requests (see below)
+- `OPENCHAMBER_HOST_CALLBACK_URL` — only for a service that provides `source-control` or `notifications`: OpenChamber's callback listener for the requests those roles send out (see below)
 
 Inbound auth: every request, including ready, must send:
 
@@ -339,7 +349,7 @@ OpenChamber decides, not the service, what a failure means. A mutation counts as
 
 ### Reaching the forge
 
-The service never holds a token. `createSourceControlForge({ env: process.env })` returns `{ request(handle, req) }`, which posts to `${OPENCHAMBER_HOST_CALLBACK_URL}/source-control/outbound` with `Authorization: Bearer <handle>`. `OPENCHAMBER_HOST_CALLBACK_URL` is a separate loopback listener, set only for services with this role.
+The service never holds a token. `createSourceControlForge({ env: process.env })` returns `{ request(handle, req) }`, which posts to `${OPENCHAMBER_HOST_CALLBACK_URL}/source-control/outbound` with `Authorization: Bearer <handle>`. `OPENCHAMBER_HOST_CALLBACK_URL` is a separate loopback listener, set only for services with this role or the `notifications` role.
 
 - Request (`SourceControlOutboundRequest`): `{ method: GET|POST|PUT|PATCH|DELETE, path, query?, headers?, body? }`. `path` starts with one `/` and stays on the call's instance origin. `headers` (lower-case names) may be `accept`, `content-type`, `if-none-match` and `range`; OpenChamber sets the rest, the token included, per `token.header` and `token.scheme` (with `basic`, the account's login too). `body` is text up to `SOURCE_CONTROL_OUTBOUND_BODY_MAX` (1 MB).
 - Answer: HTTP 200 with `{ status, headers, body }`, the forge's status (any, 401 included), the headers in `SOURCE_CONTROL_OUTBOUND_RESPONSE_HEADERS` plus `x-ratelimit-*`, and the body as text up to `SOURCE_CONTROL_OUTBOUND_RESPONSE_MAX` (8 MB). Redirects are not followed. `request` resolves with it.
@@ -352,6 +362,113 @@ This is least exposure, not a sandbox. OpenChamber keeps tokens because Git tran
 VS Code lists no Git hosts from extensions: the guest catalog is unsupported there.
 
 `examples/source-control-provider` is a checked-in provider for a subset of Gitea's REST v1, with a fake forge its tests run against.
+
+## Notification channel (`provides: ["notifications"]`)
+
+A service with this role delivers the user's notifications, next to the desktop and the phone: Slack, Matrix, a phone automation, a receiver of your own. The role needs `contributes.notifications` in the same manifest, and the manifest needs it only with the role; either alone fails as `invalid-service`. OpenChamber names the channel `ext-<panel.id>` (so `panel.id` is at most `NOTIFICATIONS_GUEST_ID_MAX`, 28), draws its account card in Settings → Integrations from the contribution, and keeps the account: the user connects it there, the token stays in OpenChamber, and the service never sees it.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["notifications"] },
+"notifications": {
+  "label": "Slack",
+  "instances": { "kind": "fixed", "origin": "https://slack.com" },
+  "token": { "header": "authorization", "scheme": "bearer", "scopes": ["chat:write"], "createPath": "/apps" }
+}
+```
+
+| Field | Rules |
+|---|---|
+| `label` | The channel's name on its card, untranslated, 1 to 64 characters |
+| `instances` | `{ kind: "fixed", origin }` when every account lives on one https origin (Slack); `{ kind: "user", label, placeholder? }` when the user types the server at connect (a Matrix homeserver). A typed server is an https origin, or http on this machine for a development receiver; paths, queries and credentials are refused, the service builds the paths |
+| `token` | `{ header: "authorization" \| "private-token", scheme: "bearer" \| "token" \| "basic" \| "none", username?, scopes?, createPath? }`, the Git host's token block: `private-token` takes the bare token (`none`); `basic` needs `username: true`, which makes the card ask for a username beside the token |
+
+Approving the extension and connecting an account is the whole switch: there is no setting for the channel on the Notifications page. A channel receives exactly the kinds the user's notification toggles let through (`GUEST_NOTIFICATION_KINDS`: `ready`, `error`, `question`, `permission`, `review`, `goal_complete`, `goal_blocked`, `goal_budget`), after the same debounces and suppressions, and only when no client is visible, unless the user chose to be notified always. Pausing the extension stops it; removing it forgets the account. In enterprise mode the channel gets the kind's generic title and no body, session name or directory, as the phone does, and the role installs only from an allowed repository like every service.
+
+### Calls
+
+OpenChamber posts `POST /notifications` (`NOTIFICATIONS_PROVIDER_PATH`) with the service bearer, one call at a time:
+
+```json
+{ "v": 1, "requestId": "…", "method": "notify", "provider": "ext-slack-bridge",
+  "session": { "instance": "https://slack.com", "handle": "…", "account": { "id": "U123", "login": "mona" } },
+  "input": { "notification": { "kind": "ready", "title": "…", "body": "…", "tag": "ready-ses_…", "at": 1730000000000,
+             "sessionId": "ses_…", "sessionName": "Fix the parser", "directory": "/Users/me/repo", "url": "/?session=ses_…" } } }
+```
+
+| Method | Deadline | Answer `data` |
+|---|---|---|
+| `auth.probe` | 15 s | `{ supported, message? }`: whether `session.instance` is a server this channel delivers to. The handle carries no token; `account` is null |
+| `auth.verify` | 15 s | `{ account: { id, login, name? } }`: who the candidate token belongs to; OpenChamber stores the account under `id`. The handle carries the token; `account` is null |
+| `notify` | 10 s | `{ delivered: true }` once the notification is on its way. The handle carries the account's token |
+
+Parse the body with `readNotificationsProviderRequest` (`NotificationsProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`NotificationsProviderResult`). OpenChamber checks answers with `notificationsProviderSchemasV1`; one that does not parse is a failed delivery, never a delivered one. A `status: 401` writes the account off (the card says it needs attention until the user connects again) only when OpenChamber's proxy saw the server answer 401 through the call's handle; a 401 the service reports on its own is a malformed answer.
+
+### Reaching the server
+
+The service never holds a token. `createNotificationsOutbound({ env: process.env })` returns `{ request(handle, req) }`, which posts to `${OPENCHAMBER_HOST_CALLBACK_URL}/notifications/outbound` with `Authorization: Bearer <handle>`; `req` is `{ method, path, query?, headers?, body? }`, `path` on the account's instance origin, `headers` limited to `accept`, `content-type`, `if-none-match` and `range`, the body up to 1 MB. OpenChamber adds the token per `token.header` and `token.scheme` (with `basic`, the account's login too), keeps the request on the origin, and relays `{ status, headers, body }`. A refusal (an expired handle, a path off the origin) is a `NotificationsOutboundError`. The handle ends with the call; never store it.
+
+Delivery is at most once: a failed `notify` (a timeout, a non-200, `ok: false`, a body that does not parse) is logged once a minute per channel and never retried. OpenChamber never logs a notification's text. The service runs on demand and stops after `NOTIFICATIONS_PROVIDER_IDLE_MS` (ten minutes) without a call.
+
+Authentication and notification calls share one ordered queue per channel, capped at 200 outstanding calls. New calls beyond the cap are dropped with a rate-limited warning for notifications or a busy error for Connect. Pausing the extension cancels its in-flight call and drops queued calls. Disconnect supersedes an earlier pending Connect; a delayed 401 can invalidate only the account used by that call. Enterprise mode is checked again immediately before sending, including for notifications that were queued before it was enabled.
+
+`examples/notification-webhook` is the reference: a channel that posts every notification to a receiver the user names, with the receiver to try it against.
+
+## Session events (`contributes.sessionEvents`)
+
+A service can be told what happens in the user's sessions without a window being open. Declare which events it wants next to the service:
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host" },
+"sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
+```
+
+`events` lists 1 to 4 distinct types:
+
+| Type | When |
+|---|---|
+| `turn-finished` | The session went idle with nothing waiting: no running subagent, no open permission, form or page, no goal or auto-review step still driving it. A turn the user stopped emits nothing |
+| `turn-failed` | The turn ended in an error |
+| `permission-asked` | The agent asked a permission the user has to answer: sent 500 ms after the ask, only when it is still open and not answered by the session's own policy |
+| `question-asked` | The agent asked the user a question, through a form or a page it shows and waits on. An MCP elicitation, which belongs to no session, is not sent |
+
+`sessionEvents` needs `contributes.service` (`invalid-session-events` otherwise) and, like a role, lets the service go without a panel or background entry. Hosts older than this feature drop the key at parse and send nothing, so declare an `engines.openchamber` floor.
+
+Approving the package is the subscription: the dialog lists the events under the service line. With `content: true` the manifest also asks for the `transcript` capability, shown as a line of its own, and the service receives what the agent said or asked; without it, identifiers only. The grant scope records the event list and the content flag, so a version that adds a type or starts asking for content shows Needs approval and receives nothing until the user approves again. In enterprise mode `transcript` is gated with `service`.
+
+### Wire
+
+OpenChamber posts `POST /session-events` (`SESSION_EVENTS_PATH`) with the service bearer, one request per event per subscribed service. The body is a `GuestSessionEventRequest`:
+
+```json
+{
+  "v": 1,
+  "requestId": "…",
+  "event": {
+    "id": "evt_…", "type": "turn-finished", "at": 1730000000000,
+    "session": { "id": "ses_…", "parentId": null },
+    "project": { "directory": "/Users/me/repo" },
+    "linked": [{ "id": "linear:OPE-367", "kind": "linear", "url": "https://…", "provider": "linear", "identifier": "OPE-367" }],
+    "permission": { "requestId": "perm_…" }
+  },
+  "content": { "type": "turn-finished", "sessionTitle": "Fix the parser", "reply": "Done. …", "replyTruncated": false }
+}
+```
+
+- `event.id` is OpenCode's event id (or one OpenChamber made for an event it synthesized), `at` epoch milliseconds, `session.parentId` set for a subagent's session, `project.directory` the session's directory or `null` when OpenChamber does not know it. `linked` is what the user attached to the session: ids, kinds, urls, the tracker's `provider` and `identifier`, a Git host's `number`, never a title. `permission` comes with `permission-asked` only.
+- `content` comes only with the `transcript` grant, typed by `type`: `turn-finished` carries `sessionTitle`, `reply` (cut at `SESSION_EVENT_REPLY_MAX`, 64 000 characters, with `replyTruncated`); `turn-failed` carries `error { type, message }` and no reply; `permission-asked` carries `action`, `resources`, `message`; `question-asked` carries `ask`, a form (`id`, `title`, `fields[{ title, description }]`) or a page (`id`, `title`).
+- Parse the body with `readSessionEventRequest` (zod-free; `null` is a body that is not a session event of this wire version, answer HTTP 400) and answer HTTP 200 `{ "ok": true }` once the event is taken, or `{ "ok": false, "error": "…" }` (`GuestSessionEventResult`, `error` up to `SESSION_EVENT_ERROR_MAX`). OpenChamber parses the answer with `sessionEventResultSchema`; anything else is a failed delivery.
+
+### Delivery
+
+- Host sessions in every project are sent, each with its directory. Sessions inside isolated spaces are not delivered to extensions yet. Which projects an extension acts on is its own choice: compare `event.project.directory` with your own settings and answer `{ ok: true }` for the rest.
+- The first event starts the service; `SESSION_EVENTS_IDLE_MS` (ten minutes) without one stops it, and the next event starts it again. Events that arrive while it starts wait, at most `SESSION_EVENT_PENDING_MAX` (200), newer ones dropped with one warning.
+- Event preparation also admits at most one oldest event and `SESSION_EVENT_PENDING_MAX` later events before starting reads. Excess announcements are dropped, while open asks and their answers remain tracked. Shutdown discards prepared events and prevents further reads.
+- One request in flight per service, in order. A delivery has `SESSION_EVENT_TIMEOUT_MS` (10 s). A failed delivery (a timeout, a non-200 status, `ok: false`, a body that does not parse) drops that service's events for the next 30 s and logs the `error` text; OpenChamber never logs an event's content.
+- At most once, with no persistence: an event that happened while OpenChamber was down, while the extension was paused, or during that backoff is gone. A paused extension, a withdrawn approval and a removal drop what waited for them.
+- Two idle events for one turn end (OpenCode announces it twice) are one `turn-finished`.
+- The service never receives a token, a callback URL or a way back into the session through this path.
+
+`examples/session-events-log` is the reference: a service-only extension that journals every event to a file.
 
 ## Shared surface (`surface: true`)
 
