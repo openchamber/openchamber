@@ -2175,7 +2175,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 } else if (actionName === 'compact') {
                     await sessionActions.waitForConnectionOrThrow();
                     const compactDirectory = useSessionUIStore.getState().getDirectoryForSession(currentSessionId) || currentDirectory || undefined;
-                    await opencodeClient.compactSession(currentSessionId, compactDirectory);
+                    // Compaction belongs to the main session, including its
+                    // model and effort while BTW owns the composer.
+                    await sessionActions.compactSession(
+                        currentSessionId,
+                        currentProviderId && currentModelId
+                            ? { providerID: currentProviderId, modelID: currentModelId, variant: currentVariant }
+                            : null,
+                        compactDirectory,
+                    );
                 }
             } catch (error) {
                 restoreComposerText();

@@ -758,7 +758,14 @@ command can leave the queue untouched and delivery can take only part of it.
   instead. `/fork [text]` (`submit/forkCommand.ts`) forks after the last
   finished turn (a running turn and its completed steps are skipped and left
   running), opens the fork, and sends the text there; a failed fork restores
-  the command, a failed send puts the text into the fork's composer. A failed prompt command restores everything it consumed: text,
+  the command, a failed send puts the text into the fork's composer. `/compact`
+  switches the session to its main-chat model and reasoning effort selection
+  first when either differs from the session record, then compacts; a failed
+  switch compacts nothing and restores the command. An open BTW keeps its own
+  model and effort separate: `/compact` still uses the main session's selection.
+  An Auto pick leaves the
+  session as it is, because compaction carries no prompt for the router to
+  resolve from. A failed prompt command restores everything it consumed: text,
   confirmed mentions, files, comment drafts, and pending synthetic context.
 - `state/useComposerDraft.ts` — a draft belongs to a (runtime, directory,
   session) identity. Writes are debounced while typing but forced at every edge

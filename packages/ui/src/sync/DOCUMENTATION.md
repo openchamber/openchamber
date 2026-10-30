@@ -65,6 +65,14 @@ time. Keeping the client alone can send a rollback to the newly selected
 server, or omit the old server's credentials. Only rollback captures transport;
 ordinary feature requests continue to resolve the active runtime at call time.
 
+### Why compaction checks runtime ownership after switching the model
+
+Manual compaction captures the runtime instance before reconciling the composer's
+model pick. If that instance changes while the model switch is pending, the action
+rejects before compacting. The shared client resolves the active server at call
+time, so continuing could compact an unrelated session with the same ID. Returning
+to the original runtime does not resume the cancelled operation.
+
 ## OpenCode compatibility before bootstrap
 
 The desktop/web/VS Code App entry and MobileApp entry wrap the application in

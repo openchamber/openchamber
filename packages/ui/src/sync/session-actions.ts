@@ -6,6 +6,7 @@
 import type { FilePart, FormRequest, JsonValue, Message, Metadata, ModelSelection, Part, PermissionRequest, Session, SyntheticMessage, TextPart, UserMessage } from "@/lib/opencode/model"
 import { compact, partIds } from "@/lib/opencode/model"
 import { readSubagentRun } from "@/lib/opencode/subagent-run"
+import { isAutoModel } from "@/lib/routing/autoModel"
 import { Binary } from "./binary"
 import { dropSessionCaches } from "./session-cache"
 import { forkAtTranscriptCut, isTurnBoundary, transcriptCutAfterMessage, transcriptCutForMessage } from "./transcript-cut"
@@ -17,6 +18,7 @@ import {
   submitRecoveredAnswer,
   type RecoveredQuestion,
 } from "./recoverable-questions"
+import { resolveSendSelection } from "./session-selection"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -469,6 +471,36 @@ export async function waitForConnectionOrThrow(): Promise<void> {
     }
   }
   throw connectionLostError()
+}
+
+// ---------------------------------------------------------------------------
+// Compaction
+// ---------------------------------------------------------------------------
+
+type CompactSelection = {
+  providerID: string
+  modelID: string
+  variant?: string | null
+}
+
+/**
+ * OpenCode compacts using the session record, so reconcile an unsent model
+ * pick first. Auto has no prompt to route and leaves the record unchanged.
+ */
+export async function compactSession(
+  sessionId: string,
+  selection: CompactSelection | null,
+  directory?: string | null,
+): Promise<void> {
+  const isCurrentRuntime = captureRuntimeInstance()
+  if (selection && !isAutoModel(selection.providerID, selection.modelID)) {
+    const { model } = resolveSendSelection(sessionId, directory ?? undefined, selection)
+    if (model) {
+      await opencodeClient.switchSessionModel(sessionId, model, directory)
+    }
+  }
+  if (!isCurrentRuntime()) throw new Error("Compaction was cancelled because the runtime changed.")
+  await opencodeClient.compactSession(sessionId, directory)
 }
 
 type SessionListSnapshot = {
