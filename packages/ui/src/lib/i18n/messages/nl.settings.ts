@@ -102,6 +102,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': 'Niet beschikbaar',
   'settings.view.unavailable.description': 'Deze instellingenpagina is niet beschikbaar in deze runtime.',
   'settings.view.badge.beta': 'beta',
+  'settings.view.badge.new': 'nieuw',
   'settings.view.actions.backToSettings': 'Terug naar instellingen',
   'settings.view.actions.closeSettings': 'Instellingen sluiten',
   'settings.view.actions.closeSettingsWithShortcut': 'Instellingen sluiten ({shortcut}+,)',

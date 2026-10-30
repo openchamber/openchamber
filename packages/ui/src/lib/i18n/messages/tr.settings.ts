@@ -80,6 +80,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': 'Kullanılamıyor',
   'settings.view.unavailable.description': 'Bu ayar sayfası bu runtime\'da kullanılamıyor.',
   'settings.view.badge.beta': 'beta',
+  'settings.view.badge.new': 'yeni',
   'settings.view.actions.backToSettings': 'Ayarlar\'a geri dön',
   'settings.view.actions.closeSettings': 'Ayarları kapat',
   'settings.view.actions.closeSettingsWithShortcut': 'Ayarları kapat ({shortcut}+,)',

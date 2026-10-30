@@ -100,6 +100,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': '利用できません',
   'settings.view.unavailable.description': 'このランタイムではこの設定ページは利用できません。',
   'settings.view.badge.beta': 'ベータ',
+  'settings.view.badge.new': '新',
 
   'settings.view.actions.backToSettings': '設定に戻る',
   'settings.view.actions.closeSettings': '設定を閉じる',

@@ -100,6 +100,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': 'לא זמין',
   'settings.view.unavailable.description': 'דף ההגדרות הזה אינו זמין בסביבה הזו.',
   'settings.view.badge.beta': 'בטא',
+  'settings.view.badge.new': 'חדש',
   'settings.view.actions.backToSettings': 'חזרה להגדרות',
   'settings.view.actions.closeSettings': 'סגור הגדרות',
   'settings.view.actions.closeSettingsWithShortcut': 'סגור הגדרות ({shortcut}+,)',

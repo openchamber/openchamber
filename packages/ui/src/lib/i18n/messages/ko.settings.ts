@@ -100,6 +100,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': '사용할 수 없음',
   'settings.view.unavailable.description': '이 설정 페이지는 현재 런타임에서 사용할 수 없습니다.',
   'settings.view.badge.beta': 'beta',
+  'settings.view.badge.new': '신규',
 
   'settings.view.actions.backToSettings': '설정으로 돌아가기',
   'settings.view.actions.closeSettings': '설정 닫기',

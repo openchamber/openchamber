@@ -98,6 +98,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': '無法使用',
   'settings.view.unavailable.description': '此設定頁面在目前執行環境中無法使用。',
   'settings.view.badge.beta': 'beta',
+  'settings.view.badge.new': '新',
 
   'settings.view.actions.backToSettings': '返回設定頁',
   'settings.view.actions.closeSettings': '關閉設定',

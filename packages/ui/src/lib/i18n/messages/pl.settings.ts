@@ -2426,6 +2426,7 @@ export const settingsDict = {
   'settings.view.nav.group.opencode': 'OpenCode',
   'settings.view.nav.group.content': 'Biblioteka',
   'settings.view.badge.beta': 'beta',
+  'settings.view.badge.new': 'nowy',
   'settings.view.home.cards.agents.description': 'Prompty, narzędzia, uprawnienia',
   'settings.view.home.cards.agents.title': 'Agenci',
   'settings.view.home.cards.mcp.description': 'Skonfiguruj serwery MCP + połączenia',

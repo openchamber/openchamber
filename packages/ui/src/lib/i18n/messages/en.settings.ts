@@ -100,6 +100,7 @@ export const settingsDict = {
   'settings.view.unavailable.title': 'Not available',
   'settings.view.unavailable.description': 'This settings page is not available in this runtime.',
   'settings.view.badge.beta': 'beta',
+  'settings.view.badge.new': 'new',
   'settings.view.actions.backToSettings': 'Back to settings',
   'settings.view.actions.closeSettings': 'Close settings',
   'settings.view.actions.closeSettingsWithShortcut': 'Close settings ({shortcut}+,)',
