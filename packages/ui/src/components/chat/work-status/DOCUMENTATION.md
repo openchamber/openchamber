@@ -736,10 +736,17 @@ A failed removal reports `chat.workStatus.linkedIssues.unlinkFailed` rather than
 leaving the row looking removed.
 
 Before the close control sits a copy-link control (`useCopyReferenceLink`, the
-same one the Tracker preview's header uses). It shows on hover in space the row
-keeps for it, and always on a coarse pointer, which has no hover: at rest a row
+same one the Tracker preview's header uses). It shows on hover or focus inside
+the row, and always on a coarse pointer, which has no hover: at rest a row
 keeps one action, and the copy is confirmed by a toast since nothing on screen
 changes.
+
+### Why the copy control takes no space at rest and not a reserved slot
+
+A slot kept for it cut every linked title short by an icon's width, though the
+control is used now and then. It is out of the layout until the row is hovered
+or focused, so the title is full width at rest and narrows only under the
+pointer.
 
 Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
 `openchamber.linked_issues`), persisted through the same server-owned metadata

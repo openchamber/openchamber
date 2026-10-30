@@ -403,9 +403,9 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           // The panel that shows what a session carries is the one that can
           // take an item back off; a pinned row's control is the precedent.
           // This sits in the trailing value slot, where row actions live.
-          // Copying the link waits for a hover in its reserved space, so the
-          // row at rest keeps one action; a touch screen has no hover and
-          // shows it always.
+          // Copying the link appears on hover and takes no space at rest, so
+          // the title keeps the full width; focus inside the row shows it for
+          // the keyboard, and a touch screen, which has no hover, shows it always.
           value={(
             <>
               <button
@@ -415,7 +415,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
                   event.stopPropagation();
                   copyLink(entry.url);
                 }}
-                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-[color,opacity] hover:text-foreground focus-visible:opacity-100 group-hover/linked:opacity-100 pointer-coarse:p-2 pointer-coarse:opacity-100"
+                className="hidden shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground group-focus-within/linked:block group-hover/linked:block pointer-coarse:block pointer-coarse:p-2"
               >
                 <Icon name="link" className="size-3.5" />
               </button>
