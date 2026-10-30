@@ -6,7 +6,7 @@
     # OpenCode CLI, pinned to the tag matching OpenChamber's OpenCode 2.x
     # requirement. Keep in sync with packages/electron/package.json
     # (opencodeCli.version) and the @opencode/client pin. Bump all together.
-    opencode.url = "github:anomalyco/opencode/v2.2.1";
+    opencode.url = "github:anomalyco/opencode/v2.2.3";
   };
 
   outputs =
