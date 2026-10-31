@@ -1,6 +1,9 @@
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
+  allowedInsecureGitOrigins,
   isCredentialListRequest,
   isEnterpriseMode,
   isNetworkAccessBlocked,
@@ -8,6 +11,7 @@ import {
   policyFilePaths,
   publicEnterprisePolicy,
   readEnterprisePolicy,
+  readPinnedModelsDevUrl,
 } from './enterprise-mode.js';
 
 const missing = () => {
@@ -28,6 +32,11 @@ const machine = (files, { platform = 'linux', env = {} } = {}) => ({
 
 const LINUX_POLICY = '/etc/openchamber/policy.json';
 
+// The profile read resolves the data dir exactly like the server does; build
+// the fake path with the same call so the test's file key matches on Windows.
+const DATA_DIR = '/data';
+const PREFERENCES_FILE = path.join(path.resolve(DATA_DIR), 'preferences.json');
+
 describe('enterprise policy', () => {
   it('is off with no policy file and no environment variable', () => {
     expect(readEnterprisePolicy(machine({}))).toEqual({
@@ -42,6 +51,9 @@ describe('enterprise policy', () => {
       allowLocalExtensions: false,
       opencodeBinary: null,
       hideBuiltinSkillCatalogs: false,
+      allowedInsecureGitOrigins: [],
+      modelsDevUrl: null,
+      skillsCatalogSources: [],
     });
   });
 
@@ -58,6 +70,7 @@ describe('enterprise policy', () => {
         organization: 'Acme',
         relayUrl: 'wss://relay.acme.test/ws',
         jev: { url: 'https://llm.acme.test/v1', model: 'acme-jev', apiKey: 'k' },
+        allowedInsecureGitOrigins: ['http://gitlab.acme.test'],
       }),
     }));
     expect(policy).toEqual({
@@ -72,6 +85,55 @@ describe('enterprise policy', () => {
       allowLocalExtensions: false,
       opencodeBinary: null,
       hideBuiltinSkillCatalogs: false,
+      allowedInsecureGitOrigins: ['http://gitlab.acme.test'],
+      modelsDevUrl: null,
+      skillsCatalogSources: [],
+    });
+  });
+
+  describe('pinned model catalog URL', () => {
+    it('comes from the file with or without enterprise mode, trimmed', () => {
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"modelsDevUrl": " https://models.corp.test/api.json "}' })))
+        .toMatchObject({ enterpriseMode: false, modelsDevUrl: 'https://models.corp.test/api.json' });
+      expect(readPinnedModelsDevUrl(machine({ [LINUX_POLICY]: '{"enterpriseMode": true, "modelsDevUrl": "http://nginx.corp.test/models.json"}' })))
+        .toBe('http://nginx.corp.test/models.json');
+    });
+
+    it('is never taken from the environment and is unset when blank', () => {
+      expect(readPinnedModelsDevUrl(machine({}, { env: { OPENCHAMBER_ENTERPRISE_MODE: '1', OPENCHAMBER_MODELS_DEV_URL: 'https://x.test/a.json' } }))).toBeNull();
+      expect(readPinnedModelsDevUrl(machine({ [LINUX_POLICY]: '{"modelsDevUrl": "  "}' }))).toBeNull();
+    });
+
+    it('treats a malformed or credentialed URL as unset', () => {
+      for (const value of ['not a url', 'ftp://models.corp.test/a.json', 'https://user:pw@models.corp.test/a.json']) {
+        expect(readPinnedModelsDevUrl(machine({ [LINUX_POLICY]: JSON.stringify({ modelsDevUrl: value }) })), value).toBeNull();
+      }
+    });
+
+    it('pins nothing when the file is broken', () => {
+      const options = machine({ [LINUX_POLICY]: '{"modelsDevUrl": 42}' });
+      expect(readEnterprisePolicy(options).modelsDevUrl).toBeNull();
+      expect(readPinnedModelsDevUrl(options)).toBeNull();
+    });
+  });
+
+  describe('replacement skill catalogs', () => {
+    const entry = { id: 'corp', label: 'Corp', source: 'https://gitlab.corp.test/platform/skills.git', defaultSubpath: ' skills ', excludedSkills: ['draft'] };
+
+    it('come from the file with or without enterprise mode', () => {
+      const expected = [{ id: 'corp', label: 'Corp', source: 'https://gitlab.corp.test/platform/skills.git', defaultSubpath: 'skills', excludedSkills: ['draft'] }];
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: JSON.stringify({ skillsCatalogSources: [entry] }) })).skillsCatalogSources).toEqual(expected);
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: JSON.stringify({ enterpriseMode: true, skillsCatalogSources: [entry] }) })).skillsCatalogSources).toEqual(expected);
+    });
+
+    it('are never taken from the environment', () => {
+      expect(readEnterprisePolicy(machine({}, { env: { OPENCHAMBER_ENTERPRISE_MODE: '1' } })).skillsCatalogSources).toEqual([]);
+    });
+
+    it('offer nothing, and hide the built-in ones, when the file is broken', () => {
+      const policy = readEnterprisePolicy(machine({ [LINUX_POLICY]: JSON.stringify({ skillsCatalogSources: [{ id: 'corp' }] }) }));
+      expect(policy.skillsCatalogSources).toEqual([]);
+      expect(policy.hideBuiltinSkillCatalogs).toBe(true);
     });
   });
 
@@ -115,6 +177,80 @@ describe('enterprise policy', () => {
     it('is shown to clients', () => {
       expect(publicEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": "/opt/acme/opencode"}' })).opencodeBinary)
         .toBe('/opt/acme/opencode');
+    });
+  });
+
+  describe('insecure Git origins', () => {
+    it('come from the file with or without enterprise mode', () => {
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"allowedInsecureGitOrigins": ["http://git.lab"]}' })))
+        .toMatchObject({ enterpriseMode: false, allowedInsecureGitOrigins: ['http://git.lab'] });
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"enterpriseMode": true, "allowedInsecureGitOrigins": ["http://git.lab"]}' })).allowedInsecureGitOrigins)
+        .toEqual(['http://git.lab']);
+    });
+
+    it('are never taken from the environment', () => {
+      expect(readEnterprisePolicy(machine({}, { env: {
+        OPENCHAMBER_ENTERPRISE_MODE: '1',
+        OPENCHAMBER_ALLOWED_INSECURE_GIT_ORIGINS: 'http://git.lab',
+      } })).allowedInsecureGitOrigins).toEqual([]);
+    });
+
+    it('resolve to exact plain-HTTP origins; anything else counts as unset', () => {
+      const options = machine({ [LINUX_POLICY]: JSON.stringify({ allowedInsecureGitOrigins: [
+        'http://git.lab', 'http://git.lab/', ' http://port.lab:8443 ', 'https://secure.lab',
+        'http://path.lab/group', 'http://user:pw@git.lab', 'not a url', 'http://query.lab?x=1',
+      ] }) });
+      expect(allowedInsecureGitOrigins(options)).toEqual(new Set(['http://git.lab', 'http://port.lab:8443']));
+    });
+
+    it('allow nothing when the file is broken', () => {
+      expect(allowedInsecureGitOrigins(machine({ [LINUX_POLICY]: '{"allowedInsecureGitOrigins": "http://git.lab"}' }))).toEqual(new Set());
+      expect(allowedInsecureGitOrigins(machine({ [LINUX_POLICY]: '{"allowedInsecureGitOrigins": tru' }))).toEqual(new Set());
+    });
+
+    it('are kept off the public policy', () => {
+      expect(publicEnterprisePolicy(machine({ [LINUX_POLICY]: '{"allowedInsecureGitOrigins": ["http://git.lab"]}' })))
+        .not.toHaveProperty('allowedInsecureGitOrigins');
+    });
+
+    describe('from the user setting', () => {
+      const prefs = (value) => ({ [PREFERENCES_FILE]: JSON.stringify({ version: 1, fields: { allowedInsecureGitOrigins: { value, updatedAt: 0 } } }) });
+      const withPrefs = (files) => machine({ ...files, ...prefs('http://profile.lab') }, { env: { OPENCHAMBER_DATA_DIR: DATA_DIR } });
+
+      it('merges with the file while enterprise mode is off', () => {
+        expect(allowedInsecureGitOrigins(withPrefs({ [LINUX_POLICY]: '{"allowedInsecureGitOrigins": ["http://git.lab"]}' })))
+          .toEqual(new Set(['http://git.lab', 'http://profile.lab']));
+        expect(allowedInsecureGitOrigins(withPrefs({}))).toEqual(new Set(['http://profile.lab']));
+      });
+
+      it('counts for nothing once the file turns enterprise mode on', () => {
+        expect(allowedInsecureGitOrigins(withPrefs({ [LINUX_POLICY]: '{"enterpriseMode": true}' })))
+          .toEqual(new Set());
+        expect(allowedInsecureGitOrigins(withPrefs({ [LINUX_POLICY]: '{"enterpriseMode": true, "allowedInsecureGitOrigins": ["http://git.lab"]}' })))
+          .toEqual(new Set(['http://git.lab']));
+      });
+
+      it('is the same list the environment-only mode ignores', () => {
+        const options = machine(prefs('http://profile.lab'), {
+          env: { OPENCHAMBER_DATA_DIR: DATA_DIR, OPENCHAMBER_ENTERPRISE_MODE: '1' },
+        });
+        expect(allowedInsecureGitOrigins(options)).toEqual(new Set());
+      });
+
+      it('adds nothing when the preferences file is missing, broken, or holds a value that is not text', () => {
+        expect(allowedInsecureGitOrigins(machine({}, { env: { OPENCHAMBER_DATA_DIR: DATA_DIR } })))
+          .toEqual(new Set());
+        expect(allowedInsecureGitOrigins(machine({ [PREFERENCES_FILE]: '{"fields": {"allowedInsecureGit' }, { env: { OPENCHAMBER_DATA_DIR: DATA_DIR } })))
+          .toEqual(new Set());
+        expect(allowedInsecureGitOrigins(machine(prefs(['http://profile.lab']), { env: { OPENCHAMBER_DATA_DIR: DATA_DIR } })))
+          .toEqual(new Set());
+      });
+
+      it('is validated like the file: malformed lines count as unset', () => {
+        expect(allowedInsecureGitOrigins(machine(prefs('https://secure.lab\nhttp://user@git.lab\nhttp://group.lab/path\nhttp://profile.lab'),
+          { env: { OPENCHAMBER_DATA_DIR: DATA_DIR } })))
+          .toEqual(new Set(['http://profile.lab']));
+      });
     });
   });
 
@@ -205,6 +341,7 @@ describe('enterprise policy', () => {
     ['a non-boolean switch', '{"enterpriseMode": "yes"}'],
     ['a non-string relay', '{"relayUrl": 42}'],
     ['a Jev model without a URL', '{"jev": {"model": "m"}}'],
+    ['an insecure-origins list of non-strings', '{"allowedInsecureGitOrigins": [42]}'],
   ])('keeps enterprise mode on and pins nothing when the file is %s', (_label, content) => {
     const policy = readEnterprisePolicy(machine(
       { [LINUX_POLICY]: content },

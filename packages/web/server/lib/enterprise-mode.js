@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { z } from 'zod';
@@ -89,6 +90,20 @@ import { z } from 'zod';
  * catalogs on offer are the ones the organization added
  * (`skills-catalog/curated-sources.js`, `packages/vscode/src/skillsCatalog.ts`).
  *
+ * The file can also allow exact plain-HTTP origins for Git hosting providers
+ * (`allowedInsecureGitOrigins`), with or without enterprise mode: an
+ * administrator who runs a forge (GitLab, Gitea, Forgejo, Gerrit) on an
+ * intranet without TLS lists its origins, and the app accepts them for
+ * instance, binding, credential and transport validation where HTTPS is
+ * otherwise required. Only an exact `http://host[:port]` origin decides; a
+ * malformed entry counts as unset, and extension-provided forges stay
+ * loopback-only. The same list exists as a user setting (Settings → Git,
+ * persisted in `preferences.json` as one-per-line text under
+ * `allowedInsecureGitOrigins`): while enterprise mode is off the two sources
+ * merge, and once the mode is on only the file counts — widening plaintext
+ * trust never becomes the user's move.
+ * `allowedInsecureGitOrigins()` resolves both for the consumers that check it.
+ *
  * The VS Code extension host, which runs no OpenChamber server, reads the
  * same policy through this module for the parts it has (provider connection,
  * update checks).
@@ -129,6 +144,23 @@ const policyFileSchema = z.object({
   jev: z.object({ url: optionalText, model: optionalText, apiKey: optionalText }).optional(),
   opencodeBinary: optionalText,
   hideBuiltinSkillCatalogs: z.boolean().optional(),
+  // Exact plain-HTTP origins of self-hosted Git hosts the administrator trusts;
+  // consumers validate each at use and treat a malformed entry as unset.
+  allowedInsecureGitOrigins: z.array(z.string().trim().min(1).max(512)).max(100).optional(),
+  // Where the model catalog (models.dev `api.json` format) is read from, for
+  // networks that cannot reach models.dev. Consumers validate it at use
+  // (`readPinnedModelsDevUrl`) and treat a malformed value as unset.
+  modelsDevUrl: optionalText,
+  // Replaces the built-in skill catalogs. An entry the schema cannot read
+  // makes the whole file invalid, which fails closed (no catalog at all).
+  skillsCatalogSources: z.array(z.object({
+    id: z.string().trim().min(1).max(64),
+    label: z.string().trim().min(1).max(128),
+    description: optionalText,
+    source: z.string().trim().min(1).max(512),
+    defaultSubpath: optionalText,
+    excludedSkills: z.array(z.string().trim().min(1).max(128)).max(200).optional(),
+  })).max(50).optional(),
 }).refine((policy) => !policy.jev || policy.jev.url || (!policy.jev.model && !policy.jev.apiKey), {
   message: '"jev" needs a "url"',
   path: ['jev'],
@@ -149,7 +181,7 @@ const parsePolicyFile = (text) => {
     const field = issue.path.length > 0 ? `"${issue.path.join('.')}": ` : '';
     throw new Error(`${field}${issue.message}`);
   }
-  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev, opencodeBinary, hideBuiltinSkillCatalogs } = parsed.data;
+  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev, opencodeBinary, hideBuiltinSkillCatalogs, allowedInsecureGitOrigins, modelsDevUrl, skillsCatalogSources } = parsed.data;
   return {
     enterpriseMode: enterpriseMode === true,
     organization: organization ?? null,
@@ -160,6 +192,9 @@ const parsePolicyFile = (text) => {
     jev: jev?.url ? { url: jev.url, model: jev.model ?? null, apiKey: jev.apiKey ?? null } : undefined,
     opencodeBinary: opencodeBinary ?? null,
     hideBuiltinSkillCatalogs: hideBuiltinSkillCatalogs === true,
+    allowedInsecureGitOrigins: allowedInsecureGitOrigins ?? [],
+    modelsDevUrl: modelsDevUrl ?? null,
+    skillsCatalogSources: skillsCatalogSources ?? [],
   };
 };
 
@@ -230,8 +265,13 @@ export const readEnterprisePolicy = (options = {}) => {
       allowedExtensions: [],
       allowLocalExtensions: false,
       opencodeBinary: null,
+      // Fails closed like the rest: a broken policy allows no plaintext origin it might have withheld.
+      allowedInsecureGitOrigins: [],
       // Fails closed like the rest: a broken policy offers no catalog it might have hidden.
       hideBuiltinSkillCatalogs: true,
+      // Fails closed like the rest: a broken policy pins no endpoint and offers no catalog it might have replaced.
+      modelsDevUrl: null,
+      skillsCatalogSources: [],
     };
   }
 
@@ -268,10 +308,92 @@ export const readEnterprisePolicy = (options = {}) => {
     opencodeBinary: fromFile?.opencodeBinary ?? null,
     // File only, in or out of enterprise mode, for the same reason.
     hideBuiltinSkillCatalogs: fromFile?.hideBuiltinSkillCatalogs === true,
+    // File only, in or out of enterprise mode, for the same reason.
+    allowedInsecureGitOrigins: fromFile?.allowedInsecureGitOrigins ?? [],
+    // File only, in or out of enterprise mode, for the same reason.
+    modelsDevUrl: fromFile?.modelsDevUrl ?? null,
+    skillsCatalogSources: fromFile?.skillsCatalogSources ?? [],
   };
 };
 
+/**
+ * The model catalog URL the administrator pinned, or null: unset, or not a
+ * plain `http(s)` URL without credentials (a malformed value counts as unset).
+ */
+export const readPinnedModelsDevUrl = (options) => {
+  const value = readEnterprisePolicy(options).modelsDevUrl;
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+};
+
 export const isEnterpriseMode = (options) => readEnterprisePolicy(options).enterpriseMode;
+
+/**
+ * The user's own plain-HTTP Git origins: the `allowedInsecureGitOrigins`
+ * profile key (Settings → Git), one origin per line, read from
+ * `preferences.json` the same way `small-model/index.js` reads profile
+ * settings. A missing or broken file, or a value that is not text, adds
+ * nothing. Consulted only while enterprise mode is off; entries are validated
+ * by the caller like the file's.
+ */
+const readProfileInsecureGitOrigins = ({ env = process.env, readFile = defaultReadFile } = {}) => {
+  const dir = env.OPENCHAMBER_DATA_DIR
+    ? path.resolve(env.OPENCHAMBER_DATA_DIR)
+    : path.join(os.homedir(), '.config', 'openchamber');
+  let text;
+  try {
+    text = readFile(path.join(dir, 'preferences.json'));
+  } catch {
+    return [];
+  }
+  let fields;
+  try {
+    fields = JSON.parse(text.replace(/^\uFEFF/, ''))?.fields;
+  } catch {
+    return [];
+  }
+  const parsed = z.string().safeParse(fields?.allowedInsecureGitOrigins?.value);
+  return parsed.success
+    ? parsed.data.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    : [];
+};
+
+/**
+ * The exact plain-HTTP origins allowed for Git hosting providers: the policy
+ * file's `allowedInsecureGitOrigins` plus, while enterprise mode is off, the
+ * user setting of the same name in `preferences.json`. Validated at use: only
+ * a bare `http:` origin without credentials, path, query or fragment decides,
+ * and a malformed entry counts as unset. Read at every use, like the rest of
+ * the policy; the callers that consult it are `source-control/origin-instance.js`,
+ * the Git transport checks (`git/network-operation-plan.js`,
+ * `git/credential-resolver.js`, `git/network-operation-storage.js`,
+ * `git/repository-credential-runtime.js`) and the provider listing route.
+ */
+export const allowedInsecureGitOrigins = (options) => {
+  const policy = readEnterprisePolicy(options);
+  const entries = [...policy.allowedInsecureGitOrigins];
+  if (!policy.enterpriseMode) entries.push(...readProfileInsecureGitOrigins(options));
+  const origins = new Set();
+  for (const entry of entries) {
+    let url;
+    try {
+      url = new URL(entry);
+    } catch {
+      continue;
+    }
+    if (url.protocol === 'http:' && !url.username && !url.password && !url.search && !url.hash
+      && ['', '/'].includes(url.pathname)) {
+      origins.add(url.origin);
+    }
+  }
+  return origins;
+};
 
 /** Whether enterprise mode keeps this server off the network (loopback only). */
 export const isNetworkAccessBlocked = (options) => {
