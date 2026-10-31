@@ -135,3 +135,27 @@ describe('useSessionDisplayStore animated activity', () => {
     }
   });
 });
+
+describe('useSessionDisplayStore cached sections', () => {
+  test('sections cached by an older build are read through the stored rules', async () => {
+    const initialState = useSessionDisplayStore.getState();
+    const originalStorage = useSessionDisplayStore.persist.getOptions().storage;
+    const older = { kind: 'custom', id: 's1', name: 'Old', grouping: 'time', filter: { states: ['running'] }, claims: false, hideWhenEmpty: true };
+    const stored = JSON.stringify({ version: 12, state: { sections: [older] } });
+    const storage = createJSONStorage<Partial<ReturnType<typeof useSessionDisplayStore.getState>>>(() => ({
+      getItem: () => stored,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    }));
+    useSessionDisplayStore.persist.setOptions({ storage });
+    try {
+      await useSessionDisplayStore.persist.rehydrate();
+      const section = useSessionDisplayStore.getState().sections.find((entry) => entry.id === 's1');
+      expect(section?.kind === 'custom' ? section.filter.text : null).toBe('');
+      expect(useSessionDisplayStore.getState().sections.some((entry) => entry.id === 'projects')).toBe(true);
+    } finally {
+      useSessionDisplayStore.persist.setOptions({ storage: originalStorage });
+      useSessionDisplayStore.setState(initialState);
+    }
+  });
+});

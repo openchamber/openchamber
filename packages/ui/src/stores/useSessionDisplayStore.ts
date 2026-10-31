@@ -220,6 +220,14 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // v9→v10 drops showRecentSection (Recent is gone).
       // v11→v12 turns two-line rows on for a phone that was on List.
       migrate: migrateSessionDisplayState,
+      // Sections cached by another build (an older one before a filter field
+      // existed) are read through the same rules as the stored setting.
+      merge: (persisted, current) => {
+        // SAFETY: `migrate` has already brought the stored state to this version's shape.
+        const state = (persisted ?? {}) as Partial<SessionDisplayStore>;
+        const sections = sidebarSectionsSchema.safeParse(state.sections ?? current.sections);
+        return { ...current, ...state, sections: sections.success ? sections.data : [...DEFAULT_SIDEBAR_SECTIONS] };
+      },
     },
   ),
 );

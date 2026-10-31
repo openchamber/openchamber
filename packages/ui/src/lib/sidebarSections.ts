@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 
 /**
  * The sidebar's sections: an ordered list the user arranges, shared by every
@@ -42,6 +43,12 @@ export type SidebarSectionFilter = {
   links: readonly SidebarSectionLink[];
   projectIds: readonly string[];
   activity: SidebarSectionActivity;
+  /**
+   * Words to find in the work's title or branch, matched as the sidebar's
+   * search matches them: every word somewhere in a session's title, the
+   * worktree's name or its branch. Empty asks nothing.
+   */
+  text: string;
 };
 
 /**
@@ -67,9 +74,10 @@ export type SidebarPinList = { id: string; name: string };
 export const SIDEBAR_SECTION_NAME_MAX = 60;
 export const SIDEBAR_SECTIONS_MAX = 24;
 export const SIDEBAR_PIN_LISTS_MAX = 24;
+export const SIDEBAR_SECTION_TEXT_MAX = 100;
 
 export const EMPTY_SIDEBAR_SECTION_FILTER: SidebarSectionFilter = Object.freeze({
-  states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], activity: 'any',
+  states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], activity: 'any', text: '',
 });
 
 
@@ -97,6 +105,7 @@ const filterSchema = z.object({
   links: chips(SIDEBAR_SECTION_LINKS).catch([]),
   projectIds: ids.catch([]),
   activity: z.enum(SIDEBAR_SECTION_ACTIVITY).catch('any'),
+  text: z.string().transform((value) => value.trim().slice(0, SIDEBAR_SECTION_TEXT_MAX)).catch(''),
 }).partial();
 
 const customSchema = z.object({
@@ -124,6 +133,7 @@ const toFilter = (filter: z.infer<typeof filterSchema>, grouping: 'time' | 'proj
       links: filter.links ?? [],
       projectIds: filter.projectIds ?? [],
       activity: filter.activity ?? 'any',
+      text: filter.text ?? '',
     }
 );
 
@@ -198,6 +208,7 @@ export const hasSidebarSectionConditions = (filter: SidebarSectionFilter): boole
   || filter.links.length > 0
   || filter.projectIds.length > 0
   || filter.activity !== 'any'
+  || filter.text.trim() !== ''
 );
 
 /** Whether a section asks for plans, which live with the project's knowledge, not with the session. */
@@ -232,6 +243,8 @@ export type SidebarWorkFacts = {
   hasGoal: boolean;
   /** The latest activity in the work, in ms; 0 when unknown. */
   lastActivityAt: number;
+  /** What the text condition reads: the titles of its top-level sessions, the worktree's name and branch. */
+  texts: readonly string[];
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -281,6 +294,7 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
   if (filter.kinds.length > 0 && !filter.kinds.includes(facts.kind)) return false;
   if (filter.links.length > 0 && !filter.links.some((link) => matchesLink(link, facts))) return false;
   if (filter.projectIds.length > 0 && (facts.projectId === null || !filter.projectIds.includes(facts.projectId))) return false;
+  if (filter.text.trim() !== '' && !matchesRankQuery(facts.texts, filter.text)) return false;
   return matchesActivity(filter.activity, facts.lastActivityAt, now);
 };
 

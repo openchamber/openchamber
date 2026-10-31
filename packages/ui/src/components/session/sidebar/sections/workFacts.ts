@@ -94,5 +94,9 @@ export const buildSidebarWorkFacts = (ref: SidebarWorkRef, context: FactsContext
       return goal !== null && goal.status !== 'complete';
     }),
     lastActivityAt: all.reduce((latest, session) => Math.max(latest, session.time.updated), 0),
+    texts: [
+      ...top.map((session) => session.title ?? ''),
+      ...(ref.kind === 'group' ? [ref.group.label, ref.group.branch ?? ''] : []),
+    ],
   };
 };

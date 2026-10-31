@@ -52,6 +52,13 @@ with its named pin lists. How the rows are drawn stays with the row model
   clock that moves by the local hour while such a section is shown
   (`useSidebarSectionsNow`), so "Today" turns over at local midnight in any
   time zone.
+- The text condition ("Title or branch") matches as the sidebar search does:
+  every word somewhere in the title of one of the work's top-level sessions,
+  the worktree's name or its branch. Save as section in the search makes a
+  section from the query this way, then closes the search so the sidebar shows
+  the section being made. Sections cached on the device by another build are
+  read through the same rules as the stored setting (the persisted store's
+  `merge`), so a field added later is never missing.
 - Section definitions and pin lists are profile settings shared by every
   surface (`sidebarSections`, `sidebarPinLists`). Which sections a surface shows
   is its own: the user's sections through `sidebarHiddenSections` (per surface),
@@ -119,6 +126,15 @@ Every category's chips on screen at once read as a wall of identical buttons
 (maintainer, 2026-10-31). The editor lists the conditions the section has, one
 row each, and offers the rest behind "Add condition"; a row's menu picks its
 values, its cross removes it.
+
+### Why the text condition reads top-level titles and not subagent ones
+
+The search also lists a work for a matching subsession, as context around the
+match. A section is a standing list, and subagent titles ("apply
+relay-transport", "Explore the codebase") would file whole works under a topic
+one helper touched, so the condition reads the titles the rows show, the
+worktree's name and its branch. A section saved from a search can therefore
+list fewer works than the search showed.
 
 ### Why the manager panel is opaque and not glass
 

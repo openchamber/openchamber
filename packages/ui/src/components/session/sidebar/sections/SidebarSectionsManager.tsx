@@ -28,6 +28,7 @@ import {
   SIDEBAR_SECTION_KINDS,
   SIDEBAR_SECTION_LINKS,
   SIDEBAR_SECTION_NAME_MAX,
+  SIDEBAR_SECTION_TEXT_MAX,
   SIDEBAR_SECTION_STATES,
   SIDEBAR_SECTION_TEMPLATES,
   SIDEBAR_SECTION_WORK_STATES,
@@ -133,7 +134,7 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
             className={cn(SECTIONS_PANEL_CLASS, 'flex max-h-[min(40rem,calc(100vh-4rem))] w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden')}
             initialFocus={false}
           >
-            {draft ? <SectionEditor draft={draft} /> : <SectionList />}
+            {draft ? <SectionEditor key={draft.id} draft={draft} /> : <SectionList />}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -250,10 +251,11 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   );
 };
 
-type ConditionCategory = 'states' | 'work' | 'pins' | 'kinds' | 'links' | 'projectIds' | 'activity';
+type ConditionCategory = 'text' | 'states' | 'work' | 'pins' | 'kinds' | 'links' | 'projectIds' | 'activity';
 type ConditionOption = { value: string; label: string };
 
 const CATEGORY_KEY = {
+  text: 'sessions.sidebar.sections.category.text',
   states: 'sessions.sidebar.sections.category.state',
   work: 'sessions.sidebar.sections.category.work',
   pins: 'sessions.sidebar.sections.category.pins',
@@ -263,16 +265,17 @@ const CATEGORY_KEY = {
   activity: 'sessions.sidebar.sections.category.activity',
 } as const satisfies Record<ConditionCategory, I18nKey>;
 
-const TIME_CATEGORIES: readonly ConditionCategory[] = ['states', 'work', 'pins', 'kinds', 'links', 'projectIds', 'activity'];
+const TIME_CATEGORIES: readonly ConditionCategory[] = ['text', 'states', 'work', 'pins', 'kinds', 'links', 'projectIds', 'activity'];
 
 /** The values a condition holds; activity is one choice, "any time" being no condition. */
 const conditionValues = (filter: SidebarSectionFilter, category: ConditionCategory): readonly string[] => {
   if (category === 'activity') return filter.activity === 'any' ? [] : [filter.activity];
+  if (category === 'text') return filter.text.trim() === '' ? [] : [filter.text];
   return filter[category];
 };
 
 /** The filter with one value of a category turned on or off; activity takes one value or none. */
-const toggleCondition = (filter: SidebarSectionFilter, category: ConditionCategory, value: string): SidebarSectionFilter => {
+const toggleCondition = (filter: SidebarSectionFilter, category: Exclude<ConditionCategory, 'text'>, value: string): SidebarSectionFilter => {
   if (category === 'activity') {
     const activity = SIDEBAR_SECTION_ACTIVITY.find((entry) => entry === value) ?? 'any';
     return { ...filter, activity: filter.activity === activity ? 'any' : activity };
@@ -296,9 +299,11 @@ const toggleCondition = (filter: SidebarSectionFilter, category: ConditionCatego
   return { ...filter, [category]: toggleIn(filter[category], value) };
 };
 
-const clearCondition = (filter: SidebarSectionFilter, category: ConditionCategory): SidebarSectionFilter => (
-  category === 'activity' ? { ...filter, activity: 'any' } : { ...filter, [category]: [] }
-);
+const clearCondition = (filter: SidebarSectionFilter, category: ConditionCategory): SidebarSectionFilter => {
+  if (category === 'activity') return { ...filter, activity: 'any' };
+  if (category === 'text') return { ...filter, text: '' };
+  return { ...filter, [category]: [] };
+};
 
 const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => {
   const { t } = useI18n();
@@ -306,13 +311,18 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
   const matchCount = useSidebarSectionsUiStore((state) => state.draftMatchCount);
   const pinLists = useSessionDisplayStore((state) => state.pinLists);
   const projects = useProjectsInSidebarOrder(useProjectsStore((state) => state.projects));
-  const [template, setTemplate] = React.useState<SidebarSectionTemplate | null>(isNew ? 'waiting' : null);
+  const [template, setTemplate] = React.useState<SidebarSectionTemplate | null>(isNew && draft.filter.text === '' ? 'waiting' : null);
+  // The words row stays while the user clears it to type again; Add condition
+  // opens it empty, and only its close button removes it.
+  const [textRowOpen, setTextRowOpen] = React.useState(draft.filter.text.trim() !== '');
+  const [focusText, setFocusText] = React.useState(false);
   const nameId = React.useId();
   const applyTemplate = (next: SidebarSectionTemplate): void => {
     // A name the user typed stays; a template's name follows the template.
     const keepName = template === null || draft.name !== t(TEMPLATE_KEY[template]);
     const section = createSidebarSectionFromTemplate(next, keepName ? draft.name : t(TEMPLATE_KEY[next]));
     setTemplate(next);
+    setTextRowOpen(false);
     updateSectionDraft({ ...section, id: draft.id });
   };
   const byProjects = draft.grouping === 'project';
@@ -325,14 +335,18 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
       case 'links': return SIDEBAR_SECTION_LINKS.map((value) => ({ value, label: t(LINK_KEY[value]) }));
       case 'projectIds': return projects.map((project) => ({ value: project.id, label: project.label?.trim() || formatDirectoryName(project.path, null) || project.path }));
       case 'activity': return SIDEBAR_SECTION_ACTIVITY.filter((value) => value !== 'any').map((value) => ({ value, label: t(ACTIVITY_KEY[value]) }));
+      case 'text': return [];
     }
   };
-  const toggle = (category: ConditionCategory, value: string): void => updateSectionDraft({ ...draft, filter: toggleCondition(draft.filter, category, value) });
+  const toggle = (category: Exclude<ConditionCategory, 'text'>, value: string): void => updateSectionDraft({ ...draft, filter: toggleCondition(draft.filter, category, value) });
   // Only the conditions the section asks for are on screen; a group of
   // projects asks for its projects alone, so that row is always there.
   const categories: readonly ConditionCategory[] = byProjects ? ['projectIds'] : TIME_CATEGORIES;
-  const shown = categories.filter((category) => byProjects || conditionValues(draft.filter, category).length > 0);
-  const addable = byProjects ? [] : categories.filter((category) => conditionValues(draft.filter, category).length === 0);
+  const isShown = (category: ConditionCategory): boolean => (
+    byProjects || conditionValues(draft.filter, category).length > 0 || (category === 'text' && textRowOpen)
+  );
+  const shown = categories.filter(isShown);
+  const addable = byProjects ? [] : categories.filter((category) => !isShown(category));
   const name = draft.name.trim();
   // A section with nothing to ask lists nothing, so it is not saved until it asks something.
   const hasConditions = byProjects ? draft.filter.projectIds.length > 0 : hasSidebarSectionConditions(draft.filter);
@@ -342,7 +356,7 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
     if (byProjects) countLabel = matchCount === 1 ? t('sessions.sidebar.sections.matchProjectsSingle', { count: matchCount }) : t('sessions.sidebar.sections.matchProjectsPlural', { count: matchCount });
     else countLabel = matchCount === 1 ? t('sessions.sidebar.sections.matchWorksSingle', { count: matchCount }) : t('sessions.sidebar.sections.matchWorksPlural', { count: matchCount });
   }
-  const optionItems = (category: ConditionCategory) => {
+  const optionItems = (category: Exclude<ConditionCategory, 'text'>) => {
     const values = conditionValues(draft.filter, category);
     // Several values of a category can be picked, so the menu stays open; activity is one choice.
     return optionsOf(category).map((option) => (
@@ -407,6 +421,28 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
         />
         <div className="flex flex-col gap-1">
           {shown.map((category) => {
+            if (category === 'text') {
+              const textLabel = t(CATEGORY_KEY.text);
+              return (
+                <div key={category} className="oc-tile flex items-center gap-1 rounded-md pe-1">
+                  <label className="flex min-w-0 flex-1 items-baseline gap-2 px-2.5 py-1.5 typography-ui-label">
+                    <span className="shrink-0 text-muted-foreground">{textLabel}</span>
+                    <input
+                      ref={(node) => { if (node && focusText) { node.focus(); setFocusText(false); } }}
+                      value={draft.filter.text}
+                      maxLength={SIDEBAR_SECTION_TEXT_MAX}
+                      placeholder={t('sessions.sidebar.sections.textPlaceholder')}
+                      onChange={(event) => updateSectionDraft({ ...draft, filter: { ...draft.filter, text: event.target.value } })}
+                      className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+                      dir="auto"
+                    />
+                  </label>
+                  <Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label={t('sessions.sidebar.sections.removeCondition', { name: textLabel })} onClick={() => { setTextRowOpen(false); updateSectionDraft({ ...draft, filter: clearCondition(draft.filter, 'text') }); }}>
+                    <Icon name="close" className="size-3.5" />
+                  </Button>
+                </div>
+              );
+            }
             const values = conditionValues(draft.filter, category);
             const labels = optionsOf(category).filter((option) => values.includes(option.value)).map((option) => option.label);
             const categoryLabel = t(CATEGORY_KEY[category]);
@@ -442,7 +478,9 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="bottom" align="start" className="max-h-[min(20rem,var(--available-height))] min-w-[180px] overflow-y-auto">
-                {addable.map((category) => (
+                {addable.map((category) => category === 'text' ? (
+                  <DropdownMenuItem key={category} onClick={() => { setTextRowOpen(true); setFocusText(true); }}>{t(CATEGORY_KEY.text)}</DropdownMenuItem>
+                ) : (
                   <DropdownMenuSub key={category}>
                     <DropdownMenuSubTrigger>{t(CATEGORY_KEY[category])}</DropdownMenuSubTrigger>
                     <DropdownMenuSubContent className="max-h-[min(20rem,var(--available-height))] min-w-[200px] overflow-y-auto">

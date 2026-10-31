@@ -1,5 +1,6 @@
 import React from 'react';
-import { closeSectionsManager, openSectionsManager, useSidebarSectionsUiStore } from '../sections/sectionActions';
+import { canAddSidebarSection, closeSectionsManager, editSection, openSectionsManager, useSidebarSectionsUiStore } from '../sections/sectionActions';
+import { createSidebarSectionFromTemplate, SIDEBAR_SECTION_NAME_MAX, SIDEBAR_SECTION_TEXT_MAX } from '@/lib/sidebarSections';
 import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 
 const loadSectionsManager = () => import('../sections/SidebarSectionsManager').then((module) => module.SidebarSectionsManager);
@@ -66,6 +67,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const headerRef = React.useRef<HTMLDivElement | null>(null);
   // The manager and its editor load the first time they open.
   const sectionsManagerOpen = useSidebarSectionsUiStore((state) => state.managerOpen);
+  const sidebarSections = useSessionDisplayStore((state) => state.sections);
   const SectionsManager = useOnDemandComponent(props.showSectionControls && sectionsManagerOpen, loadSectionsManager, closeSectionsManager);
   const guestPages = useGuestPages();
   const {
@@ -259,6 +261,18 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const morePageOpen = morePageItems.some((page) => page.open)
     || guestPages.some((guest) => guest.id === openGuestPageId);
 
+  // What the search found, kept as a section: the query becomes its words to
+  // find and its name, in the editor, with the search closed so the sidebar
+  // shows the section being made. An id lookup finds one session, not a topic.
+  const searchText = sessionSearchQuery.trim();
+  const canSaveSearch = showSectionControls && searchText !== '' && !searchText.toLowerCase().startsWith('ses_')
+    && canAddSidebarSection(sidebarSections);
+  const saveSearchAsSection = () => {
+    const section = createSidebarSectionFromTemplate('blank', searchText.slice(0, SIDEBAR_SECTION_NAME_MAX));
+    editSection({ ...section, filter: { ...section.filter, text: searchText.slice(0, SIDEBAR_SECTION_TEXT_MAX) } }, true);
+    closeSessionSearch();
+  };
+
   if (hideDirectoryControls) {
     // VS Code: the sidebar is always a single workspace, so project/directory
     // controls stay hidden, but session search is still useful. Show a compact,
@@ -406,7 +420,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
                   : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
                 : undefined}
-              trailingHint={t('sessions.sidebar.header.search.escapeHint')}
+              trailingHint={canSaveSearch ? (
+                <button type="button" onClick={saveSearchAsSection} className="text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+                  {t('sessions.sidebar.sections.saveSearch')}
+                </button>
+              ) : t('sessions.sidebar.header.search.escapeHint')}
             />
           </div>
         ) : null}

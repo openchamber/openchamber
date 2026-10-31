@@ -47,6 +47,7 @@ const sidebarSectionSchema = z.union([
       links: sidebarChips(['pr', 'issue', 'tracker', 'plan', 'goal']).catch([]),
       projectIds: sidebarIds.catch([]),
       activity: z.enum(['any', 'today', 'two-days', 'week', 'stalled']).catch('any'),
+      text: z.string().transform((value) => value.trim().slice(0, 100)).catch(''),
     }).partial().catch({}),
     claims: z.boolean().catch(false),
     hideWhenEmpty: z.boolean().catch(true),

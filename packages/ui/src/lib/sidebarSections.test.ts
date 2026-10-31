@@ -9,7 +9,7 @@ import {
 
 const facts = (overrides: Partial<SidebarWorkFacts> = {}): SidebarWorkFacts => ({
   kind: 'session', projectId: 'p1', pin: null, inWork: false, done: false, running: false, needsAnswer: false,
-  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, ...overrides,
+  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], ...overrides,
 });
 
 describe('sidebarSectionsSchema', () => {
@@ -40,6 +40,17 @@ describe('sidebarSectionsSchema', () => {
       .find((section) => section.id === 'g');
     expect(entry?.kind === 'custom' ? entry.filter : null).toEqual({ ...EMPTY_SIDEBAR_SECTION_FILTER, projectIds: ['p1'] });
   });
+
+  test('keeps the words to find trimmed and short, and reads a list saved before them as asking none', () => {
+    const parsed = sidebarSectionsSchema.parse([
+      { kind: 'custom', id: 't', name: 'Relay', filter: { text: `  relay ${'x'.repeat(200)}` } },
+      { kind: 'custom', id: 'o', name: 'Old', filter: { states: ['running'] } },
+    ]);
+    const entry = parsed.find((section) => section.id === 't');
+    const older = parsed.find((section) => section.id === 'o');
+    expect(entry?.kind === 'custom' ? entry.filter.text : null).toBe(`relay ${'x'.repeat(94)}`);
+    expect(older?.kind === 'custom' ? older.filter.text : null).toBe('');
+  });
 });
 
 describe('sidebarPinListsSchema', () => {
@@ -63,6 +74,14 @@ describe('matchesSidebarSectionFilter', () => {
     expect(matchesSidebarSectionFilter(filter, facts({ pin: 'release' }), now)).toBe(true);
     expect(matchesSidebarSectionFilter(filter, facts({ pin: 'pinned' }), now)).toBe(false);
     expect(matchesSidebarSectionFilter(filter, facts(), now)).toBe(false);
+  });
+
+  test('text: every word in a title or the branch, as the sidebar search matches', () => {
+    const filter = { ...EMPTY_SIDEBAR_SECTION_FILTER, text: 'relay fix' };
+    expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Fix the Relay reconnect'] }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Relay pairing', 'fix/relay-pairing'] }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Relay pairing'] }), now)).toBe(false);
+    expect(matchesSidebarSectionFilter({ ...filter, text: '  ' }, facts(), now)).toBe(true);
   });
 
   test('activity: today and the last two days from local midnight, stalled after three quiet days', () => {
