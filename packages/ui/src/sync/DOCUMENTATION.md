@@ -358,8 +358,8 @@ own directory ownership.
 A folder is registered in two cases only: the user opens a session there
 (`setCurrentSession`), or this client sees OpenCode move
 a session out of an admitted folder into it (`subscribeGlobalSessionMoves` in
-`session-event-router.ts`, fed by `session.patched` events that change the
-directory). Sessions that already sit in unknown folders, from OpenCode's whole
+`session-moves.ts`, which `session-event-router.ts` feeds from `session.patched`
+events that change the directory). Sessions that already sit in unknown folders, from OpenCode's whole
 history or from a project the user removed, stay hidden and are never
 registered or prompted for in the background. A move between two unknown
 folders registers nothing. VS Code registers only on a deliberate open.
