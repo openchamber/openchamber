@@ -20,6 +20,8 @@ import type {
     RepositoryReferenceDetail,
     RepositoryReferenceKind,
     RepositoryReferenceFilter,
+    RepositoryReferencePeople,
+    RepositoryReferenceState,
     Issue,
     IssueComment,
     Project,
@@ -132,13 +134,23 @@ const lookupOf = (text: string, kind: RepositoryReferenceKind, context: SourceCo
     return { number: link.number, project: { owner: link.owner, name: link.repo } };
 };
 
+/** The neutral list reads' options; the name filters narrow issues only, and an absent name sends nothing. */
+type ListOptions = {
+    page: number;
+    state: RepositoryReferenceState;
+    people: RepositoryReferencePeople;
+    query: string;
+    label?: string;
+    milestone?: string;
+};
+
 /** One page of a project's issues or change requests, filtered like a searched page; the cursor is the next page number. */
 export const fetchListBackedReferencePage = async (
     reads: ListBackedReads,
     context: SourceControlReadContext,
     provider: ListBackedProvider,
     kind: RepositoryReferenceKind,
-    filter: RepositoryReferenceFilter,
+    filter: RepositoryReferenceFilter & { labelNames?: string[]; milestoneNames?: string[] },
     text: string,
     cursor: string | null,
 ): Promise<ListPage<RepositoryReference>> => {
@@ -157,8 +169,13 @@ export const fetchListBackedReferencePage = async (
         const issue = await reads.issueGet(context, lookup.number, lookup.project);
         return { kind: 'page', items: issue ? [toIssueReference(issue)] : [], cursor: null, hasMore: false };
     }
-    // An empty query is not sent.
-    const options = { page, state: filter.state, people: filter.people, query: text };
+    // An empty query is not sent; the name filters narrow issues only, and an
+    // empty array sends nothing (the adapter omits an absent name).
+    const options: ListOptions = { page, state: filter.state, people: filter.people, query: text };
+    if (kind === 'issue') {
+        options.label = filter.labelNames?.[0];
+        options.milestone = filter.milestoneNames?.[0];
+    }
     const result = kind === 'issue'
         ? await reads.issuesList(context, options).then((answer) => ({ ...answer, items: answer.items.map(toIssueReference) }))
         : await reads.changeRequestsList(context, options).then((answer) => ({ ...answer, items: answer.items.map(pullReferenceFromChangeRequest) }));

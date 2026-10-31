@@ -11,7 +11,7 @@ import * as React from 'react';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useMinuteTickerNow } from '@/hooks/useDurationTicker';
-import type { ChangeRequestListStatus, RepositoryReference, RepositoryReferenceKind, RepositoryReferenceFilter } from '@/lib/api/types';
+import type { ChangeRequestListStatus, RepositoryReference, RepositoryReferenceKind } from '@/lib/api/types';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { useSourceControlProvider, useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
@@ -22,8 +22,9 @@ import type { CachedValue } from './referenceCache';
 import {
     referencePickerItemKey,
     trackerOfSource,
-    DEFAULT_REPOSITORY_FILTER,
+    DEFAULT_ISSUE_FILTER,
     DEFAULT_TRACKER_FILTER,
+    type IssueFilter,
     type ReferencePickerItem,
     type ReferencePickerSource,
     type TrackerReferenceFilter,
@@ -45,7 +46,10 @@ import { useTrackerSourceStatus } from '@/lib/trackers/sources';
 
 // Remembered for the app run: reopening lands on the tab and filter left last.
 let lastRepositoryKind: RepositoryReferenceKind = 'issue';
-const lastRepositoryFilter = new Map<RepositoryReferenceKind, RepositoryReferenceFilter>();
+// The list's filter carries the issues filter's name arrays, so a filter the
+// issues tab set is what the board reopens on.
+type RepositoryListFilter = IssueFilter;
+const lastRepositoryFilter = new Map<RepositoryReferenceKind, RepositoryListFilter>();
 const lastTrackerFilter = new Map<string, TrackerReferenceFilter>();
 
 const NO_REFERENCES: RepositoryReference[] = [];
@@ -94,7 +98,7 @@ export function useReferenceBrowser({
     onScreen = true,
 }: ReferenceBrowserOptions) {
     const [chosenRepositoryKind, setRepositoryKind] = React.useState<RepositoryReferenceKind>(initialGitHubKind ?? lastRepositoryKind);
-    const [chosenRepositoryFilter, setRepositoryFilter] = React.useState<RepositoryReferenceFilter>(lastRepositoryFilter.get(initialGitHubKind ?? lastRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER);
+    const [chosenRepositoryFilter, setRepositoryFilter] = React.useState<RepositoryListFilter>(lastRepositoryFilter.get(initialGitHubKind ?? lastRepositoryKind) ?? DEFAULT_ISSUE_FILTER);
     const tracker = trackerOfSource(source);
     const trackerDescriptor = useTrackerDescriptor(tracker);
     // A filter the tracker no longer offers reads as its default.
@@ -129,7 +133,7 @@ export function useReferenceBrowser({
     const hostKnown = providersHeld && (across ? acrossProvider : projectProvider) !== null;
     const awaitingHost = chosenRepositoryKind === 'discussion' && !hostKnown;
     const repositoryKind: RepositoryReferenceKind = chosenRepositoryKind === 'discussion' && hostKnown && !descriptor.features.discussions ? 'issue' : chosenRepositoryKind;
-    const repositoryFilter = repositoryKind === chosenRepositoryKind ? chosenRepositoryFilter : lastRepositoryFilter.get(repositoryKind) ?? DEFAULT_REPOSITORY_FILTER;
+    const repositoryFilter = repositoryKind === chosenRepositoryKind ? chosenRepositoryFilter : lastRepositoryFilter.get(repositoryKind) ?? DEFAULT_ISSUE_FILTER;
 
     // Across repositories the folders answer for themselves: the list reports
     // those it cannot read, so no single project's status gates it.
@@ -165,14 +169,14 @@ export function useReferenceBrowser({
         enabled: source === 'repository' && repositoryStatus === 'ready' && !across,
         directory,
         kind: otherRepositoryKind,
-        filter: lastRepositoryFilter.get(otherRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER,
+        filter: lastRepositoryFilter.get(otherRepositoryKind) ?? DEFAULT_ISSUE_FILTER,
         query: '',
     });
     useRepositoryAcrossReferenceList({
         enabled: source === 'repository' && repositoryStatus === 'ready' && across,
         directories: directories ?? NO_DIRECTORIES,
         kind: otherRepositoryKind,
-        filter: lastRepositoryFilter.get(otherRepositoryKind) ?? DEFAULT_REPOSITORY_FILTER,
+        filter: lastRepositoryFilter.get(otherRepositoryKind) ?? DEFAULT_ISSUE_FILTER,
         query: '',
     });
     const list = source === 'repository' ? (across ? acrossList : repositoryList) : trackerList;
@@ -243,11 +247,11 @@ export function useReferenceBrowser({
     const selectRepositoryKind = (kind: RepositoryReferenceKind) => {
         lastRepositoryKind = kind;
         setRepositoryKind(kind);
-        setRepositoryFilter(lastRepositoryFilter.get(kind) ?? DEFAULT_REPOSITORY_FILTER);
+        setRepositoryFilter(lastRepositoryFilter.get(kind) ?? DEFAULT_ISSUE_FILTER);
         setHighlightedKey(null);
     };
     /** Changes the state or whose items, keeping the other. */
-    const selectRepositoryFilter = (patch: Partial<RepositoryReferenceFilter>) => {
+    const selectRepositoryFilter = (patch: Partial<RepositoryListFilter>) => {
         const filter = { ...repositoryFilter, ...patch };
         lastRepositoryFilter.set(repositoryKind, filter);
         setRepositoryFilter(filter);
@@ -308,6 +312,8 @@ export function useReferenceBrowser({
         acrossProvider: across ? acrossList.contexts.provider : null,
         /** Whether the host keeps discussions, so the repository source offers their tab. */
         discussions: descriptor.features.discussions,
+        /** Which of the issues filter's name dropdowns the host offers. */
+        features: { labels: descriptor.features.labels, milestones: descriptor.features.milestones },
         leftOut,
         isMobile,
         descriptor,

@@ -304,12 +304,16 @@ export function useRepositoryReferenceList(options: {
     enabled: boolean;
     directory: string | null;
     kind: RepositoryReferenceKind;
-    filter: RepositoryReferenceFilter;
+    /** The board's and the Issues panel's filter carries the two name arrays; a bare `{ state, people }` reads as none. */
+    filter: RepositoryReferenceFilter & { labelNames?: string[]; milestoneNames?: string[] };
     query: string;
 }) {
     const { sourceControl } = useRuntimeAPIs();
     const { enabled, directory, kind, filter, query } = options;
     const { state, people } = filter;
+    // The name filters narrow issues only; the other kinds send none.
+    const label = kind === 'issue' ? filter.labelNames?.[0] : undefined;
+    const milestone = kind === 'issue' ? filter.milestoneNames?.[0] : undefined;
     const context = useRepositoryReadContext(enabled ? directory : null);
     const readable = context && context !== 'missing' ? context : null;
     const descriptor = useSourceControlProvider(readable?.provider);
@@ -317,18 +321,18 @@ export function useRepositoryReferenceList(options: {
     const text = query.trim();
     const scope = readable ? readContextCacheKey(readable) : 'missing';
     const key = enabled && directory && context
-        ? JSON.stringify([getRuntimeKey(), scope, directory, kind, filter.state, filter.people, text])
+        ? JSON.stringify([getRuntimeKey(), scope, directory, kind, filter.state, filter.people, label, milestone, text])
         : null;
     const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<RepositoryReference>> => {
         if (!readable) return { kind: 'unavailable', reason: 'no-repo' };
         if (!descriptor.features.referenceSearch) {
-            return fetchListBackedReferencePage(sourceControl, readable, { descriptor, urls }, kind, { state, people }, text, cursor);
+            return fetchListBackedReferencePage(sourceControl, readable, { descriptor, urls }, kind, { state, people, labelNames: filter.labelNames, milestoneNames: filter.milestoneNames }, text, cursor);
         }
         const result = await sourceControl.references(readable, { kind, state, people, query: text, cursor });
         if (!result.connected) return { kind: 'unavailable', reason: 'disconnected' };
         if (!result.repo) return { kind: 'unavailable', reason: 'no-repo' };
         return { kind: 'page', items: result.items, cursor: result.cursor, hasMore: result.hasMore };
-    }, [descriptor, kind, people, readable, sourceControl, state, text, urls]);
+    }, [descriptor, kind, filter.labelNames, filter.milestoneNames, people, readable, sourceControl, state, text, urls]);
     const list = useCachedList(repositoryLists, key, fetchPage);
     const contextOf = React.useCallback(() => readable, [readable]);
     const live = useLiveReferences(list.items, contextOf, list.pageReads);

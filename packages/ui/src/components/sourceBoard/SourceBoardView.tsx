@@ -24,6 +24,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { ReferenceBrowserList, ReferenceBrowserSearch } from '@/components/references/ReferenceBrowser';
+import { useChoiceOptions } from '@/components/references/issueFilterOptions';
 import { IDLE_PULL_STATUS, readyValue, useReferenceBrowser } from '@/components/references/useReferenceBrowser';
 import { ReferencePreview } from '@/components/references/ReferencePreview';
 import {
@@ -45,16 +46,21 @@ import { openExternalUrl } from '@/lib/url';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
+    Label,
+    MilestoneChoice,
     ProjectEntry,
     PullRequestStackLayer,
     RepositoryReference,
     RepositoryReferenceKind,
+    RepositorySelector,
     SourceControlReadContext,
     TrackerDescriptor,
     TrackerMappingResult,
 } from '@/lib/api/types';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { effectiveRepositoryBinding } from '@/lib/source-control/types';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { cn } from '@/lib/utils';
 import { resolveTrackerMappedProjectPath } from '@/lib/trackers/projectMapping';
@@ -622,6 +628,32 @@ const SourceBoardBody: React.FC<{
     // again, such as a PR just opened on the host's own site.
     const listContextValue = useRepositoryReadContext(tracker ? null : allRepositories?.[0] ?? directory);
     const listContext = listContextValue && listContextValue !== 'missing' ? listContextValue : null;
+    // The filter menu's name dropdowns: the board's project's labels and
+    // milestones, read with the list's context. A list across the folder's
+    // repositories has no single project to ask, so it offers none.
+    const filterContext = allRepositories === null ? listContext : null;
+    const filterBinding = useRepositoryBinding(filterContext?.directory ?? null, sourceControl, filterContext !== null);
+    const filterProject = React.useMemo<RepositorySelector | null>(() => {
+        if (!filterContext) return null;
+        const read = filterBinding.read;
+        if (!read) return null;
+        const bound = effectiveRepositoryBinding(read).providers
+            .find((entry) => entry.provider === filterContext.provider && entry.instance === filterContext.instance);
+        return bound?.repository ? { owner: bound.repository.owner, repo: bound.repository.name } : null;
+    }, [filterBinding.read, filterContext]);
+    const filterOptionsKey = filterContext && filterProject
+        ? JSON.stringify([filterContext.provider, filterContext.instance, filterContext.accountId, filterContext.directory, filterContext.repositoryId, filterContext.primaryRemote, filterContext.bindingRevision])
+        : null;
+    const fetchLabelOptions = React.useCallback(async (): Promise<Label[]> => {
+        if (!filterContext || !filterProject) return [];
+        return sourceControl.referenceLabels(filterContext, filterProject);
+    }, [filterContext, filterProject, sourceControl]);
+    const fetchMilestoneOptions = React.useCallback(async (): Promise<MilestoneChoice[]> => {
+        if (!filterContext || !filterProject) return [];
+        return sourceControl.referenceMilestones(filterContext, filterProject);
+    }, [filterContext, filterProject, sourceControl]);
+    const labelOptions = useChoiceOptions(fetchLabelOptions, filterOptionsKey);
+    const milestoneOptions = useChoiceOptions(fetchMilestoneOptions, filterOptionsKey);
     const [listRefreshing, setListRefreshing] = React.useState(false);
     const refreshList = async () => {
         if (listRefreshing) return;
@@ -748,7 +780,7 @@ const SourceBoardBody: React.FC<{
     );
     const search = (
         <ReferenceBrowserSearch
-            browser={browser}
+            browser={{ ...browser, labelOptions, milestoneOptions }}
             trailing={listRefreshButton}
             onKeyDown={(event) => {
                 if (narrow) {

@@ -30,8 +30,11 @@ export type IssueFilterMenuProps = {
   isMobile?: boolean;
 };
 
-/** The issues filter: state and people like the board's, plus host-provided label and milestone dropdowns. */
-export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ filter, onFilterChange, labels, milestones, showLabel, showMilestone, isMobile = false }) => {
+/**
+ * The groups and dropdowns of the issues filter, without the menu wrapper: a
+ * surface that owns its own filter trigger renders them inside its content.
+ */
+export const IssueFilterGroups: React.FC<Omit<IssueFilterMenuProps, 'isMobile'>> = ({ filter, onFilterChange, labels, milestones, showLabel, showMilestone }) => {
   const { t } = useI18n();
 
   const group = <T extends string>(label: string, value: T, options: readonly T[], labelOf: (option: T) => string, onSelect: (option: T) => void) => (
@@ -72,6 +75,20 @@ export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ filter, onFilt
   };
 
   return (
+    <>
+      {group(t('references.picker.filter.group.status'), filter.state, REPOSITORY_STATES.issue, (option) => t(REPOSITORY_STATE_LABEL_KEYS[option]), (option) => onFilterChange({ state: option }))}
+      <DropdownMenuSeparator />
+      {group(t('references.picker.filter.group.people'), filter.people, REPOSITORY_PEOPLE.issue, (option) => t(REPOSITORY_PEOPLE_LABEL_KEYS[option]), (option) => onFilterChange({ people: option }))}
+      {showMilestone ? (<><DropdownMenuSeparator />{nameDropdown('milestone', milestones, filter.milestoneNames, (names) => onFilterChange({ milestoneNames: names }))}</>) : null}
+      {showLabel ? (<><DropdownMenuSeparator />{nameDropdown('label', labels, filter.labelNames, (names) => onFilterChange({ labelNames: names }))}</>) : null}
+    </>
+  );
+};
+
+/** The issues filter: state and people like the board's, plus host-provided label and milestone dropdowns. */
+export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ isMobile, ...groups }) => {
+  const { t } = useI18n();
+  return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button type="button" aria-label={t('references.picker.filter.label')} className={cn(dropdownTriggerVariants({ size: isMobile ? 'mobile' : 'default' }), 'min-w-0 max-w-[18rem] shrink-0', isMobile && 'max-w-[45%]')}>
@@ -83,11 +100,7 @@ export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ filter, onFilt
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        {group(t('references.picker.filter.group.status'), filter.state, REPOSITORY_STATES.issue, (option) => t(REPOSITORY_STATE_LABEL_KEYS[option]), (option) => onFilterChange({ state: option }))}
-        <DropdownMenuSeparator />
-        {group(t('references.picker.filter.group.people'), filter.people, REPOSITORY_PEOPLE.issue, (option) => t(REPOSITORY_PEOPLE_LABEL_KEYS[option]), (option) => onFilterChange({ people: option }))}
-        {showMilestone ? (<><DropdownMenuSeparator />{nameDropdown('milestone', milestones, filter.milestoneNames, (names) => onFilterChange({ milestoneNames: names }))}</>) : null}
-        {showLabel ? (<><DropdownMenuSeparator />{nameDropdown('label', labels, filter.labelNames, (names) => onFilterChange({ labelNames: names }))}</>) : null}
+        <IssueFilterGroups {...groups} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

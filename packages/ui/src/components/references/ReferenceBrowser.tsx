@@ -17,9 +17,12 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Input } from '@/components/ui/input';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import type { Label, MilestoneChoice } from '@/lib/api/types';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
 import { cn } from '@/lib/utils';
 
+import { IssueFilterGroups } from './IssueFilterMenu';
+import type { ChoiceOptionsState } from './issueFilterOptions';
 import { ReferencePickerRow } from './ReferencePickerRow';
 import {
     REPOSITORY_PEOPLE,
@@ -64,16 +67,32 @@ export const ReferenceBrowserTabs: React.FC<{ browser: ReferenceBrowser }> = ({ 
 };
 
 /**
+ * The options behind the issues filter's name dropdowns, read per project by
+ * the surface that renders the menu (the board view); absent where the surface
+ * offers no host to read them from (the picker).
+ */
+export type ReferenceFilterOptions = {
+    labelOptions?: ChoiceOptionsState<Label> | null;
+    milestoneOptions?: ChoiceOptionsState<MilestoneChoice> | null;
+};
+
+/**
  * Which items the list shows. Picking stays in the menu, so a tracker's parts
  * combine. A tracker offers its descriptor's state filters, and people and
  * priority where its `filters` capabilities say so.
  */
-const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser }) => {
+const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser & ReferenceFilterOptions }> = ({ browser }) => {
     const { t } = useI18n();
     const { source, trackerDescriptor } = browser;
     const { state, people, priority } = browser.trackerFilter;
     const { filters } = trackerDescriptor.capabilities;
     const repository = browser.repositoryFilter;
+    // The shared menu takes over the repository's groups where the host offers
+    // both name dropdowns and the surface read their options; one repository
+    // only: a list across several has no single project to ask.
+    const showExtras = source === 'repository' && !browser.across && browser.repositoryKind === 'issue'
+        && browser.features.labels && browser.features.milestones
+        && browser.labelOptions !== undefined && browser.milestoneOptions !== undefined;
     const summary = source === 'repository'
         ? [
             t(REPOSITORY_STATE_LABEL_KEYS[repository.state]),
@@ -123,7 +142,18 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-                {source === 'repository' ? (
+                {showExtras ? (
+                    // The shared menu renders its trigger-less groups; the outer
+                    // trigger is reused, so only the content gains the dropdowns.
+                    <IssueFilterGroups
+                        filter={repository}
+                        onFilterChange={(patch) => browser.selectRepositoryFilter(patch)}
+                        labels={browser.labelOptions ?? null}
+                        milestones={browser.milestoneOptions ?? null}
+                        showLabel={browser.features.labels}
+                        showMilestone={browser.features.milestones}
+                    />
+                ) : source === 'repository' ? (
                     <>
                         {group(t('references.picker.filter.group.status'), repository.state, REPOSITORY_STATES[browser.repositoryKind], (option) => t(REPOSITORY_STATE_LABEL_KEYS[option]), (option) => browser.selectRepositoryFilter({ state: option }))}
                         <DropdownMenuSeparator />
@@ -153,7 +183,7 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
 
 /** The search field, taking the room it is given, and the filter beside it. */
 export const ReferenceBrowserSearch: React.FC<{
-    browser: ReferenceBrowser;
+    browser: ReferenceBrowser & ReferenceFilterOptions;
     onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
     /** After the filter, such as the board's list refresh. */
     trailing?: React.ReactNode;
