@@ -76,7 +76,7 @@ export const MobileProjectsCaption: React.FC<{
   return <MobileCaption label={row.label ?? t('sessions.sidebar.activity.projectsTitle')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
 };
 
-const HeaderIconButton: React.FC<{ icon: 'add' | 'node-tree'; label: string; onClick: () => void }> = ({ icon, label, onClick }) => (
+const HeaderIconButton: React.FC<{ icon: 'add' | 'git-branch'; label: string; onClick: () => void }> = ({ icon, label, onClick }) => (
   <button
     type="button"
     className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -159,7 +159,7 @@ export const MobileProjectHeader: React.FC<{
           <MobileProjectIcon project={project} size="xs" />
           <span className="block min-w-0 flex-1 truncate ps-1 typography-ui-label font-medium text-foreground">{label}</span>
         </button>
-        {isRepo ? <HeaderIconButton icon="node-tree" label={t('sessions.sidebar.project.actions.newWorktree')} onClick={() => actions.openNewWorktree(project.id)} /> : null}
+        {isRepo ? <HeaderIconButton icon="git-branch" label={t('sessions.sidebar.project.actions.newWorktree')} onClick={() => actions.openNewWorktree(project.id)} /> : null}
         {/* Its edge on the drawer's gutter, as the header's New chat. */}
         <HeaderIconButton icon="add" label={t('mobile.sessions.newSessionInProjectAria', { label })} onClick={onNewSession} />
       </div>

@@ -82,7 +82,7 @@ const WorktreeRow: React.FC<{
           <Icon name="loader-4" className="size-4 animate-spin" />
         </span>
       ) : (
-        <Icon name="node-tree" className="size-4 shrink-0 text-muted-foreground" />
+        <Icon name="git-branch" className="size-4 shrink-0 text-muted-foreground" />
       )}
       <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">{label}</span>
       {removing ? null : (

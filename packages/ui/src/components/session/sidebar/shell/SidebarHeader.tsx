@@ -19,6 +19,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -120,7 +121,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   // its orders, the sections, and collapse.
   const checkMark = <Icon name="check" className="h-4 w-4 text-primary" />;
   const choiceSubmenu = <T extends string>(
-    labelKey: I18nKey,
+    { labelKey, icon }: { labelKey: I18nKey; icon: IconName },
     options: readonly (readonly [T, I18nKey])[],
     current: T,
     onSelect: (value: T) => void,
@@ -128,7 +129,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
     const currentLabelKey = options.find(([value]) => value === current)?.[1];
     return (
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger className="gap-2">
+          <Icon name={icon} className="h-4 w-4" />
           <span className="flex-1">{t(labelKey)}</span>
           {currentLabelKey ? <span className="ms-4 text-muted-foreground">{t(currentLabelKey)}</span> : null}
         </DropdownMenuSubTrigger>
@@ -143,9 +145,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
       </DropdownMenuSub>
     );
   };
-  const toggleItem = (labelKey: I18nKey, checked: boolean, onToggle: () => void) => (
-    <DropdownMenuItem onClick={onToggle} className="flex items-center justify-between">
-      <span>{t(labelKey)}</span>
+  const toggleItem = ({ labelKey, icon }: { labelKey: I18nKey; icon: IconName }, checked: boolean, onToggle: () => void) => (
+    <DropdownMenuItem onClick={onToggle} className="flex items-center gap-2">
+      <Icon name={icon} className="h-4 w-4" />
+      <span className="flex-1">{t(labelKey)}</span>
       {checked ? checkMark : null}
     </DropdownMenuItem>
   );
@@ -171,7 +174,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
   // One view: works under their projects, or every project's works in one
   // list by time, which has no project headers to sort.
   if (showProjectDisplayControls) {
-    displayMenuSections.push(choiceSubmenu('sessions.sidebar.header.listGrouping.label', [
+    // The grouping's icon follows the choice, so the menu says which one the list is in.
+    displayMenuSections.push(choiceSubmenu({ labelKey: 'sessions.sidebar.header.listGrouping.label', icon: sidebarGrouping === 'time' ? 'time' : 'folders' }, [
       ['project', 'sessions.sidebar.header.listGrouping.project'],
       ['time', 'sessions.sidebar.header.listGrouping.time'],
     ] as const, sidebarGrouping, (grouping) => {
@@ -180,7 +184,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     }));
   }
   displayMenuSections.push(<>
-    {!timeGrouping ? choiceSubmenu('sessions.sidebar.header.actions.sortProjects', [
+    {!timeGrouping ? choiceSubmenu({ labelKey: 'sessions.sidebar.header.actions.sortProjects', icon: 'arrow-up-down' }, [
       ['manual', 'sessions.sidebar.header.projectSort.manual'],
       ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
       ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
@@ -190,7 +194,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
       setProjectSortOrder(order);
       void updateDesktopSettings({ sidebarProjectSortOrder: order });
     }) : null}
-    {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.projectDisplay.label', [
+    {showProjectDisplayControls ? choiceSubmenu({ labelKey: 'sessions.sidebar.header.projectDisplay.label', icon: 'folder-open' }, [
       ['all', 'sessions.sidebar.header.projectDisplay.all'],
       ['single', 'sessions.sidebar.header.projectDisplay.single'],
     ] as const, projectDisplayMode, (mode) => {
@@ -201,11 +205,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
   if (showSectionControls) {
     displayMenuSections.push(<>
       {/* Rows that mix projects keep one line unless asked. */}
-      {toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
+      {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.detailedZoneRows', icon: 'list-check-2' }, detailedZoneRows, () => {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
       })}
-      {toggleItem('sessions.sidebar.header.displayMode.worktreeNameByBranch', worktreeNameByBranch, () => {
+      {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.worktreeNameByBranch', icon: 'git-branch' }, worktreeNameByBranch, () => {
         setWorktreeNameByBranch(!worktreeNameByBranch);
         void updateDesktopSettings({ sidebarWorktreeNameByBranch: !worktreeNameByBranch });
       })}

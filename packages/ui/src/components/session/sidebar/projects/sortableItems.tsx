@@ -202,7 +202,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       )}
       {isRepo && !hideDirectoryControls && onManageWorktrees && (
         <Item onClick={onManageWorktrees}>
-          <Icon name="node-tree" className="me-1.5 h-4 w-4" />
+          <Icon name="git-branch" className="me-1.5 h-4 w-4" />
           {t('sessions.sidebar.project.actions.manageWorktrees')}
         </Item>
       )}
@@ -414,7 +414,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         )}
                         aria-label={t('sessions.sidebar.project.actions.newWorktree')}
                       >
-                        <Icon name="node-tree" className="h-3.5 w-3.5" />
+                        <Icon name="git-branch" className="h-3.5 w-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
