@@ -2619,6 +2619,7 @@ export const dict = {
   'chat.chatInput.draftPicker.searchProjects': 'חיפוש פרויקטים…',
   'chat.chatInput.draftPicker.searchBranches': 'חיפוש ענפים…',
   'chat.chatInput.draftPicker.noProjectsFound': 'לא נמצאו פרויקטים.',
+  'chat.chatInput.draftPicker.noBranchesFound': 'לא נמצאו ענפים או עצי עבודה.',
   'chat.chatInput.worktrees': 'עצי עבודה',
   'chat.chatInput.worktreeQuick': 'עץ עבודה מהיר',
   'chat.chatInput.worktreeCustom': 'עץ עבודה חדש…',

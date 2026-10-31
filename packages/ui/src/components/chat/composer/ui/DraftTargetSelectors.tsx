@@ -1,9 +1,9 @@
 /**
  * Where a new session will run: the project and the directory within it.
  *
- * Desktop uses a searchable project popup and an inline branch/worktree
- * select; mobile uses bottom sheets, because a native select over a
- * keyboard-resized viewport is unusable. Both render the same options from
+ * Desktop uses searchable project and branch/worktree popups; mobile uses
+ * bottom sheets, because a native select over a keyboard-resized viewport is
+ * unusable. Both render the same options from
  * the same hook, and both offer creating a worktree inline so the user does
  * not have to leave the draft to make one. The project's isolated spaces are
  * a section of their own, by name, with the way to make a new one under it.
@@ -23,22 +23,13 @@ import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { commandSearchAtBottomClass, usePopupSideOnOpen } from '@/components/ui/popup-side';
 import {
     Command,
+    CommandGroup,
     CommandInput,
     CommandItem,
     CommandList,
 } from '@/components/ui/command';
-import { handleDropdownNavigationKey, shouldDismissDropdown } from '@/components/ui/dropdown-navigation';
+import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { isIMECompositionEvent } from '@/lib/ime';
-import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectLabel,
-    SelectSeparator,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
 import { useI18n } from '@/lib/i18n';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
@@ -95,14 +86,19 @@ function WorktreeCreateActions({ onQuick, onCustom, className }: {
     className: string;
 }) {
     const { t } = useI18n();
+    // Enter reaches these buttons rather than the picker's active row: cmdk
+    // listens for Enter on its root and would otherwise select that row.
+    const stopEnter = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        if (event.key === 'Enter') event.stopPropagation();
+    };
     return (
         <>
-            <button type="button" className={className} onPointerDown={(e) => { e.stopPropagation(); }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onQuick(); }}>
+            <button type="button" className={className} onPointerDown={(e) => { e.stopPropagation(); }} onKeyDown={stopEnter} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onQuick(); }}>
                 <Icon name="flashlight" className="size-4 shrink-0 text-muted-foreground" />
                 {t('chat.chatInput.worktreeQuick')}
             </button>
             {onCustom ? (
-                <button type="button" className={className} onPointerDown={(e) => { e.stopPropagation(); }} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCustom(); }}>
+                <button type="button" className={className} onPointerDown={(e) => { e.stopPropagation(); }} onKeyDown={stopEnter} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCustom(); }}>
                     <Icon name="git-branch" className="size-4 shrink-0 text-muted-foreground" />
                     {t('chat.chatInput.worktreeCustom')}
                 </button>
@@ -177,49 +173,42 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
     const [projectQuery, setProjectQuery] = React.useState('');
     const [projectActiveId, setProjectActiveId] = React.useState<string | null>(null);
     const [projectFocusReturn, setProjectFocusReturn] = React.useState(false);
+    const [worktreeQuery, setWorktreeQuery] = React.useState('');
+    const [worktreeActiveValue, setWorktreeActiveValue] = React.useState<string | null>(null);
+    const [worktreeFocusReturn, setWorktreeFocusReturn] = React.useState(false);
     const projectTriggerRef = React.useRef<HTMLButtonElement>(null);
     const worktreeTriggerRef = React.useRef<HTMLButtonElement>(null);
     // Another project or branch eases each picker into its new width.
     useWidthMorph(projectTriggerRef);
     useWidthMorph(worktreeTriggerRef);
-    // Controlled Select closes can omit finalFocus's interaction type.
-    const keyboardCloseRef = React.useRef(false);
     const getComposerInput = () => projectTriggerRef.current?.closest('form')?.querySelector<HTMLElement>('[data-chat-input="true"] .cm-content');
-    const getFinalFocus = () => keyboardCloseRef.current ? getComposerInput() : true;
     const projectSearchRef = React.useRef<HTMLInputElement>(null);
-    // Preserve Select's dialog portal and main-area containment.
-    const [projectPortalContainer, setProjectPortalContainer] = React.useState<HTMLElement | null>(null);
-    const [projectCollisionBoundary, setProjectCollisionBoundary] = React.useState<Element | null>(null);
-    const syncProjectPopupContainers = React.useCallback((target: EventTarget | null) => {
+    const worktreeSearchRef = React.useRef<HTMLInputElement>(null);
+    // Preserve the pickers' dialog portal and main-area containment.
+    const [pickerPortalContainer, setPickerPortalContainer] = React.useState<HTMLElement | null>(null);
+    const [pickerCollisionBoundary, setPickerCollisionBoundary] = React.useState<Element | null>(null);
+    const syncPickerPopupContainers = React.useCallback((target: EventTarget | null) => {
         const element = target instanceof HTMLElement ? target : null;
         const dialog = element?.closest('[data-slot="dialog-content"], [role="dialog"]');
-        setProjectPortalContainer(dialog instanceof HTMLElement ? dialog : null);
-        setProjectCollisionBoundary(element?.closest('main') ?? null);
+        setPickerPortalContainer(dialog instanceof HTMLElement ? dialog : null);
+        setPickerCollisionBoundary(element?.closest('main') ?? null);
     }, []);
     // Each picker picks its side when it opens and keeps it while open.
     const projectPopupSide = usePopupSideOnOpen(openPicker === 'project', projectTriggerRef);
     const worktreePopupSide = usePopupSideOnOpen(openPicker === 'worktree', worktreeTriggerRef);
-    // The popover owns no shortcut suspension (unlike Select/DropdownMenu
-    // wrappers), so suspend global shortcuts while the project popup is
-    // open and restore them on close/unmount.
-    const projectSuspendRef = React.useRef<(() => void) | null>(null);
+    // The popovers own no shortcut suspension (unlike Select/DropdownMenu
+    // wrappers), so suspend global shortcuts while either picker is open and
+    // restore them on close/unmount.
+    const pickerSuspendRef = React.useRef<(() => void) | null>(null);
     React.useEffect(() => {
-        if (openPicker !== 'project') return;
-        projectSuspendRef.current?.();
-        projectSuspendRef.current = shortcutRegistry.suspend();
+        if (openPicker === null) return;
+        pickerSuspendRef.current?.();
+        pickerSuspendRef.current = shortcutRegistry.suspend();
         return () => {
-            projectSuspendRef.current?.();
-            projectSuspendRef.current = null;
+            pickerSuspendRef.current?.();
+            pickerSuspendRef.current = null;
         };
     }, [openPicker]);
-    const handlePickerKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-        if (openPicker === null || !shouldDismissDropdown(event)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        keyboardCloseRef.current = true;
-        setOpenPicker(null);
-    };
-
     useKeybind('open_draft_project_picker', () => {
         projectTriggerRef.current?.focus();
         setProjectFocusReturn(false);
@@ -229,9 +218,16 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         );
         setOpenPicker('project');
     });
+    const selectedWorktreeValue = selectedDirectory
+        ?? branchItems[0]?.value
+        ?? normalizePath(selectedProject.path)
+        ?? '';
+
     useKeybind('open_draft_worktree_picker', () => {
         if (!showBranchSelector) return false;
         worktreeTriggerRef.current?.focus();
+        setWorktreeQuery('');
+        setWorktreeActiveValue(selectedWorktreeValue || null);
         onRefreshTarget?.();
         setOpenPicker('worktree');
     });
@@ -263,6 +259,51 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         });
     }, [filteredProjects, openPicker]);
 
+    const filteredRootOption = React.useMemo(
+        () => projectRootBranchOption && matchesRankQuery([projectRootBranchOption.label], worktreeQuery)
+            ? projectRootBranchOption
+            : null,
+        [projectRootBranchOption, worktreeQuery],
+    );
+    const filteredWorktreeOptions = React.useMemo(
+        () => rankByQuery(worktreeBranchOptions, worktreeQuery, (option) => [option.label]),
+        [worktreeBranchOptions, worktreeQuery],
+    );
+    const filteredSpaceOptions = React.useMemo(
+        () => rankByQuery(spaceBranchOptions, worktreeQuery, (option) => [option.label]),
+        [spaceBranchOptions, worktreeQuery],
+    );
+    const showUnknownDirectory = Boolean(
+        selectedDirectory
+        && !selectedBranchIsKnown
+        && matchesRankQuery([selectedBranchLabel ?? ''], worktreeQuery),
+    );
+    const worktreeResultValues = React.useMemo(() => [
+        ...(filteredRootOption ? [filteredRootOption.value] : []),
+        ...filteredWorktreeOptions.map((option) => option.value),
+        ...(showUnknownDirectory && selectedDirectory ? [selectedDirectory] : []),
+        ...filteredSpaceOptions.map((option) => option.value),
+    ], [filteredRootOption, filteredSpaceOptions, filteredWorktreeOptions, selectedDirectory, showUnknownDirectory]);
+
+    // Transient search must never survive to the next opening, including
+    // picker switches and draft unmounts.
+    React.useEffect(() => {
+        if (openPicker !== 'worktree') {
+            setWorktreeQuery('');
+            setWorktreeActiveValue(null);
+        }
+    }, [openPicker]);
+    // After a query or option-list change, retain the active value only while
+    // it stays visible; otherwise fall to the first result (or none when the
+    // list is empty) so Enter cannot commit a hidden row.
+    React.useEffect(() => {
+        if (openPicker !== 'worktree') return;
+        setWorktreeActiveValue((current) => {
+            if (current && worktreeResultValues.includes(current)) return current;
+            return worktreeResultValues[0] ?? null;
+        });
+    }, [openPicker, worktreeResultValues]);
+
     const handleProjectChange = (projectId: string) => {
         onProjectChange(projectId);
         setProjectFocusReturn(true);
@@ -276,6 +317,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
 
     const handleDirectoryChange = (directory: string) => {
         onDirectoryChange(directory);
+        setWorktreeFocusReturn(true);
         setOpenPicker(null);
     };
 
@@ -329,8 +371,8 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             size="sm"
                             aria-haspopup="dialog"
                             className="h-7 min-w-0 w-fit max-w-[42vw] justify-start gap-1 overflow-hidden px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent sm:max-w-[18rem]"
-                            onPointerDownCapture={(event) => syncProjectPopupContainers(event.currentTarget)}
-                            onFocusCapture={(event) => syncProjectPopupContainers(event.currentTarget)}
+                            onPointerDownCapture={(event) => syncPickerPopupContainers(event.currentTarget)}
+                            onFocusCapture={(event) => syncPickerPopupContainers(event.currentTarget)}
                         />
                     }
                 >
@@ -346,7 +388,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     <TooltipLabelWithShortcut label={t('chat.chatInput.draftPicker.projectTitle')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_draft_project_picker', shortcutOverrides), '')} />
                 </TooltipContent>
                 </Tooltip>
-                <Popover.Portal container={projectPortalContainer ?? undefined}>
+                <Popover.Portal container={pickerPortalContainer ?? undefined}>
                     {/* The search field sits on the trigger's edge of the
                         popup and stays fixed while filtering; only the
                         results area beyond it changes height. Opening
@@ -364,7 +406,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                         align="start"
                         sideOffset={4}
                         collisionAvoidance={{ side: 'none' }}
-                        collisionBoundary={projectCollisionBoundary ?? undefined}
+                        collisionBoundary={pickerCollisionBoundary ?? undefined}
                         className="app-region-no-drag z-50"
                     >
                         <Popover.Popup
@@ -414,29 +456,28 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                     }}
                                 />
                                 <CommandList label={t('chat.chatInput.draftPicker.projectTitle')}>
-                                    {filteredProjects.length === 0 ? (
-                                        <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">
-                                            {t('chat.chatInput.draftPicker.noProjectsFound')}
-                                        </div>
-                                    ) : (
-                                        filteredProjects.map((project) => (
-                                            <CommandItem
-                                                key={project.id}
-                                                value={project.id}
-                                                onSelect={handleProjectSelect}
-                                                aria-current={project.id === selectedProject.id ? true : undefined}
-                                                className="max-w-full"
-                                            >
-                                                <span className="min-w-0 flex-1 truncate">
-                                                    <ProjectLabel project={project} theme={theme} />
-                                                </span>
-                                                {project.id === selectedProject.id ? (
-                                                    <Icon name="check" className="size-4 shrink-0 text-muted-foreground" />
-                                                ) : null}
-                                            </CommandItem>
-                                        ))
-                                    )}
+                                    {filteredProjects.map((project) => (
+                                        <CommandItem
+                                            key={project.id}
+                                            value={project.id}
+                                            onSelect={handleProjectSelect}
+                                            aria-current={project.id === selectedProject.id ? true : undefined}
+                                            className="max-w-full"
+                                        >
+                                            <span className="min-w-0 flex-1 truncate">
+                                                <ProjectLabel project={project} theme={theme} />
+                                            </span>
+                                            {project.id === selectedProject.id ? (
+                                                <Icon name="check" className="size-4 shrink-0 text-muted-foreground" />
+                                            ) : null}
+                                        </CommandItem>
+                                    ))}
                                 </CommandList>
+                                {filteredProjects.length === 0 ? (
+                                    <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">
+                                        {t('chat.chatInput.draftPicker.noProjectsFound')}
+                                    </div>
+                                ) : null}
                             </Command>
                         </Popover.Popup>
                     </Popover.Positioner>
@@ -444,105 +485,222 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
             </Popover.Root>
 
             {showBranchSelector ? (
-                <Select
-                    value={selectedDirectory ?? branchItems[0]?.value ?? normalizePath(selectedProject.path) ?? ''}
+                <Popover.Root
                     open={openPicker === 'worktree'}
-                    onOpenChange={(open, details) => {
-                        keyboardCloseRef.current = !open && details.event.type === 'keydown';
+                    onOpenChange={(open, eventDetails) => {
                         if (open) {
+                            setWorktreeFocusReturn(false);
+                            // Seed the active row from the committed directory so
+                            // Enter without typing repeats the current choice.
+                            // The clamp below keeps it when still visible and
+                            // falls to the first result otherwise.
+                            setWorktreeQuery('');
+                            setWorktreeActiveValue(selectedWorktreeValue || null);
                             onRefreshTarget?.();
+                            setOpenPicker('worktree');
+                            return;
                         }
-                        setOpenPicker(open ? 'worktree' : null);
+                        setWorktreeQuery('');
+                        setWorktreeActiveValue(null);
+                        setWorktreeFocusReturn(eventDetails?.reason === 'escape-key');
+                        setOpenPicker(null);
                     }}
-                    onValueChange={handleDirectoryChange}
-                    disableGlobalShortcuts
+                    onOpenChangeComplete={(open) => {
+                        if (!open && worktreeFocusReturn) {
+                            (getComposerInput() ?? worktreeTriggerRef.current)?.focus();
+                            setWorktreeFocusReturn(false);
+                        }
+                        if (open && openPicker === 'worktree') worktreeSearchRef.current?.focus();
+                    }}
                 >
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            <SelectTrigger
-                                ref={worktreeTriggerRef}
-                                onKeyDown={handlePickerKeyDown}
-                                className="h-7 min-w-0 w-fit max-w-[48vw] overflow-hidden sm:max-w-[20rem] bg-transparent dark:bg-transparent shadow-none px-1.5 hover:[background-image:none] data-[popup-open]:[background-image:none]"
-                            >
-                                {selectedIsSpace ? <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.group.space')} /> : null}
-                                <SelectValue>
-                                    {selectedBranchLabel ?? t('chat.chatInput.branch')}
-                                </SelectValue>
-                                {/* After the name: the check answers once the branch is
-                                    picked, and a mark arriving at the start would push
-                                    the name over. Here the picker grows into it. */}
-                                {hasUncommittedChanges ? (
-                                    <Icon
-                                        name="alert"
-                                        className="size-3.5 shrink-0 text-[var(--status-warning)]"
-                                        aria-label={t('chat.draftDirtyNotice.indicatorAria')}
+                            <Popover.Trigger
+                                render={
+                                    <Button
+                                        ref={worktreeTriggerRef}
+                                        variant="ghost"
+                                        size="sm"
+                                        aria-haspopup="dialog"
+                                        className="h-7 min-w-0 w-fit max-w-[48vw] justify-start gap-1 overflow-hidden px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent sm:max-w-[20rem]"
+                                        onPointerDownCapture={(event) => syncPickerPopupContainers(event.currentTarget)}
+                                        onFocusCapture={(event) => syncPickerPopupContainers(event.currentTarget)}
                                     />
-                                ) : null}
-                            </SelectTrigger>
+                                }
+                            >
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                    {selectedIsSpace ? <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.group.space')} /> : null}
+                                    <span className="truncate">{selectedBranchLabel ?? t('chat.chatInput.branch')}</span>
+                                    {/* After the name: the check answers once the branch is
+                                        picked, and a mark arriving at the start would push
+                                        the name over. Here the picker grows into it. */}
+                                    {hasUncommittedChanges ? (
+                                        <Icon
+                                            name="alert"
+                                            className="size-3.5 shrink-0 text-[var(--status-warning)]"
+                                            aria-label={t('chat.draftDirtyNotice.indicatorAria')}
+                                        />
+                                    ) : null}
+                                    <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
+                                </span>
+                            </Popover.Trigger>
                         </TooltipTrigger>
                         <TooltipContent showArrow side="top" sideOffset={8} className="max-w-72">
                             <TooltipLabelWithShortcut label={t('chat.chatInput.branch')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('open_draft_worktree_picker', shortcutOverrides), '')} />
                             {hasUncommittedChanges ? <span className="block whitespace-pre-line">{t('chat.draftDirtyNotice.tooltip')}</span> : null}
                         </TooltipContent>
                     </Tooltip>
-                    <SelectContent side={worktreePopupSide} align="start" sideOffset={4} collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
-                        {projectRootBranchOption ? (
-                            <SelectGroup>
-                                <SelectLabel>{t('chat.chatInput.projectRoot')}</SelectLabel>
-                                <SelectItem key={projectRootBranchOption.value} value={projectRootBranchOption.value} className="max-w-[24rem] truncate">
-                                    {projectRootBranchOption.label}
-                                </SelectItem>
-                            </SelectGroup>
-                        ) : null}
-                        {projectRootBranchOption ? <SelectSeparator /> : null}
-                        {/* Creating comes before the list, so a long list never hides it. */}
-                        <WorktreeCreateActions
-                            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                            onQuick={() => { setOpenPicker(null); void createWorktreeDraft(); }}
-                            onCustom={onCreateCustomWorktree ? () => { setOpenPicker(null); onCreateCustomWorktree(); } : undefined}
-                        />
-                        <SelectSeparator />
-                        <SelectGroup>
-                            <SelectLabel>{t('chat.chatInput.worktrees')}</SelectLabel>
-                            {worktreeBranchOptions.map((option) => (
-                                <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
-                                    {option.pending ? '⏳ ' : ''}{option.label}
-                                </SelectItem>
-                            ))}
-                        </SelectGroup>
-                        {selectedDirectory && !selectedBranchIsKnown ? (
-                            <SelectItem value={selectedDirectory} className="max-w-[24rem] truncate">
-                                {selectedBranchLabel}
-                            </SelectItem>
-                        ) : null}
-                        {spaceBranchOptions.length > 0 || onCreateSpace ? <SelectSeparator /> : null}
-                        {spaceBranchOptions.length > 0 ? (
-                            <SelectGroup>
-                                <SelectLabel>{t('spaces.picker.section')}</SelectLabel>
-                                {spaceBranchOptions.map((option) => (
-                                    <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
-                                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                                            <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
-                                            <span className="truncate">{option.label}</span>
-                                        </span>
-                                    </SelectItem>
-                                ))}
-                            </SelectGroup>
-                        ) : null}
-                        {onCreateSpace ? (
-                            <div className="px-2 py-1.5">
-                                <button
-                                    type="button"
-                                    className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
-                                    onPointerDown={(e) => { e.stopPropagation(); }}
-                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
+                    <Popover.Portal container={pickerPortalContainer ?? undefined}>
+                        <Popover.Positioner
+                            side={worktreePopupSide}
+                            align="start"
+                            sideOffset={4}
+                            collisionAvoidance={{ side: 'none' }}
+                            collisionBoundary={pickerCollisionBoundary ?? undefined}
+                            className="app-region-no-drag z-50"
+                        >
+                            <Popover.Popup
+                                role="dialog"
+                                aria-label={t('chat.chatInput.branch')}
+                                className={cn(dropdownMenuPopupClass, 'flex w-72 max-w-[calc(100vw-2rem)] flex-col p-0')}
+                                initialFocus={false}
+                                finalFocus={false}
+                            >
+                                {/* Filtering and ordering are owned by the ranked
+                                    lists above; cmdk's own filter would re-filter
+                                    and reorder the already-ranked rows. */}
+                                <Command
+                                    className={cn(
+                                        'min-h-0 flex-1',
+                                        worktreePopupSide === 'top' && commandSearchAtBottomClass,
+                                    )}
+                                    shouldFilter={false}
+                                    value={worktreeActiveValue ?? undefined}
+                                    onValueChange={setWorktreeActiveValue}
                                 >
-                                    {t('spaces.picker.new')}
-                                </button>
-                            </div>
-                        ) : null}
-                    </SelectContent>
-                </Select>
+                                    <CommandInput
+                                        ref={worktreeSearchRef}
+                                        aria-label={t('chat.chatInput.draftPicker.searchBranches')}
+                                        placeholder={t('chat.chatInput.draftPicker.searchBranches')}
+                                        value={worktreeQuery}
+                                        onValueChange={setWorktreeQuery}
+                                        onKeyDown={(event) => {
+                                            if (isIMECompositionEvent(event)) {
+                                                event.stopPropagation();
+                                                return;
+                                            }
+                                            handleDropdownNavigationKey(event, (navigationKey) => {
+                                                event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', {
+                                                    key: navigationKey,
+                                                    bubbles: true,
+                                                    cancelable: true,
+                                                }));
+                                            });
+                                        }}
+                                    />
+                                    {/* Creating sits outside the listbox so Tab reaches
+                                        the buttons and Enter activates them rather than
+                                        the active branch row. */}
+                                    <div className="px-1 pt-1">
+                                        <WorktreeCreateActions
+                                            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                            onQuick={() => { setWorktreeFocusReturn(true); setOpenPicker(null); void createWorktreeDraft(); }}
+                                            onCustom={onCreateCustomWorktree ? () => { setOpenPicker(null); onCreateCustomWorktree(); } : undefined}
+                                        />
+                                    </div>
+                                    <CommandList label={t('chat.chatInput.branch')}>
+                                        {filteredRootOption ? (
+                                            <CommandGroup heading={t('chat.chatInput.projectRoot')}>
+                                                <CommandItem
+                                                    value={filteredRootOption.value}
+                                                    onSelect={() => handleDirectoryChange(filteredRootOption.value)}
+                                                    aria-current={filteredRootOption.value === selectedWorktreeValue ? true : undefined}
+                                                    className="max-w-full"
+                                                >
+                                                    <span className="min-w-0 flex-1 truncate">{filteredRootOption.label}</span>
+                                                    {filteredRootOption.value === selectedWorktreeValue ? (
+                                                        <Icon name="check" className="size-4 shrink-0 text-muted-foreground" />
+                                                    ) : null}
+                                                </CommandItem>
+                                            </CommandGroup>
+                                        ) : null}
+                                        {filteredWorktreeOptions.length > 0 ? (
+                                            <CommandGroup heading={t('chat.chatInput.worktrees')}>
+                                                {filteredWorktreeOptions.map((option) => (
+                                                    <CommandItem
+                                                        key={option.value}
+                                                        value={option.value}
+                                                        onSelect={() => handleDirectoryChange(option.value)}
+                                                        aria-current={option.value === selectedWorktreeValue ? true : undefined}
+                                                        className="max-w-full"
+                                                    >
+                                                        <span className="min-w-0 flex-1 truncate">
+                                                            {option.pending ? '⏳ ' : ''}{option.label}
+                                                        </span>
+                                                        {option.value === selectedWorktreeValue ? (
+                                                            <Icon name="check" className="size-4 shrink-0 text-muted-foreground" />
+                                                        ) : null}
+                                                    </CommandItem>
+                                                ))}
+                                            </CommandGroup>
+                                        ) : null}
+                                        {showUnknownDirectory && selectedDirectory ? (
+                                            <CommandItem
+                                                value={selectedDirectory}
+                                                onSelect={() => handleDirectoryChange(selectedDirectory)}
+                                                aria-current={selectedDirectory === selectedWorktreeValue ? true : undefined}
+                                                className="max-w-full"
+                                            >
+                                                <span className="min-w-0 flex-1 truncate">{selectedBranchLabel}</span>
+                                                {selectedDirectory === selectedWorktreeValue ? (
+                                                    <Icon name="check" className="size-4 shrink-0 text-muted-foreground" />
+                                                ) : null}
+                                            </CommandItem>
+                                        ) : null}
+                                        {filteredSpaceOptions.length > 0 ? (
+                                            <CommandGroup heading={t('spaces.picker.section')}>
+                                                {filteredSpaceOptions.map((option) => (
+                                                    <CommandItem
+                                                        key={option.value}
+                                                        value={option.value}
+                                                        onSelect={() => handleDirectoryChange(option.value)}
+                                                        aria-current={option.value === selectedWorktreeValue ? true : undefined}
+                                                        className="max-w-full"
+                                                    >
+                                                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                                                            <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
+                                                            <span className="truncate">{option.label}</span>
+                                                        </span>
+                                                        {option.value === selectedWorktreeValue ? (
+                                                            <Icon name="check" className="size-4 shrink-0 text-muted-foreground" />
+                                                        ) : null}
+                                                    </CommandItem>
+                                                ))}
+                                            </CommandGroup>
+                                        ) : null}
+                                    </CommandList>
+                                    {onCreateSpace ? (
+                                        <div className="px-1">
+                                            <button
+                                                type="button"
+                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
+                                                onKeyDown={(event) => { if (event.key === 'Enter') event.stopPropagation(); }}
+                                                onClick={() => { setOpenPicker(null); onCreateSpace(); }}
+                                            >
+                                                {t('spaces.picker.new')}
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                    {worktreeResultValues.length === 0 ? (
+                                        <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">
+                                            {t('chat.chatInput.draftPicker.noBranchesFound')}
+                                        </div>
+                                    ) : null}
+                                </Command>
+                            </Popover.Popup>
+                        </Popover.Positioner>
+                    </Popover.Portal>
+                </Popover.Root>
             ) : null}
             <DraftsHerePicker />
         </div>

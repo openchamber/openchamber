@@ -2648,6 +2648,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.draftPicker.searchProjects": "Пошук проєктів...",
   "chat.chatInput.draftPicker.searchBranches": "Пошук гілок...",
   "chat.chatInput.draftPicker.noProjectsFound": "Проєктів не знайдено.",
+  "chat.chatInput.draftPicker.noBranchesFound": "Гілок або робочих дерев не знайдено.",
   "chat.chatInput.worktrees": "Worktree",
   "chat.chatInput.worktreeQuick": "Швидкий worktree",
   "chat.chatInput.worktreeCustom": "Новий worktree…",

@@ -854,8 +854,11 @@ command can leave the queue untouched and delivery can take only part of it.
   the popup opens upward with the search field at its bottom, next to the
   trigger, and the results above it. The side is chosen once per open
   (`usePopupSideOnOpen`, `components/ui/popup-side.ts`) and never flips while
-  open. The worktree picker remains a Select and follows the same rule, with
-  its items in the same order either way; mobile keeps its bottom sheets.
+  open. The desktop branch/worktree picker is the same searchable popup: it
+  ranks the project root, worktrees and isolated spaces with `rankByQuery`
+  over their labels, keeps the query and the active row transient, and leaves
+  the create actions outside the filter so they stay reachable. Mobile keeps
+  its bottom sheets.
   Both end with the two ways to make a worktree: **Quick worktree**
   (`createWorktreeDraft`, auto-named, at once) and **New worktree…**, which
   opens `NewWorktreeDialog` for the draft's own project. `ChatInput` hosts
