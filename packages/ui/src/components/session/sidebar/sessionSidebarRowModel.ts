@@ -217,6 +217,12 @@ export type SessionSidebarRowModelArgs = {
   hideDirectoryControls: boolean;
   /** A "Projects" caption over the project headers when something lists above them (the desktop's zones). */
   projectsCaption?: boolean;
+  /**
+   * The caption even with nothing above, while sections are dragged: the
+   * Projects section is one of them, and a section dropped above it needs a
+   * caption to land on.
+   */
+  projectsCaptionAtTop?: boolean;
   sessionBatchSize?: number;
   /** Active multi-runs; their member sessions collapse into one run row per container. */
   runIndex?: MultiRunIndex;
@@ -1105,7 +1111,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     projectSections: readonly ProjectSection[],
     caption: { key: 'projects' | `section:${string}`; label?: string; preview?: boolean; always: boolean },
   ): void => {
-    let captioned = !caption.always && (!args.projectsCaption || args.singleProjectMode || args.showOnlyMainWorkspace || rows.length === 0);
+    let captioned = !caption.always && (!args.projectsCaption || args.singleProjectMode || args.showOnlyMainWorkspace || (rows.length === 0 && !args.projectsCaptionAtTop));
     if (caption.always && projectSections.length === 0) {
       push({ kind: 'caption', key: `caption:${caption.key}`, estimateSize: SECTION_HEADER_ESTIMATE, caption: caption.key, collapsed: false, forceExpanded: search, label: caption.label, preview: caption.preview });
       push({ kind: 'empty', key: `caption:${caption.key}:empty`, estimateSize: STATUS_ESTIMATE, emptyKind: 'section' });

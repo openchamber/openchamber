@@ -18,7 +18,10 @@ with its named pin lists. How the rows are drawn stays with the row model
 - `sectionActions.ts`: the editor's device-only state (`useSidebarSectionsUiStore`)
   and every write of sections, visibility and pin lists.
 - `SidebarSectionsManager.tsx`: the manager and the editor, a popover beside the
-  sidebar opened from the display menu. It loads on its first open.
+  sidebar opened from the display menu. It loads on its first open. Its rows
+  drag anywhere but their controls, as the sidebar's do (`../rowDrag.ts`); in
+  the sidebar a section drags by its caption
+  (`projects/SortableSidebarSection.tsx`), and both write the same order.
 - `PinToMenu.tsx`, `NewPinListDialog.tsx`, `apps/mobileSidebar/MobilePinToSheet.tsx`:
   Pin to on the row menus, the swipe on the phone, and naming a new list.
 

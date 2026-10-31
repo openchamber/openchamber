@@ -2,6 +2,7 @@ import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { ROW_SORT_TRANSITION } from '../rowDrag';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -105,6 +106,11 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
 
 interface SortableProjectItemProps extends ProjectIdentityProps {
   disabled?: boolean;
+  /**
+   * The projects this one sorts among: those under the same caption, Projects
+   * or a group of projects. A drag only lands among them.
+   */
+  sortGroup?: string;
   projectDescription: string;
   projectDirectory?: string;
   isCollapsed: boolean;
@@ -139,6 +145,7 @@ interface SortableProjectItemProps extends ProjectIdentityProps {
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   id,
   disabled = false,
+  sortGroup = 'projects',
   projectLabel,
   projectDescription,
   projectDirectory,
@@ -177,10 +184,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
+    node,
     transform,
     transition,
     isDragging,
-  } = useSortable({ id, disabled });
+  } = useSortable({ id, disabled, data: { type: 'project', sortGroup, rowKey: `project:${id}:header`, element: () => node.current }, transition: ROW_SORT_TRANSITION });
 
   const menuInstanceKey = `project:${id}`;
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
@@ -289,8 +298,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn('relative', isDragging && 'opacity-30')}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      // Lifted, the header leaves its place open: its copy follows the pointer.
+      className={cn('relative', isDragging && 'opacity-0')}
     >
       {!hideHeader ? (
         <>
@@ -317,9 +327,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 />
               }
             >
+            {/* The whole header lifts, its toggle too; its buttons stay buttons.
+                Enter and Space sort from the header itself and open or close
+                the project from its toggle. */}
             <div
-              className="relative flex items-center gap-1 py-1 ps-4 pe-3.5"
+              ref={setActivatorNodeRef}
+              className={cn('relative flex items-center gap-1 py-1 ps-4 pe-3.5', !disabled && 'cursor-grab active:cursor-grabbing')}
               {...attributes}
+              {...listeners}
             >
               {isProjectPicker ? (
                 <DropdownMenu>
@@ -355,9 +370,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     <button
                       type="button"
                       onClick={handleToggleClick}
-                      {...listeners}
+                      data-row-drag=""
                       className={cn(
-                        '@container flex-1 min-w-0 flex items-center gap-1.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md cursor-grab active:cursor-grabbing',
+                        '@container flex-1 min-w-0 flex items-center gap-1.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md',
                         alwaysShowActions
                           ? (isRepo && !hideDirectoryControls ? 'pe-20' : 'pe-14')
                           : headerActionsReserveClass,

@@ -1,5 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { registerZoneHeaderHost, ZONE_HEADER_SLOT_ATTRIBUTE } from './zoneHeaderHosts';
 
 type HeaderEntry = { slot: HTMLDivElement; host: HTMLDivElement };
 type RegisterHeader = (entry: HeaderEntry) => () => void;
@@ -211,12 +212,14 @@ function PortalZoneHeader({ register, ...props }: HeaderProps & { register: Regi
     if (!slot) return;
     slot.append(host);
     const unregister = register({ slot, host });
+    const unregisterHost = registerZoneHeaderHost(slot, host);
     return () => {
       unregister();
+      unregisterHost();
       host.remove();
     };
   }, [host, register]);
-  return <><div ref={slotRef} />{createPortal(<div {...props} />, host)}</>;
+  return <><div ref={slotRef} {...{ [ZONE_HEADER_SLOT_ATTRIBUTE]: '' }} />{createPortal(<div {...props} />, host)}</>;
 }
 
 export function CrossfadeZoneHeader(props: HeaderProps) {

@@ -97,10 +97,10 @@ type SessionSidebarRowList = {
  * The list then behaves as the user's action makes it (a header's motion, new
  * rows where the control was); for any other change, sessions arriving,
  * leaving or moving and rows changing height, it keeps the row the user sees
- * in place (`SessionSidebarRows`). Projects dragged into another order are
- * the user's too, but the rows cannot tell them from projects sorted by
- * recent activity moving on their own: the drag says so itself
- * (`sessionSidebarProjectOrderChanged`).
+ * in place (`SessionSidebarRows`). Projects and sections dragged into
+ * another order are the user's too, but the rows cannot tell them from
+ * projects sorted by recent activity moving on their own: the drag holds the
+ * row it dropped instead (`heldRowRef`).
  */
 export const isSessionSidebarUserChange = (previous: SessionSidebarRowList, next: SessionSidebarRowList): boolean => {
   if (previous.search || next.search) return true;
@@ -113,16 +113,6 @@ export const isSessionSidebarUserChange = (previous: SessionSidebarRowList, next
   }
   return false;
 };
-
-const projectOrder = (list: SessionSidebarRowList, other: SessionSidebarRowList): string => list.rows
-  .filter((row) => row.kind === 'project-header' && other.rowIndexByKey.has(row.key))
-  .map((row) => row.key)
-  .join('\n');
-
-/** Whether projects present before and after changed their order. */
-export const sessionSidebarProjectOrderChanged = (previous: SessionSidebarRowList, next: SessionSidebarRowList): boolean => (
-  projectOrder(previous, next) !== projectOrder(next, previous)
-);
 
 /**
  * A row the user sees and where it sits: the row under the line `fraction` of

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { DndContext, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Icon } from '@/components/icon/Icon';
@@ -43,6 +43,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsInSidebarOrder } from '../list/useProjectsInSidebarOrder';
+import { keepRowInList, ROW_DRAG_AUTO_SCROLL, ROW_SORT_TRANSITION, useRowDragSensors } from '../rowDrag';
 import {
   canAddSidebarSection,
   closeSectionsManager,
@@ -144,10 +145,7 @@ const SectionList: React.FC = () => {
   const { t } = useI18n();
   const sections = useSessionDisplayStore((state) => state.sections);
   const pinLists = useSessionDisplayStore((state) => state.pinLists);
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
-  );
+  const sensors = useRowDragSensors();
   const onDragEnd = (event: DragEndEvent): void => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -165,7 +163,7 @@ const SectionList: React.FC = () => {
           {t('sessions.sidebar.sections.new')}
         </Button>
       </div>
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={SECTION_LIST_MODIFIERS} autoScroll={ROW_DRAG_AUTO_SCROLL} onDragEnd={onDragEnd}>
         <SortableContext items={sections.map((entry) => entry.id)} strategy={verticalListSortingStrategy}>
           <div className="flex flex-col gap-0.5">
             {sections.map((entry) => <SectionRow key={entry.id} entry={entry} />)}
@@ -191,10 +189,12 @@ const SectionList: React.FC = () => {
   );
 };
 
-/** One section in the list: its handle, its name and what can be done with it here. */
+const SECTION_LIST_MODIFIERS = [keepRowInList];
+
+/** One section in the list: its name and what can be done with it here; the row drags anywhere but its controls. */
 const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   const { t } = useI18n();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id });
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id, transition: ROW_SORT_TRANSITION });
   const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
   const showChats = useSessionDisplayStore((state) => state.showChatsSection);
   const showPinned = useSessionDisplayStore((state) => state.showPinnedSection);
@@ -218,18 +218,10 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn('flex flex-col rounded-md', isDragging && 'oc-tile relative z-10')}
+      className={cn('flex cursor-grab touch-pan-y select-none flex-col rounded-md active:cursor-grabbing', isDragging && 'oc-tile relative z-10 cursor-grabbing')}
+      {...listeners}
     >
-      <div className="flex items-center gap-1.5 px-1 py-1">
-        <button
-          type="button"
-          className="flex size-6 shrink-0 cursor-grab touch-none select-none items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-          aria-label={t('sessions.sidebar.sections.reorder', { name })}
-          {...attributes}
-          {...listeners}
-        >
-          <Icon name="draggable" className="size-3.5" />
-        </button>
+      <div className="flex items-center gap-1.5 py-1 ps-2 pe-1">
         <span className={cn('min-w-0 flex-1 truncate typography-ui-label', visibility?.shown === false ? 'text-muted-foreground' : 'text-foreground')} dir="auto">{name}</span>
         {entry.kind === 'custom' ? (
           <>
@@ -246,7 +238,7 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
         ) : null}
       </div>
       {entry.kind === 'builtin' && entry.id === 'work' && showWork ? (
-        <label className="flex items-center gap-2 ps-8 pe-1 pb-1 typography-micro text-muted-foreground">
+        <label className="flex items-center gap-2 ps-2 pe-1 pb-1 typography-micro text-muted-foreground">
           <span className="flex-1">{t('sessions.sidebar.header.displayMode.keepWorkInPlace')}</span>
           <Switch
             checked={keepWorkInPlace}
