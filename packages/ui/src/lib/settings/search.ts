@@ -601,6 +601,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.retry-now',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.retryNow',
+    descriptionKey: 'settings.openchamber.defaults.retryNowInfo',
+    keywords: ['retry', 'retry now', 'backoff', 'wait', 'rate limit', 'provider', 'subagent'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.default-agent',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.defaultAgent',

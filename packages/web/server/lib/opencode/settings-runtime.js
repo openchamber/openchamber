@@ -82,8 +82,9 @@ const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   // The limit failover plugin loads only while one of these is set.
   'fallbackModel',
   'accountSwitchProviders',
-  // The retry policy plugin loads only while a cap is set.
+  // The retry policy plugin loads only while a cap or the retry-now control is set.
   'retryWaitMaxMs',
+  'retryNowEnabled',
 ]);
 
 export const createSettingsRuntime = (deps) => {

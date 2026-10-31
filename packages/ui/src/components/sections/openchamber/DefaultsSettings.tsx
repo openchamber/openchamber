@@ -138,6 +138,7 @@ export const DefaultsSettings: React.FC = () => {
   const [fallbackModel, setFallbackModel] = React.useState<string | undefined>();
   const [fallbackVariant, setFallbackVariant] = React.useState<string | undefined>();
   const [retryWaitMaxMs, setRetryWaitMaxMs] = React.useState(0);
+  const [retryNowEnabled, setRetryNowEnabled] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
@@ -181,6 +182,9 @@ export const DefaultsSettings: React.FC = () => {
           }
           if (Number.isFinite(data.retryWaitMaxMs)) {
             setRetryWaitMaxMs(Math.max(0, data.retryWaitMaxMs ?? 0));
+          }
+          if (data.retryNowEnabled !== undefined) {
+            setRetryNowEnabled(data.retryNowEnabled);
           }
         }
       } catch (error) {
@@ -366,6 +370,15 @@ export const DefaultsSettings: React.FC = () => {
       await updateDesktopSettings({ retryWaitMaxMs: next });
     } catch (error) {
       console.warn('Failed to save retry wait cap:', error);
+    }
+  }, []);
+
+  const handleRetryNowChange = React.useCallback(async (enabled: boolean) => {
+    setRetryNowEnabled(enabled);
+    try {
+      await updateDesktopSettings({ retryNowEnabled: enabled });
+    } catch (error) {
+      console.warn('Failed to save retry-now control:', error);
     }
   }, []);
 
@@ -574,6 +587,13 @@ export const DefaultsSettings: React.FC = () => {
               </SelectContent>
             </Select>
           </SettingsFieldRow>
+          <SettingsCheckboxRow
+            settingsItem="sessions.retry-now"
+            label={t('settings.openchamber.defaults.retryNow')}
+            info={t('settings.openchamber.defaults.retryNowInfo')}
+            checked={retryNowEnabled}
+            onChange={handleRetryNowChange}
+          />
         </SettingsSection>
       )}
 

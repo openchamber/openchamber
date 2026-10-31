@@ -6,7 +6,7 @@ import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RETRY_WAIT_MAX_MS, isRetryPolicyConfigured } from './policy.js';
+import { RETRY_NOW_COMMAND, RETRY_WAIT_MAX_MS, isRetryPolicyConfigured } from './policy.js';
 import { createRetryPolicyRuntime } from './runtime.js';
 
 const temporaryDirectories = [];
@@ -16,25 +16,35 @@ afterEach(async () => {
 });
 
 const createRuntime = ({ settings = { retryWaitMaxMs: 30_000 } } = {}) => {
+  const broadcastUiEvent = vi.fn();
   const runtime = createRetryPolicyRuntime({
     fsPromises: fs,
     path,
     instanceDir: os.tmpdir(),
     readSettings: async () => settings,
     authorizeRequest: (req) => req.headers.authorization === 'Bearer token',
+    broadcastUiEvent,
   });
   const app = express();
   runtime.registerRoutes(app, express);
-  return { runtime, app };
+  return { runtime, app, broadcastUiEvent };
 };
+
+const report = (overrides = {}) => ({
+  sessionID: 'ses_1',
+  attempt: 2,
+  message: 'rate limited',
+  delay: 900_000,
+  ...overrides,
+});
 
 describe('retry policy route', () => {
   it('rejects a report without the callback token', async () => {
     const { app } = createRuntime();
-    await request(app).post('/api/openchamber/retry-policy').send({ delay: 900_000 }).expect(401);
+    await request(app).post('/api/openchamber/retry-policy').send(report()).expect(401);
   });
 
-  it('rejects a malformed delay', async () => {
+  it('rejects a malformed report', async () => {
     const { app } = createRuntime();
     await request(app)
       .post('/api/openchamber/retry-policy')
@@ -44,13 +54,14 @@ describe('retry policy route', () => {
   });
 
   it('caps a provider wait at the configured maximum', async () => {
-    const { app } = createRuntime({ settings: { retryWaitMaxMs: 30_000 } });
+    const { app, broadcastUiEvent } = createRuntime({ settings: { retryWaitMaxMs: 30_000 } });
     const response = await request(app)
       .post('/api/openchamber/retry-policy')
       .set('authorization', 'Bearer token')
-      .send({ delay: 900_000 })
+      .send(report())
       .expect(200);
-    expect(response.body).toEqual({ delay: 30_000 });
+    expect(response.body).toEqual({ delay: 30_000, hold: false });
+    expect(broadcastUiEvent).not.toHaveBeenCalled();
   });
 
   it('leaves a wait shorter than the cap alone', async () => {
@@ -58,9 +69,9 @@ describe('retry policy route', () => {
     const response = await request(app)
       .post('/api/openchamber/retry-policy')
       .set('authorization', 'Bearer token')
-      .send({ delay: 4_000 })
+      .send(report({ delay: 4_000 }))
       .expect(200);
-    expect(response.body).toEqual({ delay: 4_000 });
+    expect(response.body).toEqual({ delay: 4_000, hold: false });
   });
 
   it('never exceeds the setting ceiling even when the stored value is larger', async () => {
@@ -68,9 +79,9 @@ describe('retry policy route', () => {
     const response = await request(app)
       .post('/api/openchamber/retry-policy')
       .set('authorization', 'Bearer token')
-      .send({ delay: 900_000 })
+      .send(report())
       .expect(200);
-    expect(response.body).toEqual({ delay: RETRY_WAIT_MAX_MS });
+    expect(response.body).toEqual({ delay: RETRY_WAIT_MAX_MS, hold: false });
   });
 
   it('leaves the proposal alone when no cap is configured', async () => {
@@ -78,9 +89,41 @@ describe('retry policy route', () => {
     const response = await request(app)
       .post('/api/openchamber/retry-policy')
       .set('authorization', 'Bearer token')
-      .send({ delay: 900_000 })
+      .send(report())
       .expect(200);
-    expect(response.body).toEqual({ delay: 900_000 });
+    expect(response.body).toEqual({ delay: 900_000, hold: false });
+  });
+
+  it('holds the wait and announces it when the retry-now control is on', async () => {
+    const { app, broadcastUiEvent } = createRuntime({ settings: { retryWaitMaxMs: 30_000, retryNowEnabled: true } });
+    const before = Date.now();
+    const response = await request(app)
+      .post('/api/openchamber/retry-policy')
+      .set('authorization', 'Bearer token')
+      .send(report())
+      .expect(200);
+
+    expect(response.body).toEqual({ delay: 30_000, hold: true });
+    expect(broadcastUiEvent).toHaveBeenCalledTimes(1);
+    const [event] = broadcastUiEvent.mock.calls[0];
+    expect(event.type).toBe('openchamber:session-status');
+    expect(event.properties).toMatchObject({
+      sessionID: 'ses_1',
+      status: 'retry',
+      metadata: { attempt: 2, message: 'rate limited' },
+    });
+    expect(event.properties.metadata.next).toBeGreaterThanOrEqual(before + 30_000);
+  });
+
+  it('holds without a cap when retry-now is on', async () => {
+    const { app, broadcastUiEvent } = createRuntime({ settings: { retryNowEnabled: true } });
+    const response = await request(app)
+      .post('/api/openchamber/retry-policy')
+      .set('authorization', 'Bearer token')
+      .send(report())
+      .expect(200);
+    expect(response.body).toEqual({ delay: 900_000, hold: true });
+    expect(broadcastUiEvent).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -104,15 +147,33 @@ describe('retry policy plugin', () => {
 
   const createContext = () => {
     const hooks = {};
+    const commands = {};
     return {
       hooks,
+      commands,
       ctx: {
+        command: {
+          transform: async (callback) => {
+            const editor = { add: (definition) => { commands[definition.name] = definition; } };
+            await callback(editor);
+          },
+        },
         session: {
           hook: async (name, callback) => { hooks[name] = callback; },
         },
       },
     };
   };
+
+  const retryEvent = (overrides = {}) => ({
+    sessionID: 'ses_1',
+    agent: 'build',
+    model: { providerID: 'anthropic', id: 'claude-opus' },
+    error: { type: 'provider.rate-limit', message: 'rate limited' },
+    attempt: 2,
+    decision: { retry: true, delay: 900_000 },
+    ...overrides,
+  });
 
   const withCallbackEnv = async (run) => {
     const saved = { url: process.env.OPENCHAMBER_AGENT_TOOL_URL, token: process.env.OPENCHAMBER_AGENT_TOOL_TOKEN };
@@ -133,24 +194,40 @@ describe('retry policy plugin', () => {
     const { ctx, hooks } = createContext();
     await plugin.setup(ctx);
     await withCallbackEnv(async () => {
-      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ delay: 30_000 })));
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ delay: 30_000, hold: false })));
       vi.stubGlobal('fetch', fetchMock);
-      const event = {
-        sessionID: 'ses_1',
-        agent: 'build',
-        model: { providerID: 'anthropic', id: 'claude-opus' },
-        error: { type: 'provider.rate-limit', message: 'rate limited' },
-        attempt: 2,
-        decision: { retry: true, delay: 900_000 },
-      };
+      const event = retryEvent();
 
       await hooks.retry(event);
 
       const [url, init] = fetchMock.mock.calls[0];
       expect(url).toBe('http://127.0.0.1:4100/api/openchamber/retry-policy');
       expect(init.headers.authorization).toBe('Bearer token');
-      expect(JSON.parse(init.body)).toEqual({ delay: 900_000 });
+      expect(JSON.parse(init.body)).toEqual({
+        sessionID: 'ses_1',
+        attempt: 2,
+        message: 'rate limited',
+        delay: 900_000,
+      });
       expect(event.decision).toEqual({ retry: true, delay: 30_000 });
+    });
+  });
+
+  it('holds the wait until the retry-now command wakes it', async () => {
+    const plugin = await loadPlugin();
+    const { ctx, hooks, commands } = createContext();
+    await plugin.setup(ctx);
+    await withCallbackEnv(async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ delay: 2_000, hold: true }))));
+      const event = retryEvent();
+      const started = Date.now();
+      const pending = hooks.retry(event);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await commands[RETRY_NOW_COMMAND].execute({ sessionID: 'ses_1' });
+      await pending;
+
+      expect(Date.now() - started).toBeLessThan(500);
+      expect(event.decision).toEqual({ retry: true, delay: 0 });
     });
   });
 
@@ -160,14 +237,7 @@ describe('retry policy plugin', () => {
     await plugin.setup(ctx);
     await withCallbackEnv(async () => {
       vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
-      const event = {
-        sessionID: 'ses_1',
-        agent: 'build',
-        model: { providerID: 'anthropic', id: 'claude-opus' },
-        error: { type: 'provider.rate-limit', message: 'rate limited' },
-        attempt: 2,
-        decision: { retry: true, delay: 900_000 },
-      };
+      const event = retryEvent();
 
       await hooks.retry(event);
 
@@ -182,14 +252,7 @@ describe('retry policy plugin', () => {
     await withCallbackEnv(async () => {
       const fetchMock = vi.fn();
       vi.stubGlobal('fetch', fetchMock);
-      const event = {
-        sessionID: 'ses_1',
-        agent: 'build',
-        model: { providerID: 'anthropic', id: 'claude-opus' },
-        error: { type: 'provider.auth', message: 'bad key' },
-        attempt: 1,
-        decision: { retry: false },
-      };
+      const event = retryEvent({ decision: { retry: false } });
 
       await hooks.retry(event);
 
@@ -200,9 +263,10 @@ describe('retry policy plugin', () => {
 });
 
 describe('isRetryPolicyConfigured', () => {
-  it('loads the plugin only for a positive cap', () => {
+  it('loads the plugin for a positive cap or the retry-now control', () => {
     expect(isRetryPolicyConfigured({ retryWaitMaxMs: 30_000 })).toBe(true);
-    expect(isRetryPolicyConfigured({ retryWaitMaxMs: 0 })).toBe(false);
+    expect(isRetryPolicyConfigured({ retryNowEnabled: true })).toBe(true);
+    expect(isRetryPolicyConfigured({ retryWaitMaxMs: 0, retryNowEnabled: false })).toBe(false);
     expect(isRetryPolicyConfigured({})).toBe(false);
     expect(isRetryPolicyConfigured(null)).toBe(false);
   });
