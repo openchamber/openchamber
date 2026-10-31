@@ -106,7 +106,7 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
       case 'activity-header':
         return <MobileZoneHeader row={row} onToggle={() => toggleActivityZone(row, { model, actions })} />;
       case 'caption':
-        return <MobileProjectsCaption row={row} onToggle={() => toggleProjectsCaption({ model })} />;
+        return <MobileProjectsCaption row={row} onToggle={() => toggleProjectsCaption(row, { model })} />;
       case 'project-header': {
         const project = row.section.project;
         return <MobileProjectHeader
@@ -153,7 +153,7 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
         if (row.emptyKind === 'sidebar') return model.emptyState;
         if (row.emptyKind === 'search') return model.searchEmptyState;
         return <div className="py-1 typography-micro text-muted-foreground" style={{ paddingInlineStart: geometry.textLeft(row.depth ?? 0) }}>
-          {t('sessions.sidebar.group.empty.noArchivedSessions')}
+          {row.emptyKind === 'section' ? t('sessions.sidebar.sections.empty') : t('sessions.sidebar.group.empty.noArchivedSessions')}
         </div>;
     }
   }, [actions, childStores, geometry, model, phone, t, view.homeDirectory]);

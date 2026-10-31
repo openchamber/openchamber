@@ -71,7 +71,7 @@ export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAu
 // hooks find the project's tools; reads the UI repeats on its own may not
 // (lib/environment/refresh-scope.js).
 const worktreeTitleBodySchema = z.object({ title: z.string() });
-const worktreePinBodySchema = z.object({ pinned: z.boolean() });
+const worktreePinBodySchema = z.object({ pinned: z.boolean(), list: z.string().nullable().optional() });
 
 const userAction = (handler) => (req, res, next) => runAsUserAction(() => handler(req, res, next));
 
@@ -1710,7 +1710,7 @@ export function registerGitRoutes(app, {
       if (!body.success) {
         return res.status(400).json({ error: 'pinned must be a boolean' });
       }
-      res.json(await setWorktreePinned(directory, body.data.pinned));
+      res.json(await setWorktreePinned(directory, body.data.pinned, body.data.list ?? null));
     } catch (error) {
       console.error('Failed to pin the worktree:', error);
       res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to pin the worktree' });

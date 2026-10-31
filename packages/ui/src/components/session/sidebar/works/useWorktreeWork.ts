@@ -1,4 +1,5 @@
 import React from 'react';
+import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
 import { toast } from '@/components/ui';
 import { canArchiveWorktrees, setGitWorktreePinned, setGitWorktreeTitle } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
@@ -133,13 +134,16 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   // The pin lives in the branch's config, so a detached worktree has none.
   // The row moves once the server's topology event lists the change.
   const pinned = worktree?.pinnedAt !== undefined;
+  // The pin list it is filed in (Pin to), Pinned when none.
+  const pinList = pinned ? worktree?.pinList ?? DEFAULT_PIN_LIST : null;
   const canPin = Boolean(group.directory && worktree?.branch?.trim()) && !worktreeRemoving;
-  const togglePin = async (): Promise<void> => {
+  /** `list` null is Pinned; `pin` false unpins. */
+  const setPin = async (pin: boolean, list: string | null = null): Promise<void> => {
     if (!group.directory || !canPin) return;
     try {
-      await setGitWorktreePinned(group.directory, !pinned);
+      await setGitWorktreePinned(group.directory, pin, list);
     } catch (error) {
-      toast.error(pinned ? t('sessions.sidebar.work.unpin.failed') : t('sessions.sidebar.work.pin.failed'), {
+      toast.error(pin ? t('sessions.sidebar.work.pin.failed') : t('sessions.sidebar.work.unpin.failed'), {
         description: error instanceof Error ? error.message : undefined,
       });
     }
@@ -252,7 +256,8 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     open,
     newChat,
     saveTitle,
-    togglePin,
+    setPin,
+    pinList,
     finish,
     toggleWork,
   };

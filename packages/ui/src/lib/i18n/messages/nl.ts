@@ -25,6 +25,7 @@ import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -189,6 +190,7 @@ export const dict = {
   ...imageToolI18n.nl,
   ...snippetsI18n.nl,
   ...sidebarWorkI18n.nl,
+  ...sidebarSectionsI18n.nl,
   ...worktreeArchiveI18n.nl,
   ...overviewI18n.nl,
   ...isolatedSpacesI18n.nl,

@@ -236,6 +236,68 @@ describe('buildSessionSidebarRowModel', () => {
     expect(order).toEqual(['pinned', 'mixed-compact:pinned', 'work', 'mixed-compact:working', 'project:pinned', 'project:working']);
   });
 
+  test('the blocks set the order: a section of the user\'s own lists its works under its name', () => {
+    const input = args([project([group([node('waiting'), node('other')])])]);
+    input.workEntries = sessionWorks([timelineItem('other')]);
+    input.movedSessionIds = new Set(['waiting']);
+    input.projectsCaption = true;
+    input.blocks = [
+      { kind: 'custom', id: 's1', name: 'Waiting on me', entries: sessionWorks([timelineItem('waiting')]), hideWhenEmpty: true, preview: false },
+      { kind: 'work' },
+      { kind: 'projects' },
+    ];
+
+    const rows = buildSessionSidebarRowModel(input).rows;
+    const order = rows.flatMap((row) => (
+      row.kind === 'activity-header' ? [`${row.activityKey}${row.label ? `=${row.label}` : ''}`]
+        : row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`]
+          : row.kind === 'caption' ? [`caption:${row.caption}`]
+            : []
+    ));
+
+    expect(order).toEqual(['section:s1=Waiting on me', 'mixed-compact:waiting', 'work', 'mixed-compact:other', 'caption:projects', 'project:other']);
+  });
+
+  test('an empty section of the user\'s own hides unless kept, and a kept one says it is empty', () => {
+    const input = args([project([group([node('a')])])]);
+    input.blocks = [{ kind: 'custom', id: 's1', name: 'Today', entries: [], hideWhenEmpty: true, preview: false }, { kind: 'projects' }];
+    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'activity-header')).toBe(false);
+
+    input.blocks = [{ kind: 'custom', id: 's1', name: 'Today', entries: [], hideWhenEmpty: false, preview: false }, { kind: 'projects' }];
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'section:s1' });
+    expect(rows[1]).toMatchObject({ kind: 'empty', emptyKind: 'section' });
+  });
+
+  test('an empty group of projects shows its caption only when kept', () => {
+    const input = args([project([group([node('a')])])]);
+    input.blocks = [{ kind: 'project-group', id: 'g1', name: 'Clients', projectIds: [], hideWhenEmpty: true, preview: false }];
+    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'caption')).toBe(false);
+
+    input.blocks = [{ kind: 'project-group', id: 'g1', name: 'Clients', projectIds: [], hideWhenEmpty: false, preview: false }];
+    const rows = buildSessionSidebarRowModel(input).rows;
+    expect(rows[0]).toMatchObject({ kind: 'caption', caption: 'section:g1', label: 'Clients' });
+    expect(rows[1]).toMatchObject({ kind: 'empty', emptyKind: 'section' });
+  });
+
+  test('a group of projects lists its projects under its caption, and Projects lists the rest', () => {
+    const projectB: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([node('b')], { directory: '/other', folderScopeKey: '/other' })] };
+    const input = args([project([group([node('a')])]), projectB]);
+    input.projectsCaption = true;
+    input.blocks = [
+      { kind: 'project-group', id: 'g1', name: 'Clients', projectIds: ['project-b'], hideWhenEmpty: false, preview: false },
+      { kind: 'projects', excludedProjectIds: new Set(['project-b']) },
+    ];
+
+    const order = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
+      row.kind === 'caption' ? [`caption:${row.label ?? row.caption}`]
+        : row.kind === 'project-header' ? [`project:${row.section.project.id}`]
+          : []
+    ));
+
+    expect(order).toEqual(['caption:Clients', 'project:project-b', 'caption:projects', 'project:project-a']);
+  });
+
   test('search lists a pinned session once, in Pinned', () => {
     const pinnedNode = node('ses_pinned');
     const main = group([pinnedNode, node('ses_other')]);

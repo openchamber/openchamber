@@ -2,6 +2,14 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { getSettingsSurface } from '@/lib/settings/surface';
 import type { SettingsSurface } from '@/lib/settings/registry';
+import {
+  DEFAULT_SIDEBAR_SECTIONS,
+  hiddenSidebarSectionsSchema,
+  sidebarPinListsSchema,
+  sidebarSectionsSchema,
+  type SidebarPinList,
+  type SidebarSectionEntry,
+} from '@/lib/sidebarSections';
 
 type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 // Worktree groups inside a project. 'recent' floats worktrees with the latest
@@ -56,6 +64,18 @@ type SessionDisplayStore = {
    * their task; the other name goes under it. Off by default.
    */
   worktreeNameByBranch: boolean;
+  /**
+   * The sidebar's sections in order, the built-in ones included
+   * (`lib/sidebarSections.ts`). Shared by every surface.
+   */
+  sections: SidebarSectionEntry[];
+  /** The named pin lists Pin to files works into. Shared by every surface. */
+  pinLists: SidebarPinList[];
+  /** The user's sections this surface hides; built-in ones keep their own show toggles. */
+  hiddenSections: string[];
+  setSections: (sections: SidebarSectionEntry[]) => void;
+  setPinLists: (lists: SidebarPinList[]) => void;
+  setHiddenSections: (ids: string[]) => void;
   // VS Code only: the compact webview keeps archived buckets inline because it
   // has no room for the full Archive page. Web/desktop ignore this flag and
   // always route archived sessions to the Archive page instead.
@@ -157,6 +177,13 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       showPinnedSection: true,
       detailedZoneRows: getSettingsSurface() === 'mobile',
       worktreeNameByBranch: false,
+      sections: [...DEFAULT_SIDEBAR_SECTIONS],
+      pinLists: [],
+      hiddenSections: [],
+      // The same rules as a stored value: built-in sections kept, limits held.
+      setSections: (sections) => set({ sections: sidebarSectionsSchema.parse(sections) }),
+      setPinLists: (lists) => set({ pinLists: sidebarPinListsSchema.parse(lists) }),
+      setHiddenSections: (ids) => set({ hiddenSections: hiddenSidebarSectionsSchema.parse(ids) }),
       // Default to HIDDEN so the pre-hydration state matches the quiet/safe
       // option: archived sessions must never flash visible on startup and then
       // disappear once the persisted preference rehydrates.

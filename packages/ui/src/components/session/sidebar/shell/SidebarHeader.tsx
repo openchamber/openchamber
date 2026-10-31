@@ -1,4 +1,8 @@
 import React from 'react';
+import { closeSectionsManager, openSectionsManager, useSidebarSectionsUiStore } from '../sections/sectionActions';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+
+const loadSectionsManager = () => import('../sections/SidebarSectionsManager').then((module) => module.SidebarSectionsManager);
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import {
@@ -56,6 +60,12 @@ const IDLE_PAGE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hove
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
+  // The header spans the sidebar: the sections manager opens beside its end
+  // edge, so the section being edited shows in the list as it stands.
+  const headerRef = React.useRef<HTMLDivElement | null>(null);
+  // The manager and its editor load the first time they open.
+  const sectionsManagerOpen = useSidebarSectionsUiStore((state) => state.managerOpen);
+  const SectionsManager = useOnDemandComponent(props.showSectionControls && sectionsManagerOpen, loadSectionsManager, closeSectionsManager);
   const guestPages = useGuestPages();
   const {
     hideDirectoryControls,
@@ -91,23 +101,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
   const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
 
-  const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
-  const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
-  const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
-  const setShowWorkSection = useSessionDisplayStore((state) => state.setShowWorkSection);
-  const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
-  const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
   const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
   const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
-  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const sidebarGrouping = useSessionDisplayStore(resolveSidebarGrouping);
   const setSidebarGrouping = useSessionDisplayStore((state) => state.setSidebarGrouping);
-  const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
-  const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
   // VS Code always groups under its workspace.
@@ -188,23 +189,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
   </>);
   if (showSectionControls) {
     displayMenuSections.push(<>
-      {toggleItem('sessions.sidebar.header.displayMode.showChats', showChatsSection, () => {
-        setShowChatsSection(!showChatsSection);
-        void updateDesktopSettings({ sidebarShowChatsSection: !showChatsSection });
-      })}
-      {toggleItem('sessions.sidebar.header.displayMode.showPinned', showPinnedSection, () => {
-        setShowPinnedSection(!showPinnedSection);
-        void updateDesktopSettings({ sidebarShowPinnedSection: !showPinnedSection });
-      })}
-      {sessionWorkEnabled ? toggleItem('sessions.sidebar.header.displayMode.showWork', showWorkSection, () => {
-        setShowWorkSection(!showWorkSection);
-        void updateDesktopSettings({ sidebarShowWorkSection: !showWorkSection });
-      }) : null}
-      {/* A work in In work leaves its project unless asked; VS Code always keeps it there. */}
-      {sessionWorkEnabled && showWorkSection && showProjectDisplayControls ? toggleItem('sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, () => {
-        setKeepWorkInPlace(!keepWorkInPlace);
-        void updateDesktopSettings({ sidebarKeepWorkInPlace: !keepWorkInPlace });
-      }) : null}
+      {/* The sections, their order and what each shows live in the manager
+          beside the sidebar, which also edits the user's own sections. */}
+      <DropdownMenuItem onClick={openSectionsManager} className="flex items-center gap-2">
+        <Icon name="stack" className="h-4 w-4" />
+        <span>{t('sessions.sidebar.sections.open')}</span>
+      </DropdownMenuItem>
       {/* Rows that mix projects keep one line unless asked. */}
       {toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
         setDetailedZoneRows(!detailedZoneRows);
@@ -281,7 +271,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
 
   return (
-    <div className="select-none flex-shrink-0 px-2.5 py-1">
+    <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
       <div className="flex h-auto min-h-8 flex-col gap-1">
         {/* Quiet toolbar at the top of the list: the list's own controls
             first, then one menu with the pages the sidebar opens. ms-[3px]
@@ -342,6 +332,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} /> : null}
 
           <DropdownMenu>
             <Tooltip>

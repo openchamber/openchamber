@@ -7,7 +7,10 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { setSessionWorkState } from '@/sync/session-actions';
-import { toggleSessionPin } from '@/sync/session-pins';
+import { setSessionPinList } from '@/sync/session-pins';
+import { getSessionPinList } from '@/lib/sessionPins';
+import { DEFAULT_PIN_LIST } from '@/lib/sidebarSections';
+import { requestPinTo } from '@/components/session/sidebar/sections/sectionActions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getSessionDirectory } from '../mobileSessionFields';
 
@@ -66,11 +69,16 @@ export const toggleMobileSessionWork = async (session: Session, sessionsInWork: 
   }
 };
 
+/** The swipe's Pin: Pinned at once while there are no pin lists, a choice of list once there are. */
 export const toggleMobileSessionPin = (session: Session, pinned: boolean, t: Translate): void => {
   const directory = getSessionDirectory(session);
   if (!directory) return;
-  const failedKey = pinned ? 'sessions.sidebar.session.pin.unpinFailed' : 'sessions.sidebar.session.pin.pinFailed';
-  toggleSessionPin({ directory, sessionId: session.id }).catch(() => toast.error(t(failedKey)));
+  const target = { directory, sessionId: session.id };
+  requestPinTo({
+    current: pinned ? getSessionPinList(session) ?? DEFAULT_PIN_LIST : null,
+    pin: (list) => { setSessionPinList(target, true, list).catch(() => toast.error(t('sessions.sidebar.session.pin.pinFailed'))); },
+    unpin: () => { setSessionPinList(target, false, null).catch(() => toast.error(t('sessions.sidebar.session.pin.unpinFailed'))); },
+  });
 };
 
 export const renameMobileSession = async (sessionId: string, title: string, t: Translate): Promise<void> => {

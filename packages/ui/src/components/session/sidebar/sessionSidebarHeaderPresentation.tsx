@@ -3,17 +3,28 @@ import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
-import { ACTIVITY_TITLE_KEY } from './sessionSidebarActivityLabels';
+import { ACTIVITY_TITLE_KEY, isBuiltinActivityKey } from './sessionSidebarActivityLabels';
+
+/** The mark on the section being edited, which the sidebar draws as it stands. */
+const PreviewMark: React.FC = () => {
+  const { t } = useI18n();
+  return <span className="ms-1 rounded-full bg-interactive-selection px-1.5 typography-micro text-interactive-selection-foreground">
+    {t('sessions.sidebar.sections.previewMark')}
+  </span>;
+};
 
 
 export const SessionSidebarActivityHeader: React.FC<{
   activityKey: SessionSidebarActivityKey;
+  /** The name of one of the user's sections. */
+  label?: string;
+  preview?: boolean;
   collapsed: boolean;
   forceExpanded: boolean;
   alwaysShowActions: boolean;
   onToggle: () => void;
   onNewChat: () => void;
-}> = ({ activityKey, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat }) => {
+}> = ({ activityKey, label, preview = false, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat }) => {
   const { t } = useI18n();
   const chats = activityKey === 'chats';
   // One header for every zone, so zones line up with the project headers.
@@ -29,9 +40,10 @@ export const SessionSidebarActivityHeader: React.FC<{
           as the caption of what follows; the icons belong to projects and
           rows. The chevron follows the word: always while the zone is closed,
           on hover while it is open. */}
-      <span className="typography-ui-label font-medium text-muted-foreground">
-        {t(ACTIVITY_TITLE_KEY[activityKey])}
+      <span className="min-w-0 truncate typography-ui-label font-medium text-muted-foreground" dir="auto">
+        {label ?? (isBuiltinActivityKey(activityKey) ? t(ACTIVITY_TITLE_KEY[activityKey]) : '')}
       </span>
+      {preview ? <PreviewMark /> : null}
       {!forceExpanded ? (
         <Icon
           name={collapsed ? 'arrow-right-s' : 'arrow-down-s'}
@@ -55,11 +67,14 @@ export const SessionSidebarActivityHeader: React.FC<{
 
 /** The caption over the projects: a zone's label that folds every project away. */
 export const SessionSidebarCaption: React.FC<{
+  /** The name of a group of projects the user made; Projects otherwise. */
+  label?: string;
+  preview?: boolean;
   collapsed: boolean;
   forceExpanded: boolean;
   alwaysShowActions: boolean;
   onToggle: () => void;
-}> = ({ collapsed, forceExpanded, alwaysShowActions, onToggle }) => {
+}> = ({ label, preview = false, collapsed, forceExpanded, alwaysShowActions, onToggle }) => {
   const { t } = useI18n();
   return <div className="relative -ms-2.5 -me-2">
     <button
@@ -69,9 +84,10 @@ export const SessionSidebarCaption: React.FC<{
       className="group flex w-full items-center gap-1 py-1 ps-4 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       aria-expanded={!collapsed}
     >
-      <span className="typography-ui-label font-medium text-muted-foreground">
-        {t('sessions.sidebar.activity.projectsTitle')}
+      <span className="min-w-0 truncate typography-ui-label font-medium text-muted-foreground" dir="auto">
+        {label ?? t('sessions.sidebar.activity.projectsTitle')}
       </span>
+      {preview ? <PreviewMark /> : null}
       {!forceExpanded ? (
         <Icon
           name={collapsed ? 'arrow-right-s' : 'arrow-down-s'}

@@ -3,7 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { ACTIVITY_TITLE_KEY } from '@/components/session/sidebar/sessionSidebarActivityLabels';
+import { ACTIVITY_TITLE_KEY, isBuiltinActivityKey } from '@/components/session/sidebar/sessionSidebarActivityLabels';
 import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { useI18n } from '@/lib/i18n';
@@ -64,7 +64,7 @@ export const MobileZoneHeader: React.FC<{
   onToggle: () => void;
 }> = ({ row, onToggle }) => {
   const { t } = useI18n();
-  return <MobileCaption label={t(ACTIVITY_TITLE_KEY[row.activityKey])} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
+  return <MobileCaption label={row.label ?? (isBuiltinActivityKey(row.activityKey) ? t(ACTIVITY_TITLE_KEY[row.activityKey]) : '')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
 };
 
 /** The caption over the projects: closed, it folds every project away. */
@@ -73,7 +73,7 @@ export const MobileProjectsCaption: React.FC<{
   onToggle: () => void;
 }> = ({ row, onToggle }) => {
   const { t } = useI18n();
-  return <MobileCaption label={t('sessions.sidebar.activity.projectsTitle')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
+  return <MobileCaption label={row.label ?? t('sessions.sidebar.activity.projectsTitle')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
 };
 
 const HeaderIconButton: React.FC<{ icon: 'add' | 'node-tree'; label: string; onClick: () => void }> = ({ icon, label, onClick }) => (

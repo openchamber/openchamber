@@ -26,6 +26,7 @@ import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -190,6 +191,7 @@ export const dict: Record<I18nKey, string> = {
   ...imageToolI18n.ja,
   ...snippetsI18n.ja,
   ...sidebarWorkI18n.ja,
+  ...sidebarSectionsI18n.ja,
   ...worktreeArchiveI18n.ja,
   ...overviewI18n.ja,
   ...isolatedSpacesI18n.ja,

@@ -95,8 +95,10 @@ the list by time use this same ownership resolver, on the phone too; rows keep
 the session's own directory while taking display ownership (project id,
 labels) from the index.
 
-Web and desktop show managed Chats, then Pinned and In work, then the projects
-or the list by time (see One view). There is no Recent zone any more (removed
+Web and desktop show the sections in the order the user arranged them: by
+default managed Chats, then Pinned and In work, then the projects or the list by
+time (see One view). The user's own sections, groups of projects and Pin to
+lists are in `sections/DOCUMENTATION.md`. There is no Recent zone any more (removed
 2026-10): In work holds the works in progress, and the list by time answers
 "what was I doing" across projects. Chats use
 their shared managed root for folders and never expose worktree actions. Project
@@ -504,10 +506,12 @@ it replaced (`resolveSidebarGrouping`: List sorted by time keeps the list by
 time, everything else groups by project); the phone follows the same
 setting, and VS Code always groups by project. The display menu opens with Select sessions, then Grouping, then
 (grouped by project) the project sort and project display,
-then the section toggles (Chats, Pinned, In work), "Also show in work under
-projects" (`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default, shown
-while In work is), Detailed rows, "Name worktrees by branch", then Collapse
-all / Expand all.
+then Sections…, which opens the sections manager beside the sidebar (the order,
+each section's visibility, "Also show in work under projects" under In work
+(`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default) and the user's
+own sections), Detailed rows, "Name worktrees by branch", then Collapse all /
+Expand all. The phone's display menu keeps its toggles and lists the user's
+sections as toggles too; it has no manager.
 
 - Chats rows are one line with the tree's slot (`'tree-chat'`). Chats open
   with a reveal of 3 and 7 more per Show more; pinned chats are always shown

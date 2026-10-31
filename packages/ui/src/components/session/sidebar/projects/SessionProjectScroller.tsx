@@ -294,6 +294,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       >
         <SessionSidebarActivityHeader
           activityKey={row.activityKey}
+          label={row.label}
+          preview={row.preview === true}
           collapsed={row.collapsed}
           forceExpanded={row.forceExpanded}
           alwaysShowActions={view.alwaysShowActions}
@@ -477,16 +479,18 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     if (row.kind === 'status') return renderStatus(row);
     if (row.kind === 'caption') {
       return <SessionSidebarCaption
+        label={row.label}
+        preview={row.preview === true}
         collapsed={row.collapsed}
         forceExpanded={row.forceExpanded}
         alwaysShowActions={view.alwaysShowActions}
-        onToggle={() => toggleProjectsCaption({ model })}
+        onToggle={() => toggleProjectsCaption(row, { model })}
       />;
     }
     if (row.emptyKind === 'sidebar') return model.emptyState;
     if (row.emptyKind === 'search') return model.searchEmptyState;
     return <div className="py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: rowTextInset }}>
-      {t('sessions.sidebar.group.empty.noArchivedSessions')}
+      {row.emptyKind === 'section' ? t('sessions.sidebar.sections.empty') : t('sessions.sidebar.group.empty.noArchivedSessions')}
     </div>;
   }, [actions, deleteFolder, files, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 

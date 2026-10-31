@@ -36,6 +36,7 @@ import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
+import { hiddenSidebarSectionsSchema, sidebarPinListsSchema, sidebarSectionsSchema } from '@/lib/sidebarSections';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -402,6 +403,11 @@ export const SETTINGS_REGISTRY = {
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
   sidebarDetailedZoneRows: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('detailedZoneRows') }),
   sidebarWorktreeNameByBranch: field({ scope: 'profile', parse: parseBoolean, ui: sessionDisplayField('worktreeNameByBranch') }),
+  // The sections and pin lists are one arrangement for every surface; which of
+  // the user's sections a surface shows is its own.
+  sidebarSections: field({ scope: 'profile', parse: fromSchema(sidebarSectionsSchema), ui: sessionDisplayField('sections') }),
+  sidebarPinLists: field({ scope: 'profile', parse: fromSchema(sidebarPinListsSchema), ui: sessionDisplayField('pinLists') }),
+  sidebarHiddenSections: field({ scope: 'profile', perSurface: true, parse: fromSchema(hiddenSidebarSectionsSchema), ui: sessionDisplayField('hiddenSections') }),
 
   // ── Work status ──
   workStatusSectionOrder: field({

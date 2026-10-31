@@ -1,4 +1,5 @@
 import React from 'react';
+import { setSidebarSectionHidden } from '@/components/session/sidebar/sections/sectionActions';
 import { createPortal } from 'react-dom';
 import { isIMECompositionEvent } from '@/lib/ime';
 import {
@@ -175,6 +176,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
   const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const savedSections = useSessionDisplayStore((state) => state.sections);
+  const customSections = React.useMemo(() => savedSections.filter((entry) => entry.kind === 'custom'), [savedSections]);
+  const hiddenSections = useSessionDisplayStore((state) => state.hiddenSections);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const hasChats = useGlobalSessionsStore((state) => state.activeSessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
   const [query, setQuery] = React.useState('');
@@ -331,6 +335,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {sessionWorkEnabled ? renderMenuChoice('work', 'sessions.sidebar.header.displayMode.showWork', showWorkSection, toggleSetting(showWorkSection, setShowWorkSection, (next) => {
           void updateDesktopSettings({ sidebarShowWorkSection: next });
         })) : null}
+        {/* The user's own sections, made on the desktop or the web; the phone only shows or hides them. */}
+        {customSections.map((section) => (
+          <DropdownMenuItem key={`section:${section.id}`} onClick={() => setSidebarSectionHidden(section.id, !hiddenSections.includes(section.id))} className={MOBILE_MENU_ITEM_CLASS}>
+            <span className="min-w-0 truncate" dir="auto">{section.name}</span>
+            {!hiddenSections.includes(section.id) ? <Icon name="check" className="size-4 text-primary" /> : null}
+          </DropdownMenuItem>
+        ))}
         {/* A work in In work leaves its project unless asked. */}
         {sessionWorkEnabled && showWorkSection ? renderMenuChoice('in-place', 'sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, toggleSetting(keepWorkInPlace, setKeepWorkInPlace, (next) => {
           void updateDesktopSettings({ sidebarKeepWorkInPlace: next });

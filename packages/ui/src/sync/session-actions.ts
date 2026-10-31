@@ -1290,11 +1290,12 @@ export async function setSessionPinned(
   sessionId: string,
   directory: string | null | undefined,
   pinned: boolean,
+  list: string | null = null,
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionPinned(metadata, pinned, Date.now()), runtimeKeyAtClick)
+      withSessionPinned(metadata, pinned, Date.now(), list), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error
