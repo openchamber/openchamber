@@ -1,0 +1,55 @@
+---
+title: Local issues
+description: Track work as markdown files inside your project, on the board and from agent sessions.
+---
+
+# Local issues
+
+Local issues are issues that live in your project as markdown files. Each issue is one file named `LOCAL-<n>-<slug>.md`, for example `LOCAL-7-fix-login-timeout.md`. The board reads and writes those files, an agent session can work on them with the same files, and git carries them with the rest of the project.
+
+## Where issues live
+
+Issues sit in `.issues/` inside the project by default. A project can use another directory with the per-project `issuesDir` setting in `settings.json`. The setting has to be a relative path that stays inside the project, and anything else falls back to `.issues/`.
+
+## The Local tab
+
+Open the [Issues and PRs board](/issues-and-prs/) and switch to the **Local** tab to see a project's issues. The tab is per project, like the rest of the board.
+
+The preview shows the description, the priority, the labels and the comments. File paths in a description, such as `src/auth.ts:42`, render as links that open the file at that line.
+
+From the preview you can:
+
+- **Create an issue** with a title, a description, a priority and labels. The board picks the next free `LOCAL-<n>` number and creates the file.
+- **Edit** the title, description, priority and labels of an issue.
+- **Change the state** from the status pill. The six states are `triage`, `backlog`, `todo`, `in-progress`, `done` and `canceled`.
+
+Every change the board makes lands in the file right away, and a file you edit in your own editor shows up on the board on the next scan.
+
+## Session comments
+
+In Settings under Integrations, the Local card has a **Session comments** switch. When it is on, a session attached to an issue adds a comment to the file when it starts, completes or fails. Each comment is a `### <date> · session <id>` entry under the issue's `## Comments` heading. The switch is off until you turn it on.
+
+## Let an agent work on issues
+
+OpenChamber ships the agent command as a template: `.opencode/commands/local-issues.md` in the OpenChamber repository. Copy it into your project's `.opencode/commands/` directory, or into your OpenCode user command directory to have it in every project. The server never writes into your project's directories itself, so the copy is yours to keep and adjust.
+
+With the command in place, invoke `/local-issues` in a session to create, find or update issues. The agent numbers new issues after the highest one it finds, changes state through the frontmatter, and appends the file paths it touched to the issue body so they link in the preview. The command tells the agent to keep the `## Comments` section as it is.
+
+## Triage roles
+
+If you use the docs/agents issue-tracker convention, its five roles map onto states and labels: needs-triage moves an issue to the `triage` state, needs-info adds the `needs-info` label, ready-for-agent moves it to `todo`, ready-for-human moves it to `backlog`, and wontfix moves it to `canceled` with the `wontfix` label.
+
+## Editing issues by hand
+
+An issue file is plain markdown with a frontmatter block, so you can edit it in any editor. Two things to keep:
+
+- The `identifier` in the file name is permanent. A file whose frontmatter identifier disagrees with its file name is skipped by the board, so never rename an issue file.
+- The board rebuilds the `## Comments` section in normalized form whenever it appends a comment. Content below a second `## ` heading inside that section is dropped on the rebuild. Everything above `## Comments` survives as it is.
+
+## Issues travel with the project
+
+Issue files sit in the project directory, so they are project content: git tracks them, and a `git push` takes them to the remote with everything else. A fresh clone has its issues back as soon as the board scans the project.
+
+## Related
+
+- [Issues and PRs](/issues-and-prs/): the board local issues appear on
