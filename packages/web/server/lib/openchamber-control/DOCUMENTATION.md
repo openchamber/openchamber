@@ -24,7 +24,11 @@ other.
   `schedule.create` and `schedule.update` accept `targetSessionId`, validated
   by the scheduled-task service. An empty update clears the target. Create
   without a model inherits the target selection; an explicit agent overrides
-  it. A task without a target still requires a model.
+  it. A task without a target still requires a model. When a call names a
+  model, it is checked against the task's project catalog first: an unknown id
+  is a 400, an empty catalog answer stands down (a cold location's first read
+  is not evidence of absence), and only the model the call names is checked,
+  so an update that names no model validates nothing.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against
@@ -377,3 +381,23 @@ them, where it says who sent which message.
 The existing `openchamber:chats` id lets agents choose from `projects.list`
 without changing the current-directory default or treating a reserved word as
 a filesystem path. Chats remains outside the registered project list on disk.
+
+### Why schedule create and update check the named model against the catalog
+
+A dead model id used to be stored with `ok: true` and only every fire failed
+with `provider.no-route` hours later, in a throwaway session the task card
+still reported as a success (#5950). The check runs at the boundary, before
+anything is stored. Two boundaries on the check itself are deliberate: an
+empty catalog answer stands down, because the first read for a location
+OpenCode has not started yet is not evidence that a model is gone — the same
+rule the session routes apply (`if (requestedModel && models.length > 0)`) —
+and only the model the call names is checked, so a task whose stored model has
+since disappeared stays editable and disableable without fixing the model
+first. The matcher mirrors `findCatalogModel` (`id`, then `modelID`): a
+catalog entry may carry a display override in `id`, and `modelID` is the
+upstream name the fire path dispatches. What this deliberately does not decide
+is the pinning behavior of `model`/`agent` on a `targetSessionId` task — the
+schema says such a task keeps the session's model, and whether a named model
+should be ignored there, whether `agent` alone should pin, and whether a
+pinned fire should restore the session's previous model are product calls
+above this fix.
