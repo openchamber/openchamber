@@ -1075,10 +1075,13 @@ export function createNetworkOperations({
     && left.transportMode === right.transportMode
     && (left.credentialId ?? null) === (right.credentialId ?? null)
     && (left.transportRevision ?? null) === (right.transportRevision ?? null);
-  const auxiliaryTransport = async (hydrationPlan, kind, rawEndpoint, controls, deadline) => {
+  const auxiliaryTransport = async (hydrationPlan, kind, rawEndpoint, controls, deadline, foundAfterPlanning = false) => {
     const pinned = hydrationPlan.plannedAuxiliaryAuthorities?.find((candidate) => candidate.kind === kind
       && candidate.rawEndpoint === rawEndpoint);
-    if (hydrationPlan.plannedAuxiliaryAuthorities && !pinned) {
+    // Planning inspects only checkouts that already exist, so an endpoint read
+    // inside a child this run cloned could never be pinned. It is checked
+    // against the repository authority planning pinned instead.
+    if (hydrationPlan.plannedAuxiliaryAuthorities && !pinned && !foundAfterPlanning) {
       throw operationError('GIT_AUXILIARY_AUTHORIZATION_REQUIRED', 'Git auxiliary endpoint authorization is required', 409);
     }
     const authority = pinned ?? await currentAuxiliaryAuthority(hydrationPlan, kind, rawEndpoint, controls, deadline);
@@ -1345,7 +1348,7 @@ export function createNetworkOperations({
     const lfs = [];
     let moduleCount = 0;
     const childPlan = (directory) => ({ ...hydrationPlan, directory, authorityDirectory: hydrationPlan.directory });
-    const visit = async (directory, parentEndpoint, parentRemoteName, prefix, depth) => {
+    const visit = async (directory, parentEndpoint, parentRemoteName, prefix, depth, foundAfterPlanning = false) => {
       if (depth > SUBMODULE_DISCOVERY_LIMITS.maxRecursionDepth) {
         throw Object.assign(new Error('Submodule recursion exceeds its depth limit'), { code: 'SUBMODULE_DISCOVERY_LIMIT_EXCEEDED' });
       }
@@ -1385,8 +1388,11 @@ export function createNetworkOperations({
           if (childHead && childHead !== module.gitlink) {
             throw Object.assign(new Error('Existing submodule checkout does not match its gitlink'), { code: 'INVALID_SUBMODULE_GITLINK' });
           }
-          if (!childHead) {
-            const transfer = await auxiliaryTransport(childPlan(directory), 'submodule', endpoint.endpoint, controls, deadline);
+          const clonesChild = !childHead;
+          if (clonesChild) {
+            const transfer = await auxiliaryTransport(
+              childPlan(directory), 'submodule', endpoint.endpoint, controls, deadline, foundAfterPlanning,
+            );
             if (transfer.authority.transportMode === 'managed') await controls.markStepCompleted('authenticated');
             let keepChild = childExists;
             let childIdentity;
@@ -1426,7 +1432,7 @@ export function createNetworkOperations({
             }
           }
           submodules.push({ path: resultPath, status: 'succeeded', endpoint: publicEndpoint });
-          await visit(childDirectory, endpoint.endpoint, 'origin', resultPath, depth + 1);
+          await visit(childDirectory, endpoint.endpoint, 'origin', resultPath, depth + 1, foundAfterPlanning || clonesChild);
         } catch (error) {
           const failure = hydrationError(error);
           const existing = submodules.findIndex((entry) => entry.path === resultPath);
@@ -1490,7 +1496,7 @@ export function createNetworkOperations({
         const rawEndpoint = discovery.endpoint.candidate.endpoint;
         const endpoint = { displayUrl: redactRemoteUrl(rawEndpoint), fingerprint: fingerprintRemoteUrl(rawEndpoint) };
         try {
-          const transfer = await auxiliaryTransport(childPlan(directory), 'lfs', rawEndpoint, controls, deadline);
+          const transfer = await auxiliaryTransport(childPlan(directory), 'lfs', rawEndpoint, controls, deadline, foundAfterPlanning);
           if (transfer.authority.transportMode === 'managed') await controls.markStepCompleted('authenticated');
           try {
             const context = { ...transfer.context, env: { ...transfer.context.env, GIT_LFS_SKIP_SMUDGE: '1' } };
