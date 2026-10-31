@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listModelVariantIds, modelVariantNames } from "@/lib/modelVariants";
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
+import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
@@ -828,7 +829,7 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
     // answer, even a failure, is final, and models.dev is not tried from here.
     let catalogPinned = false;
 
-    for (const source of sources) {
+    for (const [index, source] of sources.entries()) {
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
         const timeout = controller ? setTimeout(() => controller.abort(), 8000) : undefined;
 
@@ -876,6 +877,17 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
 
         if (catalogPinned) {
             break;
+        }
+
+        // The proxy failed without an answer, and a network error carries no
+        // header. Whether its answer would have been final is the
+        // administrator's call, so read the flag once from the policy store
+        // before models.dev is tried.
+        if (index === 0) {
+            await useEnterprisePolicyStore.getState().load();
+            if (useEnterprisePolicyStore.getState().modelsDevUrlPinned) {
+                break;
+            }
         }
     }
 

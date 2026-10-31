@@ -424,7 +424,18 @@ export const NETWORK_ACCESS_BLOCKED_ERROR = 'Enterprise mode keeps OpenChamber o
 /** What a client may know about the policy; pinned endpoints and keys stay on the server. */
 export const publicEnterprisePolicy = (options) => {
   const { enterpriseMode, source, organization, policyError, allowNetworkAccess, opencodeBinary } = readEnterprisePolicy(options);
-  return { enterpriseMode, source, organization, policyError, networkAccessBlocked: enterpriseMode && !allowNetworkAccess, opencodeBinary };
+  return {
+    enterpriseMode,
+    source,
+    organization,
+    policyError,
+    networkAccessBlocked: enterpriseMode && !allowNetworkAccess,
+    opencodeBinary,
+    // A boolean only: whether the model catalog address is pinned. The address
+    // itself stays on the server; the browser needs just this to honor a
+    // pinned answer that never arrived.
+    modelsDevUrlPinned: readPinnedModelsDevUrl(options) !== null,
+  };
 };
 
 // OpenCode registers every remote MCP server with OAuth as an integration
