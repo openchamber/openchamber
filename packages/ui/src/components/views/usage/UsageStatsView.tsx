@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
+import { formatVariantLabel } from '@/lib/modelVariants';
 import type { UsageModel, UsageStats } from '@/lib/opencode/session-stats';
 import { formatDateTimeForPreference, formatTimeForPreference } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
@@ -600,7 +601,7 @@ function ModelUsage({ models, formats }: { models: UsageModel[]; formats: Format
                   <ProviderLogo providerId={model.providerID} alt={providerName} className="size-4 shrink-0" />
                   <span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate" title={`${providerName} · ${model.providerID}/${model.modelID}`}>
                     <span className="truncate typography-ui-label text-foreground">{name}</span>
-                    {model.variant ? <span className="shrink-0 typography-micro text-muted-foreground">{model.variant}</span> : null}
+                    {model.variant ? <span className="shrink-0 typography-micro text-muted-foreground">{formatVariantLabel(model.variant)}</span> : null}
                     {/* Phones keep the row for the model name; the logo names the provider there. */}
                     <span className="hidden shrink-0 typography-micro text-muted-foreground sm:inline">{providerName}</span>
                   </span>

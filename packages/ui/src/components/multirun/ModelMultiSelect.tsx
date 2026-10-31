@@ -10,7 +10,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
-import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { formatVariantLabel, listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 /** Chip height class - shared between chips and add button */
 const CHIP_HEIGHT_CLASS = 'h-7';
@@ -373,7 +373,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                         <SelectValue placeholder={t('multirun.modelMultiSelect.variant.placeholder')}>
                           {(value) => value === DEFAULT_VARIANT_VALUE
                             ? t('multirun.modelMultiSelect.variant.default')
-                            : value}
+                            : formatVariantLabel(value ?? '')}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent fitContent>
@@ -382,7 +382,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                         </SelectItem>
                         {variantKeys.map((variant) => (
                           <SelectItem key={variant} value={variant} className="pe-2 [&>span:first-child]:hidden">
-                            {variant}
+                            {formatVariantLabel(variant)}
                           </SelectItem>
                         ))}
                       </SelectContent>

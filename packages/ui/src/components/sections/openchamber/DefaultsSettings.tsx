@@ -26,7 +26,7 @@ import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useCallableModelProviders } from '@/hooks/useCallableModelProviders';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
-import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { formatVariantLabel, listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -56,7 +56,7 @@ const ModelVariantSelect: React.FC<{
   if (variants.length === 0 && !value) return null;
   const label = (variant: string) => (variant === DEFAULT_VARIANT_VALUE
     ? t('settings.openchamber.defaults.option.default')
-    : variant.charAt(0).toUpperCase() + variant.slice(1));
+    : formatVariantLabel(variant));
   return (
     <Select
       value={value ?? DEFAULT_VARIANT_VALUE}

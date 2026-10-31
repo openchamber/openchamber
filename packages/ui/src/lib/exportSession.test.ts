@@ -53,8 +53,8 @@ describe('session export', () => {
     const markdown = formatSessionAsMarkdown([user(), answer('high')], 'Session', [child]);
 
     expect(assistantDetails(markdown)).toEqual([
-      'anthropic/claude-opus-4-1, thinking: high',
-      'anthropic/claude-opus-4-1, thinking: max',
+      'anthropic/claude-opus-4-1, thinking: High',
+      'anthropic/claude-opus-4-1, thinking: Max',
     ]);
   });
 

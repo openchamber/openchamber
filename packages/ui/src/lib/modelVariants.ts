@@ -23,3 +23,16 @@ export const listModelVariantIds = (variants: ModelVariantSource): string[] => {
 /** Names of the thinking levels a model exposes, empty when it has none. */
 export const modelVariantNames = (model: { readonly variants?: ModelVariantSource } | undefined): string[] =>
   listModelVariantIds(model?.variants);
+
+/**
+ * The label to show for a thinking-level id. OpenCode sends ids in lowercase
+ * (`max`, `xhigh`); the app shows them with a capital first letter. A numeric
+ * id keeps its spelling.
+ */
+export const formatVariantLabel = (variant: string): string => {
+  const trimmed = variant.trim();
+  if (!trimmed || /^\d+(\.\d+)?$/.test(trimmed)) {
+    return trimmed;
+  }
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+};

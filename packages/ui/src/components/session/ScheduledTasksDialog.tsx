@@ -35,6 +35,7 @@ import {
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { getModelDisplayName } from '@/lib/modelDisplay';
+import { formatVariantLabel } from '@/lib/modelVariants';
 import { agentLabel } from '@/lib/agentLabel';
 import { useAgentColors } from '@/hooks/useAgentColors';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -72,7 +73,7 @@ const TaskModelLine: React.FC<{ task: ScheduledTask }> = ({ task }) => {
     <>
       <ProviderLogo providerId={providerID} alt={providerID} className="h-3 w-3 shrink-0" />
       <span className="min-w-0 truncate">
-        {[getModelDisplayName(null, modelID), variant?.trim()].filter(Boolean).join(' · ')}
+        {[getModelDisplayName(null, modelID), variant?.trim() ? formatVariantLabel(variant) : ''].filter(Boolean).join(' · ')}
       </span>
       {agentName ? (
         <>

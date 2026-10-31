@@ -36,7 +36,7 @@ import {
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
-import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { formatVariantLabel, listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
@@ -1502,13 +1502,13 @@ export function ScheduledTaskEditorDialog(props: {
                   <SelectValue>
                     {(value) => value === '__default'
                       ? t('sessions.scheduledTasks.editor.thinkingLevel.default')
-                      : value}
+                      : formatVariantLabel(value ?? '')}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__default">{t('sessions.scheduledTasks.editor.thinkingLevel.default')}</SelectItem>
                   {variantOptions.map((variant) => (
-                    <SelectItem key={variant} value={variant}>{variant}</SelectItem>
+                    <SelectItem key={variant} value={variant}>{formatVariantLabel(variant)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

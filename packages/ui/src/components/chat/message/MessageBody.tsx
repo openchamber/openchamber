@@ -52,6 +52,8 @@ import { toast } from '@/components/ui';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
+import { agentLabel } from '@/lib/agentLabel';
+import { formatVariantLabel } from '@/lib/modelVariants';
 import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool } from './parts/toolRenderUtils';
@@ -1972,8 +1974,15 @@ const AssistantMessageBody = React.memo(({
     }, [messageCompletedAt, messageCreatedAt, timeFormatPreference, locale]);
 
     const footerEffortLabel = footerVariant && !['default', 'none'].includes(footerVariant.toLowerCase())
-        ? footerVariant[0].toLowerCase() + footerVariant.slice(1)
+        ? formatVariantLabel(footerVariant)
         : null;
+
+    const agents = useConfigStore((state) => state.agents);
+    const footerAgentLabel = React.useMemo(() => {
+        if (!footerAgentName) return undefined;
+        const agent = agents.find((entry) => entry.name === footerAgentName);
+        return agentLabel(agent ?? { name: footerAgentName, displayName: '' });
+    }, [agents, footerAgentName]);
 
     // Touch surfaces have no hover, so the footer would have to show every
     // action at all times — four 36px targets that pushed the metadata onto its
@@ -2348,7 +2357,7 @@ const AssistantMessageBody = React.memo(({
                             {footerAgentName ? (
                                 <span data-fact-priority="1" className="message-footer__fact">
                                     <span className="opacity-60" aria-hidden>·</span>
-                                    {footerAgentName}
+                                    {footerAgentLabel ?? footerAgentName}
                                 </span>
                             ) : null}
                             {turnDurationText ? (

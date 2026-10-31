@@ -3,7 +3,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { listModelVariantIds } from '@/lib/modelVariants';
+import { formatVariantLabel, listModelVariantIds } from '@/lib/modelVariants';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 
@@ -26,7 +26,7 @@ export function ModelEffortMenu({ providerID, modelID, variant, onChange, appear
     return listModelVariantIds(model?.variants).join('\n');
   }, [modelID, providerID]));
   if (!variants) return null;
-  const label = variant ?? t('multirun.modelMultiSelect.variant.default');
+  const label = variant ? formatVariantLabel(variant) : t('multirun.modelMultiSelect.variant.default');
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -51,7 +51,7 @@ export function ModelEffortMenu({ providerID, modelID, variant, onChange, appear
         {variants.split('\n').map((entry) => (
           <DropdownMenuItem key={entry} onSelect={() => onChange(entry)}>
             {variant === entry ? <Icon name="check" className="size-4" /> : <span className="size-4" />}
-            {entry}
+            {formatVariantLabel(entry)}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

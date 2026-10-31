@@ -29,7 +29,8 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { RoutingCategory, RoutingConfig } from '@/lib/routing/routingApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
-import { modelVariantNames } from '@/lib/modelVariants';
+import { formatVariantLabel, modelVariantNames } from '@/lib/modelVariants';
+import { agentLabel } from '@/lib/agentLabel';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 import { JevAccessNote } from '@/components/sections/classification/JevAccessNote';
@@ -86,7 +87,7 @@ const VariantSelect: React.FC<{
   const selected = knownVariant(value, variants) ?? DEFAULT_VARIANT_VALUE;
   const label = (variant: string) => (variant === DEFAULT_VARIANT_VALUE
     ? t('settings.routing.thinking.default')
-    : variant.charAt(0).toUpperCase() + variant.slice(1));
+    : formatVariantLabel(variant));
   return (
     <Select value={selected} onValueChange={(next) => onChange(next === DEFAULT_VARIANT_VALUE ? null : next)} disabled={variants.length === 0}>
       <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, className)} aria-label={ariaLabel}>
@@ -113,12 +114,17 @@ const CategoryRow: React.FC<{
   onRemove: () => void;
 }> = ({ category, expanded, onToggle, onChange, onReset, onRemove }) => {
   const { t } = useI18n();
+  const agents = useConfigStore((state) => state.agents);
   const variants = useModelVariants(category.model?.providerID, category.model?.modelID);
   const shownVariant = knownVariant(category.variant, variants);
   const modelLabel = category.model
-    ? `${category.model.modelID}${shownVariant ? ` / ${shownVariant}` : ''}`
+    ? `${category.model.modelID}${shownVariant ? ` / ${formatVariantLabel(shownVariant)}` : ''}`
     : t('settings.routing.model.useFallback');
-  const summary = [modelLabel, category.agent].filter(Boolean).join(' · ');
+  const agentName = category.agent?.trim();
+  const agentDisplay = agentName
+    ? agentLabel(agents.find((entry) => entry.name === agentName) ?? { name: agentName, displayName: '' })
+    : '';
+  const summary = [modelLabel, agentDisplay].filter(Boolean).join(' · ');
   return (
     <div className={cn('py-1', !category.enabled && 'opacity-60')}>
       <div className="flex items-center gap-2">

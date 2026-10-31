@@ -1,5 +1,6 @@
 import type { Agent } from '@/lib/opencode/model';
 import { getProviderModelDisplayName, type DisplayProvider } from '@/lib/modelDisplay';
+import { formatVariantLabel } from '@/lib/modelVariants';
 
 export type MobileControlsPanel = 'model' | 'agent' | 'variant' | null;
 
@@ -65,9 +66,5 @@ export const formatEffortLabel = (variant?: string) => {
     if (!variant || variant.trim().length === 0) {
         return 'Default';
     }
-    const trimmed = variant.trim();
-    if (/^\d+(\.\d+)?$/.test(trimmed)) {
-        return trimmed;
-    }
-    return capitalizeLabel(trimmed);
+    return formatVariantLabel(variant);
 };

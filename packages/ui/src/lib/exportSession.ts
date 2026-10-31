@@ -6,6 +6,8 @@ import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdow
 import { getRevealLabelKey } from '@/lib/utils';
 import { readContextPart } from '@/lib/messages/contextParts';
 import { formatContextMessage, formatMessageText } from '@/lib/messages/messageMarkdown';
+import { agentLabel } from '@/lib/agentLabel';
+import { formatVariantLabel } from '@/lib/modelVariants';
 
 export type SessionMessageRecord = { info: Message; parts: Part[] };
 
@@ -51,7 +53,7 @@ function formatAssistantModel(record: SessionMessageRecord): string {
     return model;
   }
 
-  return `${model}, thinking: ${variant}`;
+  return `${model}, thinking: ${formatVariantLabel(variant)}`;
 }
 
 function formatMessageHeader(record: SessionMessageRecord): string {
@@ -96,8 +98,8 @@ function formatMessageAsMarkdown(record: SessionMessageRecord): string {
 
 function formatChildSessionAsMarkdown(child: ChildSessionExport, depth: number): string {
   const heading = '#'.repeat(Math.min(depth + 1, 6));
-  const agentLabel = child.agent ? ` — ${child.agent}` : '';
-  const childHeader = `${heading} Sub-agent: ${child.title}${agentLabel}\n\n---\n\n`;
+  const agentName = child.agent ? ` — ${agentLabel({ name: child.agent, displayName: '' })}` : '';
+  const childHeader = `${heading} Sub-agent: ${child.title}${agentName}\n\n---\n\n`;
 
   const childBody = child.records
     .map(formatMessageAsMarkdown)

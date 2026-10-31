@@ -7,6 +7,7 @@ import {
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { formatVariantLabel } from '@/lib/modelVariants';
 
 type ThinkingPillProps = {
   value: string;
@@ -17,7 +18,7 @@ type ThinkingPillProps = {
 
 export const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPillProps) => {
   const { t } = useI18n();
-  const label = value || t('rightSidebar.contextNotesTodo.sendDialog.variant.default');
+  const label = formatVariantLabel(value) || t('rightSidebar.contextNotesTodo.sendDialog.variant.default');
 
   const trigger = (
     <div
@@ -26,7 +27,7 @@ export const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPil
         disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-interactive-hover/30',
       )}
     >
-      <span className="typography-micro whitespace-nowrap font-medium capitalize">{label}</span>
+      <span className="typography-micro whitespace-nowrap font-medium">{label}</span>
       <Icon name="arrow-down-s" className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
     </div>
   );
@@ -48,8 +49,8 @@ export const ThinkingPill = ({ value, options, disabled, onChange }: ThinkingPil
             className="typography-meta"
             onSelect={() => onChange(option)}
           >
-            <span className={cn('font-medium capitalize', value === option && 'text-primary')}>
-              {option}
+            <span className={cn('font-medium', value === option && 'text-primary')}>
+              {formatVariantLabel(option)}
             </span>
           </DropdownMenuItem>
         ))}

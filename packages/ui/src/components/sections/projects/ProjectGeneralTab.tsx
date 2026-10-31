@@ -13,7 +13,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
-import { modelVariantNames } from '@/lib/modelVariants';
+import { formatVariantLabel, modelVariantNames } from '@/lib/modelVariants';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { updateSharedProjectSetup, type ProjectRef } from '@/lib/openchamberConfig';
 import { ensureSharedSetupTrusted, resetSharedSetupTrust } from '@/lib/sharedTrustConfirmation';
@@ -27,8 +27,6 @@ import { ProjectSetupUnavailable } from './ProjectSettingsBits';
 type ProjectIdentityFormState = ReturnType<typeof useProjectIdentityForm>;
 
 const NO_VARIANT_VALUE = '__default__';
-
-const formatVariantLabel = (variant: string): string => variant.charAt(0).toUpperCase() + variant.slice(1);
 
 const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ form }) => {
   const { t } = useI18n();

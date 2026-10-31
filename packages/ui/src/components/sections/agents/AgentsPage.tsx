@@ -1,5 +1,5 @@
 import React from 'react';
-import { modelVariantNames } from '@/lib/modelVariants';
+import { formatVariantLabel, modelVariantNames } from '@/lib/modelVariants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
@@ -602,13 +602,13 @@ export const AgentsPage: React.FC = () => {
             >
               <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
                 <SelectValue placeholder={t('settings.agents.page.field.variantPlaceholder')}>
-                  {(value) => value === '__default' ? t('chat.modelControls.default') : value}
+                  {(value) => value === '__default' ? t('chat.modelControls.default') : formatVariantLabel(value ?? '')}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__default">{t('chat.modelControls.default')}</SelectItem>
                 {variantSelectOptions.map((variantOption) => (
-                  <SelectItem key={variantOption} value={variantOption}>{variantOption}</SelectItem>
+                  <SelectItem key={variantOption} value={variantOption}>{formatVariantLabel(variantOption)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
