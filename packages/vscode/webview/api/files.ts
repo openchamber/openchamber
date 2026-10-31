@@ -81,34 +81,11 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async delete(path: string): Promise<{ success: boolean }> {
-    const target = normalizePath(path);
-    const data = await sendBridgeMessage<{ success: boolean }>('api:fs:delete', { path: target });
-    return { success: Boolean(data?.success) };
-  },
-
-  async rename(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }> {
-    const data = await sendBridgeMessage<{ success: boolean; path: string }>('api:fs:rename', { oldPath, newPath });
-    return {
-      success: Boolean(data?.success),
-      path: typeof data?.path === 'string' ? normalizePath(data.path) : newPath,
-    };
-  },
-
   async readFile(path: string): Promise<{ content: string; path: string }> {
     const target = normalizePath(path);
     const data = await sendBridgeMessage<{ content: string; path: string }>('api:fs:read', { path: target });
     return {
       content: typeof data?.content === 'string' ? data.content : '',
-      path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
-    };
-  },
-
-  async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
-    const target = normalizePath(path);
-    const data = await sendBridgeMessage<{ success: boolean; path: string }>('api:fs:write', { path: target, content });
-    return {
-      success: Boolean(data?.success),
       path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
     };
   },

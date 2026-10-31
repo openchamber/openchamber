@@ -321,14 +321,17 @@ every surface reached only through those is unreachable.
 
 ### Dead bridge surface
 
-Handlers with no reachable caller in the VS Code webview.
-
-| Handler | Why unreachable |
-|---|---|
-| `api:fs:write`, `api:fs:rename`, `api:fs:delete`, `api:fs:reveal`, `api:fs:mkdir` | `FilesView`, `SidebarFilesTree`, `PlanView` only |
+No mounted VS Code surface reaches these: `api:git/*` commit, history, merge,
+rebase, network-write, diff and identity write handlers were removed with
+their surfaces, and the filesystem write handlers (`api:fs:write`,
+`api:fs:rename`, `api:fs:delete`) belong to `FilesView`, `SidebarFilesTree`
+and `PlanView`, which never mount here.
 
 Reachable filesystem routes: `api:fs:read` (attachments), `api:fs:search`
-(`useFileSearchStore` behind composer file mentions), `api:fs:list`, `api:fs:stat`.
+(`useFileSearchStore` behind composer file mentions), `api:fs:list`,
+`api:fs:stat`, `api:fs:home` and `api:fs:mkdir` (empty-window Chats root
+bootstrap through `/api/fs/mkdir` in the webview), and `api:fs:reveal` (the
+session sidebar's export "Reveal" action).
 
 Maintenance: reviews, changelog entries, and parity claims consult this map;
 whoever mounts or unmounts a surface updates it in the same change.
