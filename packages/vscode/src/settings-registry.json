@@ -666,6 +666,9 @@
     "retryWaitMaxMs": {
       "scope": "profile"
     },
+    "retryNowEnabled": {
+      "scope": "profile"
+    },
     "zenModel": {
       "scope": "profile"
     },

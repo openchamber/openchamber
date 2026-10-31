@@ -2,6 +2,7 @@ import React from "react";
 import { useChatSessionSelection } from './chatColumnSession';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
+import { RetryNowButton } from "./components/RetryNowButton";
 
 // The floating assistant-status chip that hovers above the composer while the
 // agent works ("Claude is working…"). ONLY that. The composer's
@@ -23,6 +24,8 @@ interface StatusRowProps {
   providerId?: string | null;
   /** Set while the turn waits on work OpenCode can move to the background. */
   onBackground?: () => void;
+  /** Set while a held retry can be repeated immediately. */
+  onRetryNow?: () => void;
 }
 
 export const StatusRow: React.FC<StatusRowProps> = ({
@@ -36,6 +39,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   modelName,
   providerId,
   onBackground,
+  onRetryNow,
 }) => {
   const currentSessionId = useChatSessionSelection().sessionId;
 
@@ -85,6 +89,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
         </div>
         {/* -me-1.5 keeps the button's right edge 3px inside the border now
             that the chip's pe shrank to 8px. */}
+        {onRetryNow ? <RetryNowButton onClick={onRetryNow} className="-me-1.5 h-6 w-6" /> : null}
         {onBackground ? <BackgroundWorkButton onClick={onBackground} className="-me-1.5 h-6 w-6" /> : null}
       </div>
     </div>

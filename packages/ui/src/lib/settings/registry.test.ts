@@ -30,6 +30,9 @@ describe('settings registry', () => {
     expect(parseSettingsDocument({ retryWaitMaxMs: 30_000 })).toEqual({ retryWaitMaxMs: 30_000 });
     expect(parseSettingsDocument({ retryWaitMaxMs: -1 })).toEqual({ retryWaitMaxMs: 0 });
     expect(parseSettingsDocument({ retryWaitMaxMs: '30000' })).toEqual({});
+    expect(SETTINGS_REGISTRY.retryNowEnabled.scope).toBe('profile');
+    expect(parseSettingsDocument({ retryNowEnabled: true })).toEqual({ retryNowEnabled: true });
+    expect(parseSettingsDocument({ retryNowEnabled: 'true' })).toEqual({});
   });
 
   test('dictation auto-send is opt-in and adopts only explicit boolean preferences', () => {

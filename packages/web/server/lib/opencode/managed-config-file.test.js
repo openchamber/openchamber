@@ -103,7 +103,7 @@ describe('managed OpenCode config file', () => {
     expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', titleDirectory] });
   });
 
-  it('lists the retry policy plugin only while a wait cap is set', async () => {
+  it('lists the retry policy plugin while a cap or retry-now is set', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
     temporaryDirectories.push(dataDir);
     const retryDirectory = path.join(dataDir, 'retry-policy', 'openchamber-retry-policy');
@@ -132,7 +132,12 @@ describe('managed OpenCode config file', () => {
     expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', retryDirectory, titleDirectory] });
     expect(materializePlugin).toHaveBeenCalledTimes(1);
 
-    current.settings = { ...toolsOff, retryWaitMaxMs: 0 };
+    current.settings = { ...toolsOff, retryNowEnabled: true };
+    await runtime.refreshManagedConfigFile();
+    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', retryDirectory, titleDirectory] });
+    expect(materializePlugin).toHaveBeenCalledTimes(2);
+
+    current.settings = { ...toolsOff, retryWaitMaxMs: 0, retryNowEnabled: false };
     await runtime.refreshManagedConfigFile();
     expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', titleDirectory] });
   });
