@@ -110,6 +110,18 @@ export const repositoryKindOfTab = (id: string): RepositoryReferenceKind => (id 
 export const DEFAULT_REPOSITORY_FILTER: RepositoryReferenceFilter = { state: 'open', people: 'any' };
 
 /**
+ * The issues filter: state and people like the repository filter, plus the
+ * host-provided label and milestone names. Each array holds zero or one entry
+ * in this cut; the array shape is what later multi-select reuses.
+ */
+export type IssueFilter = RepositoryReferenceFilter & {
+    labelNames: string[];
+    milestoneNames: string[];
+};
+
+export const DEFAULT_ISSUE_FILTER: IssueFilter = { state: 'open', people: 'any', labelNames: [], milestoneNames: [] };
+
+/**
  * What each kind can be narrowed to: only change requests merge and get
  * review requests, only discussions wait for an answer, and nobody is
  * assigned a discussion.
