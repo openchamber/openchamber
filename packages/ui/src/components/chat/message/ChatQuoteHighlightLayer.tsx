@@ -39,6 +39,7 @@ import { ChatColumnSessionContext } from '../chatColumnSession';
 import { ChatQuoteMarkPopover } from './ChatQuoteMarkPopover';
 import type { HtmlRenderMark } from './parts/htmlRender';
 import { onPageMarkClick, revealPageMark, setPageMarks } from './pageQuoteBridge';
+import { holdMarkdownBlocksWithin } from '../markdown/markdownWindow';
 
 const MARK_HIGHLIGHT = 'oc-chat-quote';
 const FOCUS_HIGHLIGHT = 'oc-chat-quote-focus';
@@ -279,10 +280,14 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
                 // A lazy fallback can contain raw Markdown on mobile. Wait for
                 // the renderer before treating a failed match as final.
                 if (!root || root.querySelector('[data-chat-quote-pending]')) return;
+                // A long answer mounts only its blocks near the view: all of
+                // them, to find the quote, until it is in view.
+                const releaseBlocks = holdMarkdownBlocksWithin(root, { sync: true });
                 const range = resolveChatQuoteAnchor(root, anchor);
                 cancel();
+                range?.startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
+                releaseBlocks();
                 if (!range) return;
-                range.startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
                 if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
                 paintFlash([range]);
                 flashTimerRef.current = window.setTimeout(() => {

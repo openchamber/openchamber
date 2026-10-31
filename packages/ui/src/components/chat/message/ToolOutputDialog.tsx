@@ -973,7 +973,6 @@ const MermaidPreviewDialog: React.FC<{
                                         singleTilde={false}
                                         content={mermaidMarkdown}
                                         variant="tool"
-                                        allowMermaidWheelEvents
                                         className="markdown-mermaid-fullscreen h-full"
                                         mermaidControls={mermaidControls}
                                         enableFileReferences={false}

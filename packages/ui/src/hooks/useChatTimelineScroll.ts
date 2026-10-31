@@ -3,6 +3,7 @@ import React from 'react';
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
 import { cancelWhenLayoutSettled, isLayoutAnimating, onLayoutAnimationStart, onWidthDragStart, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { holdMarkdownBlocksWithin } from '@/components/chat/markdown/markdownWindow';
 import { createKeyboardFollowGlide, type KeyboardFollowGlide } from '@/components/chat/lib/scroll/keyboardFollowGlide';
 import { retireScrollContent } from '@/components/chat/lib/scroll/retireScrollContent';
 import {
@@ -655,9 +656,25 @@ export const useChatTimelineScroll = ({
         if (first === 'missing') return false;
         holdRememberedPosition();
 
+        // The offset counts from the message's top: a long answer's blocks
+        // between there and the reader stand at estimated heights until drawn
+        // (`markdownWindow`), so they are all drawn while it is restored.
+        // Tried every frame: a message whose Markdown still loads has no
+        // window yet, and one that appears later is held from then on.
+        let releaseBlocks: (() => void) | null = null;
+        const holdMessageBlocks = () => {
+            const message = node.querySelector(`[data-message-id="${CSS.escape(anchor.messageId)}"]`);
+            if (!message) return;
+            const release = holdMarkdownBlocksWithin(message);
+            releaseBlocks?.();
+            releaseBlocks = release;
+        };
+        holdMessageBlocks();
+
         let frame: number | null = null;
         let frames = 0;
         let stable = first === 'aligned' ? 1 : 0;
+        let readyStable = 0;
         let settled = false;
         let finished = false;
         const settle = () => {
@@ -678,6 +695,7 @@ export const useChatTimelineScroll = ({
             node.removeEventListener('pointerdown', onInput);
             node.removeEventListener('keydown', onInput);
             if (restoreRef.current === restore) restoreRef.current = null;
+            releaseBlocks?.();
             releaseReveal?.();
         };
         // The reader took the viewport: the link is served, wherever it stands.
@@ -700,12 +718,17 @@ export const useChatTimelineScroll = ({
                 return;
             }
             const result = messageListRef.current?.alignViewportAnchor(anchor) ?? 'missing';
+            holdMessageBlocks();
             frames += 1;
             stable = result === 'aligned' ? stable + 1 : 0;
             // Two still frames: shown where it belongs. The hold continues
             // for late measurements (images, highlighted code) above it.
             if (stable >= 2) settle();
-            if (result === 'missing' || stable >= ANCHOR_HOLD_STABLE_FRAMES || frames >= ANCHOR_HOLD_MAX_FRAMES) {
+            // Markdown still loading lands later at its own heights: the hold
+            // counts still frames only from when it has drawn.
+            const loading = node.querySelector(`[data-message-id="${CSS.escape(anchor.messageId)}"] [data-chat-quote-pending]`) !== null;
+            readyStable = result === 'aligned' && !loading ? readyStable + 1 : 0;
+            if (result === 'missing' || readyStable >= ANCHOR_HOLD_STABLE_FRAMES || frames >= ANCHOR_HOLD_MAX_FRAMES) {
                 finish();
                 return;
             }

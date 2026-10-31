@@ -30,6 +30,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 import { resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
+import { registerListAnchorRow } from './lib/scroll/holdAnchor';
 import { isReasoningRevealTarget } from './search/reasoningReveal';
 import {
     ANCHOR_HOLD_MAX_FRAMES,
@@ -672,6 +673,29 @@ const TimelineList = React.memo(({
         isAtEndRef.current = true;
     }, []);
 
+    // The row the list keeps in place when sizes change, found the way the
+    // list finds it (`maintainVisibleContentPosition.size`): the first row
+    // whose top is on screen, else the row the screen starts in. A long answer
+    // drawing its blocks keeps the reader's place inside that row itself
+    // (`holdReaderPlace`).
+    const endPinningReleasedRef = React.useRef(endPinningReleased);
+    endPinningReleasedRef.current = endPinningReleased;
+    React.useEffect(() => {
+        const scroller = listRef.current?.getScrollableNode();
+        if (!scroller) return;
+        return registerListAnchorRow(scroller, () => {
+            const state = listRef.current?.getState();
+            if (!state || !endPinningReleasedRef.current) return null;
+            const bottom = state.scroll + state.scrollLength;
+            for (let index = state.start; index >= 0 && index <= state.end; index += 1) {
+                const top = state.positionAtIndex(index);
+                if (top > bottom) break;
+                if (top >= state.scroll - 10) return state.elementAtIndex(index) ?? null;
+            }
+            return state.start >= 0 ? state.elementAtIndex(state.start) ?? null : null;
+        });
+    }, []);
+
     // The list reports scroll continuously; only end-crossings are interesting,
     // so the edge is debounced to a state transition here rather than pushing a
     // callback on every frame.
@@ -1027,8 +1051,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [messages]);
 
     // Detect new user messages SYNCHRONOUSLY during render.
-    // Must happen during render (not in useEffect) so that ToolRevealOnMount
-    // receives animate=true on the FIRST render of the new message,
+    // Must happen during render (not in useEffect) so that the new message
+    // receives animate=true on its FIRST render,
     // starting it hidden (opacity 0). An effect-based approach causes
     // the message to flash visible before the animation starts.
     {

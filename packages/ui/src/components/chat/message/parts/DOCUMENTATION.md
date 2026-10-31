@@ -514,6 +514,13 @@ themselves cannot list. Past four pills the rest wait behind one `+N` pill
 that reveals them in the row; the same pill then hides them again. The list is projected once the last assistant message
 finished with `stop`, so no tool patch is parsed while the turn streams.
 
+### Why tool rows appear without an entrance
+
+A tool row that arrived while its turn ran used to wipe in over 500 ms and
+type its title out. Opening a session whose live turn had over a hundred
+tool calls started an animation for each of them, and the switch felt heavy.
+Rows now appear as they are, and no list of revealed calls is kept per message.
+
 ### Why empty reasoning does not separate the answer
 
 `MessageBody` omits reasoning containing only whitespace or default-ignorable
@@ -732,7 +739,7 @@ Why: only navigation tools use the compact static path; all other tools need obs
   `tracker-item` of Linear (`lib/messages/contextParts.ts`). Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
   and `Linear issue context (JSON)` prefixes).
-- Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `ToolRevealOnMount.tsx`, `GuestToolTable.tsx`
+- Tools: `ToolPart.tsx`, `ToolPartDiffPreview.tsx`, `PlainDiffFallback.tsx`, `ProgressiveGroup.tsx`, `toolPresentation.tsx`, `toolRenderUtils.ts`, `GuestToolTable.tsx`
 - Reasoning: `ReasoningPart.tsx`
 - Status/placeholders: `WorkingPlaceholder.tsx`, `SessionActiveSpinner.tsx`, `MigratingPart.tsx`; the dots after a busy label are `components/ui/busy-dots.tsx`
 - Utility renderers: `VirtualizedCodeBlock.tsx`, `MinDurationShineText.tsx`

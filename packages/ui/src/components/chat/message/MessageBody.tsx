@@ -52,7 +52,6 @@ import { toast } from '@/components/ui';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
-import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool } from './parts/toolRenderUtils';
 import { ShownToolCard } from './parts/ShownToolCard';
@@ -78,6 +77,7 @@ import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
 import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth } from './imageExport';
 import { hasTextSelectionInside } from '@/lib/textSelection';
+import { holdMarkdownBlocksWithin } from '../markdown/markdownWindow';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -304,24 +304,6 @@ export type MessageExtraAction = {
     label: string;
     icon: React.ReactNode;
     onSelect: () => void;
-};
-
-const TOOL_REVEAL_CACHE_MAX = 200;
-const revealedToolIdsByMessage = new Map<string, Set<string>>();
-
-const readRevealedToolIds = (messageId: string): Set<string> => {
-    const cached = revealedToolIdsByMessage.get(messageId);
-    return cached ? new Set(cached) : new Set<string>();
-};
-
-const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
-    if (revealedToolIdsByMessage.size >= TOOL_REVEAL_CACHE_MAX && !revealedToolIdsByMessage.has(messageId)) {
-        const oldest = revealedToolIdsByMessage.keys().next().value;
-        if (oldest) {
-            revealedToolIdsByMessage.delete(oldest);
-        }
-    }
-    revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
 /**
@@ -1238,12 +1220,6 @@ const AssistantMessageBody = React.memo(({
     void _allowAnimation;
     const messageContentRef = React.useRef<HTMLDivElement>(null);
     const messageTextContentRef = React.useRef<HTMLDivElement>(null);
-    const toolRevealReadyRef = React.useRef(false);
-
-    React.useEffect(() => {
-        toolRevealReadyRef.current = true;
-    }, []);
-
     const isTouchContext = Boolean(hasTouchInput ?? isMobile);
     const alwaysShowMessageActions = Boolean(alwaysShowActions ?? isMobile);
     const { src: footerLogoSrc, onError: handleFooterLogoError, hasLogo: footerHasLogo } = useProviderLogo(footerProviderID ?? null);
@@ -1252,60 +1228,6 @@ const AssistantMessageBody = React.memo(({
     const visibleParts = React.useMemo(() => {
         return parts.filter((part) => !isEmptyTextPart(part));
     }, [parts]);
-
-    const toolParts = React.useMemo(() => {
-        return visibleParts.filter((part): part is ToolPartType => part.type === 'tool');
-    }, [visibleParts]);
-
-    const toolRevealStateRef = React.useRef<{
-        messageId: string;
-        hasCommitted: boolean;
-        persistedToolIds: Set<string>;
-        animatedToolIds: Set<string>;
-    }>({
-        messageId,
-        hasCommitted: false,
-        persistedToolIds: readRevealedToolIds(messageId),
-        animatedToolIds: new Set<string>(),
-    });
-
-    if (toolRevealStateRef.current.messageId !== messageId) {
-        toolRevealStateRef.current = {
-            messageId,
-            hasCommitted: false,
-            persistedToolIds: readRevealedToolIds(messageId),
-            animatedToolIds: new Set<string>(),
-        };
-    }
-
-    const currentToolIds = React.useMemo(() => toolParts.map((toolPart) => toolPart.id), [toolParts]);
-    const shouldAnimateNewToolMount = Boolean(turnGroupingContext?.isWorking && toolRevealReadyRef.current);
-    const persistedToolIds = toolRevealStateRef.current.persistedToolIds;
-    const animatedToolIds = toolRevealStateRef.current.animatedToolIds;
-
-    if (shouldAnimateNewToolMount && toolRevealStateRef.current.hasCommitted) {
-        for (const toolId of currentToolIds) {
-            if (!persistedToolIds.has(toolId)) {
-                animatedToolIds.add(toolId);
-            }
-        }
-    }
-
-    const animatedToolIdsKey = Array.from(animatedToolIds).join('\u0000');
-    const animatedToolIdsLookup = React.useMemo(
-        () => new Set(animatedToolIdsKey ? animatedToolIdsKey.split('\u0000') : []),
-        [animatedToolIdsKey]
-    );
-
-    React.useEffect(() => {
-        const nextPersistedToolIds = new Set(toolRevealStateRef.current.persistedToolIds);
-        for (const toolId of currentToolIds) {
-            nextPersistedToolIds.add(toolId);
-        }
-        toolRevealStateRef.current.persistedToolIds = nextPersistedToolIds;
-        toolRevealStateRef.current.hasCommitted = true;
-        writeRevealedToolIds(messageId, nextPersistedToolIds);
-    }, [currentToolIds, messageId]);
 
     const assistantTextParts = React.useMemo(() => {
         return visibleParts.filter((part) => part.type === 'text');
@@ -1516,10 +1438,17 @@ const AssistantMessageBody = React.memo(({
             if (!sourceElement) return;
 
             let wrapper: HTMLDivElement | null = null;
+            // A long answer mounts only its blocks near the view: all of them
+            // for the copy, held until it is taken. A diagram that mounts now
+            // stays hidden until its viewer fits it, a frame or two later.
+            const releaseBlocks = holdMarkdownBlocksWithin(sourceElement, { sync: true });
             try {
                 // Load the exporter before attaching its temporary clone so a slow
                 // chunk request cannot leave export-only content in the page layout.
                 const { toPng } = await import('html-to-image');
+                for (let frame = 0; frame < 10 && sourceElement.querySelector('[data-oc-mermaid-viewer] > svg:not([data-oc-mermaid-fitted])'); frame += 1) {
+                    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+                }
                 const originalElement = sourceElement;
                 const computedStyle = window.getComputedStyle(originalElement);
                 const rootStyle = window.getComputedStyle(document.documentElement);
@@ -1550,6 +1479,7 @@ const AssistantMessageBody = React.memo(({
                 wrapper.appendChild(exportStyle);
 
                 const clone = cloneMessageImageExportSource(originalElement);
+                releaseBlocks();
                 clone.style.cssText = `
                     ${computedStyle.cssText}
                     transform: none;
@@ -1652,6 +1582,7 @@ const AssistantMessageBody = React.memo(({
                 console.error('Failed to generate image:', error);
                 toast.error(t('chat.messageBody.toast.generateImageFailed'));
             } finally {
+                releaseBlocks();
                 if (wrapper && wrapper.parentNode) {
                     wrapper.parentNode.removeChild(wrapper);
                 }
@@ -1872,17 +1803,15 @@ const AssistantMessageBody = React.memo(({
                 if (isExpandableTool(toolName)) {
                     rendered.push(
                         <FadeInOnReveal key={`tool-${toolPart.id}`}>
-                            <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
-                                <ToolPart
-                                    part={toolPart}
-                                    isExpanded={expandedTools.has(toolPart.id)}
-                                    onToggle={onToggleTool}
-                                    isMobile={isMobile}
-                                    alwaysShowActions={alwaysShowMessageActions}
-                                    onShowPopup={onShowPopup}
-                                    animateTailText={animatedToolIdsLookup.has(toolPart.id)}
-                                />
-                            </ToolRevealOnMount>
+                            <ToolPart
+                                part={toolPart}
+                                isExpanded={expandedTools.has(toolPart.id)}
+                                onToggle={onToggleTool}
+                                isMobile={isMobile}
+                                alwaysShowActions={alwaysShowMessageActions}
+                                onShowPopup={onShowPopup}
+                                animateTailText={false}
+                            />
                         </FadeInOnReveal>
                     );
                     i++;
@@ -1892,22 +1821,20 @@ const AssistantMessageBody = React.memo(({
                 // Static tools: one row per tool call (no grouping)
                 rendered.push(
                     <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
-                        <ToolRevealOnMount animate={animatedToolIdsLookup.has(toolPart.id)} wipe>
-                            <StaticToolRow
-                                toolName={toolName}
-                                activities={[
-                                    {
-                                        id: toolPart.id,
-                                        turnId: '',
-                                        messageId,
-                                        partIndex: 0,
-                                        part: toolPart,
-                                        kind: 'tool' as const,
-                                    },
-                                ]}
-                                animateTailText={animatedToolIdsLookup.has(toolPart.id)}
-                            />
-                        </ToolRevealOnMount>
+                        <StaticToolRow
+                            toolName={toolName}
+                            activities={[
+                                {
+                                    id: toolPart.id,
+                                    turnId: '',
+                                    messageId,
+                                    partIndex: 0,
+                                    part: toolPart,
+                                    kind: 'tool' as const,
+                                },
+                            ]}
+                            animateTailText={false}
+                        />
                     </FadeInOnReveal>
                 );
                 i++;
@@ -1932,7 +1859,6 @@ const AssistantMessageBody = React.memo(({
         activityRowSkip,
         alwaysShowMessageActions,
         hoistedPages,
-        animatedToolIdsLookup,
         collapsibleThinkingBlocks,
         expandedTools,
         isMobile,

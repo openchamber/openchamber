@@ -25,7 +25,6 @@ export interface MarkdownPresentation {
   disableLinkSafety?: boolean;
   theme: Theme;
   mermaidControls: MermaidControls;
-  allowMermaidWheelEvents?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
   onExportCode?: (source: string, language: string) => void;
   confirmFile: (source: string, inputKind?: FileReferenceSource) => Promise<string | null>;

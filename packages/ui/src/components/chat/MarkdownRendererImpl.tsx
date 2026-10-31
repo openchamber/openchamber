@@ -53,7 +53,8 @@ import { createMarkdownCodePlugin } from './markdown/streamdownCode';
 import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
-import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow';
+import { MarkdownWindow, MarkdownWindowContext, type MarkdownWindowOptions } from './markdown/markdownWindow';
+import { holdReaderPlace } from './lib/scroll/holdAnchor';
 import { WindowedMarkdownBlock } from './markdown/WindowedMarkdownBlock';
 import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { isBareVideoUrl, markdownMediaCopySource, markdownMediaFilename } from './markdown/markdownVideo';
@@ -162,6 +163,12 @@ const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: 
 // Static mode renders the document whole and never reads the block split, but
 // Streamdown still computes it, running the marked lexer over the full text.
 const wholeDocument = (markdown: string) => [markdown];
+// A long answer in the chat mounts only its blocks near the view. Opening a
+// session mounted every answer of its rendered turns whole, several screens
+// each, and that render, its styles and its layout effects were most of the
+// open.
+const CHAT_WINDOW_MIN_LENGTH = 3000;
+const chatWindow: MarkdownWindowOptions = { initialBlocks: 0, beforeChange: holdReaderPlace };
 // Read once, when a block mounts. The value lives in a ref the provider keeps
 // for its lifetime: a context value that changed with every streamed update
 // re-rendered every block of the reply on each update.
@@ -270,7 +277,6 @@ export interface MarkdownContentProps {
   documentAssets?: MarkdownDocumentAssets;
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControls;
-  allowMermaidWheelEvents?: boolean;
   purpose?: 'copy' | 'image';
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
@@ -278,8 +284,8 @@ export interface MarkdownContentProps {
   repositoryLinks?: RepositoryLinkContext | null;
   /** `:tada:` reads as 🎉 with these names (`useEmojiShortcodes`); text keeps its shortcodes without them. */
   emojiShortcodes?: EmojiShortcodes | null;
-  /** A long document read in its own scroller: only the blocks near the view mount (`markdownWindow`). */
-  windowed?: boolean;
+  /** A long document: only the blocks near the view mount (`markdownWindow`), with these options when given. */
+  windowed?: boolean | MarkdownWindowOptions;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -302,7 +308,6 @@ export function MarkdownContent({
   documentAssets,
   onShowPopup,
   mermaidControls = defaultMermaidControls,
-  allowMermaidWheelEvents,
   purpose,
   preparedHighlights,
   onExportCode,
@@ -333,7 +338,8 @@ export function MarkdownContent({
     committedBlockCount.current = nativeRoot?.childElementCount ?? 0;
   }, [content]);
 
-  const blockWindow = React.useMemo(() => (windowed ? new MarkdownWindow() : null), [windowed]);
+  // Options are read once: a caller passes a module constant.
+  const blockWindow = React.useMemo(() => (windowed ? new MarkdownWindow(windowed === true ? undefined : windowed) : null), [windowed]);
   React.useLayoutEffect(() => {
     const element = container.current;
     if (!blockWindow || !element) return;
@@ -426,14 +432,13 @@ export function MarkdownContent({
     disableLinkSafety,
     theme,
     mermaidControls,
-    allowMermaidWheelEvents,
-    onShowPopup,
+      onShowPopup,
     onExportCode,
     confirmFile,
     code,
   }), [
     directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, disableLinkSafety, theme,
-    mermaidControls, allowMermaidWheelEvents, onShowPopup, onExportCode, confirmFile, code,
+    mermaidControls, onShowPopup, onExportCode, confirmFile, code,
   ]);
 
   let body = (
@@ -535,6 +540,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   const identity = `${messageId}:${part?.id ?? ''}`;
   const initialMode: 'streaming' | 'static' = isStreaming || (part && !settledPart) ? 'streaming' : 'static';
   const [renderMode, setRenderMode] = React.useState({ identity, mode: initialMode });
+  const mode = renderMode.identity === identity ? renderMode.mode : initialMode;
   // A live part keeps its block tree when it settles. A different part starts
   // fresh; already-completed history uses the whole-document static renderer.
   if (renderMode.identity !== identity) {
@@ -545,8 +551,11 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       key={identity}
       content={content}
       singleTilde={false}
-      mode={renderMode.identity === identity ? renderMode.mode : initialMode}
+      mode={mode}
       mediaMode={variant === 'assistant' ? 'assistant' : 'local'}
+      // Only a part already finished when it mounted: one that streamed here
+      // keeps the blocks it was drawn with.
+      windowed={mode === 'static' && content.length >= CHAT_WINDOW_MIN_LENGTH ? chatWindow : undefined}
       isStreaming={isStreaming}
       variant={variant}
       className={className}
