@@ -104,7 +104,7 @@ export type SessionSidebarRow =
    * Show more while rows remain hidden, Show less once more than the first batch shows; one row holds both.
    * `requestedCount`: how many the user asked for; `currentCount` also moves as sessions arrive and leave.
    */
-  | (RowBase & { kind: 'show-control'; more: boolean; fewer: boolean; containerKey: string; currentCount: number; requestedCount: number; increment: number; depth?: number; flat?: boolean });
+  | (RowBase & { kind: 'show-control'; more: boolean; fewer: boolean; containerKey: string; currentCount: number; requestedCount: number; increment: number; depth?: number; flat?: boolean; detailed?: boolean });
 
 export type SessionSidebarStickyHeader = {
   rowIndex: number;
@@ -860,7 +860,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const more = remaining > 0;
     const fewer = requested > initialLimit && limitedNodes.length > initialLimit;
     if (!search && !group.isArchivedBucket && (more || fewer)) {
-      push({ kind: 'show-control', key: `${rowKeyBase}:show`, estimateSize: STATUS_ESTIMATE, more, fewer, containerKey: groupKey, currentCount: limitedVisibleCount, requestedCount: requested, increment, depth: contentDepth, flat: false });
+      push({ kind: 'show-control', key: `${rowKeyBase}:show`, estimateSize: STATUS_ESTIMATE, more, fewer, containerKey: groupKey, currentCount: limitedVisibleCount, requestedCount: requested, increment, depth: contentDepth, flat: false, detailed: detailedWorks });
     }
 
     // An empty group lists nothing: its header has no chevron, and new
