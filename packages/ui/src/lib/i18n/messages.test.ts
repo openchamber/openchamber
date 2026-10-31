@@ -101,6 +101,13 @@ describe('i18n dictionaries', () => {
       }
     }
   });
+  test('the issues tab label is translated in every locale', () => {
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      expect(dictionary['issuesPanel.tab.label']).toBeTruthy();
+      if (locale !== 'en') expect(dictionary['issuesPanel.tab.label']).not.toBe(enDict['issuesPanel.tab.label']);
+    }
+  });
+
   test('all locales stay in key parity with english', () => {
     const englishKeys = Object.keys(enDict).sort();
 

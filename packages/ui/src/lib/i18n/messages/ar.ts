@@ -22,6 +22,7 @@ import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
+import { issuesPanelI18n } from './issues-panel.i18n';
 import { stacksI18n } from './stacks.i18n';
 import { changeReviewI18n } from './change-review.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
@@ -3829,6 +3830,7 @@ export const dict = {
   ...overviewI18n.ar,
   ...isolatedSpacesI18n.ar,
   ...sourceBoardI18n.ar,
+  ...issuesPanelI18n.ar,
   ...stacksI18n.ar,
   ...changeReviewI18n.ar,
   ...projectActionsI18n.ar,

@@ -23,6 +23,7 @@ import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
+import { issuesPanelI18n } from './issues-panel.i18n';
 import { stacksI18n } from './stacks.i18n';
 import { changeReviewI18n } from './change-review.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
@@ -171,6 +172,7 @@ export const dict: Record<I18nKey, string> = {
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
   ...sourceBoardI18n['zh-CN'],
+  ...issuesPanelI18n['zh-CN'],
   ...stacksI18n['zh-CN'],
   ...changeReviewI18n['zh-CN'],
   ...projectActionsI18n['zh-CN'],
