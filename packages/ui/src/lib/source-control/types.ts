@@ -300,6 +300,12 @@ export interface Label {
   color?: string;
 }
 
+/** A repository milestone as the host lists it; `state` is the host's own open/closed. */
+export interface MilestoneChoice {
+  name: string;
+  state: 'open' | 'closed';
+}
+
 export interface Issue extends SourceControlIdentity {
   id: string;
   number: number;

@@ -10,6 +10,7 @@ import type {
   ChangeRequestVoteLabel,
   CISummary,
   Label,
+  MilestoneChoice,
   ChangeRequestStatus,
   CreateChangeRequestInput,
   Issue,
@@ -1950,6 +1951,8 @@ export interface SourceControlAPI {
   refreshProviderReads(identity: SourceControlIdentity, scope: ProviderReadsRefreshScope): Promise<void>;
   /** One page of a project's labels, for the board's picker. */
   referenceLabels(context: SourceControlReadContext, project: RepositorySelector): Promise<Label[]>;
+  /** One page of a project's milestones, for the issues filter dropdowns. */
+  referenceMilestones(context: SourceControlReadContext, project: RepositorySelector): Promise<MilestoneChoice[]>;
   /** One page of the people who can be asked to review in a project. */
   referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(
@@ -1972,7 +1975,7 @@ export interface SourceControlAPI {
 
   issuesList(
     context: SourceControlReadContext,
-    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople },
+    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople; label?: string; milestone?: string },
   ): Promise<PageResult<Issue>>;
   issueGet(
     context: SourceControlReadContext,

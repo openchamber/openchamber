@@ -1046,6 +1046,38 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
+  it('reads the issues filter milestone choices and sends label and milestone on the issue list', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ name: 'v1.0', state: 'open' }, { name: 'v0.9', state: 'closed' }] }))
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ name: 'broken', state: 'done' }] }))
+      .mockResolvedValueOnce(Response.json({ items: [], page: 1, hasMore: false }));
+    const project = { owner: 'openchamber', repo: 'openchamber' };
+
+    await expect(api.referenceMilestones(readContext, project)).resolves.toEqual([{ name: 'v1.0', state: 'open' }, { name: 'v0.9', state: 'closed' }]);
+    await expect(api.referenceMilestones(readContext, project)).rejects.toThrow('invalid milestone');
+    await expect(api.issuesList(readContext, { state: 'open', people: 'any', label: 'bug', milestone: 'v1.0' })).resolves.toEqual({ items: [], page: 1, hasMore: false });
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/references/milestones', expect.objectContaining({
+      query: expect.objectContaining({ toString: expect.any(Function) }),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(3, '/api/source-control/github/issues/list', expect.objectContaining({
+      query: new URLSearchParams({
+        instance: 'github.com',
+        directory: '/workspace/a b',
+        repositoryId: 'repo_one',
+        accountId: 'github.com#7',
+        bindingRevision: '4',
+        primaryRemote: 'upstream',
+        page: '1',
+        state: 'open',
+        people: 'any',
+        label: 'bug',
+        milestone: 'v1.0',
+      }),
+    }));
+  });
+
   it('keeps credential authority separate from provider actor metadata', async () => {
     const credentialContext = { ...mutationContext, accountId: 'occred:v1:github:credential:r1' };
     runtimeFetchMock.mockResolvedValueOnce(Response.json({

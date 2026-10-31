@@ -66,6 +66,7 @@ import type {
   SourceControlUser,
   UpdateChangeRequestInput,
   Label,
+  MilestoneChoice,
   RepositoryReferenceReviewer,
   RepositorySelector,
 } from '@openchamber/ui/lib/api/types';
@@ -617,7 +618,7 @@ const parseReviewMutationResult = (result: MutationResultDTO): SourceControlRevi
 
 interface RepositoryChoicesDTO extends ErrorResponse {
   connected?: boolean;
-  items?: Array<{ name?: string; color?: string; id?: string; login?: string; avatarUrl?: string }>;
+  items?: Array<{ name?: string; color?: string; state?: 'open' | 'closed'; id?: string; login?: string; avatarUrl?: string }>;
 }
 
 /** Labels or reviewer candidates of one project in the bound repository's network. */
@@ -642,6 +643,13 @@ const parseLabelChoices = (items: NonNullable<RepositoryChoicesDTO['items']>): L
     throw new Error('Source control response contained an invalid label');
   }
   return item.color ? { name: item.name, color: item.color } : { name: item.name };
+});
+
+const parseMilestoneChoices = (items: NonNullable<RepositoryChoicesDTO['items']>): MilestoneChoice[] => items.map((item) => {
+  if (!isNonEmptyString(item.name) || (item.state !== 'open' && item.state !== 'closed')) {
+    throw new Error('Source control response contained an invalid milestone');
+  }
+  return { name: item.name, state: item.state };
 });
 
 const parseReviewerChoices = (items: NonNullable<RepositoryChoicesDTO['items']>): RepositoryReferenceReviewer[] => items.map((item) => {
@@ -1449,6 +1457,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       await request<ErrorResponse>(fetch, identity, '/read-cache/refresh', { method: 'POST' }, query);
     },
     referenceLabels: async (context, project) => parseLabelChoices(await readRepositoryChoices(fetch, context, project, '/references/labels')),
+    referenceMilestones: async (context, project) => parseMilestoneChoices(await readRepositoryChoices(fetch, context, project, '/references/milestones')),
     referenceReviewers: async (context, project) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers')),
     issueComment: async (payload: CommentInput) => {
       const identity = normalizeIdentity(payload);
@@ -1560,6 +1569,8 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       if (listOptions?.query) query.set('query', listOptions.query);
       if (listOptions?.state) query.set('state', listOptions.state);
       if (listOptions?.people) query.set('people', listOptions.people);
+      if (listOptions?.label) query.set('label', listOptions.label);
+      if (listOptions?.milestone) query.set('milestone', listOptions.milestone);
       const payload = await request<PageResult<Issue> & ErrorResponse>(fetch, normalized, '/issues/list', {}, query);
       if (!payload || !Array.isArray(payload.items)) throw new Error('Source control response contained invalid issues');
       return parsePage(payload, payload.items.map((item) => parseSourceIssue(item, normalized)));
