@@ -149,13 +149,24 @@ export function SidebarHeader(props: Props): React.ReactNode {
       {checked ? checkMark : null}
     </DropdownMenuItem>
   );
+  // Select sessions and the sections manager each open a mode or a surface of
+  // the list, so they share the first group; the manager arranges the sections
+  // and edits the user's own.
   const displayMenuSections: React.ReactNode[] = [
-    <DropdownMenuItem key="select" onClick={toggleSelectionMode} className="flex items-center gap-2">
-      <Icon name="checkbox-multiple" className="h-4 w-4" />
-      <span>{selectionModeEnabled
-        ? t('sessions.sidebar.header.actions.exitSelection')
-        : t('sessions.sidebar.header.actions.selectSessions')}</span>
-    </DropdownMenuItem>,
+    <>
+      <DropdownMenuItem onClick={toggleSelectionMode} className="flex items-center gap-2">
+        <Icon name="checkbox-multiple" className="h-4 w-4" />
+        <span>{selectionModeEnabled
+          ? t('sessions.sidebar.header.actions.exitSelection')
+          : t('sessions.sidebar.header.actions.selectSessions')}</span>
+      </DropdownMenuItem>
+      {showSectionControls ? (
+        <DropdownMenuItem onClick={openSectionsManager} className="flex items-center gap-2">
+          <Icon name="stack" className="h-4 w-4" />
+          <span>{t('sessions.sidebar.sections.open')}</span>
+        </DropdownMenuItem>
+      ) : null}
+    </>,
   ];
   // One view: works under their projects, or every project's works in one
   // list by time, which has no project headers to sort.
@@ -189,12 +200,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   </>);
   if (showSectionControls) {
     displayMenuSections.push(<>
-      {/* The sections, their order and what each shows live in the manager
-          beside the sidebar, which also edits the user's own sections. */}
-      <DropdownMenuItem onClick={openSectionsManager} className="flex items-center gap-2">
-        <Icon name="stack" className="h-4 w-4" />
-        <span>{t('sessions.sidebar.sections.open')}</span>
-      </DropdownMenuItem>
       {/* Rows that mix projects keep one line unless asked. */}
       {toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
         setDetailedZoneRows(!detailedZoneRows);
