@@ -14,6 +14,7 @@ import { decodeDataUrlText, getIssueLinkKind, getRepositoryIssueLinkProvider, ge
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useOpenAttachment } from './message/useOpenAttachment';
+import { INLINE_SERVER_ATTACHMENT_ID_PREFIX } from './composer/attachments/inlineMentionAttachments';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { StatusImage } from '@/components/ui/status-image';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -401,12 +402,17 @@ export const AttachedFilesList = memo(({ onShowPopup, className, draftIdentity }
   const attachedFiles = useDraftAttachedFiles(draftIdentity);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
-  const localFiles = attachedFiles.filter((file) => file.source !== 'server' && file.source !== 'vscode');
+  // A file attached by path (`source: 'server'`, a desktop file over the
+  // inline limit) gets a chip too: it leaves with every send, so the user
+  // has to see it and be able to remove it. An @-mention a failed send put
+  // back is shown by its mention in the text, which decides whether it goes.
+  const files = attachedFiles.filter((file) => file.source !== 'vscode'
+    && !file.id.startsWith(INLINE_SERVER_ATTACHMENT_ID_PREFIX));
 
-  if (localFiles.length === 0) return null;
+  if (files.length === 0) return null;
 
-  const images = localFiles.filter((f) => f.mimeType.startsWith('image/'));
-  const otherFiles = localFiles.filter((f) => !f.mimeType.startsWith('image/'));
+  const images = files.filter((f) => f.mimeType.startsWith('image/'));
+  const otherFiles = files.filter((f) => !f.mimeType.startsWith('image/'));
   const imageGallery = images.map((file) => ({
     url: file.dataUrl || file.serverPath || '',
     mimeType: file.mimeType,

@@ -537,7 +537,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addRestoredAttachment: ({ url, mimeType, filename }, target) => {
     const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const basename = attachmentBasename(filename)
-    // Use "local" source so the file renders in AttachedFilesList.
     // Set serverPath to the URL so ImagePreview can use it as the img src
     // when dataUrl is not a data: URL. sanitizeAttachmentsForSend leaves
     // dataUrl alone for non-server sources, so the URL stays intact on send.
