@@ -194,6 +194,15 @@ const legacyAutoProjectLabel = (path: string): string => {
   return derived.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
+// A custom `issuesDir` must stay inside the project: relative on either
+// separator family, with no `..` segment. Anything else stores as null so
+// the scanner falls back to the project's default issues directory.
+const issuesDirEscapesProject = (value: string): boolean =>
+  /^[a-zA-Z]:[\\/]/.test(value)
+  || value.startsWith('/')
+  || value.startsWith('\\')
+  || value.split(/[\\/]/).includes('..');
+
 const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
   if (!value || typeof value !== 'object') {
     return undefined;
@@ -330,6 +339,12 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       project.sidebarCollapsed = candidate.sidebarCollapsed;
+    }
+    // Absent → key omitted (the scanner defaults to its own directory);
+    // present but invalid → null so a stale unsafe value never survives.
+    if (candidate.issuesDir !== undefined) {
+      const issuesDir = parseNonEmptyTrimmedString(candidate.issuesDir, {});
+      project.issuesDir = issuesDir && !issuesDirEscapesProject(issuesDir) ? issuesDir : null;
     }
     result.push(project);
   }

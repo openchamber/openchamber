@@ -184,6 +184,27 @@ describe("useProjectsStore default model and thinking level", () => {
 
     expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe("plan")
   })
+
+  test("sanitizes a project issuesDir from settings", () => {
+    // SAFETY: the projects fixture only feeds sanitizeProjects, which parses
+    // each entry itself; the non-string issuesDir is part of the case matrix.
+    useProjectsStore.getState().synchronizeFromSettings({
+      projects: [
+        { id: "project-a", path: "/repo", issuesDir: "  plan/issues  " },
+        { id: "project-b", path: "/repo-b", issuesDir: "/etc/escape" },
+        { id: "project-c", path: "/repo-c", issuesDir: "../escape" },
+        { id: "project-d", path: "/repo-d", issuesDir: 42 },
+        { id: "project-e", path: "/repo-e" },
+      ],
+    } as DesktopSettings)
+
+    const projects = useProjectsStore.getState().projects
+    expect(projects[0]?.issuesDir).toBe("plan/issues")
+    expect(projects[1]?.issuesDir).toBe(null)
+    expect(projects[2]?.issuesDir).toBe(null)
+    expect(projects[3]?.issuesDir).toBe(null)
+    expect(projects[4]?.issuesDir).toBe(undefined)
+  })
 })
 
 describe("useProjectsStore.addProjects", () => {

@@ -555,6 +555,8 @@ ConPTY or Console Window Host behavior.
 
 Persistence path normalization (`normalizePathForPersistence` / `normalizeSettingsPaths` / `sanitizeProjects`, reached via the `readSettingsFromDiskMigrated` migration and `persistSettings`) resolves symlinks with `realpathSync` and, on case-insensitive filesystems (`win32`, `darwin`), also recovers the on-disk casing of each path component via `readdirSync` (exact-name match preferred so case-sensitive volumes are never rewritten). `realpathSync` alone does not report on-disk casing on these volumes, so without the readdir step a project stored with the wrong case would never match the real-case `directory` opencode reports for its sessions (issue #1913). A corrected path is flagged `changed` and written back to `settings.json`. A path `realpathSync` cannot resolve (missing, no permission) is kept exactly as stored, so case recovery can never swap in a different existing sibling. On macOS only `/` separates components; a backslash is a legal name character.
 
+`sanitizeProjects` also validates the per-project `issuesDir` (the local tracker's issues-directory override): a present value is kept, trimmed, only when it is a relative path on either separator family with no `..` segment; otherwise it is stored as `null`, and an absent key stays omitted. This is the settings-layer defense so a stored `issuesDir` can never point the scanner outside the project; the scanner re-validates independently and falls back to its default directory.
+
 ## Public exports (theme-runtime.js)
 - `createThemeRuntime(dependencies)`: creates custom theme runtime for on-disk theme discovery and JSON normalization/validation.
 - Returned API:

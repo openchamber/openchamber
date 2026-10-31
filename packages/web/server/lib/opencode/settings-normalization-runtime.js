@@ -1,3 +1,5 @@
+import { asNonEmptyString } from '../shared/guards.js';
+
 export const createSettingsNormalizationRuntime = (dependencies) => {
   const {
     os,
@@ -186,6 +188,14 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     }
 
     const hexColorPattern = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
+    // A custom `issuesDir` must stay inside the project: relative on either
+    // separator family, with no `..` segment. Anything else stores as null
+    // so the scanner falls back to the project's default issues directory.
+    const issuesDirEscapesProject = (value) =>
+      /^[a-zA-Z]:[\\/]/.test(value)
+      || value.startsWith('/')
+      || value.startsWith('\\')
+      || value.split(/[\\/]/).includes('..');
     const normalizeIconBackground = (value) => {
       if (typeof value !== 'string') {
         return null;
@@ -272,6 +282,13 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
 
       if (typeof candidate.sidebarCollapsed === 'boolean') {
         project.sidebarCollapsed = candidate.sidebarCollapsed;
+      }
+
+      // Absent → key omitted (the scanner defaults to its own directory);
+      // present but invalid → null so a stale unsafe value never survives.
+      if (candidate.issuesDir !== undefined) {
+        const issuesDir = asNonEmptyString(candidate.issuesDir);
+        project.issuesDir = issuesDir && !issuesDirEscapesProject(issuesDir) ? issuesDir : null;
       }
 
       result.push(project);

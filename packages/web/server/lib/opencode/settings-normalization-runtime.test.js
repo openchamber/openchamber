@@ -152,6 +152,60 @@ describe('settings normalization runtime - symlink resolution', () => {
       expect(runtime.sanitizeProjects(JSON.parse(JSON.stringify(result)))).toEqual(result);
     });
 
+    it('keeps a valid project issuesDir and omits it when absent', () => {
+      const runtime = createTestRuntime();
+
+      const result = runtime.sanitizeProjects([
+        { id: 'proj1', path: '/a', issuesDir: '  plan/issues  ' },
+        { id: 'proj2', path: '/b' },
+      ]);
+
+      expect(result[0].issuesDir).toBe('plan/issues');
+      expect(result[1].issuesDir).toBe(undefined);
+    });
+
+    it('nulls an absolute project issuesDir on either separator family', () => {
+      const runtime = createTestRuntime();
+
+      const result = runtime.sanitizeProjects([
+        { id: 'proj1', path: '/a', issuesDir: '/etc/escape' },
+        { id: 'proj2', path: '/b', issuesDir: 'C:\\escape' },
+        { id: 'proj3', path: '/c', issuesDir: 'C:/escape' },
+      ]);
+
+      expect(result[0].issuesDir).toBe(null);
+      expect(result[1].issuesDir).toBe(null);
+      expect(result[2].issuesDir).toBe(null);
+    });
+
+    it('nulls a project issuesDir whose segments escape the project', () => {
+      const runtime = createTestRuntime();
+
+      const result = runtime.sanitizeProjects([
+        { id: 'proj1', path: '/a', issuesDir: '../escape' },
+        { id: 'proj2', path: '/b', issuesDir: 'plan\\..\\escape' },
+        { id: 'proj3', path: '/c', issuesDir: '..' },
+      ]);
+
+      expect(result[0].issuesDir).toBe(null);
+      expect(result[1].issuesDir).toBe(null);
+      expect(result[2].issuesDir).toBe(null);
+    });
+
+    it('nulls a non-string project issuesDir', () => {
+      const runtime = createTestRuntime();
+
+      const result = runtime.sanitizeProjects([
+        { id: 'proj1', path: '/a', issuesDir: 42 },
+        { id: 'proj2', path: '/b', issuesDir: null },
+        { id: 'proj3', path: '/c', issuesDir: '   ' },
+      ]);
+
+      expect(result[0].issuesDir).toBe(null);
+      expect(result[1].issuesDir).toBe(null);
+      expect(result[2].issuesDir).toBe(null);
+    });
+
     it('deduplicates projects that resolve to the same realpath', () => {
       const runtime = createTestRuntime({
         realpathSync: (p) => p.startsWith('/symlink') ? '/real/project' : p,
