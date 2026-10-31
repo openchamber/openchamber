@@ -41,6 +41,15 @@ const getDisplayModel = (
 
 const DEFAULT_VARIANT_VALUE = '__default__';
 
+/** Values in milliseconds; zero keeps OpenCode's own retry wait. */
+const RETRY_WAIT_OPTIONS = [
+  { value: '0', labelKey: 'settings.openchamber.defaults.retryWaitMax.provider' },
+  { value: '15000', labelKey: 'settings.openchamber.defaults.retryWaitMax.15s' },
+  { value: '30000', labelKey: 'settings.openchamber.defaults.retryWaitMax.30s' },
+  { value: '60000', labelKey: 'settings.openchamber.defaults.retryWaitMax.1m' },
+  { value: '300000', labelKey: 'settings.openchamber.defaults.retryWaitMax.5m' },
+] as const;
+
 /**
  * The thinking level beside a model picker, shown only when that model has
  * levels. A saved level also keeps it on screen while the catalog loads, so
@@ -128,6 +137,7 @@ export const DefaultsSettings: React.FC = () => {
   const [walkthroughModelVariant, setWalkthroughModelVariant] = React.useState<string | undefined>();
   const [fallbackModel, setFallbackModel] = React.useState<string | undefined>();
   const [fallbackVariant, setFallbackVariant] = React.useState<string | undefined>();
+  const [retryWaitMaxMs, setRetryWaitMaxMs] = React.useState(0);
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
@@ -168,6 +178,9 @@ export const DefaultsSettings: React.FC = () => {
           const fallbackThinking = data.fallbackVariant?.trim();
           if (fallbackThinking) {
             setFallbackVariant(fallbackThinking);
+          }
+          if (Number.isFinite(data.retryWaitMaxMs)) {
+            setRetryWaitMaxMs(Math.max(0, data.retryWaitMaxMs ?? 0));
           }
         }
       } catch (error) {
@@ -345,6 +358,17 @@ export const DefaultsSettings: React.FC = () => {
     []
   );
 
+  const handleRetryWaitMaxChange = React.useCallback(async (value: string) => {
+    const next = Number(value);
+    if (!Number.isFinite(next) || next < 0) return;
+    setRetryWaitMaxMs(next);
+    try {
+      await updateDesktopSettings({ retryWaitMaxMs: next });
+    } catch (error) {
+      console.warn('Failed to save retry wait cap:', error);
+    }
+  }, []);
+
   // The walkthrough cannot work at all without schema-shaped output, so models
   // the catalog says cannot do it are hidden rather than offered and then
   // refused. A missing capability is not a "no": roughly half the catalog omits
@@ -361,6 +385,10 @@ export const DefaultsSettings: React.FC = () => {
     [walkthroughModelOverride]
   );
   const parsedFallbackModel = React.useMemo(() => getDisplayModel(fallbackModel), [fallbackModel]);
+  const retryWaitLabel = React.useMemo(() => {
+    const option = RETRY_WAIT_OPTIONS.find((entry) => Number(entry.value) === retryWaitMaxMs);
+    return option ? t(option.labelKey) : `${Math.round(retryWaitMaxMs / 1000)}s`;
+  }, [retryWaitMaxMs, t]);
   const variantsOf = React.useCallback((providerId: string, modelId: string) => {
     if (!providerId || !modelId) return [];
     const provider = providers.find((p) => p.id === providerId);
@@ -519,6 +547,33 @@ export const DefaultsSettings: React.FC = () => {
               {t('settings.openchamber.defaults.usageLimits.openProviders')}
             </SettingsInlineLink>
           </p>
+        </SettingsSection>
+      )}
+
+      {/* The managed OpenCode plugin applies the cap; VS Code runs its own OpenCode without it. */}
+      {isVSCode ? null : (
+        <SettingsSection title={t('settings.openchamber.defaults.retryTitle')} contentClassName="space-y-1">
+          <SettingsFieldRow
+            settingsItem="sessions.retry-wait"
+            label={t('settings.openchamber.defaults.retryWaitMax')}
+            info={t('settings.openchamber.defaults.retryWaitMaxInfo')}
+          >
+            <Select value={String(retryWaitMaxMs)} onValueChange={handleRetryWaitMaxChange}>
+              <SelectTrigger
+                className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+                aria-label={t('settings.openchamber.defaults.retryWaitMax')}
+              >
+                <SelectValue>{retryWaitLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {RETRY_WAIT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsFieldRow>
         </SettingsSection>
       )}
 

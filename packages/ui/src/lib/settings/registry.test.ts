@@ -24,6 +24,14 @@ import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
 
 describe('settings registry', () => {
+  test('retry wait cap is a non-negative profile setting', () => {
+    expect(SETTINGS_REGISTRY.retryWaitMaxMs.scope).toBe('profile');
+    expect(SETTINGS_KEYS).toContain('retryWaitMaxMs');
+    expect(parseSettingsDocument({ retryWaitMaxMs: 30_000 })).toEqual({ retryWaitMaxMs: 30_000 });
+    expect(parseSettingsDocument({ retryWaitMaxMs: -1 })).toEqual({ retryWaitMaxMs: 0 });
+    expect(parseSettingsDocument({ retryWaitMaxMs: '30000' })).toEqual({});
+  });
+
   test('dictation auto-send is opt-in and adopts only explicit boolean preferences', () => {
     const dom = installHookTestDom();
     window.__zustand_config_store__ = useConfigStore;
