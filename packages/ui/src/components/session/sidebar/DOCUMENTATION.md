@@ -598,8 +598,9 @@ never counts. `list/SessionProjectCollection.tsx` orders the works by the first 
 their sessions in the shared lifecycle order (`orderInWorkWorks` in
 `works/sidebarWorks.ts`) and passes `workEntries` to the row model. In work
 spans registered projects. A session whose destination has no registered project
-stays out of In work, Pinned and search until `sync/session-admission.ts` checks
-its OpenCode configuration and registers its folder. Pins and work state cannot
+stays out of In work, Pinned and search until its folder is registered: by the
+user opening the session, or by `sync/session-admission.ts` after a move out of
+a registered project. Pins and work state cannot
 admit a destination, including in the tray. The raw global cache retains these
 sessions for cleanup and lineage. A work In work lists leaves its project
 or folder (`movedSessionIds`, `movedGroupKeys`) unless "Also show in work

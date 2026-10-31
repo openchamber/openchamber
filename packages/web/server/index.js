@@ -2857,6 +2857,15 @@ async function main(options = {}) {
     openCodeTrust,
     registerSessionProject: settingsRuntime.registerSessionProject,
     resolveSessionDirectory: async (sessionID) => (await openCodeSessionClient().session.get({ sessionID })).location.directory,
+    emitWorktreeChanged: ({ directories, at }) => {
+      for (const client of uiOpenChamberEventClients) {
+        try {
+          writeSseEvent(client, { type: 'openchamber:worktree-changed', properties: { directories, at } });
+        } catch {
+          uiOpenChamberEventClients.delete(client);
+        }
+      }
+    },
   });
   await featureRoutesRuntime.registerRoutes(app, {
     environmentStore,

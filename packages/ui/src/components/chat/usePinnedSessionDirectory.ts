@@ -4,7 +4,6 @@ import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionDirectoryAdmitted } from '@/sync/session-admission-rule';
-import { admitSession } from '@/sync/session-admission';
 import { getChatsRoot, subscribeChatsRoot } from '@/lib/chatDirectories';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 
@@ -30,10 +29,8 @@ export const usePinnedSessionDirectory = (selection: PinnedSelection | null): st
     // Managed roots can arrive after a pinned selection was restored.
     React.useSyncExternalStore(subscribeChatsRoot, getChatsRoot, getChatsRoot);
     useSpaceArchivesStore((state) => state.byDirectory);
-    const admitted = isSessionDirectoryAdmitted(directory, projects, worktrees);
-    const sessionId = selection?.sessionId;
-    React.useEffect(() => {
-        if (sessionId && directory && !admitted) void admitSession(sessionId, directory, true);
-    }, [admitted, directory, sessionId]);
-    return admitted ? directory : null;
+    // A column only hides an unknown destination. Pins persist across
+    // launches, so admitting from here would register folders nobody opened;
+    // a live move is admitted by `subscribeSessionAdmission`.
+    return isSessionDirectoryAdmitted(directory, projects, worktrees) ? directory : null;
 };

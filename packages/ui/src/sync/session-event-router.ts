@@ -4,6 +4,7 @@ import { compact } from "@/lib/opencode/model"
 import {
   isGlobalSessionRecencyOnlyUpdate,
   mergeSessionDirectoryMetadata,
+  resolveGlobalSessionDirectory,
   useGlobalSessionsStore,
   type GlobalSessionMutation,
 } from "@/stores/useGlobalSessionsStore"
@@ -24,6 +25,15 @@ const scheduleGlobalSessionUpdate = (session: Session): void => {
 }
 
 subscribeRuntimeEndpointWillChange(clearPendingGlobalSessionUpdates)
+
+type GlobalSessionMove = { sessionId: string; from: string; to: string }
+const sessionMoveListeners = new Set<(move: GlobalSessionMove) => void>()
+
+/** Moves OpenCode reports while this client listens; history and snapshots never count. */
+export const subscribeGlobalSessionMoves = (listener: (move: GlobalSessionMove) => void): (() => void) => {
+  sessionMoveListeners.add(listener)
+  return () => { sessionMoveListeners.delete(listener) }
+}
 
 /**
  * Applies a session patch to the global list's own record.
@@ -64,6 +74,7 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[
   const store = useGlobalSessionsStore.getState()
   const overlay = new Map(store.entityById)
   const mutations: GlobalSessionMutation[] = []
+  const moves: GlobalSessionMove[] = []
   let flushedRecency = false
 
   const appendUpsert = (session: Session): void => {
@@ -105,6 +116,9 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[
       if (!currentSession) continue
       const session = stripSessionDiffSnapshots(applyPatch(currentSession, patch))
       if (shouldSkipStaleSessionEvent(currentSession, session)) continue
+      const from = patch.directory === undefined ? null : resolveGlobalSessionDirectory(currentSession)
+      const to = patch.directory === undefined ? null : resolveGlobalSessionDirectory(session)
+      if (from && to && from !== to) moves.push({ sessionId: sessionID, from, to })
       if (isGlobalSessionRecencyOnlyUpdate(currentSession, session)) {
         scheduleGlobalSessionUpdate(session)
       } else {
@@ -127,6 +141,7 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[
   if (flushedRecency) streamPerfMark("global_sessions.event_update_flush")
   store.applySessionMutations(mutations)
   streamPerfCount("ui.global_sessions.event_update_publication")
+  for (const move of moves) for (const listener of sessionMoveListeners) listener(move)
 }
 
 export const applySessionEventToGlobalSessions = (payload: SyncEvent): void => {
