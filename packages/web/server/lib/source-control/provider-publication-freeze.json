@@ -96,7 +96,8 @@
         "issueCloseReason": true,
         "changeRequestTemplates": [],
         "changeRequestPatch": true,
-        "discussions": true
+        "discussions": true,
+        "labels": true
       }
     },
     {
@@ -183,7 +184,8 @@
         "changeRequestTemplates": [
           ".gitlab/merge_request_templates/Default.md"
         ],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "labels": true
       }
     },
     {
@@ -270,7 +272,9 @@
           ".gitea/PULL_REQUEST_TEMPLATE.md",
           ".github/pull_request_template.md"
         ],
-        "changeRequestPatch": true
+        "changeRequestPatch": true,
+        "labels": true,
+        "milestones": true
       }
     }
   ],

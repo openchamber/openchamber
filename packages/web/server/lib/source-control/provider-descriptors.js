@@ -173,6 +173,8 @@ export function publicProviderDescriptor(descriptor, order, extension) {
   if (capabilities.reviewModel !== undefined) published.features.reviewModel = capabilities.reviewModel;
   if (capabilities.revisions !== undefined) published.features.revisions = capabilities.revisions;
   if (capabilities.createVia !== undefined) published.features.createByPush = capabilities.createVia === 'push';
+  if (capabilities.labels === true) published.features.labels = true;
+  if (capabilities.milestones === true) published.features.milestones = true;
   if (capabilities.discussions !== undefined) {
     published.features.discussions = capabilities.discussions;
     if (presentation.urls.discussion) published.urls.discussion = [...presentation.urls.discussion];

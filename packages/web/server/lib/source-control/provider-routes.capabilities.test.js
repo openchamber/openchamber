@@ -67,6 +67,7 @@ describe('provider route capabilities', () => {
     ['post', '/api/source-control/acme/pr/thread/reply'],
     ['post', '/api/source-control/acme/issues/labels'],
     ['get', '/api/source-control/acme/references/labels'],
+    ['get', '/api/source-control/acme/references/milestones'],
     ['get', `/api/source-control/acme/uploads/${'a'.repeat(32)}/picture.png`],
   ])('answers %s %s with a stable 501 when the descriptor turns the capability off', async (method, path) => {
     const { app, proxy } = appWith();
@@ -122,6 +123,41 @@ describe('provider route capabilities', () => {
     const shell = registerProviderRoutes({ get: vi.fn(), post: vi.fn(), delete: vi.fn() }, { providers });
     await expect(shell.resolveChangeRequestSource({ context: { provider: 'sourcehut' } }))
       .rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400 });
+  });
+
+  it('answers /references/milestones for a provider that keeps the capability', async () => {
+    const withMilestones = Object.freeze({ ...acme, capabilities: { ...acme.capabilities, milestones: true } });
+    const impl = fakeImplementation();
+    impl.resources.listMilestones = vi.fn(async () => [{ name: 'v1.0', state: 'open' }]);
+    const providers = createSourceControlProviders({
+      descriptors: createProviderDescriptors([withMilestones]),
+      loaders: { acme: async () => ({ createProvider: () => impl }) },
+    });
+    const app = express();
+    app.use(express.json());
+    registerSourceControlRoutes(app, {
+      providers,
+      bindingService: { validateReadContext: vi.fn(async () => ({ provider: 'acme', instance, accountId: 'account', directory: '/repo', primaryRemote: 'origin', repositoryId: 'repo-1', bindingRevision: 1 })), validateMutationContext: vi.fn(), accountUnavailable: vi.fn(), accountConnected: vi.fn() },
+      identityProvisioning: { backfillAccountIdentities: vi.fn(), ensureAccountIdentity: vi.fn(), repointAccountIdentities: vi.fn() },
+      mutationExecutor: { read: vi.fn(), execute: vi.fn() },
+    });
+    const response = await request(app).get('/api/source-control/acme/references/milestones')
+      .query({ instance, directory: '/repo', owner: 'acme', repo: 'app' }).expect(200);
+    expect(response.body).toEqual({ connected: true, items: [{ name: 'v1.0', state: 'open' }] });
+    expect(impl.resources.listMilestones).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/repo', project: { owner: 'acme', name: 'app' },
+    }));
+  });
+
+  it('publishes labels and milestones features only when the capability is on', async () => {
+    const { publicProviderDescriptor } = await import('./provider-descriptors.js');
+    // gitlabDescriptor declares the labels capability; acme turns it off.
+    expect(publicProviderDescriptor(gitlabDescriptor, 0).features.labels).toBe(true);
+    expect(publicProviderDescriptor(gitlabDescriptor, 0).features).not.toHaveProperty('milestones');
+    const withMilestones = Object.freeze({ ...gitlabDescriptor, capabilities: { ...gitlabDescriptor.capabilities, milestones: true } });
+    expect(publicProviderDescriptor(withMilestones, 0).features).toMatchObject({ labels: true, milestones: true });
+    // A capability that is declared but off publishes nothing, not false.
+    expect(publicProviderDescriptor(acme, 0).features).not.toHaveProperty('labels');
   });
 });
 

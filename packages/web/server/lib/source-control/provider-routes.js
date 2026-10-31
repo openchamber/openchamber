@@ -797,6 +797,7 @@ export function registerProviderRoutes(app, {
     for (const [suffix, capability, method] of [
       ['/references/labels', 'labels', 'listLabels'],
       ['/references/reviewers', 'reviewers', 'listReviewerCandidates'],
+      ['/references/milestones', 'milestones', 'listMilestones'],
     ]) {
       boundRead(capability, suffix, async ({ req, res, impl, instance, directory, trustedContext }) => {
         const read = requireResource(impl, method);

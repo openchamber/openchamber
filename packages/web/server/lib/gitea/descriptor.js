@@ -35,6 +35,7 @@ export const giteaDescriptor = Object.freeze({
     reviews: true,
     state: true,
     labels: true,
+    milestones: true,
     reviewers: true,
     // Gitea's API can neither answer nor resolve a review thread.
     reviewThreads: Object.freeze({ start: false, reply: false, resolve: false }),

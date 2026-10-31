@@ -60,7 +60,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     features: {
       ...BUILT_IN_FEATURES_OFF,
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true, issueCloseReason: true,
-      changeRequestPatch: true,
+      changeRequestPatch: true, labels: true,
     },
   },
   {
@@ -95,7 +95,7 @@ export const BUILT_IN_SOURCE_CONTROL_PROVIDERS: readonly PublishedSourceControlP
     features: {
       ...BUILT_IN_FEATURES_OFF,
       startThread: true, authorCanReview: true, projectUploads: true, changeRequestPatch: true,
-      changeRequestTemplates: ['.gitlab/merge_request_templates/Default.md'],
+      changeRequestTemplates: ['.gitlab/merge_request_templates/Default.md'], labels: true,
     },
   },
 ];
