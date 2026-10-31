@@ -92,6 +92,7 @@ const KIND_KEY = {
   worktree: 'sessions.sidebar.sections.kind.worktree',
   space: 'sessions.sidebar.sections.kind.space',
   run: 'sessions.sidebar.sections.kind.run',
+  scheduled: 'sessions.sidebar.sections.kind.scheduled',
 } as const satisfies Record<SidebarSectionFilter['kinds'][number], I18nKey>;
 const LINK_KEY = {
   pr: 'sessions.sidebar.sections.link.pr',

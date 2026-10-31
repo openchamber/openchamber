@@ -52,6 +52,10 @@ with its named pin lists. How the rows are drawn stays with the row model
   clock that moves by the local hour while such a section is shown
   (`useSidebarSectionsNow`), so "Today" turns over at local midnight in any
   time zone.
+- "Scheduled run" is a type of its own beside what the work is (a session or a
+  worktree): a work whose top-level session a scheduled task started
+  (`openchamber.kind = 'scheduled'`, cleared on a fork). With the text
+  condition it lists the runs of one task, whose sessions carry the task's name.
 - The text condition ("Title or branch") matches as the sidebar search does:
   every word somewhere in the title of one of the work's top-level sessions,
   the worktree's name or its branch. Save as section in the search makes a

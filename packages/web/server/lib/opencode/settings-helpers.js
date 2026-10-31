@@ -43,7 +43,7 @@ const sidebarSectionSchema = z.union([
       states: sidebarChips(['running', 'needs-answer', 'unread', 'failed', 'looks-done']).catch([]),
       work: sidebarChips(['in-work', 'done']).catch([]),
       pins: sidebarIds.catch([]),
-      kinds: sidebarChips(['session', 'worktree', 'space', 'run']).catch([]),
+      kinds: sidebarChips(['session', 'worktree', 'space', 'run', 'scheduled']).catch([]),
       links: sidebarChips(['pr', 'issue', 'tracker', 'plan', 'goal']).catch([]),
       projectIds: sidebarIds.catch([]),
       activity: z.enum(['any', 'today', 'two-days', 'week', 'stalled']).catch('any'),

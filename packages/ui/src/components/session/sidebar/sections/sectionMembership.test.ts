@@ -7,7 +7,7 @@ const ref = (id: string, projectId = 'p1'): SidebarWorkRef => ({ kind: 'session'
 
 const facts = (overrides: Partial<SidebarWorkFacts> = {}): SidebarWorkFacts => ({
   kind: 'session', projectId: 'p1', pin: null, inWork: false, done: false, running: false, needsAnswer: false,
-  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], ...overrides,
+  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], scheduled: false, ...overrides,
 });
 
 const section = (id: string, overrides: Partial<CustomSidebarSection> = {}): CustomSidebarSection => ({

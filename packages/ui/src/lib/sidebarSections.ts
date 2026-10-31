@@ -21,7 +21,7 @@ export const SIDEBAR_SECTION_STATES = ['running', 'needs-answer', 'unread', 'fai
 export type SidebarSectionState = typeof SIDEBAR_SECTION_STATES[number];
 export const SIDEBAR_SECTION_WORK_STATES = ['in-work', 'done'] as const;
 export type SidebarSectionWorkState = typeof SIDEBAR_SECTION_WORK_STATES[number];
-export const SIDEBAR_SECTION_KINDS = ['session', 'worktree', 'space', 'run'] as const;
+export const SIDEBAR_SECTION_KINDS = ['session', 'worktree', 'space', 'run', 'scheduled'] as const;
 export type SidebarSectionKind = typeof SIDEBAR_SECTION_KINDS[number];
 export const SIDEBAR_SECTION_LINKS = ['pr', 'issue', 'tracker', 'plan', 'goal'] as const;
 export type SidebarSectionLink = typeof SIDEBAR_SECTION_LINKS[number];
@@ -221,7 +221,10 @@ export const sidebarSectionReadsLiveState = (filter: SidebarSectionFilter): bool
 
 /** What the filter is matched against: one work's facts. */
 export type SidebarWorkFacts = {
-  kind: SidebarSectionKind;
+  /** What the work is; a scheduled task's run is also a session or a worktree, so it is its own fact. */
+  kind: Exclude<SidebarSectionKind, 'scheduled'>;
+  /** A scheduled task started one of its top-level sessions. */
+  scheduled: boolean;
   projectId: string | null;
   /** The pin list the work is filed in (`DEFAULT_PIN_LIST` for Pinned), or null. */
   pin: string | null;
@@ -291,7 +294,7 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
   if (filter.states.length > 0 && !filter.states.some((state) => matchesState(state, facts))) return false;
   if (filter.work.length > 0 && !filter.work.some((state) => (state === 'in-work' ? facts.inWork : facts.done))) return false;
   if (filter.pins.length > 0 && (facts.pin === null || !filter.pins.includes(facts.pin))) return false;
-  if (filter.kinds.length > 0 && !filter.kinds.includes(facts.kind)) return false;
+  if (filter.kinds.length > 0 && !filter.kinds.some((kind) => (kind === 'scheduled' ? facts.scheduled : kind === facts.kind))) return false;
   if (filter.links.length > 0 && !filter.links.some((link) => matchesLink(link, facts))) return false;
   if (filter.projectIds.length > 0 && (facts.projectId === null || !filter.projectIds.includes(facts.projectId))) return false;
   if (filter.text.trim() !== '' && !matchesRankQuery(facts.texts, filter.text)) return false;

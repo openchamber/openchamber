@@ -9,7 +9,7 @@ import {
 
 const facts = (overrides: Partial<SidebarWorkFacts> = {}): SidebarWorkFacts => ({
   kind: 'session', projectId: 'p1', pin: null, inWork: false, done: false, running: false, needsAnswer: false,
-  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], ...overrides,
+  unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], scheduled: false, ...overrides,
 });
 
 describe('sidebarSectionsSchema', () => {
@@ -74,6 +74,16 @@ describe('matchesSidebarSectionFilter', () => {
     expect(matchesSidebarSectionFilter(filter, facts({ pin: 'release' }), now)).toBe(true);
     expect(matchesSidebarSectionFilter(filter, facts({ pin: 'pinned' }), now)).toBe(false);
     expect(matchesSidebarSectionFilter(filter, facts(), now)).toBe(false);
+  });
+
+  test('a scheduled run is a type of its own beside what the work is', () => {
+    const scheduled = { ...EMPTY_SIDEBAR_SECTION_FILTER, kinds: ['scheduled' as const] };
+    expect(matchesSidebarSectionFilter(scheduled, facts({ scheduled: true }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter(scheduled, facts({ kind: 'worktree', scheduled: true }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter(scheduled, facts(), now)).toBe(false);
+    // With a title: the runs of one task.
+    expect(matchesSidebarSectionFilter({ ...scheduled, text: 'nightly triage' }, facts({ scheduled: true, texts: ['Nightly triage 2026-10-31'] }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter({ ...scheduled, text: 'nightly triage' }, facts({ texts: ['Nightly triage notes'] }), now)).toBe(false);
   });
 
   test('text: every word in a title or the branch, as the sidebar search matches', () => {

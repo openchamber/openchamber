@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { Session } from '@/lib/opencode/model';
 import { getLinkedIssues, isLinkedChange } from '@/lib/linkedIssues';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
@@ -19,6 +20,9 @@ export type SidebarLiveFacts = {
   unreadIds: ReadonlySet<string>;
   failedIds: ReadonlySet<string>;
 };
+
+/** A session a scheduled task started (`scheduled-tasks/runtime.js` marks it so at creation). */
+const scheduledRunSchema = z.object({ openchamber: z.object({ kind: z.literal('scheduled') }) });
 
 /** Sessions a project plan was sent to, read only while a shown section asks for plans. */
 type SidebarPlanFacts = ReadonlySet<string>;
@@ -76,6 +80,7 @@ export const buildSidebarWorkFacts = (ref: SidebarWorkRef, context: FactsContext
   else pin = getSessionPinList(root);
   return {
     kind,
+    scheduled: top.some((session) => scheduledRunSchema.safeParse(session.metadata).success),
     projectId: ref.projectId,
     pin,
     inWork,
