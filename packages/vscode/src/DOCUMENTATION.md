@@ -305,9 +305,9 @@ every surface reached only through those is unreachable.
 | Worktrees | PARTIAL | Create/remove reachable via `SessionSidebar` → `NewWorktreeDialog` and `sessionWorktreeMenu`. `WorktreesView` is `MainLayout`-only |
 | Git | PARTIAL | Read-only status/branches/log via `useGitStore` in `SessionSidebar`, `ChatInput`, `WorkStatusPrimaryGroup`. Stage/commit/push/history/merge/rebase live in `GitView` + `views/git/*`, cut off with `ContextPanel` |
 | Voice / dictation | PARTIAL | `ComposerDictation` renders in `ChatInput`; the `voice` settings page is VS Code-gated |
-| Command palette | PARTIAL | `useKeyboardShortcuts` runs from `SyncAppEffects` and `open_command_palette` toggles `isCommandPaletteOpen`, but `CommandPalette` renders only in `MainLayout` — the shortcut opens nothing |
+| Command palette | NOT MOUNTED | `CommandPalette` renders only in `MainLayout`; `useKeyboardShortcuts` gates `open_command_palette` off in the VS Code runtime, so the keystroke stays with VS Code's own command palette |
 | ContextPanel / project context (notes, todos, plans tabs) | NOT MOUNTED | `ContextPanel`, `ContextPanelRail`, `RightSidebarTabs` imported only by `MainLayout` and `MobileWorkspaceDrawer` |
-| Terminal | NOT MOUNTED | `TerminalView` imported only by `ContextPanel` and `MobileWorkspaceDrawer`. `webview/api/index.ts` ships `createStubTerminalAPI()` whose every method throws unsupported |
+| Terminal | NOT MOUNTED | `TerminalView` imported only by `ContextPanel` and `MobileWorkspaceDrawer`. `webview/api/index.ts` ships `createStubTerminalAPI()` whose every method throws unsupported; `useKeyboardShortcuts` gates `toggle_terminal` off in the VS Code runtime, leaving the keystroke to VS Code's own terminal |
 | Files view | NOT MOUNTED | lazy `FilesView` in `ContextPanel`; `SidebarFilesTree` is `MainLayout`-only |
 | Diff view | NOT MOUNTED | lazy `DiffView` in `ContextPanel` |
 | Git view | NOT MOUNTED | lazy `GitView` in `ContextPanel` |
@@ -326,7 +326,6 @@ Handlers with no reachable caller in the VS Code webview.
 
 | Handler | Why unreachable |
 |---|---|
-| `api:git/ignore-openchamber` | No reference anywhere in `packages/vscode/webview` |
 | `api:git/commit`, `api:git/commit-files`, `api:git/commit-file-diff` | Only `GitView` and `views/git/*` call them |
 | `api:git/log` (write paths), `api:git/checkout`, `api:git/checkout-commit`, `api:git/reset-to-commit`, `api:git/revert-commit`, `api:git/cherry-pick` | `views/git/HistoryCommitRow.tsx` only |
 | `api:git/merge`, `api:git/merge/abort`, `api:git/merge/continue`, `api:git/rebase`, `api:git/rebase/abort`, `api:git/rebase/continue`, `api:git/conflict-details` | `GitView` only |
@@ -336,7 +335,6 @@ Handlers with no reachable caller in the VS Code webview.
 | `api:git/pr-description` | `views/git/PullRequestSection.tsx` only |
 | `api:git/identity` | `git` settings page is VS Code-gated |
 | `api:fs:write`, `api:fs:rename`, `api:fs:delete`, `api:fs:reveal`, `api:fs:mkdir` | `FilesView`, `SidebarFilesTree`, `PlanView` only |
-| `api:fs:exec` | Terminal API is a throwing stub; no other caller |
 
 Reachable filesystem routes: `api:fs:read` (attachments), `api:fs:search`
 (`useFileSearchStore` behind composer file mentions), `api:fs:list`, `api:fs:stat`.

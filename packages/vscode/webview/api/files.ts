@@ -1,12 +1,11 @@
 import type {
-  CommandExecResult,
   DirectoryListResult,
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
 
-import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
+import { sendBridgeMessage } from './bridge';
 
 const normalizePath = (value: string): string => value.replace(/\\/g, '/');
 
@@ -118,19 +117,6 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     const target = normalizePath(path);
     const data = await sendBridgeMessage<{ success?: boolean }>('api:fs:reveal', { path: target });
     return { success: Boolean(data?.success) };
-  },
-
-  async execCommands(commands: string[], cwd: string): Promise<{ success: boolean; results: CommandExecResult[] }> {
-    const targetCwd = normalizePath(cwd);
-    const data = await sendBridgeMessageWithOptions<{ success: boolean; results?: CommandExecResult[] }>('api:fs:exec', {
-      commands,
-      cwd: targetCwd,
-    }, { timeoutMs: 300000 });
-
-    return {
-      success: Boolean(data?.success),
-      results: Array.isArray(data?.results) ? data.results : [],
-    };
   },
 
   async downloadFile(path: string): Promise<void> {

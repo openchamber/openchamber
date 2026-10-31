@@ -1415,15 +1415,6 @@ export type FileContentSearchOutcome =
   /** The server has no ripgrep to search with. */
   | { status: 'unavailable' };
 
-export interface CommandExecResult {
-  command: string;
-  success: boolean;
-  exitCode?: number;
-  stdout?: string;
-  stderr?: string;
-  error?: string;
-}
-
 interface ListDirectoryOptions {
   respectGitignore?: boolean;
 }
@@ -1454,7 +1445,6 @@ export interface FilesAPI {
   delete?(path: string): Promise<{ success: boolean }>;
   rename?(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }>;
   revealPath?(path: string): Promise<{ success: boolean }>;
-  execCommands?(commands: string[], cwd: string): Promise<{ success: boolean; results: CommandExecResult[] }>;
   downloadFile?(path: string, options?: FileReadOptions): Promise<void>;
 }
 
