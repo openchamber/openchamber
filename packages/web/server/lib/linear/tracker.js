@@ -37,6 +37,8 @@ export const LINEAR_TRACKER_DESCRIPTOR = Object.freeze({
     projectMapping: true,
     sessionComments: true,
     hostAccess: true,
+    create: false,
+    edit: false,
   }),
   // The order is the filter menu's. `inReview` and `duplicate` are Linear's
   // own name-based filters; Linear has no triage list filter.

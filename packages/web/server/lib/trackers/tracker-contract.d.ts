@@ -97,6 +97,10 @@ export type TrackerDescriptor = {
     sessionComments: boolean;
     /** An SDK guest may borrow the token. */
     hostAccess: boolean;
+    /** UI can create items (POST items/create). */
+    create: boolean;
+    /** UI can edit item fields (POST items/edit). */
+    edit: boolean;
   };
   /** In menu order: `open`, `all`, categories, then provider extras (`inReview`, `duplicate`). */
   stateFilters: string[];
@@ -131,6 +135,21 @@ export interface TrackerSessionStatusRuntime {
   stop(): void;
 }
 
+export type TrackerCreateItemInput = {
+  containerId: string;
+  title: string;
+  description?: string | null;
+  priority?: TrackerPriority | null;
+  labels?: string[];
+};
+export type TrackerEditItemInput = {
+  id: string;
+  title?: string;
+  description?: string | null;
+  priority?: TrackerPriority | null;
+  labels?: string[];
+};
+
 /** Server-side implementation a registry entry loads. JSON in, JSON out. */
 export interface TrackerImplementation {
   auth: {
@@ -144,6 +163,8 @@ export interface TrackerImplementation {
   get(id: string): Promise<Connected<{ item: TrackerItem | null }>>;
   states(containerId: string): Promise<Connected<{ states: TrackerWorkflowState[] }>>;
   updateState(input: { id: string; stateId: string }): Promise<Connected<{ item: TrackerItem | null }>>;
+  create(input: TrackerCreateItemInput): Promise<Connected<{ item: TrackerItem | null }>>;
+  edit(input: TrackerEditItemInput): Promise<Connected<{ item: TrackerItem | null }>>;
   liveSummaries(identifiers: string[]): Promise<Connected<{ items: TrackerLiveSummaryWire[] }>>;
   matchUrl(url: string): string | null;
   mapping?: {

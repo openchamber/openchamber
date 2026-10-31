@@ -116,6 +116,10 @@ export type TrackerDescriptor = {
     sessionComments: boolean;
     /** An SDK guest may borrow the token. */
     hostAccess: boolean;
+    /** UI can create items (POST items/create); absent on an older server, read as false. */
+    create?: boolean;
+    /** UI can edit item fields (POST items/edit); absent on an older server, read as false. */
+    edit?: boolean;
   };
   /** In menu order: `open`, `all`, categories, then provider extras (`inReview`, `duplicate`). */
   stateFilters: string[];

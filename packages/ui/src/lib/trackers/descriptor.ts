@@ -47,6 +47,9 @@ const descriptorSchema = z.object({
     projectMapping: flag,
     sessionComments: flag,
     hostAccess: flag,
+    // An older server's descriptor carries neither key; a missing key is off.
+    create: z.boolean().optional(),
+    edit: z.boolean().optional(),
   }),
   stateFilters: z.array(z.string().min(1).max(32)).max(32),
   // A pattern that does not compile is dropped; the tracker still lists.
