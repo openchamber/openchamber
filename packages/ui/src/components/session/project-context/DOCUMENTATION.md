@@ -23,6 +23,8 @@ drawer.
 | `KnowledgeActions.tsx` | the row actions: pin toggle, the ⋯ menu, hover reveal |
 | `pendingKnowledgeDeletes.ts` | deletes that wait out an undo window |
 | `knowledgeFormat.ts` | note title from the first line, entry dates |
+| `IssuesSection.tsx` | the issues tab: filtered list, the open issue in place (body, comments, labels, milestone), attach and open-on-host |
+| `issueReference.ts` | the issue detail DTO mapped onto the list row shape the attach path reads |
 | `useProjectTodoSend.ts` | sending a todo to a current/new/worktree session |
 
 ## Layout
@@ -61,9 +63,9 @@ changed since the user last looked, as a separate `+N` next to the total.
 ## Wide panel: list and entry side by side
 
 From 900px of panel width (measured on the panel itself, so an expanded panel
-and a dragged-wide one behave the same) notes, plans and memory switch to
-`KnowledgeSplit`: the list in a 380px column on the start side, the open entry
-beside it, the selected card marked. Nothing replaces the list, so there is no
+and a dragged-wide one behave the same) notes, plans, issues and memory switch
+to `KnowledgeSplit`: the list in a 380px column on the start side, the open
+entry beside it, the selected card marked. Nothing replaces the list, so there is no
 back control and no position to restore; Escape closes the entry and leaves a
 quiet hint ("Select a note…"). Nothing opens on its own: a panel that has just
 opened must not put a caret in someone's note. The search bar floats over the
@@ -215,6 +217,40 @@ worktree the directory lookup missed, and for plan tabs restored after a
 reload. The context panel has no plan surface anymore: OpenCode 2.x dropped
 plan mode, and saved plans open here. Persisted `plan` tabs from older builds
 are dropped on rehydrate as an unknown mode.
+
+## The issues tab
+
+The issues tab is a provider feature, not a panel one: it appears only when
+the project's connected provider publishes both `features.labels` and
+`features.milestones` (the two dropdowns the filter menu offers) and the
+binding reads with an account that can. While the binding or the provider list
+loads, the tab stays out rather than flicker in and out, and a persisted
+`issues` tab falls back to `notes` the way a persisted `memory` tab does when
+the feature is off.
+
+The list comes from the shared reference read
+(`useRepositoryReferenceList`, `kind: 'issue'`), so the tab shows the same
+items, states and ordering as the board. A failed list read shows the failure
+with a retry, never an empty list that reads as "no issues". The rows carry no
+per-issue milestone, so the milestone chip and the detail's milestone come from
+the active milestone filter, which narrows the list to one.
+
+The tab's filter and open issue are the project's, stored in
+`useIssuesPanelStore` keyed by project context id: the panel reopens on the
+issue it was left on, filtered the way it was left. The panel's own entry
+state stays local, the issue number is the string form of the same id the
+other sections use.
+
+The open issue renders in place, the way a note does: the full Markdown body,
+the full comment thread, milestone, labels, state and author. Two actions
+replace the pin/delete row: "Attach to this session" resolves the issue
+through `resolveComposerReferences` (a fresh read with the repository's
+account) and hands it to the composer via `usePendingComposerReferences`, the
+same path the picker uses; "Open on {provider}" opens the host's own page for
+the issue. The detail's read failure falls back to the list.
+
+The issues list is server-backed, so the panel's search does not count it:
+the tab's count stays 0 and search never follows to it.
 
 ## Pins belong to one session
 
@@ -390,6 +426,8 @@ matched the old project would silently hide everything in the new one.
   Deleting is an explicit action.
 - **A load failure never blanks the panel.** The store keeps the last good
   snapshot; the panel toasts once, and only when nothing had loaded yet.
+- **A failed issues list read is never an empty list.** The read's failure is
+  shown with a retry; an empty state means the filter matched nothing.
 - **Completed todos sink to the bottom.** The display sorts them there; item
   writes store them last too, and a drag stores what the user dragged.
 - **Plan creation is not optimistic.** The id and file name come from the
@@ -403,6 +441,7 @@ Assembly and delivery live in `packages/web/server/lib/session-knowledge`.
 ## Related
 
 - Store: `packages/ui/src/stores/useProjectContextStore.ts`
+- Issues tab state: `packages/ui/src/stores/useIssuesPanelStore.ts`
 - HTTP client: `packages/ui/src/lib/projectContextApi.ts`
 - Plan viewer/editor: `packages/ui/src/components/views/PlanView.tsx`
 - User docs: `packages/docs/content/docs/notes-todos-plans.mdx`

@@ -1,9 +1,11 @@
-import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
 import { z } from 'zod';
 import type { fetchProjectContext, ProjectNote } from '@/lib/projectContextApi';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { RepositoryIssueReference, RuntimeAPIs, SourceControlAPI } from '@/lib/api/types';
+import type { SourceControlReadContext } from '@/lib/source-control/types';
+import { unknownProviderDescriptor, type SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 
 class TestEventSource {
   static CLOSED = 2;
@@ -93,6 +95,44 @@ const { plugin } = await import('bun');
 plugin({ name: 'knowledge-note-worker-url', setup(build) {
   build.onLoad({ filter: /markdown-shiki\.worker\.ts\?worker&url$/ }, () => ({ contents: 'export default "http://localhost/worker.js";', loader: 'js' }));
 } });
+
+// The Issues tab gates on the project's repository: the gate's inputs and the
+// list the tab would read are pinned here, the rest of the modules stays real.
+const actualReferenceSources = await import('@/components/references/referenceSources');
+const actualRegistry = await import('@/lib/source-control/providers/registry');
+
+// SAFETY: the list the gate's mock answers with; `items` is named so a test can
+// hand the tab a row without widening the literal.
+const NO_LIST = {
+  status: 'ready',
+  unavailable: null,
+  items: [] as RepositoryIssueReference[],
+  hasMore: false,
+  refreshing: false,
+  loadingMore: false,
+  error: null,
+  skipped: [],
+  pageReads: [],
+  followed: [],
+  loadMore: () => undefined,
+  retry: async () => undefined,
+};
+
+let gateReadContext: SourceControlReadContext | 'missing' | null = null;
+let gateDescriptor: SourceControlProviderDescriptor = unknownProviderDescriptor('gitea');
+let gateList = NO_LIST;
+
+mock.module('@/components/references/referenceSources', () => ({
+  ...actualReferenceSources,
+  useRepositoryReadContext: () => gateReadContext,
+  useRepositoryReferenceProvider: () => 'gitea',
+  useRepositoryReferenceList: () => gateList,
+}));
+mock.module('@/lib/source-control/providers/registry', () => ({
+  ...actualRegistry,
+  useSourceControlProvider: () => gateDescriptor,
+}));
+
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
@@ -102,6 +142,7 @@ const { resolveProjectContextId } = await import('@/lib/projectContextApi');
 const { subscribeOpenchamberEvents } = await import('@/lib/openchamberEvents');
 const { useProjectContextStore } = await import('@/stores/useProjectContextStore');
 const { useUIStore } = await import('@/stores/useUIStore');
+const { useIssuesPanelStore } = await import('@/stores/useIssuesPanelStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { ProjectNotesTodoPanel } = await import('./ProjectNotesTodoPanel');
 const { EditorView } = await import('@codemirror/view');
@@ -123,6 +164,28 @@ const announce = async (projectId = resolveProjectContextId(project)) => {
 };
 // An open note renders Markdown, which reads the runtime; nothing here may call it.
 const unavailable = (): never => { throw new Error('The knowledge panel must not call runtime APIs'); };
+// The Issues tab destructures the source-control API. Every read it would make
+// rejects, the way the API contract (a promise, not a synchronous throw) says.
+const rejecting = async (): Promise<never> => { throw new Error('The knowledge panel must not call runtime APIs'); };
+const throwingSourceControl: SourceControlAPI = {
+  providers: rejecting, references: rejecting,
+  repositoryBinding: rejecting, repositoryContext: rejecting, resetRepositoryBinding: rejecting,
+  repositoryProviderBindingMutate: rejecting,
+  authInstances: rejecting, capabilities: rejecting, authStatus: rejecting, authStart: rejecting,
+  authComplete: rejecting, authSetToken: rejecting, authDisconnect: rejecting, authActivate: rejecting,
+  authSetCliDisabled: rejecting,
+  changeRequestStatus: rejecting, changeRequestCreate: rejecting, changeRequestUpdate: rejecting,
+  changeRequestMerge: rejecting, changeRequestReady: rejecting, changeRequestComment: rejecting,
+  changeRequestStartThread: rejecting, changeRequestReplyToThread: rejecting, changeRequestResolveThread: rejecting,
+  changeRequestReview: rejecting, issueComment: rejecting, changeRequestSetState: rejecting,
+  issueSetState: rejecting, changeRequestSetLabels: rejecting, issueSetLabels: rejecting,
+  discussionComment: rejecting, discussionSetState: rejecting, discussionSetAnswer: rejecting, discussionSetLabels: rejecting,
+  changeRequestSetReviewers: rejecting, refreshProviderReads: rejecting, referenceLabels: rejecting,
+  referenceMilestones: rejecting, referenceReviewers: rejecting, changeRequestsList: rejecting,
+  changeRequestContext: rejecting, issuesList: rejecting, issueGet: rejecting, issueComments: rejecting,
+  projectUpstream: rejecting, projectBranches: rejecting, referenceDetail: rejecting,
+  changeRequestListStatuses: rejecting,
+};
 const runtimeApis: RuntimeAPIs = {
   runtime: { platform: 'web', isDesktop: false, isVSCode: false },
   get terminal() { return unavailable(); },
@@ -131,7 +194,7 @@ const runtimeApis: RuntimeAPIs = {
   get settings() { return unavailable(); },
   get permissions() { return unavailable(); },
   get notifications() { return unavailable(); },
-  get sourceControl() { return unavailable(); },
+  sourceControl: throwingSourceControl,
 };
 const sdk = OpenCode.make({
   baseUrl: 'http://runtime.test',
@@ -182,6 +245,10 @@ beforeEach(() => {
   Object.defineProperty(browser.navigator, 'onLine', { value: true, configurable: true });
   useProjectContextStore.getState().reset();
   useUIStore.setState({ projectContextTab: 'notes', isMobile: false });
+  useIssuesPanelStore.setState({ byProject: {} });
+  gateReadContext = null;
+  gateDescriptor = unknownProviderDescriptor('gitea');
+  gateList = NO_LIST;
   useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
   // App already owns this shared connection before its knowledge panel opens.
   releaseStream = subscribeOpenchamberEvents(() => {});
@@ -413,4 +480,84 @@ test('going back from an open note returns to where the list was', async () => {
 
   expect(scroller.scrollTop).toBe(120);
   expect(browser.document.activeElement?.getAttribute('data-knowledge-entry-id')).toBe('second-note');
+});
+
+test('the issues tab appears only when the provider serves both filters and the binding reads', async () => {
+  const readContext: SourceControlReadContext = {
+    provider: 'gitea', instance: 'https://gitea.test', accountId: 'account',
+    directory: '/fixture/chats', repositoryId: 'org/chats', primaryRemote: 'origin', bindingRevision: 1,
+  };
+  const gitea = (labels: boolean, milestones: boolean): SourceControlProviderDescriptor => ({
+    ...unknownProviderDescriptor('gitea'),
+    features: { ...unknownProviderDescriptor('gitea').features, labels, milestones },
+  });
+  const issuesTab = () => host.querySelector<HTMLButtonElement>('nav button[title="Issues"]');
+
+  gateDescriptor = gitea(false, false);
+  gateReadContext = readContext;
+  await mount();
+  expect(issuesTab()).toBeNull();
+
+  gateDescriptor = gitea(true, false);
+  await render();
+  expect(issuesTab()).toBeNull();
+
+  gateDescriptor = gitea(false, true);
+  await render();
+  expect(issuesTab()).toBeNull();
+
+  // Both features, binding not read yet.
+  gateReadContext = null;
+  gateDescriptor = gitea(true, true);
+  await render();
+  expect(issuesTab()).toBeNull();
+
+  // Both features, no account can read the project.
+  gateReadContext = 'missing';
+  await render();
+  expect(issuesTab()).toBeNull();
+
+  gateReadContext = readContext;
+  await render();
+  const tab = issuesTab();
+  if (!tab) throw new Error('Issues tab missing');
+  // The tab mounts over the (empty) list without touching the runtime.
+  await act(async () => tab.click());
+  expect(host.textContent).toContain('No issues match the filter');
+});
+
+test('the issues tab reopens the issue it was left on', async () => {
+  const readContext: SourceControlReadContext = {
+    provider: 'gitea', instance: 'https://gitea.test', accountId: 'account',
+    directory: '/fixture/chats', repositoryId: 'org/chats', primaryRemote: 'origin', bindingRevision: 1,
+  };
+  gateDescriptor = {
+    ...unknownProviderDescriptor('gitea'),
+    features: { ...unknownProviderDescriptor('gitea').features, labels: true, milestones: true },
+  };
+  gateReadContext = readContext;
+  gateList = {
+    ...NO_LIST,
+    items: [{
+      kind: 'issue', number: 7, title: 'Pipelines time out',
+      url: 'https://gitea.test/org/chats/issues/7', body: '', bodyTruncated: false,
+      createdAt: null, updatedAt: null, author: null, labels: [], commentCount: 0,
+      sourceRepo: { owner: 'org', repo: 'chats', source: 'origin' }, provider: 'gitea', state: 'open',
+    } satisfies RepositoryIssueReference],
+  };
+  useIssuesPanelStore.getState().setOpenIssue(resolveProjectContextId(project), 7);
+  useUIStore.setState({ projectContextTab: 'issues' });
+
+  await mount();
+  expect(host.querySelector('button[aria-current="true"]')?.getAttribute('data-knowledge-entry-id')).toBe('7');
+});
+
+test('the issues tab remembers its filter and open issue per project', () => {
+  const id = resolveProjectContextId(project);
+  useIssuesPanelStore.getState().setFilter(id, { state: 'closed', people: 'assigned', labelNames: ['bug'], milestoneNames: ['v1.0'] });
+  useIssuesPanelStore.getState().setOpenIssue(id, 7);
+
+  const entry = useIssuesPanelStore.getState().getEntry(id);
+  expect(entry.filter).toEqual({ state: 'closed', people: 'assigned', labelNames: ['bug'], milestoneNames: ['v1.0'] });
+  expect(entry.openIssueNumber).toBe(7);
 });

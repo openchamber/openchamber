@@ -27,6 +27,12 @@ import { memoryDeleteKey, noteDeleteKey, planDeleteKey, usePendingKnowledgeDelet
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionProjectContextPins } from '@/lib/sessionKnowledgeApi';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
+import { EMPTY_ISSUES_ENTRY, useIssuesPanelStore } from '@/stores/useIssuesPanelStore';
+import { IssuesSection } from './IssuesSection';
+import { useRepositoryReadContext, useRepositoryReferenceProvider } from '../../references/referenceSources';
+import { REPOSITORY_KIND_ICONS, type IssueFilter } from '../../references/referencePickerItems';
 
 /** Lazy: the plan editor is a large view, and most panel visits never open it. */
 const PlanView = React.lazy(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
@@ -44,9 +50,9 @@ interface ProjectNotesTodoPanelProps {
   className?: string;
 }
 
-type ProjectContextTab = 'notes' | 'todos' | 'plans' | 'memory';
+type ProjectContextTab = 'notes' | 'todos' | 'plans' | 'memory' | 'issues';
 
-const TAB_ORDER: ProjectContextTab[] = ['notes', 'todos', 'plans', 'memory'];
+const TAB_ORDER: ProjectContextTab[] = ['notes', 'todos', 'plans', 'memory', 'issues'];
 
 /** Panel width from which entries open beside the list instead of over it. */
 const SPLIT_MIN_WIDTH = 900;
@@ -139,6 +145,27 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   );
 
   const isMobile = useUIStore((state) => state.isMobile);
+
+  // The Issues tab is a provider feature: it appears only when the project's
+  // connected provider publishes the two filters the tab offers, and the
+  // binding reads with an account that can. While the binding or the provider
+  // list loads, the tab stays out rather than flicker in and out.
+  const repositoryProvider = useRepositoryReferenceProvider(projectRef?.path ?? null);
+  const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
+  const issuesReadContext = useRepositoryReadContext(projectRef?.path ?? null);
+  const issuesVisible = Boolean(
+    projectRef
+    && repositoryDescriptor.features.labels
+    && repositoryDescriptor.features.milestones
+    && issuesReadContext
+    && issuesReadContext !== 'missing',
+  );
+
+  // The tab's filter and open issue are the project's, so they outlive the
+  // panel: the panel's entry state is local, the issue number is persisted.
+  const issuesEntry = useIssuesPanelStore((state) => (projectContextId ? state.byProject[getRuntimeKey()]?.[projectContextId] : undefined) ?? EMPTY_ISSUES_ENTRY);
+  const setIssuesFilter = useIssuesPanelStore((state) => state.setFilter);
+  const setIssuesOpen = useIssuesPanelStore((state) => state.setOpenIssue);
   /**
    * The panel's own width decides the layout, whether it got wide through the
    * expand button or by being dragged: from SPLIT_MIN_WIDTH the list and the
@@ -166,10 +193,13 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     ? storedTab as ProjectContextTab
     : 'notes';
   // A persisted 'memory' must not survive the feature being turned off, or the
-  // panel would open on a tab that no longer exists.
+  // panel would open on a tab that no longer exists. 'issues' falls the same
+  // way when its provider stops serving the tab.
   const activeTab: ProjectContextTab = requestedTab === 'memory' && !memoryVisible
     ? 'notes'
-    : requestedTab;
+    : requestedTab === 'issues' && !issuesVisible
+      ? 'notes'
+      : requestedTab;
   // Todos open nothing, so they never split.
   const split = wide && activeTab !== 'todos';
 
@@ -218,6 +248,18 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const openNote = React.useCallback((id: string | null) => openEntryIn('notes', id), [openEntryIn]);
   const openMemory = React.useCallback((id: string | null) => openEntryIn('memory', id), [openEntryIn]);
   const openPlan = React.useCallback((plan: { id: string }) => openEntryIn('plans', plan.id), [openEntryIn]);
+  // The issue number lives in the project's entry; the panel's entry state is
+  // the string form of the same id, the way the other sections name theirs.
+  const openIssueNumber = openIdIn('issues') === null ? null : Number(openIdIn('issues'));
+  const openIssue = React.useCallback((number: number | null) => {
+    if (!projectContextId) return;
+    setIssuesOpen(projectContextId, number);
+    openEntryIn('issues', number === null ? null : String(number));
+  }, [openEntryIn, projectContextId, setIssuesOpen]);
+  const patchIssuesFilter = React.useCallback((patch: Partial<IssueFilter>) => {
+    if (!projectContextId) return;
+    setIssuesFilter(projectContextId, { ...issuesEntry.filter, ...patch });
+  }, [issuesEntry.filter, projectContextId, setIssuesFilter]);
   const trimmedQuery = query.trim().toLowerCase();
 
   // Completed items sink to the bottom in the list; storage order is untouched.
@@ -243,6 +285,9 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       ...globalMemory.filter((entry) => !pendingDeletes.has(memoryDeleteKey('global', entry.id))),
       ...projectMemory.filter((entry) => !pendingDeletes.has(memoryDeleteKey('project', entry.id))),
     ].filter((entry) => matchesRankQuery([entry.title, entry.body], query)).length,
+    // The issues list is server-backed; the panel's search counts what it
+    // owns, so this tab never draws the search to it.
+    issues: 0,
   }), [contextEntry.notes, contextEntry.plans, globalMemory, pendingDeletes, projectMemory, projectRef, query, todos]);
 
   // Counted across both scopes against their own marks: a new global memory is
@@ -314,6 +359,17 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     setOpenEntry((current) => (current && current.section !== activeTab ? null : current));
   }, [activeTab]);
 
+  // Coming back to the Issues tab reopens the issue it was left on. The
+  // number is the project's; the panel's entry state is not.
+  React.useEffect(() => {
+    if (activeTab !== 'issues' || !projectContextId) return;
+    setOpenEntry((current) => {
+      if (current?.section === 'issues') return current;
+      if (issuesEntry.openIssueNumber === null) return current;
+      return { section: 'issues', id: String(issuesEntry.openIssueNumber) };
+    });
+  }, [activeTab, issuesEntry.openIssueNumber, projectContextId]);
+
   // A plan an agent asked to show. Declared after the resets above so a request
   // that switched the tab or mounted the panel is not closed again by them. A
   // request for another project waits for that project's panel.
@@ -379,7 +435,14 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       // its own mark beside the total instead of hiding inside it.
       unseen: highlightedMemoryCount,
     }] : []),
-  ]), [counts, highlightedMemoryCount, memoryVisible, t]);
+    ...(issuesVisible ? [{
+      id: 'issues' as const,
+      icon: REPOSITORY_KIND_ICONS.issue,
+      label: t('issuesPanel.tab.label'),
+      count: counts.issues,
+      unseen: 0,
+    }] : []),
+  ]), [counts, highlightedMemoryCount, issuesVisible, memoryVisible, t]);
 
   if (!projectRef) {
     return (
@@ -581,6 +644,46 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
               emptyLabel={t('rightSidebar.contextNotesTodo.plans.selectHint')}
             />
           ) : openPlanId ? planView(openPlanId, true) : plansList
+        ) : null}
+
+        {activeTab === 'issues' && issuesVisible ? (
+          split ? (
+            // Wide: the list column keeps its filter menu, the detail column
+            // reads the open issue itself and has nothing to go back to.
+            <KnowledgeSplit
+              list={(
+                <IssuesSection
+                  directory={projectRef.path}
+                  filter={issuesEntry.filter}
+                  onFilterChange={patchIssuesFilter}
+                  openIssueNumber={openIssueNumber}
+                  onOpenIssue={openIssue}
+                  split
+                />
+              )}
+              detail={openIssueNumber !== null ? (
+                <IssuesSection
+                  directory={projectRef.path}
+                  filter={issuesEntry.filter}
+                  onFilterChange={patchIssuesFilter}
+                  openIssueNumber={openIssueNumber}
+                  onOpenIssue={openIssue}
+                  split={false}
+                  showBack={false}
+                />
+              ) : null}
+              emptyLabel={t('issuesPanel.empty')}
+            />
+          ) : (
+            <IssuesSection
+              directory={projectRef.path}
+              filter={issuesEntry.filter}
+              onFilterChange={patchIssuesFilter}
+              openIssueNumber={openIssueNumber}
+              onOpenIssue={openIssue}
+              split={false}
+            />
+          )
         ) : null}
       </div>
       </div>
