@@ -132,7 +132,7 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
     if (purpose && language !== 'mermaid') onExportCode?.(code, language);
   }, [purpose, onExportCode, code, language]);
 
-  if (language === 'mermaid') {
+  if (language === 'mermaid' || (language === 'openui-lang' && presentation.uiBlocks)) {
     return (
       <defaultComponents.code {...props} node={node} className={className}>
         {children}

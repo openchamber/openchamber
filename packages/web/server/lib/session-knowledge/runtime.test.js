@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { DIRECT_TOOLS_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
+import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
@@ -229,8 +230,9 @@ describe('when to draw a page', () => {
   test('is told in a session whose agent has the render tool', async () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${RENDER_PAGE_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
     expect(entries[GUIDANCE]).toContain('Skip it for a few numbers');
+    expect(entries[GUIDANCE]).toContain('root = Stack([...])');
   });
 
   test('is left out without the tool, or when the check fails', async () => {

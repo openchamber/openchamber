@@ -257,13 +257,21 @@ const RENDER_PAGE_HTML_DESCRIPTION = [
 ].join(' ');
 
 const RENDER_PAGE_AWAIT_DESCRIPTION = [
-  "Wait for the user to choose, fill in fields, or both, on the page. Give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
+  "Wait for the user to choose, fill in fields, or both, on the page. With ui, any Button sends the answer. With html, give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
   "The call returns summary and data, or answered: false when the user wrote in the chat instead; their message follows.",
   "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button; data-variant=\"outline\" for a secondary action, \"destructive\" for a dangerous one).",
 ].join(' ');
 
 // Its own names: `title` here names the page.
+// A question asked with `ui` looks the same whatever model writes it, which is
+// why the description sends questions there first.
+const RENDER_PAGE_UI_DESCRIPTION = [
+  "Instead of html: one complete openui-lang program, the language of UI blocks, without the fence. Prefer it to html for a question: Choice and Input fields with a Button, drawn with the chat's own controls.",
+  "With awaitAnswer the call returns summary (the button and the values in words) and data: { button, value, values }: the pressed button's label and value, and each field's value under its name.",
+].join(' ');
+
 const RENDER_PARAMETER_PROPERTIES = {
+  ui: { type: 'string', description: RENDER_PAGE_UI_DESCRIPTION },
   html: { type: 'string', description: RENDER_PAGE_HTML_DESCRIPTION },
   title: { type: 'string', description: `At most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters; without it the page's <title> or first heading names it` },
   awaitAnswer: { type: 'boolean', description: RENDER_PAGE_AWAIT_DESCRIPTION },
@@ -339,9 +347,14 @@ const KNOWLEDGE_TOOL_DESCRIPTION = "The project's Notes, Todos and Plans, shown 
 
 const NOTIFY_TOOL_DESCRIPTION = "Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told. Routine progress and what your reply already says stay in the chat.";
 
+// The pointer to UI blocks sits here because a model choosing how to show
+// data reads this description, and with the page as the only visual it named,
+// a weak model drew HTML for a plain comparison.
 const RENDER_TOOL_DESCRIPTION = "Draw a finished HTML page inline in the chat, above your reply, or ask the user to choose on one (awaitAnswer). "
+  + "Tables, charts, comparisons, steps and flows do not need a page: write them as openui-lang UI blocks in your reply. "
+  + "To ask the user and wait for the answer, send ui with awaitAnswer; html is for mockups and custom drawings. "
   + "The page is part of your reply and sits on the chat's background: leave html, body and the outermost element without a background, add no outer card, border or banner title, and set boxes apart by tone. Style with the theme variables listed under html. "
-  + "Read html before writing a page and awaitAnswer before asking on one.";
+  + "Read ui or html before writing a page and awaitAnswer before asking on one.";
 
 const IMAGE_TOOL_DESCRIPTION = "Generate or edit images with the image model the user chose in OpenChamber's settings; your own model stays. "
   + "The call returns the saved file paths, and the chat shows the images to the user, so do not repeat them in your reply. Read a file to look at it. "

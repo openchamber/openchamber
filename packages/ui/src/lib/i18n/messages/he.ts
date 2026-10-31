@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -3856,6 +3857,7 @@ export const dict = {
   ...fileEditorAidsI18n.he,
   ...htmlRenderI18n.he,
   ...documentToolbarI18n.he,
+  ...uiBlocksI18n.he,
   ...updateDialogCanaryI18n.he,
   ...secretRequestI18n.he,
   ...sessionNoticesI18n.he,

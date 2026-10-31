@@ -1641,6 +1641,33 @@ class OpencodeService {
     await call("session.background", () => this.clientFor(directory).session.background({ sessionID: id }))
   }
 
+  /**
+   * Hands the agent input the user gave outside the composer, such as the
+   * choices in a UI block of its last reply, and starts its next turn. The
+   * input is a synthetic message: the chat shows no user bubble for it, and
+   * `metadata` lets the chat find it again.
+   */
+  async resumeWithSyntheticInput(params: {
+    runtimeKey: string
+    /** Client-minted, so a retry after a lost response is refused as a repeat instead of landing twice. */
+    id: string
+    sessionId: string
+    directory?: string | null
+    text: string
+    metadata: Metadata
+  }): Promise<void> {
+    this.assertRuntimeUnchanged(params.runtimeKey)
+    await call("session.synthetic", () =>
+      this.clientFor(params.directory).session.synthetic({
+        sessionID: params.sessionId,
+        id: params.id,
+        text: params.text,
+        metadata: params.metadata,
+        resume: true,
+      }),
+    )
+  }
+
   /** Runs a shell command inside the session transcript. Returns the shell message id. */
   async shellSession(params: {
     runtimeKey?: string

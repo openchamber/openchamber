@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -179,6 +180,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n['zh-TW'],
   ...htmlRenderI18n['zh-TW'],
   ...documentToolbarI18n['zh-TW'],
+  ...uiBlocksI18n['zh-TW'],
   ...updateDialogCanaryI18n['zh-TW'],
   ...secretRequestI18n['zh-TW'],
   ...sessionNoticesI18n['zh-TW'],

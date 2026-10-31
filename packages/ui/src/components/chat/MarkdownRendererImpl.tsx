@@ -48,6 +48,7 @@ import { MarkdownLink, MarkdownInlineCode } from './markdown/MarkdownLink';
 import { MarkdownCode } from './markdown/MarkdownCode';
 import { MarkdownTable, MarkdownTableCell } from './markdown/MarkdownTable';
 import { MarkdownMermaid } from './markdown/MarkdownMermaid';
+import { MarkdownUiBlock } from './markdown/MarkdownUiBlock';
 import { MarkdownBlockquote } from './markdown/MarkdownBlockquote';
 import { createMarkdownCodePlugin } from './markdown/streamdownCode';
 import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
@@ -156,7 +157,11 @@ const components: Components = {
     </summary>
   ),
 };
-const renderers = [{ language: 'mermaid', component: MarkdownMermaid }];
+const renderers = [
+  { language: 'mermaid', component: MarkdownMermaid },
+  // Reached only where `uiBlocks` is on (MarkdownCode); elsewhere the block stays code.
+  { language: 'openui-lang', component: MarkdownUiBlock },
+];
 const linkSafety = { enabled: false };
 const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 // Static mode renders the document whole and never reads the block split, but
@@ -281,6 +286,8 @@ export interface MarkdownContentProps {
   emojiShortcodes?: EmojiShortcodes | null;
   /** A long document read in its own scroller: only the blocks near the view mount (`markdownWindow`). */
   windowed?: boolean;
+  /** `openui-lang` fences draw as UI blocks; only assistant replies set it. */
+  uiBlocks?: boolean;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -309,6 +316,7 @@ export function MarkdownContent({
   repositoryLinks,
   emojiShortcodes,
   windowed = false,
+  uiBlocks = false,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
   const theme = themeSystem?.currentTheme ?? getDefaultTheme(
@@ -423,6 +431,10 @@ export function MarkdownContent({
     loopbackPreview,
     settled,
     purpose,
+    // Only an assistant reply on screen draws UI blocks; copies and image
+    // exports keep the block's source.
+    uiBlocks: uiBlocks && !purpose,
+    uiBlockReply: uiBlocks && !purpose && settled && sessionId && messageId ? { sessionId, messageId } : null,
     disableLinkSafety,
     theme,
     mermaidControls,
@@ -431,7 +443,7 @@ export function MarkdownContent({
     confirmFile,
     code,
   }), [
-    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, disableLinkSafety, theme,
+    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, sessionId, messageId, disableLinkSafety, theme,
     mermaidControls, onShowPopup, onExportCode, confirmFile, code,
   ]);
 
@@ -557,6 +569,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       onShowPopup={onShowPopup}
       enableFileReferences={enableFileReferences}
       loopbackPreview
+      uiBlocks={variant === 'assistant'}
     />
   );
 
