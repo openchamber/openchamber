@@ -149,9 +149,9 @@ interface GitAPI {
   checkIsGitRepository: (directory: string) => Promise<boolean>;
   getGitStatus: (directory: string, options?: GitStatusRequestOptions) => Promise<GitStatus>;
   getGitBranches: (directory: string) => Promise<GitBranch>;
-  getGitLog: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
-  getCurrentGitIdentity: (directory: string) => Promise<GitIdentitySummary | null>;
-  getGitFileDiff: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
+  getGitLog?: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
+  getCurrentGitIdentity?: (directory: string) => Promise<GitIdentitySummary | null>;
+  getGitFileDiff?: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
 }
 
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
@@ -1092,7 +1092,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const log = await git.getGitLog(directory, { maxCount: effectiveMaxCount });
+          const log = git.getGitLog ? await git.getGitLog(directory, { maxCount: effectiveMaxCount }) : null;
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1124,7 +1124,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const identity = await git.getCurrentGitIdentity(directory);
+          const identity = git.getCurrentGitIdentity ? await git.getCurrentGitIdentity(directory) : null;
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1230,6 +1230,9 @@ export const useGitStore = create<GitStore>()(
       prefetchDiffs: async (directory, git, filePaths, options = {}) => {
         const dirState = get().directories.get(directory);
         if (!dirState?.status?.files || dirState.status.files.length === 0 || filePaths.length === 0) return;
+        // A runtime without the per-file diff read (VS Code) has no diff
+        // prefetch to run; the git view that triggers it is not mounted there.
+        if (!git.getGitFileDiff) return;
 
         const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
         const availablePaths = new Set(dirState.status.files.map((file) => file.path));
@@ -1288,7 +1291,7 @@ export const useGitStore = create<GitStore>()(
           inFlight.add(filePath);
           const fetchPromise = (async () => {
             try {
-              return await git.getGitFileDiff(directory, { path: filePath });
+              return await git.getGitFileDiff!(directory, { path: filePath });
             } finally {
               // A UI deadline only stops waiting. Keep the path and capacity
               // reserved until the transport actually settles.

@@ -75,7 +75,7 @@ export const useExistingRepositorySummary = (
             ssh: [remote.fetch, remote.push].every((endpoint) => isSshRemoteUrl(endpoint.displayUrl)),
           }));
           const [author, authorIsLocal] = await Promise.all([
-            git.getCurrentGitIdentity(directory).catch(() => null),
+            git.getCurrentGitIdentity ? git.getCurrentGitIdentity(directory).catch(() => null) : Promise.resolve(null),
             git.hasLocalIdentity?.(directory).catch(() => false) ?? Promise.resolve(false),
           ]);
           if (cancelled || runtimeKey !== getRuntimeKey()) return;

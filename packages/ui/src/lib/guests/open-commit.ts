@@ -33,6 +33,7 @@ export const openGuestCommit = async ({ sha, directory, git, currentBranch, supp
   if (!git) return { ok: false, code: 'HOST_UNAVAILABLE', message: 'Git is not available yet.' };
   const runtimeKey = getRuntimeKey();
   let entry;
+  if (!git.getGitLog) return { ok: false, code: 'HOST_UNAVAILABLE', message: 'Git log is not available yet.' };
   try {
     const log = await git.getGitLog(directory, { maxCount: 1, to: sha });
     entry = log.all[0];

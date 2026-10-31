@@ -1195,14 +1195,14 @@ export interface GitAPI {
    * without a batched status read (VS Code) omit it and read one by one.
    */
   prefetchProjectStatuses?(directories: string[]): Promise<void>;
-  getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse>;
+  getGitDiff?(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse>;
   /**
    * `getGitDiff` for many paths of one side in one request. Rejects when the
    * request itself fails; per-path failures are entries. Absent in runtimes
    * that read per path (VS Code).
    */
   getGitDiffs?(directory: string, options: GetGitDiffsOptions): Promise<GitPathDiffBatchEntry[]>;
-  getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
+  getGitFileDiff?(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
   getGitRangeFiles?(directory: string, options: GetGitRangeFilesOptions): Promise<GitRangeFileEntry[]>;
   getBranchBase?(directory: string, branch: string): Promise<GitBranchBaseResponse>;
@@ -1224,8 +1224,8 @@ export interface GitAPI {
   getGitUnpushedBranchCounts(directory: string, branches: string[]): Promise<GitUnpushedBranchCounts>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }>;
-  generateCommitMessage(directory: string, files: string[], options?: { zenModel?: string; providerId?: string; modelId?: string }): Promise<{ message: GeneratedCommitMessage }>;
-  generatePullRequestDescription(
+  generateCommitMessage?(directory: string, files: string[], options?: { zenModel?: string; providerId?: string; modelId?: string }): Promise<{ message: GeneratedCommitMessage }>;
+  generatePullRequestDescription?(
     directory: string,
     payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
   ): Promise<GeneratedPullRequestDescription>;
@@ -1235,10 +1235,10 @@ export interface GitAPI {
   previewGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   createGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   deleteGitWorktree?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
-  createGitCommit(directory: string, message: string, options?: CreateGitCommitOptions): Promise<GitCommitResult>;
-  gitPush(directory: string, options?: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> }): Promise<GitPushResult>;
-  gitPull(directory: string, options?: GitPullOptions): Promise<GitPullResult>;
-  gitFetch(directory: string, options?: { remote?: string; branch?: string }): Promise<{ success: boolean }>;
+  createGitCommit?(directory: string, message: string, options?: CreateGitCommitOptions): Promise<GitCommitResult>;
+  gitPush?(directory: string, options?: { remote?: string; branch?: string; options?: string[] | Record<string, unknown> }): Promise<GitPushResult>;
+  gitPull?(directory: string, options?: GitPullOptions): Promise<GitPullResult>;
+  gitFetch?(directory: string, options?: { remote?: string; branch?: string }): Promise<{ success: boolean }>;
   planNetworkOperation(request: GitNetworkOperationRequest): Promise<GitNetworkOperationPlan>;
   issueContributorDestination(request: GitContributorDestinationRequest): Promise<GitContributorDestinationSelection>;
   listContributorDestinations(directory: string): Promise<GitContributorDestinationCandidates>;
@@ -1261,22 +1261,22 @@ export interface GitAPI {
   applyGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
   popGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
   dropGitStash(directory: string, options: { ref: string }): Promise<{ success: boolean; ref: string }>;
-  checkoutBranch(directory: string, branch: string): Promise<{ success: boolean; branch: string }>;
+  checkoutBranch?(directory: string, branch: string): Promise<{ success: boolean; branch: string }>;
   createBranch(directory: string, name: string, startPoint?: string): Promise<{ success: boolean; branch: string }>;
   renameBranch(directory: string, oldName: string, newName: string): Promise<{ success: boolean; branch: string }>;
-  getGitLog(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
+  getGitLog?(directory: string, options?: GitLogOptions): Promise<GitLogResponse>;
   /**
    * Amends the checked-out commit to carry a Change-Id trailer, computed the
    * way a review host's commit-msg hook computes it. Refuses when HEAD is no
    * longer `expectedHead` or already has one. Absent where the runtime cannot.
    */
   addChangeIdToHead?(directory: string, expectedHead: string): Promise<{ sha: string; changeId: string }>;
-  getCommitFiles(directory: string, hash: string): Promise<GitCommitFilesResponse>;
+  getCommitFiles?(directory: string, hash: string): Promise<GitCommitFilesResponse>;
   getGitCommitDiff?(directory: string, options: GetGitCommitDiffOptions): Promise<GitDiffResponse>;
   getCommitFileDiff?(directory: string, hash: string, filePath: string, isBinary: boolean): Promise<CommitFileDiffResponse>;
-  getCurrentGitIdentity(directory: string): Promise<GitIdentitySummary | null>;
+  getCurrentGitIdentity?(directory: string): Promise<GitIdentitySummary | null>;
   hasLocalIdentity?(directory: string): Promise<boolean>;
-  setGitIdentity(directory: string, profileId: string): Promise<{ success: boolean; profile: GitIdentityProfile | null }>;
+  setGitIdentity?(directory: string, profileId: string): Promise<{ success: boolean; profile: GitIdentityProfile | null }>;
   getGitIdentities(): Promise<GitIdentityProfile[]>;
   createGitIdentity(profile: GitIdentityProfile): Promise<GitIdentityProfile>;
   updateGitIdentity(id: string, updates: GitIdentityProfile): Promise<GitIdentityProfile>;
@@ -1284,19 +1284,19 @@ export interface GitAPI {
   getGlobalGitIdentity?(): Promise<GitIdentitySummary | null>;
   /** Returns a redacted display URL, never a transport credential source. */
   getRemotes(directory: string): Promise<GitRemote[]>;
-  rebase(directory: string, options: { onto: string }): Promise<GitRebaseResult>;
-  abortRebase(directory: string): Promise<{ success: boolean }>;
-  continueRebase(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }>;
-  merge(directory: string, options: { branch: string }): Promise<GitMergeResult>;
-  abortMerge(directory: string): Promise<{ success: boolean }>;
-  continueMerge(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }>;
-  checkoutCommit(directory: string, hash: string): Promise<CheckoutCommitResponse>;
-  cherryPick(directory: string, hash: string): Promise<CherryPickResponse>;
-  revertCommit(directory: string, hash: string): Promise<RevertCommitResponse>;
-  resetToCommit(directory: string, hash: string, mode: 'soft' | 'mixed' | 'hard', force?: boolean): Promise<ResetToCommitResponse>;
+  rebase?(directory: string, options: { onto: string }): Promise<GitRebaseResult>;
+  abortRebase?(directory: string): Promise<{ success: boolean }>;
+  continueRebase?(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }>;
+  merge?(directory: string, options: { branch: string }): Promise<GitMergeResult>;
+  abortMerge?(directory: string): Promise<{ success: boolean }>;
+  continueMerge?(directory: string): Promise<{ success: boolean; conflict: boolean; conflictFiles?: string[] }>;
+  checkoutCommit?(directory: string, hash: string): Promise<CheckoutCommitResponse>;
+  cherryPick?(directory: string, hash: string): Promise<CherryPickResponse>;
+  revertCommit?(directory: string, hash: string): Promise<RevertCommitResponse>;
+  resetToCommit?(directory: string, hash: string, mode: 'soft' | 'mixed' | 'hard', force?: boolean): Promise<ResetToCommitResponse>;
   stash(directory: string, options?: { message?: string; includeUntracked?: boolean }): Promise<{ success: boolean }>;
   stashPop(directory: string): Promise<{ success: boolean }>;
-  getConflictDetails(directory: string): Promise<MergeConflictDetails>;
+  getConflictDetails?(directory: string): Promise<MergeConflictDetails>;
   /** Phase 1: validate that a cwd is inside a worktreeRoot */
   validateWorktreeDirectory?(directory: string, worktreeRoot: string): Promise<{
     valid: boolean;

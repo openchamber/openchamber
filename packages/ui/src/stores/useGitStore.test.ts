@@ -119,10 +119,10 @@ describe('useGitStore', () => {
   test('keeps timed-out diff requests inside the concurrency limit until they settle', async () => {
     const paths = ['one.ts', 'two.ts', 'three.ts', 'four.ts'];
     setDirectoryStatus(createStatus({ staged: {}, working: {} }, paths.map((path) => ({ path, index: ' ', working_dir: 'M' }))));
-    const pending: Array<{ path: string; request: Deferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>> }> = [];
+    const pending: Array<{ path: string; request: Deferred<Awaited<ReturnType<NonNullable<GitAPI['getGitFileDiff']>>>> }> = [];
     const git = createGitApi(async () => createStatus());
     git.getGitFileDiff = (_directory, { path }) => {
-      const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+      const request = createDeferred<Awaited<ReturnType<NonNullable<GitAPI['getGitFileDiff']>>>>();
       pending.push({ path, request });
       return request.promise;
     };
@@ -156,7 +156,7 @@ describe('useGitStore', () => {
       directories: new Map(directories.map((directory) => [directory, createDirectoryState(status)])),
     });
     populate();
-    const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+    const request = createDeferred<Awaited<ReturnType<NonNullable<GitAPI['getGitFileDiff']>>>>();
     const calls: string[] = [];
     const git = createGitApi(async () => status);
     git.getGitFileDiff = (directory) => {
@@ -204,7 +204,7 @@ describe('useGitStore', () => {
   test('a duplicate diff demand does not discard the first batch or leave failure slots occupied', async () => {
     const paths = ['one.ts', 'two.ts', 'three.ts'];
     setDirectoryStatus(createStatus({ staged: {}, working: {} }, paths.map((path) => ({ path, index: ' ', working_dir: 'M' }))));
-    const request = createDeferred<Awaited<ReturnType<GitAPI['getGitFileDiff']>>>();
+    const request = createDeferred<Awaited<ReturnType<NonNullable<GitAPI['getGitFileDiff']>>>>();
     const git = createGitApi(async () => createStatus());
     let calls = 0;
     git.getGitFileDiff = async (_directory, { path }) => {
