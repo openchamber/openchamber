@@ -13,6 +13,18 @@ export const isSessionAdmitted = (directory: string | null | undefined): boolean
   directory, useProjectsStore.getState().projects, useSessionUIStore.getState().availableWorktreesByProject,
 );
 
+const ADMISSION_WAIT_MS = 10_000;
+
+const waitUntilAdmitted = (directory: string): Promise<void> => new Promise((resolve) => {
+  const finish = () => { clearTimeout(timer); stopProjects(); stopTopology(); resolve(); };
+  const check = () => { if (isSessionAdmitted(directory)) finish(); };
+  const timer = setTimeout(finish, ADMISSION_WAIT_MS);
+  const stopProjects = useProjectsStore.subscribe((state, previous) => { if (state.projects !== previous.projects) check(); });
+  const stopTopology = useSessionUIStore.subscribe((state, previous) => {
+    if (state.availableWorktreesByProject !== previous.availableWorktreesByProject) check();
+  });
+});
+
 const pending = new Map<string, { sessionIds: Map<string, boolean>; request: Promise<boolean> }>();
 let generation = 0;
 subscribeRuntimeEndpointWillChange(() => { generation += 1; pending.clear(); });
@@ -47,7 +59,13 @@ const tryAdmitSession = (sessionId: string, directory: string, deliberate = fals
     const currentId = currentSession();
     if (!currentId) return false;
     if (isSessionAdmitted(normalized)) return true;
-    return useProjectsStore.getState().adoptSessionProject(currentId, normalized, () => currentSession() !== null);
+    if (!await useProjectsStore.getState().adoptSessionProject(currentId, normalized, () => currentSession() !== null)) return false;
+    // A linked worktree joins its repository's project without a new entry and
+    // is admitted once the worktree list (owned by the sidebar) picks it up on
+    // the server's worktree-changed event. An open waits for that, bounded; it
+    // never repeats the registration.
+    if (!isSessionAdmitted(normalized)) await waitUntilAdmitted(normalized);
+    return isSessionAdmitted(normalized);
   })().finally(() => { if (pending.get(key)?.request === request) pending.delete(key); });
   pending.set(key, { sessionIds, request });
   return request;

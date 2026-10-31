@@ -55,6 +55,20 @@ describe('session destination project registration', () => {
     expect(emitWorktreeChanged).toHaveBeenCalledWith(expect.objectContaining({ directories: ['/kept', '/worktrees/feature'] }));
   });
 
+  it('skips a project whose assessment hangs instead of holding the write queue', async () => {
+    const f = fixture({
+      resolveSessionDirectory: async () => '/worktrees/feature',
+      openCodeTrust: {
+        assess: (directory) => (directory === '/kept'
+          ? new Promise(() => {})
+          : Promise.resolve({ trusted: true, assessment: { directory, repositoryKey: '/kept/.git' } })),
+      },
+      linkedWorktreeRoot: async () => '/worktrees/feature',
+    });
+    const response = await f.adopt('/worktrees/feature').expect(200);
+    expect(response.body.project.path).toBe('/worktrees/feature');
+  }, 10_000);
+
   it('registers a sibling folder of a registered checkout as its own project', async () => {
     const f = fixture({
       resolveSessionDirectory: async () => '/repo/tools',

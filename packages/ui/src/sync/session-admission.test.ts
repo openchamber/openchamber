@@ -35,10 +35,11 @@ let trustReads = 0;
 let trustFailures = 0;
 let registrationReads = 0;
 let registrationFailures = 0;
+let registeredProjectPath: string | null = null;
 
 beforeEach(() => {
   trusted = false; runsCode = true; registrations = []; trustWrites = 0;
-  trustReads = 0; trustFailures = 0; registrationReads = 0; registrationFailures = 0;
+  trustReads = 0; trustFailures = 0; registrationReads = 0; registrationFailures = 0; registeredProjectPath = null;
   forgetOpenCodeTrustDeclines();
   configureRuntimeUrlResolver({ apiBaseUrl: 'https://admission.test' });
   useProjectsStore.setState({ projects: [{ id: 'kept', path: '/kept' }], activeProjectId: 'kept' });
@@ -63,7 +64,8 @@ beforeEach(() => {
       if (registrationFailures-- > 0) return new Response(null, { status: 503 });
       const body = JSON.parse(String(init?.body));
       registrations.push(body.directory);
-      return Response.json({ project: { id: body.directory, path: body.directory } });
+      const path = registeredProjectPath ?? body.directory;
+      return Response.json({ project: { id: path, path } });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -331,6 +333,24 @@ describe('session admission', () => {
       expect(trustReads).toBe(0);
       expect(registrations).toEqual([]);
     } finally { stop(); }
+  });
+
+  test('opening a session in a worktree nobody listed yet asks the server once and opens once it is listed', async () => {
+    trusted = true;
+    // The server answers with the repository's project and appends nothing.
+    registeredProjectPath = '/kept';
+    useGlobalSessionsStore.getState().upsertSession(session('in-new-worktree', '/new-worktree'));
+    useSessionUIStore.getState().setCurrentSession('in-new-worktree', '/new-worktree');
+    for (let round = 0; round < 10; round += 1) { await new Promise((resolve) => setTimeout(resolve, 5)); await settle(); }
+    expect(registrationReads).toBe(1);
+    expect(useSessionUIStore.getState().currentSessionId).toBeNull();
+    // The sidebar lists the worktree on the server's worktree-changed event.
+    useSessionUIStore.setState({ availableWorktreesByProject: new Map([
+      ['/kept', [{ path: '/new-worktree', projectDirectory: '/kept', branch: 'task', label: 'task' }]],
+    ]) });
+    await settle(); await settle();
+    expect(useSessionUIStore.getState().currentSessionId).toBe('in-new-worktree');
+    expect(registrationReads).toBe(1);
   });
 
   test('notification and restore selection waits before publishing or changing the directory', async () => {

@@ -11,6 +11,9 @@ const contains = (root, directory) => {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 };
 
+// A registered project on a hung mount must not hold the settings write queue.
+const PROJECT_ASSESS_TIMEOUT_MS = 2000;
+
 /** The root of the linked worktree holding `directory` (its `.git` is a pointer file), or null. */
 const findLinkedWorktreeRoot = async (directory) => {
   for (let current = directory; ; current = path.dirname(current)) {
@@ -57,7 +60,10 @@ export const registerSessionProjectRoutes = (app, {
         if (worktreeRoot) {
           for (const entry of projects) {
             if (contains(worktreeRoot, entry.path)) continue;
-            const { assessment: projectAssessment } = await openCodeTrust.assess(entry.path).catch(() => ({ assessment: null }));
+            const projectAssessment = await Promise.race([
+              openCodeTrust.assess(entry.path).then(({ assessment: found }) => found, () => null),
+              new Promise((resolve) => { setTimeout(resolve, PROJECT_ASSESS_TIMEOUT_MS, null).unref?.(); }),
+            ]);
             if (projectAssessment?.repositoryKey === assessment.repositoryKey) {
               worktreeOf = entry;
               return entry;

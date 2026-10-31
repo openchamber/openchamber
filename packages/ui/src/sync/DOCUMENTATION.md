@@ -404,7 +404,12 @@ A linked worktree lives outside its repository's folder, and a session can move
 into one before this client lists it. The server route matches the destination's
 repository against the registered projects; a worktree of a registered project
 returns that project, appends nothing, and sends `worktree-changed` so clients
-list the worktree, which then admits the session.
+list the worktree, which then admits the session. Admission waits up to 10
+seconds for that listing and answers whether the folder is admitted. An open
+continues only on that answer, so a lost event ends the attempt instead of
+repeating registration; a later listing still admits the session, and a parked
+viewed session comes back then. The sidebar stays the only owner of the
+worktree list: admission never publishes topology itself.
 
 ### Why admission reacts to moves and not to the session list
 
