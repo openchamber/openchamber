@@ -56,6 +56,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Adds a comment to the issue when a session starts, finishes, or fails. Comments are only posted when this server has a public address, so the link opens the session for everyone on the issue.',
     'settings.integrations.tracker.sessionComments.aria': 'Post session status comments to {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': 'Could not load {provider} comment settings.',
+    'settings.integrations.local.title': 'Local issues',
+    'settings.integrations.local.description': 'Issues live as markdown files inside each project on this machine. Nothing to connect.',
   },
   nl: {
     'settings.sourceControl.provider.description.pullRequest': 'Verbind een {provider}-account voor pull requests en issues.',
@@ -113,6 +115,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Voegt een reactie toe aan het issue wanneer een sessie start, eindigt of mislukt. Reacties worden alleen geplaatst als deze server een openbaar adres heeft, zodat de link de sessie voor iedereen op het issue opent.',
     'settings.integrations.tracker.sessionComments.aria': 'Sessiestatusreacties naar {provider} plaatsen',
     'settings.integrations.tracker.sessionComments.loadFailed': 'Kan de reactie-instellingen van {provider} niet laden',
+    'settings.integrations.local.title': 'Lokale issues',
+    'settings.integrations.local.description': 'Issues staan als markdownbestanden in elk project op deze machine. Er is niets te verbinden.',
   },
   de: {
     'settings.sourceControl.provider.description.pullRequest': '{provider}-Konto für Pull Requests und Issues verbinden.',
@@ -170,6 +174,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Kommentiert das Issue, wenn eine Sitzung startet, endet oder fehlschlägt. Kommentare werden nur gepostet, wenn dieser Server eine öffentliche Adresse hat, damit der Link die Sitzung für alle Beteiligten öffnet.',
     'settings.integrations.tracker.sessionComments.aria': 'Statuskommentare zu Sitzungen in {provider} posten',
     'settings.integrations.tracker.sessionComments.loadFailed': '{provider}-Kommentareinstellungen konnten nicht geladen werden.',
+    'settings.integrations.local.title': 'Lokale Issues',
+    'settings.integrations.local.description': 'Issues liegen als Markdown-Dateien in jedem Projekt auf diesem Rechner. Es muss nichts verbunden werden.',
   },
   fr: {
     'settings.sourceControl.provider.description.pullRequest': 'Connecter un compte {provider} pour les pull requests et les issues.',
@@ -227,6 +233,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Ajoute un commentaire au ticket quand une session démarre, se termine ou échoue. Les commentaires ne sont publiés que si ce serveur a une adresse publique, afin que le lien ouvre la session pour tout le monde.',
     'settings.integrations.tracker.sessionComments.aria': 'Publier les commentaires d’état de session dans {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': 'Impossible de charger les réglages de commentaires {provider}.',
+    'settings.integrations.local.title': 'Issues locales',
+    'settings.integrations.local.description': 'Les issues sont des fichiers markdown dans chaque projet de cette machine. Aucune connexion nécessaire.',
   },
   es: {
     'settings.sourceControl.provider.description.pullRequest': 'Conecta una cuenta de {provider} para pull requests e issues.',
@@ -284,6 +292,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Añade un comentario a la incidencia cuando una sesión empieza, termina o falla. Los comentarios solo se publican si este servidor tiene una dirección pública, para que el enlace abra la sesión a todos.',
     'settings.integrations.tracker.sessionComments.aria': 'Publicar comentarios de estado de sesión en {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': 'No se pudieron cargar los ajustes de comentarios de {provider}.',
+    'settings.integrations.local.title': 'Issues locales',
+    'settings.integrations.local.description': 'Los issues se guardan como archivos markdown dentro de cada proyecto en esta máquina. No hay nada que conectar.',
   },
   ja: {
     'settings.sourceControl.provider.description.pullRequest': 'プルリクエストと Issue のために {provider} アカウントを接続します。',
@@ -341,6 +351,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'セッションの開始・完了・失敗時にイシューへコメントします。リンクを誰でも開けるよう、このサーバーが公開アドレスを持つ場合のみ投稿します。',
     'settings.integrations.tracker.sessionComments.aria': 'セッション状態のコメントを {provider} に投稿',
     'settings.integrations.tracker.sessionComments.loadFailed': '{provider} のコメント設定を読み込めませんでした。',
+    'settings.integrations.local.title': 'ローカル Issue',
+    'settings.integrations.local.description': 'Issue はこのマシンの各プロジェクト内に markdown ファイルとして保存されます。接続は不要です。',
   },
   ko: {
     'settings.sourceControl.provider.description.pullRequest': '풀 리퀘스트와 이슈를 위해 {provider} 계정을 연결합니다.',
@@ -398,6 +410,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': '세션이 시작, 완료, 실패할 때 이슈에 댓글을 남깁니다. 링크를 모두가 열 수 있도록 이 서버에 공개 주소가 있을 때만 게시합니다.',
     'settings.integrations.tracker.sessionComments.aria': '세션 상태 댓글을 {provider}에 게시',
     'settings.integrations.tracker.sessionComments.loadFailed': '{provider} 댓글 설정을 불러오지 못했습니다.',
+    'settings.integrations.local.title': '로컬 이슈',
+    'settings.integrations.local.description': '이슈는 이 머신의 각 프로젝트 안에 markdown 파일로 저장됩니다. 연결이 필요하지 않습니다.',
   },
   pl: {
     'settings.sourceControl.provider.description.pullRequest': 'Połącz konto {provider} dla pull requestów i issues.',
@@ -455,6 +469,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Dodaje komentarz do zgłoszenia, gdy sesja się zaczyna, kończy lub kończy błędem. Komentarze pojawiają się tylko wtedy, gdy ten serwer ma publiczny adres, żeby link otwierał sesję każdemu.',
     'settings.integrations.tracker.sessionComments.aria': 'Publikuj komentarze o stanie sesji w {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': 'Nie udało się wczytać ustawień komentarzy {provider}.',
+    'settings.integrations.local.title': 'Lokalne issues',
+    'settings.integrations.local.description': 'Issues są zapisane jako pliki markdown w każdym projekcie na tej maszynie. Nie trzeba niczego łączyć.',
   },
   'pt-BR': {
     'settings.sourceControl.provider.description.pullRequest': 'Conecte uma conta do {provider} para pull requests e issues.',
@@ -512,6 +528,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Comenta na issue quando uma sessão começa, termina ou falha. Os comentários só são publicados se este servidor tiver um endereço público, para que o link abra a sessão para todos.',
     'settings.integrations.tracker.sessionComments.aria': 'Publicar comentários de status de sessão no {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': 'Não foi possível carregar as configurações de comentários do {provider}.',
+    'settings.integrations.local.title': 'Issues locais',
+    'settings.integrations.local.description': 'As issues ficam como arquivos markdown dentro de cada projeto nesta máquina. Nada para conectar.',
   },
   uk: {
     'settings.sourceControl.provider.description.pullRequest': 'Підключіть акаунт {provider} для pull request-ів та issues.',
@@ -569,6 +587,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Додає коментар до тікета, коли сесія починається, завершується або падає. Коментарі публікуються, лише якщо цей сервер має публічну адресу, щоб посилання відкривало сесію для всіх.',
     'settings.integrations.tracker.sessionComments.aria': 'Публікувати коментарі про стан сесії в {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': 'Не вдалося завантажити налаштування коментарів {provider}.',
+    'settings.integrations.local.title': 'Локальні issues',
+    'settings.integrations.local.description': 'Issues зберігаються як файли markdown у кожному проєкті на цьому компʼютері. Нічого підключати не потрібно.',
   },
   'zh-CN': {
     'settings.sourceControl.provider.description.pullRequest': '连接 {provider} 账号以处理拉取请求和议题。',
@@ -626,6 +646,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': '会话开始、完成或失败时在议题下留言。仅当此服务器拥有公网地址时才发布，这样链接才能让所有人打开该会话。',
     'settings.integrations.tracker.sessionComments.aria': '将会话状态评论发布到 {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': '无法加载 {provider} 评论设置。',
+    'settings.integrations.local.title': '本地议题',
+    'settings.integrations.local.description': '议题以 markdown 文件的形式保存在本机的各个项目中。无需连接。',
   },
   'zh-TW': {
     'settings.sourceControl.provider.description.pullRequest': '連接 {provider} 帳號以處理拉取請求與議題。',
@@ -683,6 +705,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': '工作階段開始、完成或失敗時在議題留言。僅在這台伺服器有公開位址時才發布，這樣連結才能讓所有人開啟該工作階段。',
     'settings.integrations.tracker.sessionComments.aria': '將工作階段狀態留言發布到 {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': '無法載入 {provider} 留言設定。',
+    'settings.integrations.local.title': '本機議題',
+    'settings.integrations.local.description': '議題以 markdown 檔案的形式儲存在本機的各個專案中。無需連接。',
   },
   tr: {
     'settings.sourceControl.provider.description.pullRequest': "Pull request ve issue'lar için bir {provider} hesabı bağlayın.",
@@ -740,6 +764,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'Bir oturum başladığında, bittiğinde veya başarısız olduğunda göreve yorum ekler. Bağlantının herkeste açılabilmesi için yorumlar yalnızca bu sunucunun genel bir adresi varsa gönderilir.',
     'settings.integrations.tracker.sessionComments.aria': 'Oturum durumu yorumlarını {provider} üzerinde yayınla',
     'settings.integrations.tracker.sessionComments.loadFailed': '{provider} yorum ayarları yüklenemedi.',
+    'settings.integrations.local.title': 'Yerel issues',
+    'settings.integrations.local.description': 'Issues bu makinedeki her projede markdown dosyaları olarak durur. Bağlanacak bir şey yok.',
   },
   ar: {
     'settings.sourceControl.provider.description.pullRequest': 'اربط حساب {provider} لطلبات السحب والمشكلات.',
@@ -797,6 +823,8 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'يضيف تعليقًا إلى المشكلة عندما تبدأ جلسة أو تنتهي أو تفشل. لا تُنشر التعليقات إلا إذا كان لهذا الخادم عنوان عام، كي يفتح الرابط الجلسة لكل من في المشكلة.',
     'settings.integrations.tracker.sessionComments.aria': 'نشر تعليقات حالة الجلسة في {provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': 'تعذّر تحميل إعدادات تعليقات {provider}.',
+    'settings.integrations.local.title': 'مشكلات محلية',
+    'settings.integrations.local.description': 'تُحفَظ المشكلات كملفات markdown داخل كل مشروع على هذا الجهاز. لا يوجد ما يحتاج إلى اتصال.',
   },
   he: {
     'settings.sourceControl.provider.description.pullRequest': 'חיבור חשבון {provider} עבור בקשות משיכה ובעיות.',
@@ -854,5 +882,7 @@ export const firstPartyIntegrationsI18n = {
     'settings.integrations.tracker.sessionComments.info': 'מוסיף תגובה לבעיה כשהפעלה מתחילה, מסתיימת או נכשלת. תגובות מתפרסמות רק כשלשרת הזה יש כתובת ציבורית, כך שהקישור פותח את ההפעלה לכל מי שמעורב בבעיה.',
     'settings.integrations.tracker.sessionComments.aria': 'פרסם תגובות סטטוס הפעלה ב-{provider}',
     'settings.integrations.tracker.sessionComments.loadFailed': 'לא ניתן היה לטעון את הגדרות התגובות של {provider}.',
+    'settings.integrations.local.title': 'בעיות מקומיות',
+    'settings.integrations.local.description': 'בעיות נשמרות כקובצי markdown בתוך כל פרויקט במחשב הזה. אין מה לחבר.',
   },
 } as const;

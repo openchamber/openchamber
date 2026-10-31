@@ -74,8 +74,12 @@ const LINEAR_SETTINGS_SEARCH: TrackerSettingsSearch = {
   },
 };
 
+// Local issues are markdown files in the project's folder on this machine, so the folder marks the tracker.
+const LOCAL_PRESENTATION: TrackerPresentation = { icon: 'folder', copy: GENERIC_COPY, branchName: issueBranchName };
+
 const PRESENTATIONS = new Map<string, TrackerPresentation>([
   ['linear', { icon: 'linear', copy: LINEAR_COPY, branchName: issueBranchName, settingsSearch: LINEAR_SETTINGS_SEARCH }],
+  ['local', LOCAL_PRESENTATION],
 ]);
 
 const GENERIC_PRESENTATION: TrackerPresentation = { icon: 'record-circle', copy: GENERIC_COPY, branchName: issueBranchName };
