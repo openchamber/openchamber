@@ -117,6 +117,69 @@ OpenChamber 自带几个公开的技能目录（Anthropic、OpenAI、Cursor、Ma
 
 此后设置中只提供用户自行添加的目录，即使直接请求，OpenChamber 也不会加载内置目录。由于用户可以自行设置环境变量，因此没有对应的环境变量。
 
+### 允许明文 HTTP 的 Git 来源
+
+连接 Git 托管服务（GitLab、Gitea、Gerrit、Forgejo）时 OpenChamber 要求 HTTPS，因为通过明文 HTTP 发送的令牌可能被网络上任何人读取。没有 HTTPS 的内网主机可以在策略文件中放行。无论是否开启企业模式都有效。用户也可以在 Settings → Git 里自行放行来源：企业模式关闭时，这份列表会并入文件里的列表；模式一旦开启，它就完全不生效。
+
+```json
+{
+  "allowedInsecureGitOrigins": ["http://gitlab.corp.internal"]
+}
+```
+
+- 每一项是一个精确的来源：协议、主机，以及需要时的端口。不支持路径、`*` 或凭据。`http://gitlab.corp.internal` 不覆盖 `http://gitlab.corp.internal:8443`。
+- 只有列出的来源被放行。GitHub 与 GitLab 的公开实例以及其他所有主机仍要求 HTTPS。
+- 这份白名单不会放开其他限制：自建 provider 扩展仍只接受 HTTPS 与回环 HTTP，匿名传输仍要求 HTTPS，Git LFS 下载仍要求 HTTPS。
+- 把某个来源从列表移除后，OpenChamber 会拒收绑定到它的实例，直到重新绑定。
+- Settings → Git 里的列表遵循同样的规则：每行一个精确来源，不被接受的行会在保存时去掉。企业模式开启时，这份列表会被完全忽略——放宽明文信任仍然是管理员的动作。
+
+同一份列表还决定扩展和技能可以从哪里安装。「从 URL 安装」和扩展更新默认会拒绝私网地址、内网域名（`.internal`、`.local`）和明文 HTTP，因为这个地址是服务端自己去请求的。写进 `allowedInsecureGitOrigins` 的主机在这件事上会被信任：
+
+- 该主机在 HTTPS 与 SSH 下任意端口都可以访问；HTTP 只对列表里写明的精确来源放行。Git 克隆和 `.zip` 下载都遵循这一规则。
+- 它解析出的地址不能是回环地址（`127.0.0.0/8`、`::1`）或链路本地地址（`169.254.0.0/16`，含云厂商元数据服务）。把这些地址写进列表也不会生效。
+- 重定向不会被盲目跟随：每一跳都会重新校验，被信任的主机无法把安装请求跳转到其他内网主机。
+- 技能来源写成 `http://host/group/repo.git` 时，在来源已列入名单的前提下可用。使用托管 HTTPS Git 身份的技能来源仍然要求 HTTPS。
+- 声明 `service`、`network`、`origins` 或 `transcript` 能力的扩展，仍然必须来自 `allowedExtensions` 下的仓库。
+
+### 把模型元数据指向内网地址
+
+模型选择器从 `https://models.dev/api.json` 读取上下文长度与价格。在访问不到它的网络里，可以固定为一份内网副本。无论是否开启企业模式都有效。
+
+```json
+{
+  "modelsDevUrl": "http://nginx.corp.internal/models/api.json"
+}
+```
+
+- 文件采用 models.dev 的格式。只会读取 `id`、`name`、`limit`、`modalities`、`cost` 和少量能力标记，所以手写一份精简文件就够用。
+- 固定之后，服务端和浏览器都只读这个地址，不会再回退到 models.dev。
+- 不是普通 `http(s)` URL、或带有凭据的值，视为未设置。
+- 模型元数据只用于展示和路由提示，没有它会话照常可用。
+
+### 替换内置技能目录
+
+`hideBuiltinSkillCatalogs` 只能隐藏公共目录。若要换成自己的目录，列出它们：
+
+```json
+{
+  "skillsCatalogSources": [
+    {
+      "id": "corp",
+      "label": "公司技能库",
+      "description": "平台团队维护的技能",
+      "source": "https://gitlab.corp.internal/platform/skills.git",
+      "defaultSubpath": "skills",
+      "excludedSkills": ["draft"]
+    }
+  ]
+}
+```
+
+- `id`、`label`、`source` 必填。来源是一个 Git URL：HTTPS、SSH，或 `allowedInsecureGitOrigins` 里已列出来源的 HTTP。
+- 列表非空时，它会替换内置目录，无论内置目录是否被隐藏。
+- 文件里有读不懂的条目，整份策略文件会被判为无效，此时不提供任何目录。
+- 这一项没有对应的环境变量。
+
 ### 示例
 
 要在 Mac 上放置策略文件，以管理员身份在终端中运行：

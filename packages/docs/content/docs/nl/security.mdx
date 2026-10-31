@@ -117,6 +117,69 @@ OpenChamber wordt geleverd met een paar openbare skillcatalogi (Anthropic, OpenA
 
 Instellingen biedt dan alleen catalogi aan die mensen zelf toevoegen, en OpenChamber laadt geen ingebouwde, ook niet op direct verzoek. Hier is geen omgevingsvariabele voor, omdat een gebruiker die zelf kan instellen.
 
+### Plain-http-herkomsten voor Git toestaan
+
+Bij het verbinden van een Git-hostingdienst (GitLab, Gitea, Gerrit, Forgejo) eist OpenChamber HTTPS, omdat een token over plain-http door iedereen op het netwerk kan worden meegelezen. Een intranethost zonder HTTPS kan in het beleidsbestand worden toegestaan. Dit werkt met en zonder enterprise-modus. Iedereen kan ook zelf herkomsten toestaan in Settings → Git: zolang de enterprise-modus uit staat, wordt hun lijst aan die van het bestand toegevoegd; staat de modus aan, dan wordt ze genegeerd.
+
+```json
+{
+  "allowedInsecureGitOrigins": ["http://gitlab.corp.internal"]
+}
+```
+
+- Elke invoer is een exacte herkomst: schema, host en, als het uitmaakt, poort. Geen pad, geen `*`, geen aanmeldgegevens. `http://gitlab.corp.internal` dekt niet `http://gitlab.corp.internal:8443`.
+- Alleen wat hier staat, wordt doorgelaten. De openbare instanties van GitHub en GitLab, en alle andere hosts, blijven HTTPS eisen.
+- De lijst opent niets anders: een zelf-gehoste provider-extensie blijft alleen HTTPS en loopback-http accepteren, anonieme transfers blijven HTTPS eisen, en Git LFS-downloads ook.
+- Haal een herkomst uit de lijst, dan wijst OpenChamber de instanties die eraan gebonden zijn af totdat je ze opnieuw bindt.
+- De lijst in Settings → Git volgt dezelfde regels: één exacte herkomst per regel, en een regel die geen geaccepteerde herkomst is, valt weg bij het opslaan. Staat de enterprise-modus aan, dan wordt de lijst volledig genegeerd — de HTTPS-regel versoepelen blijft de keuze van de beheerder.
+
+Dezelfde lijst bepaalt ook vanaf waar extensies en skills geïnstalleerd mogen worden. "Installeren vanaf URL" en extensie-updates wijzen normaal privé-adressen, interne namen (`.internal`, `.local`) en plain-http af, omdat de server het adres zelf ophaalt. Een host die in `allowedInsecureGitOrigins` staat, geldt daarvoor als vertrouwd:
+
+- Zijn host wordt geaccepteerd via HTTPS en SSH op elke poort, en via HTTP alleen op de exact genoemde herkomst. Git-clones en `.zip`-downloads volgen beide deze regel.
+- Het adres waar hij op uitkomt, mag geen loopback (`127.0.0.0/8`, `::1`) of link-local (`169.254.0.0/16`, inclusief cloudmetadata) zijn. Die in de lijst zetten verandert niets.
+- Redirects worden nooit blind gevolgd: elke hop wordt opnieuw gecontroleerd, zodat een vertrouwde host een installatie niet naar een andere intranethost kan doorschuiven.
+- Skillbronnen in de vorm `http://host/group/repo.git` worden op een genoemde herkomst geaccepteerd. Een skillbron die een beheerde HTTPS-git-identiteit gebruikt, blijft HTTPS eisen.
+- Extensies die `service`, `network`, `origins` of `transcript` vragen, moeten nog steeds uit een repository onder `allowedExtensions` komen.
+
+### Modelmetadata naar een intern adres wijzen
+
+De modelkiezer leest contextgroottes en prijzen uit `https://models.dev/api.json`. Op een netwerk zonder route daarheen kunt u een interne kop van dat bestand vastzetten. Dit werkt met en zonder enterprise-modus.
+
+```json
+{
+  "modelsDevUrl": "http://nginx.corp.internal/models/api.json"
+}
+```
+
+- Het bestand gebruikt het format van models.dev. Alleen `id`, `name`, `limit`, `modalities`, `cost` en een paar mogelijkhedenvlaggen worden gelezen, dus een kort handgeschreven bestand volstaat.
+- Eenmaal vastgezet leest OpenChamber alleen dat adres, in de server en in de browser. Het valt nooit terug op models.dev.
+- Een waarde die geen gewone `http(s)`-URL is, of die aanmeldgegevens bevat, telt als niet ingesteld.
+- Modelmetadata is voor weergave en routinghints. Sessies werken ook zonder.
+
+### Ingebouwde skillcatalogi vervangen
+
+`hideBuiltinSkillCatalogs` verbergt alleen de openbare catalogi. Om in de plaats eigen catalogi aan te bieden, noem ze in de lijst:
+
+```json
+{
+  "skillsCatalogSources": [
+    {
+      "id": "corp",
+      "label": "Bedrijfsskills",
+      "description": "Skills die het platformteam bijhoudt",
+      "source": "https://gitlab.corp.internal/platform/skills.git",
+      "defaultSubpath": "skills",
+      "excludedSkills": ["draft"]
+    }
+  ]
+}
+```
+
+- `id`, `label` en `source` zijn verplicht. Een bron is een Git-URL: HTTPS, SSH, of HTTP voor een herkomst die in `allowedInsecureGitOrigins` staat.
+- Zodra de lijst niet leeg is, vervangt hij de ingebouwde catalogi, of die nu verborgen zijn of niet.
+- Eén invoer die het bestand niet kan lezen, maakt het hele beleidsbestand ongeldig, en dan wordt er überhaupt geen catalogus aangeboden.
+- Een omgevingsvariabele hiervoor is er niet.
+
 ### Voorbeelden
 
 Om het beleidsbestand op een Mac te plaatsen, voert u dit in Terminal uit als beheerder:
