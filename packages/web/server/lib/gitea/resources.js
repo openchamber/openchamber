@@ -468,6 +468,17 @@ export function createGiteaResourceService({
       });
     },
 
+    async listMilestones(directory, selector, remote) {
+      const { target } = await network(directory, selector, remote);
+      const milestones = await client.collection(`${repoPath(target.project)}/milestones`, { state: 'all' }, {
+        limit: PAGE_LIMIT, maxItems: COLLECTION_MAX_ITEMS,
+      });
+      return milestones.flatMap((milestone) => {
+        if (!isPlainObject(milestone) || !isString(milestone.title) || !milestone.title) return [];
+        return [{ name: milestone.title, state: milestone.state === 'closed' ? 'closed' : 'open' }];
+      });
+    },
+
     /** Collaborators: who can be asked to review. Ids are numeric, as reviewer mutations take them. */
     async listReviewerCandidates(directory, selector, remote) {
       const { target } = await network(directory, selector, remote);

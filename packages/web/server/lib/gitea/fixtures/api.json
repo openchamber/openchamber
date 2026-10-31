@@ -2508,6 +2508,32 @@
       "url": "https://gitea.example.com/api/v1/repos/alice/app/labels/2"
     }
   ],
+  "milestones": [
+    {
+      "id": 1,
+      "title": "v1.0",
+      "description": "",
+      "open_issues": 3,
+      "closed_issues": 1,
+      "due_on": "2026-12-01T00:00:00Z",
+      "state": "open",
+      "has_issues": true,
+      "is_closed": false,
+      "url": "https://gitea.example.com/api/v1/repos/alice/app/milestones/1"
+    },
+    {
+      "id": 2,
+      "title": "v0.9",
+      "description": "",
+      "open_issues": 0,
+      "closed_issues": 5,
+      "due_on": null,
+      "state": "closed",
+      "has_issues": true,
+      "is_closed": true,
+      "url": "https://gitea.example.com/api/v1/repos/alice/app/milestones/2"
+    }
+  ],
   "issue": {
     "id": 6,
     "url": "https://gitea.example.com/api/v1/repos/alice/app/issues/6",

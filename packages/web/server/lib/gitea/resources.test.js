@@ -368,3 +368,30 @@ describe('Gitea mutations', () => {
       .resolves.toMatchObject({ state: 'failed' });
   });
 });
+
+describe('Gitea milestones', () => {
+  it('lists the project milestones by name and state, open and closed', async () => {
+    const { service, calls } = setup({ 'GET /repos/alice/app/milestones': fixtures.milestones });
+
+    const milestones = await service.listMilestones('/repo', { owner: 'alice', name: 'app' }, 'origin');
+
+    expect(milestones).toEqual([
+      { name: 'v1.0', state: 'open' },
+      { name: 'v0.9', state: 'closed' },
+    ]);
+    // Asked for the whole set, not one state: the dropdown lists both.
+    expect(calls.find((call) => call.url.pathname === '/api/v1/repos/alice/app/milestones').url.searchParams.get('state')).toBe('all');
+  });
+
+  it('drops malformed milestone entries instead of failing the read', async () => {
+    const { service } = setup({
+      'GET /repos/alice/app/milestones': [
+        { ...fixtures.milestones[0], title: null },
+        { ...fixtures.milestones[1] },
+      ],
+    });
+
+    await expect(service.listMilestones('/repo', { owner: 'alice', name: 'app' }, 'origin'))
+      .resolves.toEqual([{ name: 'v0.9', state: 'closed' }]);
+  });
+});
