@@ -4,7 +4,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getAdmissionNavigationRevision, useSessionUIStore } from './session-ui-store';
-import { subscribeGlobalSessionMoves } from './session-event-router';
+import { subscribeGlobalSessionMoves } from './session-moves';
 import { isSessionDirectoryAdmitted } from './session-admission-rule';
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { isVSCodeRuntime } from '@/lib/desktop';

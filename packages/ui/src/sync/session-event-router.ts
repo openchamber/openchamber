@@ -12,6 +12,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime
 import { streamPerfCount, streamPerfMark } from "@/stores/utils/streamDebug"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
+import { publishGlobalSessionMoves, type GlobalSessionMove } from "./session-moves"
 
 const pendingGlobalSessionUpdates = new Map<string, { runtimeKey: string; session: Session }>()
 
@@ -25,15 +26,6 @@ const scheduleGlobalSessionUpdate = (session: Session): void => {
 }
 
 subscribeRuntimeEndpointWillChange(clearPendingGlobalSessionUpdates)
-
-type GlobalSessionMove = { sessionId: string; from: string; to: string }
-const sessionMoveListeners = new Set<(move: GlobalSessionMove) => void>()
-
-/** Moves OpenCode reports while this client listens; history and snapshots never count. */
-export const subscribeGlobalSessionMoves = (listener: (move: GlobalSessionMove) => void): (() => void) => {
-  sessionMoveListeners.add(listener)
-  return () => { sessionMoveListeners.delete(listener) }
-}
 
 /**
  * Applies a session patch to the global list's own record.
@@ -141,7 +133,7 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[
   if (flushedRecency) streamPerfMark("global_sessions.event_update_flush")
   store.applySessionMutations(mutations)
   streamPerfCount("ui.global_sessions.event_update_publication")
-  for (const move of moves) for (const listener of sessionMoveListeners) listener(move)
+  publishGlobalSessionMoves(moves)
 }
 
 export const applySessionEventToGlobalSessions = (payload: SyncEvent): void => {
