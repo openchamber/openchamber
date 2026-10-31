@@ -156,8 +156,16 @@ export function createLocalTracker({ listProjects }) {
   const sessionLinks = new Map();
   // One comment per session and kind, whatever produced it (runtime event or
   // direct post): OpenCode reports `idle` after every turn, and without this
-  // guard every turn would append another "completed" comment.
+  // guard every turn would append another "completed" comment. A post still
+  // running is deduped by `inflightPosts` instead; this set records settled
+  // outcomes only, so a failure does not burn the slot.
   const postedStatuses = new Set();
+  // In-flight posts keyed `sessionId:kind`, mirroring Linear's `inflight` map:
+  // the runtime fires posts fire-and-forget and the check-then-add on
+  // `postedStatuses` spans awaits, so two concurrent posts of the same
+  // session and kind would each append a comment without this. Concurrent
+  // callers await the same promise and get its result.
+  const inflightPosts = new Map();
 
   const rememberSessionLink = (sessionId, link) => {
     sessionLinks.delete(sessionId); // re-insert so eviction drops the oldest
@@ -167,7 +175,15 @@ export function createLocalTracker({ listProjects }) {
     }
   };
 
-  const postSessionStatus = async (input) => {
+  const rememberPostedStatus = (dedupeKey) => {
+    postedStatuses.delete(dedupeKey); // re-insert so eviction drops the oldest
+    postedStatuses.add(dedupeKey);
+    if (postedStatuses.size > MAX_SESSION_STATUS_MEMORY) {
+      postedStatuses.delete(postedStatuses.keys().next().value);
+    }
+  };
+
+  const postSessionStatusOnce = async (input) => {
     const sessionId = asNonEmptyString(input?.sessionId);
     const kind = asNonEmptyString(input?.kind);
     if (!sessionId || !SESSION_STATUS_KINDS.has(kind)) {
@@ -222,8 +238,21 @@ export function createLocalTracker({ listProjects }) {
         ? `Session ${statusWord(kind)} — ${sessionOrigin}`
         : `Session ${statusWord(kind)}`,
     }));
-    postedStatuses.add(dedupeKey);
+    rememberPostedStatus(dedupeKey);
     return { connected: true, posted: true };
+  };
+
+  const postSessionStatus = (input) => {
+    const dedupeKey = `${input?.sessionId}:${input?.kind}`;
+    const pending = inflightPosts.get(dedupeKey);
+    if (pending) {
+      return pending;
+    }
+    const promise = postSessionStatusOnce(input).finally(() => {
+      inflightPosts.delete(dedupeKey);
+    });
+    inflightPosts.set(dedupeKey, promise);
+    return promise;
   };
 
   return {

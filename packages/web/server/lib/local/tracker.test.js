@@ -135,6 +135,44 @@ describe('preferences and session status', () => {
     expect((await t.get('LOCAL-1')).item.comments).toHaveLength(0);
   });
 
+  it('caps in-memory posted-status markers at 500 with FIFO eviction', async () => {
+    const t = await tracker();
+    await t.create({ containerId: 'p1', title: 'First', description: 'Body' });
+    await t.create({ containerId: 'p1', title: 'Second', description: 'Body' });
+
+    const first = 'ses-0000';
+    await t.sessionStatus.post({ kind: 'started', sessionId: first, identifier: 'LOCAL-1' });
+    expect(await t.sessionStatus.post({ kind: 'started', sessionId: first, identifier: 'LOCAL-1' }))
+      .toEqual({ connected: true, posted: false, skipped: 'already-posted' });
+
+    // Push the map past the cap: the oldest marker (the first session) drops.
+    for (let i = 1; i <= 500; i += 1) {
+      await t.sessionStatus.post({ kind: 'started', sessionId: `ses-${String(i).padStart(4, '0')}`, identifier: 'LOCAL-2' });
+    }
+
+    // Evicted: the same post appends a second comment instead of deduping.
+    expect(await t.sessionStatus.post({ kind: 'started', sessionId: first, identifier: 'LOCAL-1' }))
+      .toEqual({ connected: true, posted: true });
+    // Newest marker still present and still dedupes.
+    expect(await t.sessionStatus.post({ kind: 'started', sessionId: 'ses-0500', identifier: 'LOCAL-2' }))
+      .toEqual({ connected: true, posted: false, skipped: 'already-posted' });
+    expect((await t.get('LOCAL-1')).item.comments).toHaveLength(2);
+  });
+
+  it('coalesces two concurrent posts of the same session and kind into one comment', async () => {
+    const t = await tracker();
+    await t.create({ containerId: 'p1', title: 'First', description: 'Body' });
+
+    const [first, second] = await Promise.all([
+      t.sessionStatus.post({ kind: 'started', sessionId: 'ses_abc123', identifier: 'LOCAL-1' }),
+      t.sessionStatus.post({ kind: 'started', sessionId: 'ses_abc123', identifier: 'LOCAL-1' }),
+    ]);
+    // Both callers share the one in-flight post, like Linear's inflight map.
+    expect(first).toEqual({ connected: true, posted: true });
+    expect(second).toEqual({ connected: true, posted: true });
+    expect((await t.get('LOCAL-1')).item.comments).toHaveLength(1);
+  });
+
   it('wires a runtime that posts completed through sessionStatus.post', async () => {
     const t = await tracker();
     await t.create({ containerId: 'p1', title: 'First', description: 'Body' });
