@@ -474,7 +474,9 @@ const SourceBoardBody: React.FC<{
     const trackerOnline = isTrackerConnected(useTrackerAuthEntry(tracker));
     const trackerDescriptor = useTrackerDescriptor(tracker);
     const canCreateIssue = tracker !== null && trackerOnline && trackerDescriptor.capabilities.create === true;
-    const canEditIssue = canCreateIssue && trackerDescriptor.capabilities.edit === true
+    // Gated on the edit bit alone; the server checks the two routes
+    // independently, so a tracker may allow editing without creating.
+    const canEditIssue = tracker !== null && trackerOnline && trackerDescriptor.capabilities.edit === true
         && previewItem?.source === 'tracker' && previewItem.item.provider === tracker
         // The edit form prefills the item's fields; a summary would leave the
         // description blank and a submit would clear it, so the detail is waited for.
