@@ -663,6 +663,9 @@
     "accountSwitchProviders": {
       "scope": "profile"
     },
+    "retryWaitMaxMs": {
+      "scope": "profile"
+    },
     "zenModel": {
       "scope": "profile"
     },

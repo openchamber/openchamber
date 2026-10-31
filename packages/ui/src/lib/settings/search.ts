@@ -593,6 +593,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.retry-wait',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.retryWaitMax',
+    descriptionKey: 'settings.openchamber.defaults.retryWaitMaxInfo',
+    keywords: ['retry', 'backoff', 'wait', 'rate limit', 'provider', 'timeout', 'delay'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.default-agent',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.defaultAgent',
