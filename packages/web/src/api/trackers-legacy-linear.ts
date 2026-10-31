@@ -42,6 +42,8 @@ export const BUILT_IN_LINEAR_TRACKER: TrackerDescriptor = {
     projectMapping: true,
     sessionComments: true,
     hostAccess: true,
+    create: false,
+    edit: false,
   },
   stateFilters: ['open', 'all', 'backlog', 'todo', 'in-progress', 'inReview', 'done', 'canceled', 'duplicate'],
   urlPatterns: [{ host: 'linear.app', path: '^/[^/]+/issue/([A-Za-z][A-Za-z0-9]*-\\d+)(?:/|$)' }],
