@@ -45,6 +45,21 @@ describe('list', () => {
     expect(page.issues).toHaveLength(1);
     expect(page.hasMore).toBe(false);
   });
+  it('filters by priority: all or absent, none, and exact match', async () => {
+    const dir = path.join(root, '.issues');
+    fs.mkdirSync(dir);
+    const withPriority = (n, title, priority) => issue(n, title).replace('priority: null', `priority: ${priority}`);
+    fs.writeFileSync(path.join(dir, 'LOCAL-1-high.md'), withPriority(1, 'High', 'high'));
+    fs.writeFileSync(path.join(dir, 'LOCAL-2-none.md'), withPriority(2, 'Unset', 'null'));
+    fs.writeFileSync(path.join(dir, 'LOCAL-3-low.md'), withPriority(3, 'Low', 'low'));
+    const scanner = await scannerWith();
+    const ids = async (options) => (await scanner.list(options)).issues.map((i) => i.identifier);
+    expect(await ids({ state: 'all' })).toEqual(['LOCAL-1', 'LOCAL-2', 'LOCAL-3']);
+    expect(await ids({ state: 'all', priority: 'all' })).toEqual(['LOCAL-1', 'LOCAL-2', 'LOCAL-3']);
+    expect(await ids({ state: 'all', priority: 'none' })).toEqual(['LOCAL-2']);
+    expect(await ids({ state: 'all', priority: 'high' })).toEqual(['LOCAL-1']);
+    expect(await ids({ state: 'all', priority: 'low' })).toEqual(['LOCAL-3']);
+  });
   it('ignores a duplicated identifier and warns', async () => {
     const dir = path.join(root, '.issues');
     fs.mkdirSync(dir);
@@ -186,7 +201,7 @@ it('falls back to .issues when issuesDir escapes the project or is empty', async
   const dir = path.join(root, '.issues');
   fs.mkdirSync(dir);
   fs.writeFileSync(path.join(dir, 'LOCAL-1-a.md'), issue(1, 'Safe'));
-  for (const bad of ['../outside', '  ', '/abs/dir']) {
+  for (const bad of ['../outside', '.. ', '.. .', '  ', '/abs/dir']) {
     project.issuesDir = bad;
     const scanner = await scannerWith();
     const { issues } = await scanner.list({ state: 'all' });

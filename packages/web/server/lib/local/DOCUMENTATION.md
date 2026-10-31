@@ -13,7 +13,7 @@ Routes answered (through the shared `/api/tracker/local/*` routes, host-only in 
 ## Invariants
 
 - **Identifiers are immutable.** `LOCAL-<n>` is assigned at create time from the per-project counter, becomes the file name, and never changes. The number restarts at 1 per project; the project is what makes an issue unique. A file whose parsed identifier disagrees with its file name, or a duplicated identifier in one project, is skipped with a warning, never served.
-- **Six states, exactly:** `triage`, `backlog`, `todo`, `in-progress`, `done`, `canceled` (`files.js` `STATES`). An unknown state in a file is skipped at parse; an update to an unknown state is rejected.
+- **Six states, exactly:** `triage`, `backlog`, `todo`, `in-progress`, `done`, `canceled` (`files.js` `STATES`). Parse does not validate the state — a file with an unknown state parses and is served as it is — but an update to an unknown state is rejected.
 - **The scan cache is per-file `mtimeMs`+`size`.** Parsed issues are reused while both match the directory stat; any outside writer (the user in an editor, this module's own `writeIssue`) invalidates the file on the next scan. The cache is per project and lives for the server run.
 - **Writes are atomic: tmp file + rename** (`writeIssue`). `writeIssue` does not create the directory — callers guarantee it exists (`scanner.create` does); a caller that does not fails with the rename error rather than silently writing elsewhere.
 - **The `## Comments` section format:** entries are `### <iso> · <source>` headings followed by body lines. The section is rebuilt in normalized form on every comment append; the head (everything above it) is preserved verbatim. `updatedAt` is bumped by the append.

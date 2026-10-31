@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { createLocalTracker, LOCAL_TRACKER_DESCRIPTOR } from './tracker.js';
+import { readIssue } from './files.js';
 
 let root;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-track-')); });
@@ -46,6 +47,37 @@ describe('list/get/create/edit/updateState', () => {
     expect(moved.item.state.category).toBe('done');
     const empty = await t.get('LOCAL-99');
     expect(empty).toEqual({ connected: true, item: null });
+  });
+  it('stores priority "none" as null in the file, on create and edit', async () => {
+    const t = await tracker();
+    const priorityOf = (parsed) => {
+      const entry = parsed.fields.find(([key]) => key === 'priority');
+      return entry ? entry[1] : null;
+    };
+    const { item } = await t.create({ containerId: 'p1', title: 'Unprioritized', description: null, priority: 'none', labels: [] });
+    // The neutral summary maps a null priority back to the `none` filter shape.
+    expect(item.priority).toBe('none');
+    const dir = path.join(root, '.issues');
+    expect(fs.readFileSync(path.join(dir, 'LOCAL-1-unprioritized.md'), 'utf8')).toContain('priority: null');
+    expect(priorityOf(readIssue(dir, 'LOCAL-1-unprioritized.md'))).toBeNull();
+    // A null priority is stored as the key's absence, the scanner's clear
+    // semantics; it still reads back as null.
+    await t.edit({ id: 'LOCAL-1', priority: 'none' });
+    expect(priorityOf(readIssue(dir, 'LOCAL-1-unprioritized.md'))).toBeNull();
+  });
+  it('collapses newlines in title and labels to single lines', async () => {
+    const t = await tracker();
+    const { item } = await t.create({ containerId: 'p1', title: 'Broken\ntitle', description: 'Body', priority: null, labels: ['multi\nline'] });
+    expect(item.title).toBe('Broken title');
+    expect(item.labels.map((l) => l.name)).toEqual(['multi line']);
+    // The file parsed and is served; a newline would have produced a
+    // frontmatter line the parser rejects, skipping the file forever.
+    const detail = await t.get('LOCAL-1');
+    expect(detail.item.title).toBe('Broken title');
+    expect(detail.item.labels.map((l) => l.name)).toEqual(['multi line']);
+    const edited = await t.edit({ id: 'LOCAL-1', title: 'Renamed\nagain', labels: ['other\nlabel'] });
+    expect(edited.item.title).toBe('Renamed again');
+    expect(edited.item.labels.map((l) => l.name)).toEqual(['other label']);
   });
   it('returns connected:false-shaped UNSUPPORTED errors as user errors', async () => {
     const t = await tracker();

@@ -34,6 +34,21 @@ const SESSION_ID_SHORT_LENGTH = 12;
 
 const statusWord = (kind) => (kind === 'failure' ? 'failed' : kind);
 
+// The frontmatter format is single-line `key: value` and the parser rejects
+// any other shape: a newline reaching a title or label produces a malformed
+// line and the file is skipped on every scan from then on. Values crossing
+// into the scanner are therefore collapsed to a single line first. Runs of
+// whitespace collapse with them, so the result reads naturally.
+const toSingleLine = (value) => (isString(value) ? value.replace(/\s+/g, ' ').trim() : value);
+
+const toSingleLineLabels = (labels) => (Array.isArray(labels)
+  ? labels.filter(isString).map(toSingleLine).filter((label) => label)
+  : labels);
+
+// `none` is the UI's filter shape for "no priority", not a spec value; the
+// files store `null` for it, so neither create nor edit can write `none`.
+const normalizePriority = (priority) => (priority === 'none' ? null : priority);
+
 const shortSessionId = (sessionId) => (sessionId.length <= SESSION_ID_SHORT_LENGTH ? sessionId : sessionId.slice(0, SESSION_ID_SHORT_LENGTH));
 
 const nowIso = () => new Date().toISOString();
@@ -292,12 +307,24 @@ export function createLocalTracker({ listProjects }) {
     },
 
     create: async ({ containerId, title, description, priority, labels }) => {
-      const issue = await scanner.create(containerId, { title, description, priority, labels });
+      const issue = await scanner.create(containerId, {
+        title: toSingleLine(title),
+        description,
+        priority: normalizePriority(priority),
+        labels: toSingleLineLabels(labels),
+      });
       return { connected: true, item: toTrackerItemSummary(issue, await containerOfIssue(issue)) };
     },
 
     edit: async ({ id, title, description, priority, labels }) => {
-      const issue = await scanner.edit(id, { title, description, priority, labels });
+      // Only the fields the caller carries are forwarded; an absent field
+      // leaves the stored value alone, an explicit value replaces it.
+      const patch = {};
+      if (title !== undefined) patch.title = toSingleLine(title);
+      if (description !== undefined) patch.description = description;
+      if (priority !== undefined) patch.priority = normalizePriority(priority);
+      if (labels !== undefined) patch.labels = toSingleLineLabels(labels);
+      const issue = await scanner.edit(id, patch);
       return { connected: true, item: toTrackerItemSummary(issue, await containerOfIssue(issue)) };
     },
 

@@ -30,10 +30,17 @@ const nowIso = () => new Date().toISOString();
 
 // A custom `issuesDir` must be a relative, non-escaping directory name;
 // anything else falls back to the default so a bad setting can never point
-// the scanner outside the project.
+// the scanner outside the project. The escape check mirrors the settings
+// layer's `issuesDirEscapesProject` (../opencode/settings-normalization-runtime.js):
+// Win32 path normalization trims trailing whitespace and dot runs from each
+// component, so `.. ` and `.. .` resolve as `..` on Windows while a dots-only
+// segment (`....`) stays a legal directory name.
+const issuesDirEscapesProject = (value) => value.split(/[\\/]/).some((segment) =>
+  segment === '..' || /^\.\.\s[\s.]*$/.test(segment));
+
 const issuesDirOf = (project) => {
   const value = project.issuesDir;
-  if (isString(value) && value.trim() && !path.isAbsolute(value) && !value.split(/[\\/]/).includes('..')) {
+  if (isString(value) && value.trim() && !path.isAbsolute(value) && !issuesDirEscapesProject(value)) {
     return value;
   }
   return DEFAULT_ISSUES_DIR;
@@ -156,6 +163,14 @@ const matchesState = (issueState, filter) => {
   return issueState === filter;
 };
 
+// `all` (or absent) matches any priority; `none` matches issues without one;
+// otherwise the issue's priority equals the filter value.
+const matchesPriority = (issuePriority, filter) => {
+  if (!filter || filter === 'all') return true;
+  if (filter === 'none') return issuePriority == null;
+  return issuePriority === filter;
+};
+
 const matchesQuery = (issue, query) => {
   if (!query) return true;
   return `${issue.identifier} ${issue.title} ${issue.body}`.toLowerCase().includes(query);
@@ -169,6 +184,7 @@ const createLocalScanner = ({ listProjects }) => {
 
   const list = async (options = {}) => {
     const stateFilter = isString(options.state) ? options.state : null;
+    const priorityFilter = isString(options.priority) ? options.priority : null;
     const query = isString(options.query) && options.query.trim() ? options.query.trim().toLowerCase() : null;
     const containerId = isString(options.containerId) && options.containerId ? options.containerId : null;
 
@@ -184,6 +200,7 @@ const createLocalScanner = ({ listProjects }) => {
       containerByIssue.set(project.id, container);
       for (const issue of issues) {
         if (!matchesState(issue.state, stateFilter)) continue;
+        if (!matchesPriority(issue.priority, priorityFilter)) continue;
         if (!matchesQuery(issue, query)) continue;
         filtered.push(issue);
       }
