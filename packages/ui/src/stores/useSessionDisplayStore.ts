@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { getSettingsSurface } from '@/lib/settings/surface';
+import { getRuntimeKey, isTransientRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import type { SettingsSurface } from '@/lib/settings/registry';
 import {
   DEFAULT_SIDEBAR_SECTIONS,
@@ -73,6 +74,12 @@ type SessionDisplayStore = {
   pinLists: SidebarPinList[];
   /** The user's sections this surface hides; built-in ones keep their own show toggles. */
   hiddenSections: string[];
+  /**
+   * The instance the sections, pin lists and hidden sections came from. They
+   * belong to that instance: switching to another drops them until its own
+   * settings arrive, so one server's sections never show on another.
+   */
+  sectionsOwner: string | null;
   setSections: (sections: SidebarSectionEntry[]) => void;
   setPinLists: (lists: SidebarPinList[]) => void;
   setHiddenSections: (ids: string[]) => void;
@@ -180,10 +187,11 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       sections: [...DEFAULT_SIDEBAR_SECTIONS],
       pinLists: [],
       hiddenSections: [],
+      sectionsOwner: null,
       // The same rules as a stored value: built-in sections kept, limits held.
-      setSections: (sections) => set({ sections: sidebarSectionsSchema.parse(sections) }),
-      setPinLists: (lists) => set({ pinLists: sidebarPinListsSchema.parse(lists) }),
-      setHiddenSections: (ids) => set({ hiddenSections: hiddenSidebarSectionsSchema.parse(ids) }),
+      setSections: (sections) => set({ sections: sidebarSectionsSchema.parse(sections), sectionsOwner: getRuntimeKey() }),
+      setPinLists: (lists) => set({ pinLists: sidebarPinListsSchema.parse(lists), sectionsOwner: getRuntimeKey() }),
+      setHiddenSections: (ids) => set({ hiddenSections: hiddenSidebarSectionsSchema.parse(ids), sectionsOwner: getRuntimeKey() }),
       // Default to HIDDEN so the pre-hydration state matches the quiet/safe
       // option: archived sessions must never flash visible on startup and then
       // disappear once the persisted preference rehydrates.
@@ -219,3 +227,18 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
 export type {
   ProjectSortOrder
 };
+
+// The user's sections, pin lists and hidden sections are another instance's
+// once the client switches: back to the built-in sections until the new
+// instance's settings arrive (an instance without any keeps them).
+/** Drops the user's sections when they came from another instance than `runtimeKey`. */
+export const dropSectionsOfOtherInstance = (runtimeKey: string): void => {
+  const state = useSessionDisplayStore.getState();
+  if (state.sectionsOwner === null || state.sectionsOwner === runtimeKey || isTransientRuntimeKey(runtimeKey)) return;
+  useSessionDisplayStore.setState({ sections: [...DEFAULT_SIDEBAR_SECTIONS], pinLists: [], hiddenSections: [], sectionsOwner: null });
+};
+subscribeRuntimeEndpointWillChange(({ runtimeKey }) => dropSectionsOfOtherInstance(runtimeKey));
+// The stored copy may be another instance's when the app starts on a different
+// one. Checked once the boot code has set the instance (it runs in the same
+// task as this module), so a window opened on a saved host keeps its own.
+queueMicrotask(() => dropSectionsOfOtherInstance(getRuntimeKey()));

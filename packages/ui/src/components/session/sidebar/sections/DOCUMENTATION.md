@@ -55,6 +55,12 @@ with its named pin lists. How the rows are drawn stays with the row model
   the built-in ones through the show toggles they always had
   (`sidebarShowChatsSection`, `sidebarShowPinnedSection`, `sidebarShowWorkSection`),
   which older clients still read. Projects is always shown.
+- Sections, pin lists and hidden sections belong to the instance they came
+  from (`sectionsOwner` in the display store, stamped by every write). The local
+  copy is a startup cache: switching to another instance, or starting on one,
+  drops it back to the built-in sections until that instance's settings
+  arrive, so one server's sections never show on another. A transient
+  disconnected state keeps them.
 - VS Code draws no section of the user's own; its list stays as it was.
 - Live state (running, a waiting request, unread, failed) is subscribed only
   while a shown section filters on it, and only while the sidebar is visible.
