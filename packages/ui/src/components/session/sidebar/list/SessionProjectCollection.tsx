@@ -241,13 +241,15 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const singleProjectId = useSessionDisplayStore((state) => state.singleProjectId);
   const setSingleProjectId = useSessionDisplayStore((state) => state.setSingleProjectId);
-  const supportsSingleProjectMode = !topology.isVSCode && !isCapacitorApp();
-  const singleProjectMode = supportsSingleProjectMode && projectDisplayMode === 'single';
   // VS Code lists every session under its workspace and keeps sessions in
   // work there too; it has neither the list by time nor worktree works.
   const sidebarGrouping = useSessionDisplayStore(resolveSidebarGrouping);
   const keepWorkInPlaceSetting = useSessionDisplayStore((state) => state.keepWorkInPlace);
   const timeGrouping = !topology.isVSCode && sidebarGrouping === 'time';
+  // The list by time is every project's works, so it overrides one-project
+  // display; the choice comes back with grouping by project.
+  const supportsSingleProjectMode = !topology.isVSCode && !isCapacitorApp();
+  const singleProjectMode = supportsSingleProjectMode && projectDisplayMode === 'single' && !timeGrouping;
   const keepWorkInPlace = topology.isVSCode || keepWorkInPlaceSetting;
   const runIndex = React.useMemo(() => buildMultiRunIndex(
     collection.rootSessions,

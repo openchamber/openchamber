@@ -114,7 +114,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
   // VS Code always groups under its workspace.
   const timeGrouping = showProjectDisplayControls && sidebarGrouping === 'time';
-  const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
+  // The list by time shows every project, whatever the project display says.
+  const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single' && !timeGrouping;
 
   // One choice per line, rarely touched orders behind submenus that name the
   // current choice, so the menu stays short: selection first, then the view,
@@ -183,8 +184,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
       void updateDesktopSettings({ sidebarGrouping: grouping });
     }));
   }
-  displayMenuSections.push(<>
-    {!timeGrouping ? choiceSubmenu({ labelKey: 'sessions.sidebar.header.actions.sortProjects', icon: 'arrow-up-down' }, [
+  // Grouped by time the list has no project headers to sort and shows every
+  // project, so this group is empty then and takes no separator.
+  if (!timeGrouping) displayMenuSections.push(<>
+    {choiceSubmenu({ labelKey: 'sessions.sidebar.header.actions.sortProjects', icon: 'arrow-up-down' }, [
       ['manual', 'sessions.sidebar.header.projectSort.manual'],
       ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
       ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
@@ -193,7 +196,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     ] as const, projectSortOrder, (order) => {
       setProjectSortOrder(order);
       void updateDesktopSettings({ sidebarProjectSortOrder: order });
-    }) : null}
+    })}
     {showProjectDisplayControls ? choiceSubmenu({ labelKey: 'sessions.sidebar.header.projectDisplay.label', icon: 'folder-open' }, [
       ['all', 'sessions.sidebar.header.projectDisplay.all'],
       ['single', 'sessions.sidebar.header.projectDisplay.single'],

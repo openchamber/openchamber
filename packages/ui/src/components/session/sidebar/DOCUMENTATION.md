@@ -579,8 +579,10 @@ sections as toggles too; it has no manager.
   worktrees nobody has started a session in. It is virtualized, so it has no
   reveal limit, and ends with the statuses a project header would show for
   projects it lists nothing for (one loading line, one line per failed
-  directory). Single-project mode keeps its project header and groups by
-  project.
+  directory). The list by time is every project's works, so it overrides
+  the project display: one-project mode applies only while grouped by project,
+  and the display menu hides Show projects meanwhile (maintainer, 2026-10-31;
+  before, one-project mode kept its project and the list by time did nothing).
 - An isolated space without chats still has its work row: it leads its
   project's list while it is made or runs, and closes it otherwise (see
   Spaces). Search leaves it out.
