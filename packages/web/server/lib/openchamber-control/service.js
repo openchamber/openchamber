@@ -134,6 +134,16 @@ const buildScheduledTask = (input) => {
   if (goalTokenBudget !== undefined && (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget < 1000 || goalTokenBudget > 100_000_000)) {
     throw new OpenChamberControlError('goalTokenBudget must be from 1000 to 100000000', 400);
   }
+  // Isolation (git only): run each task run in a fresh worktree on the chosen
+  // source branch. These fields mean nothing to a task that runs in an
+  // existing session — that session's own directory wins — so the combination
+  // is refused instead of being stored and ignored.
+  const runInWorktree = input.runInWorktree === true;
+  const cleanupWorktree = input.cleanupWorktree === false;
+  const baseBranch = asNonEmptyString(input.baseBranch);
+  if (targetSessionId && (runInWorktree || cleanupWorktree || baseBranch)) {
+    throw new OpenChamberControlError('runInWorktree, baseBranch and cleanupWorktree are not compatible with an existing session', 400);
+  }
   const task = {
     name,
     enabled: input.disabled !== true,
@@ -148,6 +158,9 @@ const buildScheduledTask = (input) => {
     },
   };
   if (input.targetSessionId !== undefined) task.targetSessionId = targetSessionId ?? input.targetSessionId;
+  if (runInWorktree) task.runInWorktree = true;
+  if (cleanupWorktree) task.cleanupWorktree = false;
+  if (baseBranch) task.baseBranch = baseBranch;
   return task;
 };
 
@@ -203,7 +216,20 @@ const patchScheduledTask = (existing, input) => {
   const schedule = replacesSchedule
     ? buildSchedule(input)
     : (timezone ? { ...existing.schedule, timezone } : existing.schedule);
-  return {
+
+  // Isolation (git only): only the fields the call names change. A task that
+  // runs in an existing session ignores them — that session's own directory
+  // wins — so naming any of them on such a task is refused. Turning isolation
+  // off keeps a stored base branch, the way the editor does; clearing it is an
+  // explicit empty string.
+  const isolationNamed = input.runInWorktree !== undefined
+    || input.baseBranch !== undefined
+    || input.cleanupWorktree !== undefined;
+  const effectiveTarget = input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId;
+  if (isolationNamed && asNonEmptyString(effectiveTarget)) {
+    throw new OpenChamberControlError('runInWorktree, baseBranch and cleanupWorktree are not compatible with an existing session', 400);
+  }
+  const patch = {
     id: existing.id,
     targetSessionId: input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId,
     name,
@@ -211,6 +237,14 @@ const patchScheduledTask = (existing, input) => {
     schedule,
     execution,
   };
+  if (input.runInWorktree !== undefined) patch.runInWorktree = input.runInWorktree === true;
+  if (input.cleanupWorktree !== undefined) patch.cleanupWorktree = input.cleanupWorktree === true;
+  if (input.baseBranch !== undefined) {
+    // An explicit empty value clears the stored branch; a nonempty one trims
+    // and sets it. Absent leaves the stored choice untouched.
+    patch.baseBranch = input.baseBranch === null || input.baseBranch === '' ? null : asNonEmptyString(input.baseBranch);
+  }
+  return patch;
 };
 
 export const createOpenChamberControlService = (dependencies) => {

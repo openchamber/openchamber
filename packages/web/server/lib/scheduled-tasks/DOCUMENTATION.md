@@ -193,6 +193,10 @@ source ref; an absent branch uses the project checkout's `HEAD` at run time.
 The editor reuses multi-run's `BranchSelector`, including remote branches, and
 hides it while isolation is off. Chats and existing-session dispatches do not
 use isolation. Setup commands are outside this implementation.
+The agent tool sets the same choices through `schedule.create` and
+`schedule.update` (`runInWorktree`, `baseBranch`, `cleanupWorktree`); it refuses
+any of them together with `targetSessionId`, because that session's own
+directory wins.
 
 - Project config stores `runInWorktree: true`, a nonempty `baseBranch`, and
   `cleanupWorktree: false`. Omitted fields preserve stored choices. The source
