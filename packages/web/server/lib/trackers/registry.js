@@ -1,4 +1,5 @@
 import { linearTracker } from '../linear/tracker.js';
+import { localTracker } from '../local/index.js';
 import { isPlainObject } from '../shared/guards.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { EXTENSION_PROVIDER_PREFIX, isProviderId, isReservedProviderId } from '../source-control/provider-id.js';
@@ -12,7 +13,7 @@ import { EXTENSION_PROVIDER_PREFIX, isProviderId, isReservedProviderId } from '.
  * The built-in trackers in registration order: one module folder and one entry here each.
  * `server/index.js` builds the one registry over them.
  */
-export const BUILT_IN_TRACKERS = Object.freeze([linearTracker]);
+export const BUILT_IN_TRACKERS = Object.freeze([linearTracker, localTracker]);
 
 // Descriptors are plain JSON: objects, arrays and primitives.
 const deepFreeze = (value) => {

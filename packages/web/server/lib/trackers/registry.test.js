@@ -1,18 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { LINEAR_TRACKER_DESCRIPTOR } from '../linear/tracker.js';
+import { LOCAL_TRACKER_DESCRIPTOR } from '../local/tracker.js';
+import { configureLocalTracker, localTracker } from '../local/index.js';
 import { BUILT_IN_TRACKERS, createTrackerRegistry } from './registry.js';
 
 const descriptorFor = (id) => ({ ...structuredClone(LINEAR_TRACKER_DESCRIPTOR), id, name: id });
 const entryFor = (id, load = async () => ({ id })) => ({ descriptor: descriptorFor(id), load });
 
 describe('createTrackerRegistry', () => {
-  it('serves the built-in Linear descriptor as plain JSON', () => {
+  it('serves the built-in descriptors as plain JSON', () => {
     const registry = createTrackerRegistry();
-    expect(registry.list()).toEqual(['linear']);
+    expect(registry.list()).toEqual(['linear', 'local']);
     expect(registry.has('linear')).toBe(true);
-    expect(JSON.parse(JSON.stringify(registry.descriptors()))).toEqual([LINEAR_TRACKER_DESCRIPTOR]);
-    expect(BUILT_IN_TRACKERS.map((entry) => entry.descriptor.id)).toEqual(['linear']);
+    expect(registry.has('local')).toBe(true);
+    expect(JSON.parse(JSON.stringify(registry.descriptors()))).toEqual([LINEAR_TRACKER_DESCRIPTOR, LOCAL_TRACKER_DESCRIPTOR]);
+    expect(BUILT_IN_TRACKERS.map((entry) => entry.descriptor.id)).toEqual(['linear', 'local']);
   });
 
   it('answers null for an unknown id', async () => {
@@ -84,5 +90,36 @@ describe('createTrackerRegistry', () => {
     expect(linear.sessionStatus.createRuntime).toBeInstanceOf(Function);
     expect(linear.matchUrl('https://linear.app/acme/issue/eng-12/title')).toBe('ENG-12');
     expect(linear.hostAccess.apiOrigin).toBe('https://api.linear.app');
+  });
+});
+
+describe('the built-in local tracker', () => {
+  it('registers after linear and answers its descriptor', () => {
+    const registry = createTrackerRegistry(undefined, { foreignIds: ['github', 'gitlab'] });
+    expect(registry.list()).toEqual(['linear', 'local']);
+    expect(registry.descriptor('local')).toEqual(LOCAL_TRACKER_DESCRIPTOR);
+    expect(registry.descriptor('local').identifierPattern).toBe('^[A-Za-z][A-Za-z0-9]*-\\d+$');
+  });
+
+  it('builds when passed explicitly', () => {
+    const registry = createTrackerRegistry([localTracker]);
+    expect(registry.list()).toEqual(['local']);
+  });
+
+  it('refuses to load before the server configured the settings reader', async () => {
+    configureLocalTracker({ readSettings: null });
+    const registry = createTrackerRegistry([localTracker]);
+    await expect(registry.implementation('local')).rejects.toThrow(/configured/);
+  });
+
+  it('loads the real implementation over the configured settings reader', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-local-tracker-'));
+    fs.mkdirSync(path.join(root, '.issues'));
+    configureLocalTracker({ readSettings: async () => ({ projects: [{ id: 'proj-1', path: root, label: 'Proj One' }] }) });
+    const registry = createTrackerRegistry([localTracker]);
+    const local = await registry.implementation('local');
+    expect(local.list).toBeInstanceOf(Function);
+    expect(local.sessionStatus.createRuntime).toBeInstanceOf(Function);
+    expect(await local.list({ state: 'all' })).toMatchObject({ connected: true, items: [], hasMore: false });
   });
 });

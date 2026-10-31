@@ -98,6 +98,7 @@ import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
 import { createSessionWarmingRuntime } from './lib/session-warming/runtime.js';
 import { createTrackerRegistry } from './lib/trackers/registry.js';
+import { configureLocalTracker } from './lib/local/index.js';
 import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
@@ -1209,7 +1210,10 @@ sessionWarmingRuntime.start();
 
 // The tracker registry, one per server. Tracker and source-control ids share
 // one namespace (tracked items, the read cache), so the source-control ids are
-// refused here and an overlap fails at startup.
+// refused here and an overlap fails at startup. The local tracker lists its
+// projects from this server's own settings runtime, handed over here because
+// `settings-runtime.js` exports the factory, not a reader.
+configureLocalTracker({ readSettings: readSettingsFromDiskMigrated });
 const trackerRegistry = createTrackerRegistry(undefined, {
   foreignIds: sourceControlProviderDescriptors.list().map((descriptor) => descriptor.id),
 });

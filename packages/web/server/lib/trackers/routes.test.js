@@ -288,7 +288,7 @@ describe('tracker routes over the built-in Linear tracker', () => {
     const app = express();
     registerTrackerRoutes(app, { registry: createTrackerRegistry() });
     const providers = await request(app).get('/api/tracker/providers').expect(200);
-    expect(providers.body.providers.map((descriptor) => descriptor.id)).toEqual(['linear']);
+    expect(providers.body.providers.map((descriptor) => descriptor.id)).toEqual(['linear', 'local']);
     expect((await request(app).get('/api/tracker/linear/items/list').expect(200)).body).toEqual({ connected: false });
     expect((await request(app).get('/api/tracker/linear/items/get?id=ENG-12').expect(200)).body).toEqual({ connected: false });
     expect((await request(app).get('/api/tracker/linear/mapping').expect(200)).body).toEqual({ connected: false });
