@@ -83,6 +83,13 @@ describe('readIssue/writeIssue', () => {
     expect(issue.fields).toContainEqual(['custom', 'c']);
     expect(readIssue(dir, 'nope.md')).toBeNull();
   });
+  it('quotes scalars that would reparse as a different type, keeping write/read lossless', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-local-'));
+    writeIssue(dir, { fileName: 'LOCAL-3-x.md', number: 3, slug: 'x', identifier: 'LOCAL-3', fields: [['identifier', 'LOCAL-3'], ['title', '[Bug]'], ['note', 'null']], body: 'B\n' });
+    const issue = readIssue(dir, 'LOCAL-3-x.md');
+    expect(issue.fields).toContainEqual(['title', '[Bug]']);
+    expect(issue.fields).toContainEqual(['note', 'null']);
+  });
   it('returns null for an unparseable file', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-local-'));
     write(dir, 'LOCAL-2-bad.md', 'no frontmatter here');

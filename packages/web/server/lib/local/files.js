@@ -82,6 +82,13 @@ function serializeFrontmatterValue(value) {
   if (Array.isArray(value)) {
     return `[${value.join(', ')}]`;
   }
+  // Quote strings that would otherwise reparse as a different type (the
+  // `null` literal or a `[...]` array); the parser strips the surrounding
+  // quotes on read. Quote characters inside the value are not escaped —
+  // out of scope for this minimal wrapper.
+  if (isString(value) && (value === 'null' || (value.startsWith('[') && value.endsWith(']')))) {
+    return `"${value}"`;
+  }
   return value;
 }
 
