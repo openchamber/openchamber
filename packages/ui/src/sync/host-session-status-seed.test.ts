@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
+import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import {
@@ -19,6 +20,12 @@ import { resetSessionActivityTiming, useSessionActivityTimingStore } from './ses
 import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, resetGlobalBlockingRequests, useGlobalBlockingRequestsStore } from './global-blocking-requests';
 
 const NOW = 1_700_000_000_000;
+const sessionIds = (events: SyncEvent[] | undefined) => events?.flatMap((event) => (
+  event.type === 'session.status' ? [event.properties.sessionID] : []
+));
+const statusOf = (event: SyncEvent | undefined) => (
+  event?.type === 'session.status' ? event.properties.status : undefined
+);
 const deferredSnapshot = () => {
   type Snapshot = Awaited<ReturnType<typeof opencodeClient.getHostSessionStatusSnapshot>>;
   let resolve!: (value: Snapshot) => void;
@@ -33,16 +40,17 @@ const session = (id: string, directory: string): Session => ({
 });
 
 describe('buildHostStatusSeedEvents', () => {
-  test('adds busy and retry entries as busy, grouped by resolved directory', () => {
+  test('adds busy entries and retry details, grouped by resolved directory', () => {
     const events = buildHostStatusSeedEvents({
       serverTime: NOW,
       sessions: {
         a: { status: 'busy', lastUpdateAt: NOW - 1_000 },
-        b: { status: 'retry', lastUpdateAt: NOW - 1_000 },
+        b: { status: 'retry', lastUpdateAt: NOW - 1_000, metadata: { attempt: 2, message: 'rate limited', next: NOW + 60_000 } },
         c: { status: 'idle', lastUpdateAt: NOW },
       },
     }, {
-      isKnown: () => false,
+      knownStatus: () => undefined,
+      observed: () => false,
       resolveDirectory: (id) => (id === 'a' ? '/repo' : id === 'b' ? '/other' : null),
     });
 
@@ -51,7 +59,10 @@ describe('buildHostStatusSeedEvents', () => {
       type: 'session.status',
       properties: { sessionID: 'a', status: { type: 'busy' } },
     }]);
-    expect(events.get('/other')?.[0]?.properties).toEqual({ sessionID: 'b', status: { type: 'busy' } });
+    expect(events.get('/other')?.[0]?.properties).toEqual({
+      sessionID: 'b',
+      status: { type: 'retry', attempt: 2, message: 'rate limited', next: NOW + 60_000 },
+    });
   });
 
   test('skips sessions the client already observed, stale entries, and unresolved directories', () => {
@@ -64,7 +75,8 @@ describe('buildHostStatusSeedEvents', () => {
         unplaced: { status: 'busy', lastUpdateAt: NOW },
       },
     }, {
-      isKnown: (id) => id === 'known',
+      knownStatus: (id) => (id === 'known' ? { type: 'busy' } : undefined),
+      observed: (id) => id === 'known',
       resolveDirectory: (id) => (id === 'unplaced' ? null : '/repo'),
     });
 
@@ -73,6 +85,34 @@ describe('buildHostStatusSeedEvents', () => {
       type: 'session.status',
       properties: { sessionID: 'fresh', status: { type: 'busy' } },
     }]);
+  });
+
+  test('lets a host retry replace a busy observation, but not a retry or idle one', () => {
+    const entries = {
+      held: { status: 'retry', lastUpdateAt: NOW, metadata: { attempt: 2, message: 'held', next: NOW + 60_000 } },
+      knownRetry: { status: 'retry', lastUpdateAt: NOW },
+      settled: { status: 'retry', lastUpdateAt: NOW },
+    };
+    const busy = buildHostStatusSeedEvents(
+      { serverTime: NOW, sessions: entries },
+      { knownStatus: () => ({ type: 'busy' }), observed: () => false, resolveDirectory: () => '/repo' },
+    );
+    expect(sessionIds(busy.get('/repo'))).toEqual(['held', 'knownRetry', 'settled']);
+    expect(statusOf(busy.get('/repo')?.[0])).toEqual({
+      type: 'retry', attempt: 2, message: 'held', next: NOW + 60_000,
+    });
+
+    const retry = buildHostStatusSeedEvents(
+      { serverTime: NOW, sessions: entries },
+      { knownStatus: () => ({ type: 'retry', attempt: 1, message: '', next: NOW }), observed: () => false, resolveDirectory: () => '/repo' },
+    );
+    expect([...retry.keys()]).toEqual([]);
+
+    const idle = buildHostStatusSeedEvents(
+      { serverTime: NOW, sessions: entries },
+      { knownStatus: () => ({ type: 'idle' }), observed: () => true, resolveDirectory: () => '/repo' },
+    );
+    expect([...idle.keys()]).toEqual([]);
   });
 });
 

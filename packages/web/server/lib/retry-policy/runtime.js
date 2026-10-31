@@ -127,7 +127,7 @@ export default {
  * @param {string} dependencies.instanceDir this server's own directory (`../opencode/instance-dir.js`)
  * @param {() => Promise<object|null>} dependencies.readSettings
  * @param {(req: import('express').Request) => boolean} dependencies.authorizeRequest the agent tool's callback check
- * @param {(event: { type: string, properties: object }) => void} [dependencies.broadcastUiEvent]
+ * @param {(sessionID: string, metadata: { attempt: number, message: string, next: number }) => void} [dependencies.announceRetry] the session runtime's status owner
  */
 export const createRetryPolicyRuntime = ({
   fsPromises,
@@ -135,7 +135,7 @@ export const createRetryPolicyRuntime = ({
   instanceDir,
   readSettings,
   authorizeRequest,
-  broadcastUiEvent = () => {},
+  announceRetry = () => {},
 }) => {
   const pluginDirectory = path.join(instanceDir, 'retry-policy', PLUGIN_ID);
 
@@ -158,18 +158,10 @@ export const createRetryPolicyRuntime = ({
         : report.data.delay;
       const hold = settings?.retryNowEnabled === true && delay > 0;
       if (hold) {
-        broadcastUiEvent({
-          type: 'openchamber:session-status',
-          properties: {
-            sessionID: report.data.sessionID,
-            status: 'retry',
-            timestamp: Date.now(),
-            metadata: {
-              attempt: report.data.attempt,
-              message: report.data.message,
-              next: Date.now() + delay,
-            },
-          },
+        announceRetry(report.data.sessionID, {
+          attempt: report.data.attempt,
+          message: report.data.message,
+          next: Date.now() + delay,
         });
       }
       return res.json({ delay, hold });

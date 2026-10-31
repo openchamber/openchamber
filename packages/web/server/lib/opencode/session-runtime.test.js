@@ -223,6 +223,48 @@ describe('session runtime', () => {
     expect(runtime.getActiveSessionCount()).toBe(0);
   });
 
+  it('records a held retry in the snapshot and clears it on the next step', () => {
+    const events = [];
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: (event) => events.push(event),
+    });
+    runtimes.push(runtime);
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+    events.length = 0;
+
+    runtime.announceRetry('session-1', { attempt: 2, message: 'rate limited', next: 12_345 });
+
+    expect(runtime.getSessionStateSnapshot()['session-1']).toMatchObject({
+      status: 'retry',
+      metadata: { attempt: 2, message: 'rate limited', next: 12_345 },
+    });
+    expect(events).toContainEqual({
+      type: 'openchamber:session-status',
+      properties: expect.objectContaining({
+        sessionID: 'session-1',
+        status: 'retry',
+        metadata: { attempt: 2, message: 'rate limited', next: 12_345 },
+      }),
+    });
+
+    events.length = 0;
+    runtime.processOpenCodeSsePayload({
+      type: 'session.status',
+      properties: { sessionID: 'session-1', status: { type: 'busy' } },
+    });
+
+    expect(runtime.getSessionStateSnapshot()['session-1'].status).toBe('busy');
+    expect(events).toContainEqual({
+      type: 'openchamber:session-status',
+      properties: expect.objectContaining({ sessionID: 'session-1', status: 'busy' }),
+    });
+  });
+
   it('interrupts busy sessions after restart and broadcasts terminal events once', () => {
     const events = [];
     const runtime = createSessionRuntime({

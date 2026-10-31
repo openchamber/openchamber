@@ -16,18 +16,18 @@ afterEach(async () => {
 });
 
 const createRuntime = ({ settings = { retryWaitMaxMs: 30_000 } } = {}) => {
-  const broadcastUiEvent = vi.fn();
+  const announceRetry = vi.fn();
   const runtime = createRetryPolicyRuntime({
     fsPromises: fs,
     path,
     instanceDir: os.tmpdir(),
     readSettings: async () => settings,
     authorizeRequest: (req) => req.headers.authorization === 'Bearer token',
-    broadcastUiEvent,
+    announceRetry,
   });
   const app = express();
   runtime.registerRoutes(app, express);
-  return { runtime, app, broadcastUiEvent };
+  return { runtime, app, announceRetry };
 };
 
 const report = (overrides = {}) => ({
@@ -54,14 +54,14 @@ describe('retry policy route', () => {
   });
 
   it('caps a provider wait at the configured maximum', async () => {
-    const { app, broadcastUiEvent } = createRuntime({ settings: { retryWaitMaxMs: 30_000 } });
+    const { app, announceRetry } = createRuntime({ settings: { retryWaitMaxMs: 30_000 } });
     const response = await request(app)
       .post('/api/openchamber/retry-policy')
       .set('authorization', 'Bearer token')
       .send(report())
       .expect(200);
     expect(response.body).toEqual({ delay: 30_000, hold: false });
-    expect(broadcastUiEvent).not.toHaveBeenCalled();
+    expect(announceRetry).not.toHaveBeenCalled();
   });
 
   it('leaves a wait shorter than the cap alone', async () => {
@@ -95,7 +95,7 @@ describe('retry policy route', () => {
   });
 
   it('holds the wait and announces it when the retry-now control is on', async () => {
-    const { app, broadcastUiEvent } = createRuntime({ settings: { retryWaitMaxMs: 30_000, retryNowEnabled: true } });
+    const { app, announceRetry } = createRuntime({ settings: { retryWaitMaxMs: 30_000, retryNowEnabled: true } });
     const before = Date.now();
     const response = await request(app)
       .post('/api/openchamber/retry-policy')
@@ -104,26 +104,22 @@ describe('retry policy route', () => {
       .expect(200);
 
     expect(response.body).toEqual({ delay: 30_000, hold: true });
-    expect(broadcastUiEvent).toHaveBeenCalledTimes(1);
-    const [event] = broadcastUiEvent.mock.calls[0];
-    expect(event.type).toBe('openchamber:session-status');
-    expect(event.properties).toMatchObject({
-      sessionID: 'ses_1',
-      status: 'retry',
-      metadata: { attempt: 2, message: 'rate limited' },
-    });
-    expect(event.properties.metadata.next).toBeGreaterThanOrEqual(before + 30_000);
+    expect(announceRetry).toHaveBeenCalledTimes(1);
+    const [sessionID, metadata] = announceRetry.mock.calls[0];
+    expect(sessionID).toBe('ses_1');
+    expect(metadata).toMatchObject({ attempt: 2, message: 'rate limited' });
+    expect(metadata.next).toBeGreaterThanOrEqual(before + 30_000);
   });
 
   it('holds without a cap when retry-now is on', async () => {
-    const { app, broadcastUiEvent } = createRuntime({ settings: { retryNowEnabled: true } });
+    const { app, announceRetry } = createRuntime({ settings: { retryNowEnabled: true } });
     const response = await request(app)
       .post('/api/openchamber/retry-policy')
       .set('authorization', 'Bearer token')
       .send(report())
       .expect(200);
     expect(response.body).toEqual({ delay: 900_000, hold: true });
-    expect(broadcastUiEvent).toHaveBeenCalledTimes(1);
+    expect(announceRetry).toHaveBeenCalledTimes(1);
   });
 });
 
