@@ -466,6 +466,9 @@
     "gitmojiEnabled": {
       "scope": "profile"
     },
+    "allowedInsecureGitOrigins": {
+      "scope": "profile"
+    },
     "defaultFileViewerPreview": {
       "scope": "profile"
     },

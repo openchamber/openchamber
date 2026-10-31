@@ -49,6 +49,7 @@ import {
   parseGuarded,
   parseIntegerAtLeast,
   parseIntegerInRange,
+  parseInsecureGitOriginsText,
   parseLastUsedEfforts,
   parseManagedRemoteTunnelPresetTokens,
   parseManagedRemoteTunnelPresets,
@@ -465,6 +466,14 @@ export const SETTINGS_REGISTRY = {
   diffHideWhitespace: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('diffHideWhitespace', (v) => useUIStore.getState().setDiffHideWhitespace(v)) }),
   gitChangesViewMode: field({ scope: 'profile', parse: parseOneOf(['flat', 'tree']), ui: uiStore('gitChangesViewMode', (v) => useUIStore.getState().setGitChangesViewMode(v)) }),
   gitmojiEnabled: field({ scope: 'profile', parse: parseBoolean }),
+  // Merged with the policy file's list of the same name at the server's check
+  // point, and ignored entirely once enterprise mode is on. The store keeps
+  // the Settings box's raw text; only accepted origins persist, one per line.
+  allowedInsecureGitOrigins: field({
+    scope: 'profile',
+    parse: parseInsecureGitOriginsText,
+    ui: uiStore('allowedInsecureGitOrigins', setUi('allowedInsecureGitOrigins')),
+  }),
   defaultFileViewerPreview: field({ scope: 'profile', parse: parseBoolean }),
   directoryShowHidden: field({
     scope: 'profile',

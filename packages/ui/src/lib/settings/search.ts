@@ -1044,6 +1044,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['ignored', 'files', 'gitignore'],
   },
   {
+    id: 'git.insecure-origins',
+    page: 'git',
+    titleKey: 'settings.openchamber.git.insecureTitle',
+    descriptionKey: 'settings.openchamber.git.insecureInfo',
+    keywords: ['http', 'plaintext', 'allowlist', 'self-hosted', 'gitlab', 'origin', 'certificate'],
+    isAvailable: (ctx) => !ctx.enterpriseMode,
+  },
+  {
     id: 'usage.work-status-panel',
     page: 'usage',
     titleKey: 'settings.usage.page.options.showInWorkStatus',

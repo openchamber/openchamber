@@ -1097,6 +1097,8 @@ interface UIStore {
   /** Width of the walkthrough table of contents, in pixels. */
   walkthroughTocWidth: number;
   gitChangesViewMode: 'flat' | 'tree';
+  /** One plain-HTTP Git origin per line, as typed in Settings → Git. */
+  allowedInsecureGitOrigins: string;
   toolJsonViewMode: 'summary' | 'formatted' | 'raw';
   isTimelineDialogOpen: boolean;
   isPromptNavigatorPanelOpen: boolean;
@@ -1498,6 +1500,7 @@ interface UIStore {
   resetAllShortcutOverrides: () => void;
   setFileEditorKeymap: (value: FileEditorKeymap) => void;
   setFileEditorVimMappings: (value: string) => void;
+  setAllowedInsecureGitOrigins: (value: string) => void;
 }
 
 
@@ -1653,6 +1656,7 @@ export const useUIStore = create<UIStore>()(
         diffFileTreeWidth: 240,
         walkthroughTocWidth: 224,
         gitChangesViewMode: 'flat',
+        allowedInsecureGitOrigins: '',
         toolJsonViewMode: 'summary',
         isTimelineDialogOpen: false,
         isPromptNavigatorPanelOpen: false,
@@ -3503,6 +3507,12 @@ export const useUIStore = create<UIStore>()(
         setFileEditorVimMappings: (value) => {
           // Same cap as the settings registry field.
           set({ fileEditorVimMappings: value.slice(0, 10_000) });
+        },
+
+        setAllowedInsecureGitOrigins: (value) => {
+          // Raw text while typing; the registry's parser keeps only whole
+          // plain-HTTP origins in what persists. Same cap as that field.
+          set({ allowedInsecureGitOrigins: value.slice(0, 10_000) });
         },
 
         toggleExpandedInput: () => {

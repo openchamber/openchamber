@@ -106,6 +106,37 @@ export const createSettingsHelpers = (dependencies) => {
   const LAST_USED_EFFORTS_MAX_KEYS = 512;
   const lastUsedEffortsSchema = z.record(z.string(), z.string().trim().min(1).nullable().catch(undefined));
 
+  const normalizeInsecureGitOrigin = (raw) => {
+    const parsed = z.string().safeParse(raw);
+    const value = parsed.success ? parsed.data.trim() : '';
+    if (!value || value.length > 512) return null;
+    let url;
+    try {
+      url = new URL(value.includes('://') ? value : `http://${value}`);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== 'http:' || url.username || url.password || url.search || url.hash) return null;
+    if (url.pathname !== '' && url.pathname !== '/') return null;
+    return url.origin;
+  };
+
+  // One origin per line, as typed in Settings → Git. The stored text holds
+  // exactly the origins the server's check accepts — the UI's registry parser
+  // mirrors this by hand — so what persists and the trust it buys never
+  // diverge. An empty string means the user cleared the list.
+  const sanitizeInsecureGitOriginsText = (input) => {
+    const parsed = z.string().safeParse(input);
+    if (!parsed.success) return null;
+    const result = [];
+    for (const entry of parsed.data.slice(0, 10_000).split(/\r?\n/)) {
+      const origin = normalizeInsecureGitOrigin(entry);
+      if (origin && !result.includes(origin)) result.push(origin);
+      if (result.length >= 100) break;
+    }
+    return result.join('\n');
+  };
+
   const sanitizeShortcutOverrides = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return null;
@@ -762,6 +793,10 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.gitmojiEnabled === 'boolean') {
       result.gitmojiEnabled = candidate.gitmojiEnabled;
+    }
+    const candidateInsecureOrigins = z.string().safeParse(candidate.allowedInsecureGitOrigins);
+    if (candidateInsecureOrigins.success) {
+      result.allowedInsecureGitOrigins = sanitizeInsecureGitOriginsText(candidateInsecureOrigins.data);
     }
     if (typeof candidate.defaultFileViewerPreview === 'boolean') {
       result.defaultFileViewerPreview = candidate.defaultFileViewerPreview;

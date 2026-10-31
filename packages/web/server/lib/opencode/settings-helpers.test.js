@@ -558,6 +558,24 @@ describe('settings helpers', () => {
     });
   });
 
+  it('keeps only exact plain-HTTP origins in the insecure Git allowlist', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({
+      allowedInsecureGitOrigins: 'http://git.internal\n http://port.internal:8443 \ngit.host\nhttps://secure.internal\nhttp://user@git.internal\nhttp://path.internal/group\nnot a url',
+    })).toEqual({
+      allowedInsecureGitOrigins: 'http://git.internal\nhttp://port.internal:8443\nhttp://git.host',
+    });
+
+    expect(helpers.sanitizeSettingsUpdate({ allowedInsecureGitOrigins: '' })).toEqual({
+      allowedInsecureGitOrigins: '',
+    });
+    expect(helpers.sanitizeSettingsUpdate({ allowedInsecureGitOrigins: ['http://git.internal'] })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({
+      allowedInsecureGitOrigins: Array.from({ length: 150 }, (_, index) => `http://h${index}.internal`).join('\n'),
+    }).allowedInsecureGitOrigins.split('\n')).toHaveLength(100);
+  });
+
   it('accepts OpenCode update notification preference as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -900,7 +918,7 @@ describe('settings registry gate', () => {
     stickyUserHeader: true, promptNavigatorEnabled: true, wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
-    gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
+    gitChangesViewMode: 'tree', gitmojiEnabled: true, allowedInsecureGitOrigins: 'http://git.internal', defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
     largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,

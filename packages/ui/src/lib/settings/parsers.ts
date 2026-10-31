@@ -79,6 +79,50 @@ export const parseTrimmedStringUpTo = (maxLength: number): SettingsParser<string
   trimmed.transform((value) => value.slice(0, maxLength)),
 );
 
+/**
+ * One typed plain-HTTP Git origin, as the server's allowlist accepts it:
+ * `http:` only, no credentials, path, query or fragment. A bare host gets the
+ * scheme added. `null` for anything else, so a control can show the line back
+ * as not understood.
+ */
+export const normalizeInsecureGitOrigin = (raw: string): string | null => {
+  const value = raw.trim();
+  if (!value || value.length > 512) return null;
+  let url: URL;
+  try {
+    url = new URL(value.includes('://') ? value : `http://${value}`);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' || url.username || url.password || url.search || url.hash) return null;
+  if (url.pathname !== '' && url.pathname !== '/') return null;
+  return url.origin;
+};
+
+/**
+ * Distinct origins the list names; anything else is dropped, capped like the
+ * policy file. The server's sanitizer mirrors this by hand.
+ */
+const insecureGitOriginsFromEntries = (entries: readonly string[]): string[] => {
+  const origins: string[] = [];
+  for (const entry of entries) {
+    const origin = normalizeInsecureGitOrigin(entry);
+    if (origin && !origins.includes(origin)) origins.push(origin);
+    if (origins.length >= 100) break;
+  }
+  return origins;
+};
+
+/**
+ * The one-origin-per-line box as a plain string. What persists is the same
+ * list the server's check accepts — a line it would refuse is dropped here —
+ * so the stored value and the trust it buys never diverge.
+ */
+export const parseInsecureGitOriginsText: SettingsParser<string> = (value, raw) => {
+  const text = parseTextUpTo(10_000)(value, raw);
+  return text === undefined ? undefined : insecureGitOriginsFromEntries(text.split(/\r?\n/)).join('\n');
+};
+
 export const parseOneOf = <const T extends readonly [string, ...string[]]>(options: T): SettingsParser<T[number]> => fromSchema(
   trimmed.pipe(z.enum(options)),
 );
