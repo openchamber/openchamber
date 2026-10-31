@@ -2329,7 +2329,7 @@ async function main(options = {}) {
     instanceDir,
     readSettings: () => readSettingsFromDiskMigrated(),
     authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
-    broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
+    announceRetry: (sessionID, metadata) => sessionRuntime.announceRetry(sessionID, metadata),
   });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,

@@ -30,6 +30,13 @@ export const hostSessionStatusSnapshotSchema = z.object({
   sessions: z.record(z.string().min(1), z.object({
     status: z.string(),
     lastUpdateAt: z.number(),
+    // A retry's attempt, message and next-at, when the host has them. Older
+    // hosts omit the field; a retry then still seeds, without details.
+    metadata: z.object({
+      attempt: z.number().optional(),
+      message: z.string().optional(),
+      next: z.number().optional(),
+    }).optional(),
     // When the session's latest turn began, on the host's clock (`serverTime`
     // gives "now" on the same clock). Hosts predating the field omit it. The
     // VS Code shim sets it only for a turn its extension host saw begin.

@@ -1,4 +1,5 @@
 import { hostTurnStart, type SessionTurnStart, type SyncEvent } from '@/lib/opencode/events';
+import type { SessionStatus } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -32,14 +33,19 @@ import { applyHostTurnStarts, needsHostTurnStarts } from './session-activity-tim
 export const HOST_STATUS_SEED_MAX_AGE_MS = 30 * 60_000;
 
 type SeedDependencies = {
-  isKnown: (sessionId: string) => boolean;
+  /** The status this client already holds for the session, if any. */
+  knownStatus: (sessionId: string) => SessionStatus | undefined;
+  /** A settled observation (idle or a finished turn) that the seed must not revive. */
+  observed: (sessionId: string) => boolean;
   resolveDirectory: (sessionId: string) => string | null;
 };
 
 /**
  * Turns the host snapshot into per-directory `session.status` events for the
- * sessions the client has no live observation of. Retry collapses to busy:
- * the host keeps no attempt details, and the next live event restores them.
+ * sessions the client has no live observation of. A retry keeps the host's
+ * attempt details when it has them. A known busy observation yields to a host
+ * retry: a held retry leaves OpenCode itself busy, and only the host knows the
+ * countdown and the action.
  */
 export const buildHostStatusSeedEvents = (
   snapshot: HostSessionStatusSnapshot,
@@ -50,11 +56,27 @@ export const buildHostStatusSeedEvents = (
   for (const [sessionId, entry] of Object.entries(snapshot.sessions)) {
     if (entry.status !== 'busy' && entry.status !== 'retry') continue;
     if (snapshot.serverTime - entry.lastUpdateAt > maxAgeMs) continue;
-    if (deps.isKnown(sessionId)) continue;
+    const known = deps.knownStatus(sessionId);
+    if (known?.type === 'retry') continue;
+    if (known && known.type !== 'busy') continue;
+    if (!known && deps.observed(sessionId)) continue;
+    if (known?.type === 'busy' && entry.status !== 'retry') continue;
     const directory = deps.resolveDirectory(sessionId);
     if (!directory) continue;
     const events = eventsByDirectory.get(directory) ?? [];
-    events.push({ type: 'session.status', properties: { sessionID: sessionId, status: { type: 'busy' } } });
+    const metadata = entry.metadata;
+    const status = entry.status === 'retry'
+      && metadata?.attempt !== undefined
+      && metadata.message !== undefined
+      && metadata.next !== undefined
+      ? {
+          type: 'retry' as const,
+          attempt: metadata.attempt,
+          message: metadata.message,
+          next: metadata.next,
+        }
+      : { type: 'busy' as const };
+    events.push({ type: 'session.status', properties: { sessionID: sessionId, status } });
     eventsByDirectory.set(directory, events);
   }
   return eventsByDirectory;
@@ -109,7 +131,8 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
     const status = useGlobalSessionStatusStore.getState();
     const entities = useGlobalSessionsStore.getState().entityById;
     const events = buildHostStatusSeedEvents(snapshot, {
-      isKnown: (sessionId) => status.statusById.has(sessionId) || status.observedById.has(sessionId),
+      knownStatus: (sessionId) => status.statusById.get(sessionId)?.status,
+      observed: (sessionId) => status.observedById.has(sessionId),
       resolveDirectory: (sessionId) => {
         const session = entities.get(sessionId);
         return session ? resolveGlobalSessionDirectory(session) : null;

@@ -344,6 +344,16 @@ export const createSessionRuntime = ({
     return sessionStates.get(sessionId) || null;
   };
 
+  /**
+   * A retry the managed retry-policy plugin is holding. It goes through this
+   * owner so the snapshot and the later busy transition behave like OpenCode's
+   * own retry; a raw broadcast would leave reloads at busy and swallow the
+   * step-start that clears the chip.
+   */
+  const announceRetry = (sessionId, metadata) => {
+    updateSessionState(sessionId, 'retry', `retry-hold-${Date.now()}`, metadata);
+  };
+
   const getSessionActivitySnapshot = () => {
     const result = {};
     for (const [sessionId, data] of sessionActivityPhases) {
@@ -604,6 +614,7 @@ export const createSessionRuntime = ({
     getPendingBlockingRequestsSnapshot,
     trackWaitingPage,
     getSessionState,
+    announceRetry,
     resetAllSessionActivityToIdle,
     interruptBusySessionsAfterRestart,
     dispose,
