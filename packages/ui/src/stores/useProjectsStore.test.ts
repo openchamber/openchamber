@@ -194,7 +194,11 @@ describe("useProjectsStore default model and thinking level", () => {
         { id: "project-b", path: "/repo-b", issuesDir: "/etc/escape" },
         { id: "project-c", path: "/repo-c", issuesDir: "../escape" },
         { id: "project-d", path: "/repo-d", issuesDir: 42 },
-        { id: "project-e", path: "/repo-e" },
+        // Win32 normalization strips trailing dots/spaces per component, so
+        // these segments resolve as `..` on Windows and must be nulled too.
+        { id: "project-e", path: "/repo-e", issuesDir: "plan/.. /escape" },
+        { id: "project-f", path: "/repo-f", issuesDir: "plan\\.. .\\escape" },
+        { id: "project-g", path: "/repo-g" },
       ],
     } as DesktopSettings)
 
@@ -203,7 +207,26 @@ describe("useProjectsStore default model and thinking level", () => {
     expect(projects[1]?.issuesDir).toBe(null)
     expect(projects[2]?.issuesDir).toBe(null)
     expect(projects[3]?.issuesDir).toBe(null)
-    expect(projects[4]?.issuesDir).toBe(undefined)
+    expect(projects[4]?.issuesDir).toBe(null)
+    expect(projects[5]?.issuesDir).toBe(null)
+    expect(projects[6]?.issuesDir).toBe(undefined)
+  })
+
+  test("keeps a project issuesDir whose segments only look like escapes", () => {
+    // SAFETY: the projects fixture only feeds sanitizeProjects, which parses
+    // each entry itself.
+    useProjectsStore.getState().synchronizeFromSettings({
+      projects: [
+        { id: "project-a", path: "/repo", issuesDir: "...." },
+        { id: "project-b", path: "/repo-b", issuesDir: "..foo" },
+        { id: "project-c", path: "/repo-c", issuesDir: "foo.." },
+      ],
+    } as DesktopSettings)
+
+    const projects = useProjectsStore.getState().projects
+    expect(projects[0]?.issuesDir).toBe("....")
+    expect(projects[1]?.issuesDir).toBe("..foo")
+    expect(projects[2]?.issuesDir).toBe("foo..")
   })
 })
 

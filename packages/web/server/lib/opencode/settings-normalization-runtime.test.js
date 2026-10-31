@@ -185,11 +185,31 @@ describe('settings normalization runtime - symlink resolution', () => {
         { id: 'proj1', path: '/a', issuesDir: '../escape' },
         { id: 'proj2', path: '/b', issuesDir: 'plan\\..\\escape' },
         { id: 'proj3', path: '/c', issuesDir: '..' },
+        // Win32 normalization strips trailing dots/spaces per component, so
+        // these segments resolve as `..` on Windows and must escape too.
+        { id: 'proj4', path: '/d', issuesDir: 'plan/.. /escape' },
+        { id: 'proj5', path: '/e', issuesDir: 'plan\\.. .\\escape' },
       ]);
 
       expect(result[0].issuesDir).toBe(null);
       expect(result[1].issuesDir).toBe(null);
       expect(result[2].issuesDir).toBe(null);
+      expect(result[3].issuesDir).toBe(null);
+      expect(result[4].issuesDir).toBe(null);
+    });
+
+    it('keeps project issuesDir segments that only look like escapes', () => {
+      const runtime = createTestRuntime();
+
+      const result = runtime.sanitizeProjects([
+        { id: 'proj1', path: '/a', issuesDir: '....' },
+        { id: 'proj2', path: '/b', issuesDir: '..foo' },
+        { id: 'proj3', path: '/c', issuesDir: 'foo..' },
+      ]);
+
+      expect(result[0].issuesDir).toBe('....');
+      expect(result[1].issuesDir).toBe('..foo');
+      expect(result[2].issuesDir).toBe('foo..');
     });
 
     it('nulls a non-string project issuesDir', () => {

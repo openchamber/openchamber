@@ -189,13 +189,17 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
 
     const hexColorPattern = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
     // A custom `issuesDir` must stay inside the project: relative on either
-    // separator family, with no `..` segment. Anything else stores as null
-    // so the scanner falls back to the project's default issues directory.
+    // separator family, with no `..` segment. Win32 normalization trims
+    // trailing whitespace and dot runs from each component, so `.. ` and
+    // `.. .` resolve as `..` on Windows, while a dots-only segment (`....`)
+    // stays a legal directory name. Anything else stores as null so the
+    // scanner falls back to the project's default issues directory.
     const issuesDirEscapesProject = (value) =>
       /^[a-zA-Z]:[\\/]/.test(value)
       || value.startsWith('/')
       || value.startsWith('\\')
-      || value.split(/[\\/]/).includes('..');
+      || value.split(/[\\/]/).some((segment) =>
+        segment === '..' || /^\.\.\s[\s.]*$/.test(segment));
     const normalizeIconBackground = (value) => {
       if (typeof value !== 'string') {
         return null;
