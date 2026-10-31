@@ -23,13 +23,13 @@ export const MobilePinToSheet: React.FC = () => {
     <MobileOverlayPanel open={request !== null} title={t('sessions.sidebar.pinTo.label')} onClose={closePinToRequest}>
       {request ? (
         <div className="flex flex-col gap-0.5 p-2">
-          <button type="button" className={ROW_CLASS} onClick={() => choose(() => request.pin(null))}>
+          <button type="button" className={ROW_CLASS} onClick={() => choose(() => { if (request.current !== DEFAULT_PIN_LIST) request.pin(null); })}>
             <Icon name="pushpin" className="size-4 text-muted-foreground" />
             <span className="min-w-0 truncate">{t('sessions.sidebar.activity.pinnedTitle')}</span>
             {request.current === DEFAULT_PIN_LIST ? check : null}
           </button>
           {pinLists.map((list) => (
-            <button key={list.id} type="button" className={ROW_CLASS} onClick={() => choose(() => request.pin(list.id))}>
+            <button key={list.id} type="button" className={ROW_CLASS} onClick={() => choose(() => { if (request.current !== list.id) request.pin(list.id); })}>
               <Icon name="pushpin" className="size-4 text-muted-foreground" />
               <span className="min-w-0 truncate" dir="auto">{list.name}</span>
               {request.current === list.id ? check : null}
