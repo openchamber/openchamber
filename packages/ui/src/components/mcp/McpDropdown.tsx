@@ -69,8 +69,7 @@ export const McpDropdownContent: React.FC<{ active: boolean }> = ({ active }) =>
   const status = useMcpStore((state) => directory ? state.getStatusForDirectory(directory) : null);
   const refresh = useMcpStore((state) => state.refresh);
   const ensureFresh = useMcpStore((state) => state.ensureFresh);
-  const connect = useMcpStore((state) => state.connect);
-  const disconnect = useMcpStore((state) => state.disconnect);
+  const setEnabled = useMcpStore((state) => state.setEnabled);
   const mcpServers = useMcpConfigStore((state) => directory ? selectMcpServersForDirectory(state, directory) : null);
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
   const [isSpinning, setIsSpinning] = React.useState(false);
@@ -179,11 +178,7 @@ export const McpDropdownContent: React.FC<{ active: boolean }> = ({ active }) =>
                   if (!directory) return;
                   setBusyName(serverName);
                   try {
-                    if (checked) {
-                      await connect(serverName, directory);
-                    } else {
-                      await disconnect(serverName, directory);
-                    }
+                    await setEnabled(serverName, checked, directory);
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : t('mcpDropdown.status.unknownError'));
                   } finally {
@@ -218,8 +213,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   const status = useMcpStore((state) => directory ? state.getStatusForDirectory(directory) : null);
   const refresh = useMcpStore((state) => state.refresh);
   const ensureFresh = useMcpStore((state) => state.ensureFresh);
-  const connect = useMcpStore((state) => state.connect);
-  const disconnect = useMcpStore((state) => state.disconnect);
+  const setEnabled = useMcpStore((state) => state.setEnabled);
   const mcpServers = useMcpConfigStore((state) => directory ? selectMcpServersForDirectory(state, directory) : null);
   const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
 
@@ -335,11 +329,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
                 if (!directory) return;
                 setBusyName(serverName);
                 try {
-                  if (checked) {
-                    await connect(serverName, directory);
-                  } else {
-                    await disconnect(serverName, directory);
-                  }
+                  await setEnabled(serverName, checked, directory);
                 } finally {
                   setBusyName(null);
                 }
