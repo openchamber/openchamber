@@ -449,6 +449,23 @@
           }
         },
         {
+          "label": "Local issues",
+          "link": "/local-issues/",
+          "translations": {
+            "nl": "Lokale issues",
+            "uk": "Локальні issues",
+            "zh-CN": "本地 Issue",
+            "es": "Issues locales",
+            "pt-BR": "Issues locais",
+            "ko": "로컬 이슈",
+            "pl": "Lokalne issues",
+            "fr": "Issues locales",
+            "ja": "ローカル Issue",
+            "de": "Lokale Issues",
+            "tr": "Yerel Issue'lar"
+          }
+        },
+        {
           "label": "Magic Prompts",
           "link": "/magic-prompts/",
           "translations": {
