@@ -352,4 +352,4 @@ const createLocalScanner = ({ listProjects }) => {
   return { list, get, states, updateState, create, edit, liveSummaries, containers };
 };
 
-export { createLocalScanner };
+export { createLocalScanner, issuesDirOf };

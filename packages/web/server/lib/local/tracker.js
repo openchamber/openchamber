@@ -1,6 +1,9 @@
-import { isString } from '../shared/guards.js';
-import { LocalIssueError, splitComments } from './files.js';
-import { createLocalScanner } from './scanner.js';
+import path from 'path';
+import { asNonEmptyString, isString } from '../shared/guards.js';
+import { appendComment, LocalIssueError, readIssue, splitComments, writeIssue } from './files.js';
+import { createLocalScanner, issuesDirOf } from './scanner.js';
+import { readLocalPreferences, writeLocalPreferences } from './preferences.js';
+import { createLocalSessionStatusRuntime } from './status-runtime.js';
 
 /**
  * The local markdown-file tracker: its descriptor and the adapter that turns
@@ -18,6 +21,22 @@ import { createLocalScanner } from './scanner.js';
 /** @typedef {import('../trackers/tracker-contract').TrackerImplementation} TrackerImplementation */
 
 const LOCAL_TRACKER_ID = 'local';
+
+const SESSION_STATUS_KINDS = new Set(['started', 'completed', 'failure']);
+// How many session links and posted-status markers the in-memory maps keep;
+// mirrors Linear's `MAX_SESSION_STATUS_RECORDS`. Comments persist on the issue
+// file itself, so dropping old entries only loses the ability to dedupe or
+// complete very old sessions, never data.
+const MAX_SESSION_STATUS_MEMORY = 500;
+// The comment heading names the session; a full OpenCode session id is long,
+// so the heading keeps a prefix that still separates concurrent sessions.
+const SESSION_ID_SHORT_LENGTH = 12;
+
+const statusWord = (kind) => (kind === 'failure' ? 'failed' : kind);
+
+const shortSessionId = (sessionId) => (sessionId.length <= SESSION_ID_SHORT_LENGTH ? sessionId : sessionId.slice(0, SESSION_ID_SHORT_LENGTH));
+
+const nowIso = () => new Date().toISOString();
 
 /** The issue URL the neutral `url` field and `matchUrl` agree on. */
 const itemUrl = (identifier) => `https://openchamber.local/tracker/local/${identifier}`;
@@ -117,7 +136,6 @@ function toTrackerItem(issue, container) {
 
 /**
  * The local tracker over the local scanner, injected so tests can pass fakes.
- * `preferences` and `sessionStatus` are placeholders until their modules land.
  * @returns {TrackerImplementation}
  */
 export function createLocalTracker({ listProjects }) {
@@ -130,8 +148,82 @@ export function createLocalTracker({ listProjects }) {
     return found ? { id: found.id, key: null, name: found.name } : null;
   };
 
-  const notImplemented = async () => {
-    throw new LocalIssueError('Not implemented yet');
+  // Session id → the issue a `started` post linked it to (identifier plus the
+  // origin the UI posted). The runtime's later events carry only the session
+  // id, like Linear's, so the link is recovered here instead of from a records
+  // file. In memory only: the `started` comment on the issue file already
+  // records the link for humans, and the map refills on the next `started`.
+  const sessionLinks = new Map();
+  // One comment per session and kind, whatever produced it (runtime event or
+  // direct post): OpenCode reports `idle` after every turn, and without this
+  // guard every turn would append another "completed" comment.
+  const postedStatuses = new Set();
+
+  const rememberSessionLink = (sessionId, link) => {
+    sessionLinks.delete(sessionId); // re-insert so eviction drops the oldest
+    sessionLinks.set(sessionId, link);
+    if (sessionLinks.size > MAX_SESSION_STATUS_MEMORY) {
+      sessionLinks.delete(sessionLinks.keys().next().value);
+    }
+  };
+
+  const postSessionStatus = async (input) => {
+    const sessionId = asNonEmptyString(input?.sessionId);
+    const kind = asNonEmptyString(input?.kind);
+    if (!sessionId || !SESSION_STATUS_KINDS.has(kind)) {
+      return { connected: true, posted: false, skipped: 'no-identifier' };
+    }
+
+    const link = sessionLinks.get(sessionId) ?? null;
+    const identifier = asNonEmptyString(input.identifier) ?? link?.identifier ?? null;
+    if (!identifier) {
+      return { connected: true, posted: false, skipped: 'no-identifier' };
+    }
+
+    // A session origin is only knowable from the post that carried it (the
+    // UI's `started` call); OpenCode events never carry one.
+    const sessionOrigin = asNonEmptyString(input.sessionOrigin) ?? link?.sessionOrigin ?? null;
+    if (asNonEmptyString(input.identifier)) {
+      rememberSessionLink(sessionId, { identifier, sessionOrigin });
+    }
+
+    if (!readLocalPreferences().sessionComments) {
+      return { connected: true, posted: false, skipped: 'no-identifier' };
+    }
+    const dedupeKey = `${sessionId}:${kind}`;
+    if (postedStatuses.has(dedupeKey)) {
+      return { connected: true, posted: false, skipped: 'already-posted' };
+    }
+
+    const found = await scanner.get(identifier);
+    if (!found) {
+      return { connected: true, posted: false, skipped: 'no-identifier' };
+    }
+
+    // Re-read the parsed issue from disk before writing (the view the scanner
+    // returns carries no frontmatter fields), append the comment, and write
+    // through the same tmp+rename `writeIssue` the scanner persists with. The
+    // next scan re-stats the file and re-reads it, so the scanner cache stays
+    // coherent with an outside writer by its own mtime design.
+    const project = (await listProjects()).find((candidate) => candidate.id === found.issue.containerId);
+    if (!project) {
+      return { connected: true, posted: false, skipped: 'no-identifier' };
+    }
+    const dirPath = path.join(project.path, issuesDirOf(project));
+    const parsed = readIssue(dirPath, found.issue.fileName);
+    if (!parsed) {
+      return { connected: true, posted: false, skipped: 'no-identifier' };
+    }
+
+    writeIssue(dirPath, appendComment(parsed, {
+      iso: nowIso(),
+      source: `session ${shortSessionId(sessionId)}`,
+      text: sessionOrigin
+        ? `Session ${statusWord(kind)} — ${sessionOrigin}`
+        : `Session ${statusWord(kind)}`,
+    }));
+    postedStatuses.add(dedupeKey);
+    return { connected: true, posted: true };
   };
 
   return {
@@ -185,15 +277,13 @@ export function createLocalTracker({ listProjects }) {
     matchUrl: matchLocalUrl,
 
     preferences: {
-      get: notImplemented,
-      set: notImplemented,
+      get: readLocalPreferences,
+      set: writeLocalPreferences,
     },
 
     sessionStatus: {
-      post: notImplemented,
-      createRuntime: () => {
-        throw new LocalIssueError('Not implemented yet');
-      },
+      post: postSessionStatus,
+      createRuntime: () => createLocalSessionStatusRuntime({ post: postSessionStatus }),
     },
   };
 }

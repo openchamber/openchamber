@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -50,6 +50,103 @@ describe('list/get/create/edit/updateState', () => {
   it('returns connected:false-shaped UNSUPPORTED errors as user errors', async () => {
     const t = await tracker();
     await expect(t.create({ containerId: 'unknown', title: 'x' })).rejects.toThrow();
+  });
+});
+
+describe('preferences and session status', () => {
+  let dataDir;
+  let previousDataDir;
+
+  // Each test gets its own data dir: `t.preferences.set` persists into
+  // `$OPENCHAMBER_DATA_DIR/local-tracker.json`, and one test's write must not
+  // flip another test's preference. The package setup's dir is restored after.
+  beforeEach(() => {
+    previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-track-prefs-'));
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+  });
+
+  afterEach(() => {
+    if (previousDataDir === undefined) {
+      delete process.env.OPENCHAMBER_DATA_DIR;
+    } else {
+      process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    }
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('round-trips the sessionComments preference', async () => {
+    const t = await tracker();
+    expect(await t.preferences.get()).toEqual({ sessionComments: true });
+    await t.preferences.set({ sessionComments: false });
+    expect(await t.preferences.get()).toEqual({ sessionComments: false });
+  });
+
+  it('posts a started comment and dedupes a repeat of the same kind', async () => {
+    const t = await tracker();
+    await t.create({ containerId: 'p1', title: 'First', description: 'Body' });
+
+    const result = await t.sessionStatus.post({
+      kind: 'started',
+      sessionId: 'ses_abc123',
+      identifier: 'LOCAL-1',
+      sessionOrigin: 'https://app.example.com',
+    });
+    expect(result).toEqual({ connected: true, posted: true });
+
+    const detail = await t.get('LOCAL-1');
+    expect(detail.item.comments).toHaveLength(1);
+    expect(detail.item.comments[0].body).toBe('Session started — https://app.example.com');
+    expect(detail.item.comments[0].createdAt).toBeTruthy();
+
+    expect(await t.sessionStatus.post({ kind: 'started', sessionId: 'ses_abc123', identifier: 'LOCAL-1' }))
+      .toEqual({ connected: true, posted: false, skipped: 'already-posted' });
+    expect((await t.get('LOCAL-1')).item.comments).toHaveLength(1);
+  });
+
+  it('posts failure for a session the started post linked, without an identifier', async () => {
+    const t = await tracker();
+    await t.create({ containerId: 'p1', title: 'First', description: 'Body' });
+    const longId = 'ses_longer-than-twelve-characters';
+
+    await t.sessionStatus.post({ kind: 'started', sessionId: longId, identifier: 'LOCAL-1', sessionOrigin: 'https://app.example.com' });
+    expect(await t.sessionStatus.post({ kind: 'failure', sessionId: longId }))
+      .toEqual({ connected: true, posted: true });
+
+    const detail = await t.get('LOCAL-1');
+    // The origin the started post carried is recovered for the later event.
+    expect(detail.item.comments[1].body).toBe('Session failed — https://app.example.com');
+    const fileName = fs.readdirSync(path.join(root, '.issues')).find((name) => name.endsWith('.md'));
+    const raw = fs.readFileSync(path.join(root, '.issues', fileName), 'utf8');
+    // The heading names the session with a shortened id.
+    expect(raw).toContain('· session ses_longer-t');
+  });
+
+  it('skips posting without an identifier and when session comments are off', async () => {
+    const t = await tracker();
+    await t.create({ containerId: 'p1', title: 'First', description: 'Body' });
+
+    expect(await t.sessionStatus.post({ kind: 'started', sessionId: 'ses_1' }))
+      .toEqual({ connected: true, posted: false, skipped: 'no-identifier' });
+
+    await t.preferences.set({ sessionComments: false });
+    expect(await t.sessionStatus.post({ kind: 'started', sessionId: 'ses_1', identifier: 'LOCAL-1' }))
+      .toEqual({ connected: true, posted: false, skipped: 'no-identifier' });
+    expect((await t.get('LOCAL-1')).item.comments).toHaveLength(0);
+  });
+
+  it('wires a runtime that posts completed through sessionStatus.post', async () => {
+    const t = await tracker();
+    await t.create({ containerId: 'p1', title: 'First', description: 'Body' });
+    await t.sessionStatus.post({ kind: 'started', sessionId: 'ses_1', identifier: 'LOCAL-1' });
+
+    const runtime = t.sessionStatus.createRuntime();
+    runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'idle' } } });
+    await vi.waitFor(async () => {
+      const detail = await t.get('LOCAL-1');
+      expect(detail.item.comments.map((comment) => comment.body)).toContain('Session completed');
+    });
+    runtime.stop();
   });
 });
 
