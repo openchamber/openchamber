@@ -14,8 +14,12 @@ import type {
   MilestoneChoice,
   RepositoryIssueReference,
   RepositoryReference,
+  RepositorySelector,
 } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { openExternalUrl } from '@/lib/url';
+import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { effectiveRepositoryBinding } from '@/lib/source-control/types';
 import { cn } from '@/lib/utils';
 
 import { IssueFilterMenu } from '../../references/IssueFilterMenu';
@@ -26,9 +30,6 @@ import { resolveComposerReferences } from '../../references/resolveComposerRefer
 import { usePendingComposerReferences } from '../../chat/composer/pendingComposerReferences';
 import { KnowledgeEntryView } from './KnowledgeEntryView';
 import { issueToRepositoryReference } from './issueReference';
-
-/** The repository a list row was read from, the way its `sourceRepo` names it. */
-type IssueSourceRepo = { owner: string; repo: string; source: string };
 
 type OpenIssueRead =
   | { status: 'loading' }
@@ -69,17 +70,19 @@ export const IssuesSection: React.FC<IssuesSectionProps> = ({ directory, filter,
     query: '',
   });
 
-  // The project selector the option and detail reads come from. The read
-  // context carries no owner/repo, so the board's own source answers: the
-  // first listed issue's `sourceRepo`. It is the repository, not the items,
-  // so it is stable across filters — the last known value is kept when a
-  // filtered page comes back empty.
-  const [project, setProject] = React.useState<IssueSourceRepo | null>(null);
-  React.useEffect(() => {
-    const first = list.items[0]?.sourceRepo;
-    if (!first) return;
-    setProject((current) => (current && current.owner === first.owner && current.repo === first.repo ? current : { owner: first.owner, repo: first.repo, source: first.source }));
-  }, [list.items]);
+  // The project the option and detail reads name. The binding is the
+  // authority: the read context names provider and instance, and the binding
+  // entry for them names the repository. It does not depend on the list, so
+  // an empty first page — every issue closed, say — still reads its options
+  // instead of leaving the dropdowns in loading.
+  const binding = useRepositoryBinding(directory, sourceControl, context !== null);
+  const project = React.useMemo<RepositorySelector | null>(() => {
+    const read = binding.read;
+    if (!context || !read) return null;
+    const bound = effectiveRepositoryBinding(read).providers
+      .find((entry) => entry.provider === context.provider && entry.instance === context.instance);
+    return bound?.repository ? { owner: bound.repository.owner, repo: bound.repository.name } : null;
+  }, [binding.read, context]);
 
   const labels = useChoiceOptions<Label>(
     React.useCallback(
@@ -122,7 +125,7 @@ export const IssuesSection: React.FC<IssuesSectionProps> = ({ directory, filter,
   const attachToSession = (issue: Issue) => {
     if (!context) return;
     void resolveComposerReferences(
-      [{ source: 'repository', reference: issueToRepositoryReference(issue, project?.source ?? 'origin'), includeDiff: false }],
+      [{ source: 'repository', reference: issueToRepositoryReference(issue, context.primaryRemote), includeDiff: false }],
       {
         sourceControl,
         context,
@@ -136,9 +139,10 @@ export const IssuesSection: React.FC<IssuesSectionProps> = ({ directory, filter,
     });
   };
 
-  // The host's own page for the issue; the app's normal link handling opens it.
+  // The host's own page for the issue; the runtime link path opens it,
+  // through the VS Code and desktop bridges where they exist.
   const openOnHost = (issue: Issue) => {
-    window.open(issue.url, '_blank', 'noopener,noreferrer');
+    void openExternalUrl(issue.url);
   };
 
   if (!context) {

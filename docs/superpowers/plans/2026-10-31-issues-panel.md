@@ -43,7 +43,7 @@ Five input classes / failure modes the spec implies that no happy-path test exer
 - Consumes: `client.collection(path, query, { limit, maxItems, message })` from `./client.js` (reads every page up to `maxItems`), `network(directory, selector, remote)` and `repoPath(project)` from this file, `PAGE_LIMIT = 50` / `COLLECTION_MAX_ITEMS = 2000` (lines 11/15), `isPlainObject` / `isString` guards already imported.
 - Produces: `service.listMilestones(directory, selector, remote): Promise<Array<{ name: string; state: 'open' | 'closed' }>>` on the object `createGiteaResourceService` returns. Task 2 exposes it through the provider and the route.
 
-- [ ] **Step 1: Add the milestones fixture to `api.json`**
+- [x] **Step 1: Add the milestones fixture to `api.json`**
 
 Insert after the `labels` array (the `]` at line 2510, before `"issue": {`):
 
@@ -78,7 +78,7 @@ Insert after the `labels` array (the `]` at line 2510, before `"issue": {`):
 
 Gitea's milestone payload names the milestone `title` (not `name`) and carries `state: 'open' | 'closed'`; the DTO maps `title` → `name`.
 
-- [ ] **Step 2: Write the failing resource test**
+- [x] **Step 2: Write the failing resource test**
 
 Append to `packages/web/server/lib/gitea/resources.test.js`:
 
@@ -111,12 +111,12 @@ describe('Gitea milestones', () => {
 });
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run: `cd packages/web && bunx vitest run server/lib/gitea/resources.test.js`
 Expected: FAIL — `service.listMilestones is not a function`.
 
-- [ ] **Step 4: Implement `listMilestones` in `resources.js`**
+- [x] **Step 4: Implement `listMilestones` in `resources.js`**
 
 Add inside the service object, directly after `listLabels` (line 469):
 
@@ -133,12 +133,12 @@ Add inside the service object, directly after `listLabels` (line 469):
     },
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cd packages/web && bunx vitest run server/lib/gitea/resources.test.js`
 Expected: PASS (all suites in the file, including the pre-existing ones).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/web/server/lib/gitea/resources.js packages/web/server/lib/gitea/resources.test.js packages/web/server/lib/gitea/fixtures/api.json
@@ -165,7 +165,7 @@ git commit -m "feat(gitea): list repository milestones by name and state"
   - Route: `GET /api/source-control/<id>/references/milestones?directory=...&owner=...&repo=...` → `{ connected: true, items: Array<{ name, state }> }`; `501 SOURCE_CONTROL_CAPABILITY_UNSUPPORTED` where the capability is off or the implementation lacks the method.
   - Published descriptor: `features.labels: true` and `features.milestones: true` exactly where the descriptor declares the capabilities (github: labels only; gitlab: labels only; gitea and forgejo: both; gerrit: neither — left out, not sent false).
 
-- [ ] **Step 1: Write the failing route tests**
+- [x] **Step 1: Write the failing route tests**
 
 In `packages/web/server/lib/source-control/provider-routes.capabilities.test.js`:
 
@@ -219,12 +219,12 @@ In `packages/web/server/lib/source-control/provider-routes.capabilities.test.js`
   });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cd packages/web && bunx vitest run server/lib/source-control/provider-routes.capabilities.test.js`
 Expected: FAIL — the milestones route 501 passes only if the route exists (it does not yet); the publication test fails because `features.labels` is not published.
 
-- [ ] **Step 3: Add the contract method**
+- [x] **Step 3: Add the contract method**
 
 In `packages/web/server/lib/source-control/provider-contract.d.ts`, after `listLabels?` (line 303):
 
@@ -232,7 +232,7 @@ In `packages/web/server/lib/source-control/provider-contract.d.ts`, after `listL
     listMilestones?(input: ReadInput & { project: ProjectSelector }): Promise<Json>;
 ```
 
-- [ ] **Step 4: Register the route**
+- [x] **Step 4: Register the route**
 
 In `packages/web/server/lib/source-control/provider-routes.js`, extend the loop at line 797:
 
@@ -246,7 +246,7 @@ In `packages/web/server/lib/source-control/provider-routes.js`, extend the loop 
 
 The loop's existing `boundRead` handler already validates the project selector, resolves the session and answers `{ connected: true, items }`, and `route()` answers `501 SOURCE_CONTROL_CAPABILITY_UNSUPPORTED` for a capability the descriptor turns off or a method the implementation lacks — no other route code changes.
 
-- [ ] **Step 5: Add the capability and expose the resource**
+- [x] **Step 5: Add the capability and expose the resource**
 
 In `packages/web/server/lib/gitea/descriptor.js`, inside `capabilities` (after `labels: true`, line 37):
 
@@ -262,7 +262,7 @@ In `packages/web/server/lib/gitea/provider.js`, inside `resources` (after `listL
       listMilestones: ({ session, directory, project, remote }) => serviceFor(session).listMilestones(directory, project, remote),
 ```
 
-- [ ] **Step 6: Publish the features from the capabilities**
+- [x] **Step 6: Publish the features from the capabilities**
 
 In `packages/web/server/lib/source-control/provider-descriptors.js`, in the capability-derived block (after the `createByPush` line, line 175):
 
@@ -273,7 +273,7 @@ In `packages/web/server/lib/source-control/provider-descriptors.js`, in the capa
 
 Each only when the capability is on, so a provider that turns it off (gerrit's `labels: false`) or never declares it publishes exactly what it always did — its frozen output stays byte-identical.
 
-- [ ] **Step 7: Update the publication freeze JSON**
+- [x] **Step 7: Update the publication freeze JSON**
 
 In `packages/web/server/lib/source-control/provider-publication-freeze.json`:
 
@@ -283,12 +283,12 @@ In `packages/web/server/lib/source-control/provider-publication-freeze.json`:
 
 Gerrit's block stays byte-identical: its `labels: false` capability is not `true`, so nothing new is published for it.
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
 Run: `cd packages/web && bunx vitest run server/lib/source-control/provider-routes.capabilities.test.js server/lib/source-control/provider-publication-freeze.test.js server/lib/source-control/provider-descriptors.test.js`
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/web/server/lib/source-control/provider-contract.d.ts packages/web/server/lib/source-control/provider-routes.js packages/web/server/lib/source-control/provider-routes.capabilities.test.js packages/web/server/lib/source-control/provider-descriptors.js packages/web/server/lib/source-control/provider-publication-freeze.json packages/web/server/lib/gitea/descriptor.js packages/web/server/lib/gitea/provider.js
@@ -303,13 +303,14 @@ git commit -m "feat(source-control): milestones capability and /references/miles
 - Modify: `packages/web/server/lib/source-control/provider-contract.d.ts:298` (extend `listIssues?` input)
 - Modify: `packages/web/server/lib/source-control/provider-routes.js:968-978` (read the two query params in `/issues/list`)
 - Modify: `packages/web/server/lib/gitea/resources.js:420-429` (map them to Gitea's query params in `listIssues`)
-- Test: `packages/web/server/lib/gitea/resources.test.js`
+- Modify: `packages/web/server/lib/gitea/provider.js:192-193` (forward `label`/`milestone` in the `listIssues` resource wrapper — the wrapper destructures the route input, so it must name both parameters or they are dropped between the route and the resource)
+- Test: `packages/web/server/lib/gitea/resources.test.js` and `packages/web/server/lib/source-control/provider-routes.capabilities.test.js` (a route-level test pinning that `impl.resources.listIssues` receives `label`/`milestone`; the resource-layer test alone cannot see the wrapper seam)
 
 **Interfaces:**
 - Consumes: Task 1's fixture conventions; the existing `/issues/list` route shape.
 - Produces: `listIssues` accepts optional `label?: string` and `milestone?: string`; Gitea forwards them as its own `label` / `milestone` query parameters on `GET /repos/{o}/{r}/issues`. Providers without the parameters ignore them (their `listIssues` simply does not read them). The web adapter (Task 4) passes the two names on the wire as `label` and `milestone`.
 
-- [ ] **Step 1: Write the failing resource test**
+- [x] **Step 1: Write the failing resource test**
 
 Append to `packages/web/server/lib/gitea/resources.test.js`:
 
@@ -351,12 +352,12 @@ describe('Gitea issue list filters', () => {
 
 Note: `listIssues` reads from the network's primary repository (`bob/app` in the fixture network), and `fixtures.issue` is an issue (not a pull request), so it survives the `raw?.pull_request != null` filter.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd packages/web && bunx vitest run server/lib/gitea/resources.test.js`
 Expected: FAIL — the first test gets zero items (the parameters are not forwarded).
 
-- [ ] **Step 3: Extend the contract**
+- [x] **Step 3: Extend the contract**
 
 In `packages/web/server/lib/source-control/provider-contract.d.ts`, change `listIssues?` (line 298) to:
 
@@ -364,7 +365,7 @@ In `packages/web/server/lib/source-control/provider-contract.d.ts`, change `list
     listIssues?(input: ReadInput & { page: number; query?: string; state: string; people: string; label?: string; milestone?: string }): Promise<Json>;
 ```
 
-- [ ] **Step 4: Read the parameters in the route**
+- [x] **Step 4: Read the parameters in the route**
 
 In `packages/web/server/lib/source-control/provider-routes.js`, in the `/issues/list` `boundRead` (line 968), pass the two parameters through:
 
@@ -384,7 +385,7 @@ In `packages/web/server/lib/source-control/provider-routes.js`, in the `/issues/
     });
 ```
 
-- [ ] **Step 5: Map them in the Gitea implementation**
+- [x] **Step 5: Map them in the Gitea implementation**
 
 In `packages/web/server/lib/gitea/resources.js`, in `listIssues` (line 420), after the `people` lines:
 
@@ -395,12 +396,12 @@ In `packages/web/server/lib/gitea/resources.js`, in `listIssues` (line 420), aft
 
 `client.page` drops `undefined`/`null`/`''` query values (`urlOf` in `client.js`), so absent filters send nothing.
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `cd packages/web && bunx vitest run server/lib/gitea/resources.test.js server/lib/source-control/provider-routes.capabilities.test.js`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/web/server/lib/source-control/provider-contract.d.ts packages/web/server/lib/source-control/provider-routes.js packages/web/server/lib/gitea/resources.js packages/web/server/lib/gitea/resources.test.js
@@ -427,7 +428,7 @@ git commit -m "feat(source-control): label and milestone filters on the issue li
   - `SourceControlAPI.issuesList` options gain `label?: string; milestone?: string`.
   - Descriptor `features.labels: boolean` and `features.milestones: boolean`, both `z.boolean().default(false).catch(false)`, so an older server that names neither reads as both off (tab hidden).
 
-- [ ] **Step 1: Add the `MilestoneChoice` type**
+- [x] **Step 1: Add the `MilestoneChoice` type**
 
 In `packages/ui/src/lib/source-control/types.ts`, after the `Label` interface (line 301):
 
@@ -439,7 +440,7 @@ export interface MilestoneChoice {
 }
 ```
 
-- [ ] **Step 2: Extend the API surface types**
+- [x] **Step 2: Extend the API surface types**
 
 In `packages/ui/src/lib/api/types.ts`:
 
@@ -459,7 +460,7 @@ In `packages/ui/src/lib/api/types.ts`:
   ): Promise<PageResult<Issue>>;
 ```
 
-- [ ] **Step 3: Add the descriptor schema features**
+- [ ] **Step 3: Add the descriptor schema features** — Skipped: `features.labels`/`features.milestones` and `unknownProviderDescriptor` already exist (pulled forward into Task 2's commit).
 
 In `packages/ui/src/lib/source-control/providers/descriptor.ts`, in the `features` object (after `discussions`, line 155):
 
@@ -472,7 +473,7 @@ In `packages/ui/src/lib/source-control/providers/descriptor.ts`, in the `feature
 
 And in `unknownProviderDescriptor`'s `features` (line 219-224), add `labels: false, milestones: false,`.
 
-- [ ] **Step 4: Wire the web adapter**
+- [x] **Step 4: Wire the web adapter**
 
 In `packages/web/src/api/source-control.ts`:
 
@@ -504,7 +505,7 @@ The `RepositoryChoicesDTO.items` element type (line 620) gains `state?: 'open' |
       if (listOptions?.milestone) query.set('milestone', listOptions.milestone);
 ```
 
-- [ ] **Step 5: Add the VS Code adapter method**
+- [x] **Step 5: Add the VS Code adapter method**
 
 In `packages/vscode/webview/api/source-control.ts`, after `referenceLabels: unsupported,` (line 80):
 
@@ -512,7 +513,7 @@ In `packages/vscode/webview/api/source-control.ts`, after `referenceLabels: unsu
   referenceMilestones: unsupported,
 ```
 
-- [ ] **Step 6: Write the adapter test**
+- [x] **Step 6: Write the adapter test**
 
 In `packages/web/src/api/source-control.test.ts` (create it beside the adapter if no such file exists), add a focused test that `referenceMilestones` parses the milestones route and that `issuesList` sends the two params. Model it on the adapter's existing test conventions (a `fetch` double answering the route):
 
@@ -555,13 +556,13 @@ describe('source control adapter: issues panel reads', () => {
 
 Adjust the `createSourceControlAPI` factory name and the `fetch` argument shape to match the adapter's real export and constructor (read the top of `source-control.ts` for the exact signature before writing the test).
 
-- [ ] **Step 7: Run the tests**
+- [x] **Step 7: Run the tests**
 
 Run: `cd packages/web && bunx vitest run src/api/source-control.test.ts`
 Then: `cd packages/ui && bun test src/lib/source-control/providers/descriptor.test.ts` (if it exists; the schema change is covered by type-check in Step 8).
 Expected: PASS.
 
-- [ ] **Step 8: Type-check and commit**
+- [x] **Step 8: Type-check and commit**
 
 Run: `bun run check:changed`
 Expected: PASS (type-check catches any missing `MilestoneChoice` import or adapter signature drift).
@@ -593,7 +594,7 @@ git commit -m "feat(ui): milestone choices and issue filter parameters on the so
     ```
     `status: 'error'` with `items.length === 0` is the first-failure state (dropdown disabled, error note). `status: 'ready'` with `stale: true` is the refresh-failure state (last good list kept, stale hint). `items` is never an authoritative empty on failure.
 
-- [ ] **Step 1: Add the filter model**
+- [x] **Step 1: Add the filter model**
 
 In `packages/ui/src/components/references/referencePickerItems.ts`, after `DEFAULT_REPOSITORY_FILTER` (line 110):
 
@@ -613,7 +614,7 @@ export const DEFAULT_ISSUE_FILTER: IssueFilter = { state: 'open', people: 'any',
 
 (`RepositoryReferenceFilter` is already imported in this file; confirm the import and add it if absent.)
 
-- [ ] **Step 2: Write the failing hook tests**
+- [x] **Step 2: Write the failing hook tests**
 
 Create `packages/ui/src/components/references/issueFilterOptions.test.ts`:
 
@@ -676,12 +677,12 @@ describe('choice options (labels/milestones dropdown data)', () => {
 });
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `cd packages/ui && bun test src/components/references/issueFilterOptions.test.ts`
 Expected: FAIL — `createChoiceOptions is not defined`.
 
-- [ ] **Step 4: Implement the hook**
+- [x] **Step 4: Implement the hook**
 
 Create `packages/ui/src/components/references/issueFilterOptions.ts`:
 
@@ -778,12 +779,12 @@ export function useChoiceOptions<T>(
 
 Note: `createValueCache.ensure` returns the value and throws on failure; the `lastGood` map is the side store that gives the stale-keep behavior. A `null` key returns a loading state and fetches nothing.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `cd packages/ui && bun test src/components/references/issueFilterOptions.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run: `bun run check:changed` (from the root) — expected PASS.
 
@@ -818,7 +819,7 @@ git commit -m "feat(ui): issue filter model and last-good choice options hook"
   ```
   The component renders the state radio group, the people radio group, and (when `showMilestone`) a milestone dropdown, and (when `showLabel`) a label dropdown. A dropdown in the first-failure state renders disabled with an error note; a stale dropdown renders its last good items with a stale hint. Selecting an option sets the single entry in the corresponding `labelNames`/`milestoneNames` array; selecting "All" clears it.
 
-- [ ] **Step 1: Write the failing component tests**
+- [x] **Step 1: Write the failing component tests**
 
 Create `packages/ui/src/components/references/IssueFilterMenu.test.tsx`:
 
@@ -872,12 +873,12 @@ describe('IssueFilterMenu', () => {
 
 Adjust the `render` import and assertions to the repository's existing test-utils and the actual rendered control labels (read a sibling `*.test.tsx` under `components/references/` for the convention before finalizing the selectors).
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cd packages/ui && bun test src/components/references/IssueFilterMenu.test.tsx`
 Expected: FAIL — `IssueFilterMenu` is not exported.
 
-- [ ] **Step 3: Implement the component**
+- [x] **Step 3: Implement the component**
 
 Create `packages/ui/src/components/references/IssueFilterMenu.tsx`. Model the structure on `ReferenceFilterMenu` in `ReferenceBrowser.tsx` (lines 71-152): a `DropdownMenu` whose trigger is the filter summary button, and whose content holds the state radio group, the people radio group, and the two dropdowns.
 
@@ -973,12 +974,12 @@ export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ filter, onFilt
 
 Confirm `REPOSITORY_STATES` / `REPOSITORY_PEOPLE` are keyed by kind (`issue`) in `referencePickerItems.ts` (they are, per `ReferenceBrowser.tsx` usage); if the existing shapes differ, adapt the `group(...)` calls to the real exports rather than renaming them.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cd packages/ui && bun test src/components/references/IssueFilterMenu.test.tsx`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run: `bun run check:changed` (from the root) — expected PASS.
 
@@ -1002,7 +1003,7 @@ git commit -m "feat(ui): shared issues filter menu with label and milestone drop
 - Consumes: `IssueFilter` / `DEFAULT_ISSUE_FILTER` (Task 5), `IssueFilterMenu` (Task 6), `useChoiceOptions` (Task 5), `SourceControlAPI.referenceLabels` / `referenceMilestones` (Task 4), `descriptor.features.labels` / `descriptor.features.milestones` (Task 4).
 - Produces: the board's repository filter carries `labelNames` and `milestoneNames`; the board's filter menu shows the two dropdowns on a host that publishes both; `fetchListBackedReferencePage` sends `label`/`milestone` only for `kind === 'issue'`.
 
-- [ ] **Step 1: Extend the repository filter state in `useReferenceBrowser`**
+- [x] **Step 1: Extend the repository filter state in `useReferenceBrowser`**
 
 In `packages/ui/src/components/references/useReferenceBrowser.ts`:
 
@@ -1027,7 +1028,7 @@ Update `chosenRepositoryFilter` state (line 97) and `repositoryFilter` (line 132
 
 The option reads (`useChoiceOptions` for labels and milestones) are owned by the surface that renders the menu (the board view), not the browser hook, so the hook only exposes `features` and the filter.
 
-- [ ] **Step 2: Pass the names through the list read**
+- [x] **Step 2: Pass the names through the list read**
 
 In `packages/ui/src/components/references/listBackedReferences.ts`, `fetchListBackedReferencePage` (line 136) takes `filter: RepositoryReferenceFilter`. Widen it to accept the two name arrays and forward them only for issues:
 
@@ -1091,7 +1092,7 @@ export function useRepositoryReferenceList(options: {
         : null;
 ```
 
-- [ ] **Step 3: Render the shared menu in `ReferenceFilterMenu`**
+- [x] **Step 3: Render the shared menu in `ReferenceFilterMenu`**
 
 In `packages/ui/src/components/references/ReferenceBrowser.tsx`, `ReferenceFilterMenu` (line 71) currently renders the state/people groups inline for the repository source. Replace that branch with the shared `IssueFilterMenu` when the host offers the extras, keeping the existing inline groups as the fallback for hosts that do not:
 
@@ -1144,16 +1145,16 @@ and have `IssueFilterMenu` render `<DropdownMenuContent ...><IssueFilterGroups {
 
 The board view (`SourceBoardView.tsx`) supplies `browser.labelOptions` / `browser.milestoneOptions` from `useChoiceOptions` keyed by the board's project, reading `referenceLabels` / `referenceMilestones` with the board's read context. Add those two `useChoiceOptions` calls in `SourceBoardView.tsx` where the browser is created and thread them onto the `browser` object the menu reads (a small addition to the object the view passes, not a change to the hook's contract).
 
-- [ ] **Step 4: Write the tests**
+- [x] **Step 4: Write the tests**
 
 In `packages/ui/src/components/references/useReferenceBrowser.test.ts`, add a test that the repository filter defaults carry empty name arrays and that `selectRepositoryFilter({ labelNames: ['bug'] })` updates them. In a `ReferenceBrowser.test.tsx` (create if absent), render the filter menu for a repository source on a descriptor with `features.labels` and `features.milestones` true and assert the two dropdown labels render; on a descriptor with them false, assert the dropdowns are absent and the state/people groups remain.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cd packages/ui && bun test src/components/references/useReferenceBrowser.test.ts src/components/references/ReferenceBrowser.test.tsx`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run: `bun run check:changed` (from the root) — expected PASS.
 
@@ -1179,7 +1180,7 @@ git commit -m "feat(ui): board issues filter gains the shared label and mileston
   - `useIssuesPanelStore`: a zustand persist store keyed by `projectContextId` holding `{ filter: IssueFilter; openIssueNumber: number | null }` per project, so the tab reopens filtered the way it was left.
   - `IssuesSection: React.FC<IssuesSectionProps>` rendering the filtered issue list (rows: number, title, state dot, milestone chip), the in-place detail (full Markdown body, full comment thread, milestone, labels, state, author), and the two actions ("Attach to this session", "Open on {provider}").
 
-- [ ] **Step 1: Create the persistence store**
+- [x] **Step 1: Create the persistence store**
 
 Create `packages/ui/src/stores/useIssuesPanelStore.ts`, modelled on `useSourceBoardStore.ts`:
 
@@ -1251,7 +1252,7 @@ export const useIssuesPanelStore = create<IssuesPanelState>()(
 );
 ```
 
-- [ ] **Step 2: Create the `IssuesSection` component**
+- [x] **Step 2: Create the `IssuesSection` component**
 
 Create `packages/ui/src/components/session/project-context/IssuesSection.tsx`. It owns the list read (through `useRepositoryReferenceList` from `../references/referenceSources.ts` with `kind: 'issue'` and the persisted `IssueFilter`), the option reads (`useChoiceOptions` for labels and milestones), the detail read (`issueGet` + `issueComments`), and the two actions.
 
@@ -1381,7 +1382,7 @@ export const IssuesSection: React.FC<IssuesSectionProps> = ({ directory, filter,
 
 `IssuesList` and `IssueDetail` are private components in the same file: `IssuesList` renders the filter menu (`IssueFilterMenu`), the loading/failure/empty states (a failed list read shows the failure state, never an empty list), and the rows (number, title, state dot, milestone chip); `IssueDetail` renders the full Markdown body, the full comment thread, milestone, labels, state and author, and the two action buttons. `useRepositoryReferenceList` accepts the `IssueFilter` directly (Task 7 widened its `filter` parameter to carry the two name arrays), so the list read needs no cast. The single `as any` on the resolved reference is intentional: it builds a `RepositoryIssueReference` from the `Issue` detail DTO, whose `project: { owner, name }` shape is not the list row's `sourceRepo: { owner, repo }`.
 
-- [ ] **Step 3: Wire the tab into `ProjectNotesTodoPanel`**
+- [x] **Step 3: Wire the tab into `ProjectNotesTodoPanel`**
 
 In `packages/ui/src/components/session/project-context/ProjectNotesTodoPanel.tsx`:
 
@@ -1440,7 +1441,7 @@ const TAB_ORDER: ProjectContextTab[] = ['notes', 'todos', 'plans', 'memory', 'is
 
 (Adapt the exact prop threading to how `KnowledgeSplit` takes `list`/`detail`; the narrow case shows the detail in place with a `KnowledgeBackButton`, mirroring the plans branch at lines 576-584.)
 
-- [ ] **Step 4: Write the tests**
+- [x] **Step 4: Write the tests**
 
 In `ProjectNotesTodoPanel.test.tsx`, add:
 - a gating test: a project whose provider descriptor has `features.labels` true and `features.milestones` false renders no Issues tab (and the reverse); both true renders the tab. (This pins Review Focus line 5.)
@@ -1451,12 +1452,12 @@ In `IssuesSection.test.tsx`:
 - a detail test: opening an issue renders its body, a comment, the milestone and a label.
 - an attach test: "Attach to this session" pushes a `repository-issue` composer reference.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `cd packages/ui && bun test src/components/session/project-context/ProjectNotesTodoPanel.test.tsx src/components/session/project-context/IssuesSection.test.tsx`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 Run: `bun run check:changed` (from the root) — expected PASS.
 
@@ -1478,7 +1479,7 @@ git commit -m "feat(ui): issues tab in the project knowledge panel"
 - Consumes: nothing.
 - Produces: the `issuesPanel.*` keys used by Tasks 6 and 8, present in every locale with the same key set as `en` (the parity test enforces this).
 
-The 16 keys:
+The 14 keys:
 
 | Key | en |
 | --- | --- |
@@ -1490,16 +1491,14 @@ The 16 keys:
 | `issuesPanel.filter.unavailable` | Could not read the {what} list |
 | `issuesPanel.empty` | No issues match the filter |
 | `issuesPanel.detail.milestone` | Milestone |
-| `issuesPanel.detail.labels` | Labels |
 | `issuesPanel.detail.state.open` | Open |
 | `issuesPanel.detail.state.closed` | Closed |
 | `issuesPanel.detail.author` | Author |
 | `issuesPanel.actions.attach` | Attach to this session |
 | `issuesPanel.actions.openOnHost` | Open on {provider} |
-| `issuesPanel.error.listFailed` | Could not read the issue list |
 | `issuesPanel.back` | Back to issues |
 
-- [ ] **Step 1: Create the fragment**
+- [x] **Step 1: Create the fragment**
 
 Create `packages/ui/src/lib/i18n/messages/issues-panel.i18n.ts`:
 
@@ -1779,7 +1778,7 @@ export const issuesPanelI18n = {
 };
 ```
 
-- [ ] **Step 2: Merge the fragment into all 15 locale dictionaries**
+- [x] **Step 2: Merge the fragment into all 15 locale dictionaries**
 
 In each of the 15 files `packages/ui/src/lib/i18n/messages/{en,de,fr,nl,es,ja,pt-BR,uk,ko,pl,zh-CN,zh-TW,tr,ar,he}.ts`:
 
@@ -1797,7 +1796,7 @@ import { issuesPanelI18n } from './issues-panel.i18n';
 
 Use the matching locale member (`...issuesPanelI18n.de` in `de.ts`, `...issuesPanelI18n['pt-BR']` in `pt-BR.ts`, `...issuesPanelI18n['zh-CN']` in `zh-CN.ts`, etc.).
 
-- [ ] **Step 3: Add a parity assertion**
+- [x] **Step 3: Add a parity assertion**
 
 In `packages/ui/src/lib/i18n/messages.test.ts`, inside `describe('i18n dictionaries', ...)`, add:
 
@@ -1810,12 +1809,12 @@ In `packages/ui/src/lib/i18n/messages.test.ts`, inside `describe('i18n dictionar
   });
 ```
 
-- [ ] **Step 4: Run the i18n test**
+- [x] **Step 4: Run the i18n test**
 
 Run: `cd packages/ui && bun test src/lib/i18n/messages.test.ts`
 Expected: PASS (key parity across all 15 locales plus the new assertion).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run: `bun run check:changed` (from the root) — expected PASS.
 
@@ -1839,27 +1838,27 @@ git commit -m "feat(ui): issues panel strings in all locales"
 - Consumes: the behavior implemented in Tasks 1-9.
 - Produces: owning-module documentation that names the new reads, the capability, the gate, and the persistence.
 
-- [ ] **Step 1: Update the source-control module doc**
+- [x] **Step 1: Update the source-control module doc**
 
 In `packages/web/server/lib/source-control/DOCUMENTATION.md`, in the `provider-routes.js` bullet (line 21), add `milestones` to the bound-reads list ("status, lists, context, issues, upstream, branches, labels, reviewers" → "…, labels, reviewers, milestones"). In the capability-publication note near line 135 (the Presentation bullet under *Change-based review hosts*) or the `Repository discussions` section (line 145), add a sentence: `publicProviderDescriptor` publishes `features.labels` and `features.milestones` from the capabilities, each only when the capability is `true`, so a provider that turns one off publishes exactly what it always did.
 
-- [ ] **Step 2: Update the Gitea module doc**
+- [x] **Step 2: Update the Gitea module doc**
 
 In `packages/web/server/lib/gitea/DOCUMENTATION.md`, in the Invariants list, add a bullet after the labels one (line 30): milestones are read as a whole collection (`GET /repos/{o}/{r}/milestones?state=all`) up to the existing collection bound and mapped to `{ name, state }` (the host's `title`/`state`); the issue list takes `label` and `milestone` and forwards them as the host's own query parameters. In the *Verified against live instances* section, add a line noting the milestones read and the two issue-list parameters were verified against live Gitea 1.21.11 and 1.27.3 (or mark them as assumed if not yet exercised live, per the doc's existing "Still unverified" convention).
 
-- [ ] **Step 3: Update the Forgejo module doc**
+- [x] **Step 3: Update the Forgejo module doc**
 
 In `packages/web/server/lib/forgejo/DOCUMENTATION.md`, in the Invariants list, add a line: the `milestones` capability and the `label`/`milestone` issue-list parameters are Gitea's by construction (`...giteaDescriptor`), so Forgejo answers `/references/milestones` and the filtered issue list without its own code.
 
-- [ ] **Step 4: Update the references module doc**
+- [x] **Step 4: Update the references module doc**
 
 In `packages/ui/src/components/references/DOCUMENTATION.md`, add entries for the new files and the shared filter: the `IssueFilter` model (`state`, `people`, `labelNames`, `milestoneNames`, each array zero-or-one in this cut), the `useChoiceOptions` hook (last-good-on-stale-failure over the value cache; a first failure disables the dropdown, a refresh failure keeps the last good list with a stale hint, a fetch failure is never an authoritative empty), and the shared `IssueFilterMenu` / `IssueFilterGroups` used by both the board's filter menu and the knowledge panel's Issues tab.
 
-- [ ] **Step 5: Update the project-context module doc**
+- [x] **Step 5: Update the project-context module doc**
 
 In `packages/ui/src/components/session/project-context/DOCUMENTATION.md`, in the Files table, add rows for `IssuesSection.tsx` and `stores/useIssuesPanelStore.ts`. Add a short section describing the Issues tab: it renders only when the project's connected provider publishes both `features.labels` and `features.milestones` and a read context exists; it lists the project's issues filtered by the shared `IssueFilter`; a row opens the full issue in place (wide: split beside the list, narrow: in place with a back button); the actions are "Attach to this session" (through `resolveComposerReferences`) and "Open on {provider}"; the filter and open item persist per project in `useIssuesPanelStore`.
 
-- [ ] **Step 6: Validate and commit**
+- [x] **Step 6: Validate and commit**
 
 Run: `bun run check:changed` (from the root) — expected PASS.
 Run: `bun run docs:validate` — expected PASS.

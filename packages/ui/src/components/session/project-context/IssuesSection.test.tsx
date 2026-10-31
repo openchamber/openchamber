@@ -8,6 +8,7 @@ import type {
   RepositoryIssueReference,
   RuntimeAPIs,
   SourceControlAPI,
+  SourceControlBindingRead,
 } from '@/lib/api/types';
 import type { SourceControlReadContext } from '@/lib/source-control/types';
 import { unknownProviderDescriptor, type SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
@@ -57,6 +58,40 @@ const readContext: SourceControlReadContext = {
   accountId: 'account-1',
   bindingRevision: 1,
   primaryRemote: 'origin',
+};
+
+// The folder's binding; its entry for the read context's provider and instance
+// names the repository the option and detail reads ask for.
+const bindingRead: SourceControlBindingRead = {
+  repository: {
+    repositoryId: 'org/chats',
+    configRevision: 'cfg-1',
+    bare: false,
+    remotes: [{
+      name: 'origin',
+      fetch: { displayUrl: 'https://gitea.test/org/chats', fingerprint: 'fp-origin' },
+      push: { displayUrl: 'https://gitea.test/org/chats', fingerprint: 'fp-origin' },
+    }],
+  },
+  revision: 1,
+  status: 'bound',
+  binding: {
+    repositoryId: 'org/chats',
+    revision: 1,
+    providers: [{
+      provider: 'gitea',
+      instance: 'https://gitea.test',
+      accountId: 'account-1',
+      primaryRemote: 'origin',
+      repository: { owner: 'org', name: 'chats' },
+      readiness: 'ready',
+      endpoint: { displayUrl: 'https://gitea.test/org/chats', fingerprint: 'fp-origin' },
+    }],
+    remotes: [],
+    auxiliary: [],
+    state: 'bound',
+    configRevision: 'cfg-1',
+  },
 };
 
 const giteaDescriptor: SourceControlProviderDescriptor = {
@@ -203,12 +238,18 @@ const sourceControl: SourceControlAPI = {
 // module stays the real one.
 const actualReferenceSources = await import('@/components/references/referenceSources');
 const actualRegistry = await import('@/lib/source-control/providers/registry');
+const actualRepositoryBinding = await import('@/lib/source-control/repository-binding');
 
 mock.module('@/components/references/referenceSources', () => ({
   ...actualReferenceSources,
   useRepositoryReadContext: () => readContext,
   useRepositoryReferenceProvider: () => 'gitea',
   useRepositoryReferenceList: () => list,
+}));
+// The folder's binding answers the project question the list rows used to.
+mock.module('@/lib/source-control/repository-binding', () => ({
+  ...actualRepositoryBinding,
+  useRepositoryBinding: () => ({ status: 'ready', read: bindingRead, error: null, contexts: [readContext], scope: {}, retry: () => undefined, isCurrent: () => true, stale: false }),
 }));
 mock.module('@/lib/source-control/providers/registry', () => ({
   ...actualRegistry,
@@ -301,6 +342,8 @@ beforeEach(() => {
   detailComments = [];
   sourceControl.issueGet = async () => detailIssue;
   sourceControl.issueComments = async () => detailComments;
+  sourceControl.referenceLabels = async () => [];
+  sourceControl.referenceMilestones = async () => [];
   usePendingComposerReferences.setState({ references: [] });
 });
 
@@ -318,6 +361,27 @@ test('a failed list read shows the failure, never an empty list', async () => {
   expect(host?.textContent).toContain('Couldn\u2019t load the list: offline');
   expect(host?.textContent).toContain('Retry');
   expect(host?.textContent).not.toContain('No issues match the filter');
+});
+
+test('an empty list page still reads its options: the project comes from the binding', async () => {
+  // No issues on the page (every one closed, say). The option reads must not
+  // wait for a list row to name the project: the binding does, so the reads
+  // run for the bound repository and the dropdowns reach ready instead of
+  // staying in loading.
+  list.items = [];
+  const labelReads: Array<{ owner: string; repo: string }> = [];
+  sourceControl.referenceLabels = async (_context, project) => {
+    labelReads.push({ owner: project.owner, repo: project.repo });
+    return [{ name: 'bug', color: 'd042f1' }];
+  };
+  const milestoneReads: Array<{ owner: string; repo: string }> = [];
+  sourceControl.referenceMilestones = async (_context, project) => {
+    milestoneReads.push({ owner: project.owner, repo: project.repo });
+    return [{ name: 'v1.0', state: 'open' }];
+  };
+  await renderSection();
+  expect(labelReads).toEqual([{ owner: 'org', repo: 'chats' }]);
+  expect(milestoneReads).toEqual([{ owner: 'org', repo: 'chats' }]);
 });
 
 test('the open issue shows its full body, its comments, its milestone and its labels', async () => {
