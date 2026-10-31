@@ -6,6 +6,8 @@ import { registerSourceControlRoutes } from './routes.js';
 import { createProviderDescriptors } from './provider-descriptors.js';
 import { createSourceControlProviders } from './provider-registry.js';
 import { gitlabDescriptor } from '../gitlab/descriptor.js';
+import { giteaDescriptor } from '../gitea/descriptor.js';
+import { createProvider as createGiteaProvider } from '../gitea/provider.js';
 
 /**
  * A provider that turns capabilities off still answers every route the shell
@@ -147,6 +149,47 @@ describe('provider route capabilities', () => {
     expect(impl.resources.listMilestones).toHaveBeenCalledWith(expect.objectContaining({
       directory: '/repo', project: { owner: 'acme', name: 'app' },
     }));
+  });
+
+  it('forwards label and milestone on /issues/list into the issue list resource', async () => {
+    // The real Gitea provider, so the route's filter parameters travel through
+    // its resource wrapper; only the auth store and the resource service are
+    // fakes, in this file's usual shape.
+    const giteaInstance = 'https://gitea.example.com';
+    const account = {
+      id: 'gitea-account', token: 'pat', credentialRevision: 1, providerUserId: 'gitea-user',
+      user: { id: 1, login: 'dev' }, status: 'valid',
+    };
+    const store = {
+      readAccount: vi.fn(async () => account),
+      readInstance: vi.fn(async () => ({ activeAccountId: account.id, accounts: [account], cliDisabled: false, cliActive: false })),
+    };
+    const listIssues = vi.fn(async () => ({ items: [], page: 1, hasMore: false }));
+    const impl = createGiteaProvider({
+      authStore: { section: () => store },
+      events: { connected: vi.fn(), invalidated: vi.fn(), removed: vi.fn() },
+      createClient: () => ({}),
+      createResourceService: () => ({ listIssues }),
+    });
+    const providers = createSourceControlProviders({
+      descriptors: createProviderDescriptors([giteaDescriptor]),
+      loaders: { gitea: async () => ({ createProvider: () => impl }) },
+    });
+    const app = express();
+    app.use(express.json());
+    registerSourceControlRoutes(app, {
+      providers,
+      bindingService: {
+        validateReadContext: vi.fn(async () => ({ provider: 'gitea', instance: giteaInstance, accountId: account.id, directory: '/repo', primaryRemote: 'origin', repositoryId: 'repo-1', bindingRevision: 1 })),
+        validateMutationContext: vi.fn(), accountUnavailable: vi.fn(), accountConnected: vi.fn(),
+      },
+      identityProvisioning: { backfillAccountIdentities: vi.fn(), ensureAccountIdentity: vi.fn(), repointAccountIdentities: vi.fn() },
+      mutationExecutor: { read: vi.fn(), execute: vi.fn() },
+    });
+    const response = await request(app).get('/api/source-control/gitea/issues/list')
+      .query({ instance: giteaInstance, directory: '/repo', label: 'bug', milestone: 'v1.0' }).expect(200);
+    expect(response.body).toEqual({ items: [], page: 1, hasMore: false });
+    expect(listIssues).toHaveBeenCalledWith('/repo', expect.objectContaining({ label: 'bug', milestone: 'v1.0', state: 'open', people: 'any', remote: 'origin' }));
   });
 
   it('publishes labels and milestones features only when the capability is on', async () => {

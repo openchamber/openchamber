@@ -189,8 +189,8 @@ export function createGiteaFamilyProvider({
         .listChangeRequests(directory, { page, query, state, people, remote }),
       changeRequestContext: ({ session, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, { includeDiff, includeCIDetails, includeTimeline, project, remote }),
-      listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
-        .listIssues(directory, { page, query, state, people, remote }),
+      listIssues: ({ session, directory, page, query, state, people, label, milestone, remote }) => serviceFor(session)
+        .listIssues(directory, { page, query, state, people, label, milestone, remote }),
       getIssue: ({ session, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote),
       issueComments: ({ session, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),
