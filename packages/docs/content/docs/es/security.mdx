@@ -129,7 +129,7 @@ Al conectar un servicio de alojamiento Git (GitLab, Gitea, Gerrit, Forgejo), Ope
 
 - Cada entrada es un origen exacto: esquema, host y, si importa, puerto. Sin ruta, sin `*`, sin credenciales. `http://gitlab.corp.internal` no cubre `http://gitlab.corp.internal:8443`.
 - Solo pasa lo que se enumera. Las instancias públicas de GitHub y GitLab, y todos los demás hosts, siguen exigiendo HTTPS.
-- La lista no abre nada más: una extensión de proveedor autoalojada sigue aceptando solo HTTPS y HTTP de loopback, las transferencias anónimas siguen exigiendo HTTPS y también las descargas de Git LFS.
+- La lista no abre nada más: una extensión de proveedor autoalojada sigue aceptando solo HTTPS y HTTP de loopback, y las transferencias anónimas siguen exigiendo HTTPS. Las descargas de Git LFS siguen la misma lista: HTTP en claro solo en un origen listado.
 - Al quitar un origen de la lista, OpenChamber deja de aceptar las instancias vinculadas a él hasta que se vuelvan a vincular.
 - La lista de Settings → Git sigue las mismas reglas: un origen exacto por línea, y una línea que no sea un origen aceptado se descarta al guardar la lista. Con el modo empresarial activado se ignora por completo: ampliar la confianza en texto sin cifrar sigue siendo decisión del administrador.
 
@@ -138,7 +138,7 @@ La misma lista también decide desde dónde se pueden instalar extensiones y ski
 - Su host se acepta por HTTPS y SSH en cualquier puerto, y por HTTP solo en el origen exacto de la lista. Los clones de Git y las descargas `.zip` siguen esta regla.
 - La dirección a la que resuelve no puede ser de loopback (`127.0.0.0/8`, `::1`) ni link-local (`169.254.0.0/16`, que incluye los metadatos de la nube). Nombrarlas en la lista no cambia nada.
 - Las redirecciones nunca se siguen a ciegas: cada salto se comprueba de nuevo, así que un host de confianza no puede rebotar una instalación a otro host interno.
-- Las fuentes de skills escritas como `http://host/group/repo.git` se aceptan en un origen de la lista. Una fuente de skills que usa una identidad Git gestionada por HTTPS sigue exigiendo HTTPS.
+- Las fuentes de skills escritas como `http://host/group/repo.git` se aceptan en un origen de la lista.
 - Las extensiones que piden `service`, `network`, `origins` o `transcript` siguen teniendo que venir de un repositorio bajo `allowedExtensions`.
 
 ### Apuntar los metadatos de modelos a una dirección interna

@@ -129,7 +129,7 @@ Przy łączeniu hostingu Git (GitLab, Gitea, Gerrit, Forgejo) OpenChamber wymaga
 
 - Każdy wpis to dokładne źródło: schemat, host i, jeśli ma znaczenie, port. Bez ścieżki, bez `*`, bez danych logowania. `http://gitlab.corp.internal` nie obejmuje `http://gitlab.corp.internal:8443`.
 - Przechodzi tylko to, co wypisane. Publiczne instancje GitHub i GitLab oraz wszystkie inne hosty nadal wymagają HTTPS.
-- Ta lista nic więcej nie otwiera: rozszerzenie providera z własnej instalacji nadal przyjmuje tylko HTTPS i HTTP loopback, transfery anonimowe nadal wymagają HTTPS, i tak samo pobrania Git LFS.
+- Ta lista nic więcej nie otwiera: rozszerzenie providera z własnej instalacji nadal przyjmuje tylko HTTPS i HTTP loopback, a transfery anonimowe nadal wymagają HTTPS. Pobrania Git LFS podlegają tej samej liście: HTTP w postaci jawnej tylko na wypisanym źródle.
 - Usunięcie źródła z listy sprawi, że OpenChamber odrzuci instancje z nim powiązane, dopóki nie powiążesz ich ponownie.
 - Lista w Settings → Git rządzi się tymi samymi regułami: jedno dokładne źródło na wiersz, a wiersz, który nie jest akceptowanym źródłem, znika przy zapisie. Gdy tryb enterprise jest włączony, ta lista jest całkowicie ignorowana — poluzowanie reguły HTTPS pozostaje decyzją administratora.
 
@@ -138,7 +138,7 @@ Ta sama lista decyduje też, skąd wolno instalować rozszerzenia i skille. Poni
 - Jego host jest akceptowany przez HTTPS i SSH na dowolnym porcie, a przez HTTP tylko na dokładnie wypisanym źródle. Klony Git i pobrania `.zip` przestrzegają tej zasady.
 - Adres, na jaki ta nazwa się rozwiązuje, nie może być loopbackiem (`127.0.0.0/8`, `::1`) ani link-local (`169.254.0.0/16`, zawiera metadane chmury). Wpisanie takich adresów na listę nic nie zmienia.
 - Przekierowania nigdy nie są ślepo podążane: każdy skok jest sprawdzany ponownie, więc zaufany host nie może przerzucić instalacji na inny host intranetu.
-- Źródła skilli zapisane jako `http://host/group/repo.git` są akceptowane na wypisanym źródle. Źródło skilli używające zarządzanej tożsamości Git przez HTTPS nadal wymaga HTTPS.
+- Źródła skilli zapisane jako `http://host/group/repo.git` są akceptowane na wypisanym źródle.
 - Rozszerzenia proszące o `service`, `network`, `origins` albo `transcript` nadal muszą pochodzić z repozytorium pod `allowedExtensions`.
 
 ### Skieruj metadane modeli na wewnętrzny adres

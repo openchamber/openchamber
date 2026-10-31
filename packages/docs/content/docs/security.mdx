@@ -129,7 +129,7 @@ OpenChamber asks for HTTPS when you connect a Git hosting provider (GitLab, Gite
 
 - Each entry is one exact origin, with scheme, host and, if it matters, port. No path, no `*`, no credentials. `http://gitlab.corp.internal` does not cover `http://gitlab.corp.internal:8443`.
 - Only what you list is let through. GitHub and GitLab's public instances, and everything else, still require HTTPS.
-- The allowlist doesn't open anything else: a self-hosted provider extension keeps accepting HTTPS and loopback HTTP only, anonymous transfers keep requiring HTTPS, and Git LFS downloads keep requiring HTTPS.
+- The allowlist doesn't open anything else: a self-hosted provider extension keeps accepting HTTPS and loopback HTTP only, and anonymous transfers keep requiring HTTPS. Git LFS downloads follow the same list: plain HTTP only on a listed origin.
 - Remove an origin from the list and OpenChamber stops accepting the instances bound to it until you bind them again.
 - The Settings → Git list follows the same rules: one exact origin per line, and a line that isn't an accepted origin is dropped when the list is saved. While enterprise mode is on it is ignored entirely — widening plaintext trust stays the administrator's move.
 
@@ -138,7 +138,7 @@ The same list also decides where extensions and skills may be installed from. "I
 - Its host is accepted over HTTPS and SSH on any port, and over HTTP on the exact listed origin. Git clones and `.zip` downloads both follow this.
 - The address it resolves to must not be loopback (`127.0.0.0/8`, `::1`) or link-local (`169.254.0.0/16`, which includes cloud metadata). Naming those in the list changes nothing.
 - Redirects are never followed blindly: every hop is checked again, so a trusted host can't bounce an install to another internal host.
-- Skill sources written as `http://host/group/repo.git` are accepted on a listed origin. A skill source that uses a managed HTTPS Git identity still needs HTTPS.
+- Skill sources written as `http://host/group/repo.git` are accepted on a listed origin.
 - Extensions that ask for `service`, `network`, `origins` or `transcript` still have to come from a repository under `allowedExtensions`.
 
 ### Point model metadata at an internal address

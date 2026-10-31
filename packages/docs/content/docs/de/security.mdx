@@ -129,7 +129,7 @@ Beim Verbinden eines Git-Hosting-Dienstes (GitLab, Gitea, Gerrit, Forgejo) verla
 
 - Jeder Eintrag ist eine exakte Herkunft: Schema, Host und, wenn relevant, Port. Kein Pfad, kein `*`, keine Zugangsdaten. `http://gitlab.corp.internal` umfasst nicht `http://gitlab.corp.internal:8443`.
 - Nur was hier steht, wird durchgelassen. Die öffentlichen Instanzen von GitHub und GitLab und alle übrigen Hosts verlangen weiter HTTPS.
-- Die Liste öffnet nichts anderes: Ein Provider-Extension einer eigenen Instanz akzeptiert weiterhin nur HTTPS und Loopback-HTTP, anonyme Übertragungen verlangen weiterhin HTTPS, und Git-LFS-Downloads ebenfalls.
+- Die Liste öffnet nichts anderes: Ein Provider-Extension einer eigenen Instanz akzeptiert weiterhin nur HTTPS und Loopback-HTTP, und anonyme Übertragungen verlangen weiterhin HTTPS. Git-LFS-Downloads folgen derselben Liste: Klartext-HTTP nur auf einer gelisteten Herkunft.
 - Entfernen Sie eine Herkunft aus der Liste, lehnt OpenChamber die daran gebundenen Instanzen ab, bis Sie sie neu binden.
 - Die Liste in **Einstellungen → Git** folgt denselben Regeln: pro Zeile eine exakte Herkunft; eine Zeile, die keine akzeptierte Herkunft ist, entfällt beim Speichern. Solange der Enterprise-Modus aktiv ist, wird sie komplett ignoriert — die HTTPS-Regel zu lockern bleibt allein die Entscheidung der Verwaltung.
 
@@ -138,7 +138,7 @@ Dieselbe Liste bestimmt auch, von wo aus Extensions und Skills installiert werde
 - Sein Host wird über HTTPS und SSH auf jedem Port akzeptiert, über HTTP nur auf der exakt gelisteten Herkunft. Git-Klone und `.zip`-Downloads folgen beide dieser Regel.
 - Die Adresse, auf die der Host auflöst, darf weder Loopback (`127.0.0.0/8`, `::1`) noch link-local (`169.254.0.0/16`, schließt die Cloud-Metadaten ein) sein. Solche Adressen in die Liste zu schreiben, ändert nichts.
 - Weiterleitungen werden nie blind gefolgt: Jeder Zwischenschritt wird erneut geprüft, damit ein vertrauter Host eine Installation nicht an einen anderen Intranet-Rechner weiterreicht.
-- Skill-Quellen der Form `http://host/group/repo.git` werden auf einer gelisteten Herkunft akzeptiert. Eine Skill-Quelle, die eine verwaltete HTTPS-Git-Identität nutzt, verlangt weiterhin HTTPS.
+- Skill-Quellen der Form `http://host/group/repo.git` werden auf einer gelisteten Herkunft akzeptiert.
 - Extensions, die `service`, `network`, `origins` oder `transcript` verlangen, müssen weiterhin aus einem Repository unter `allowedExtensions` stammen.
 
 ### Modellmetadaten auf eine interne Adresse richten

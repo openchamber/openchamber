@@ -129,7 +129,7 @@ Bir Git barındırma hizmeti (GitLab, Gitea, Gerrit, Forgejo) bağlanırken Open
 
 - Her madde tam bir kaynaktır: şema, ana bilgisayar ve gerekiyorsa port. Yol, `*` ya da kimlik bilgisi olmaz. `http://gitlab.corp.internal`, `http://gitlab.corp.internal:8443` kapsamaz.
 - Yalnızca listelenen geçer. GitHub ve GitLab'ın herkese açık örnekleri ve geri kalan tüm ana bilgisayarlar HTTPS istemeye devam eder.
-- Bu liste başka bir şeyi açmaz: kendi barındırılan bir sağlayıcı uzantısı bundan sonra da yalnızca HTTPS ve loopback HTTP kabul eder, anonim aktarımlar HTTPS istemeye devam eder, Git LFS indirmeleri de öyle.
+- Bu liste başka bir şeyi açmaz: kendi barındırılan bir sağlayıcı uzantısı bundan sonra da yalnızca HTTPS ve loopback HTTP kabul eder, anonim aktarımlar HTTPS istemeye devam eder. Git LFS indirmeleri de aynı listeyi izler: düz metin HTTP yalnızca listedeki bir kaynakta.
 - Bir kaynağı listeden çıkarınca OpenChamber, ona bağlı örnekleri yeniden bağlayana dek reddeder.
 - Settings → Git listesi de aynı kurallara uyar: satır başına tam bir kaynak; kabul edilmeyen satır, liste kaydedilirken düşer. Kurumsal mod açıkken bu liste tümüyle yok sayılır — düz metin güvenini genişletmek yine yöneticinin kararıdır.
 
@@ -138,7 +138,7 @@ Aynı liste, uzantıların ve skill'lerin nerelerden kurulabileceğine de karar 
 - Bu ana bilgisayar HTTPS ve SSH üzerinde her portta kabul edilir; HTTP'de ise yalnızca listelenen tam kaynakta. Git klonları ve `.zip` indirmeleri bu kurala uyar.
 - Adının çözüldüğü adres loopback (`127.0.0.0/8`, `::1`) veya link-local (`169.254.0.0/16`, bulut üstverileri dahil) olmamalıdır. Bunları listeye yazmak bir şeyi değiştirmez.
 - Yönlendirmeler asla körü körüne izlenmez: her atlama yeniden denetlenir, böylece güvenilir bir ana bilgisayar bir kurulumu başka bir intranet ana bilgisayarına yönlendiremez.
-- `http://host/group/repo.git` biçiminde yazılan skill kaynakları, listedeki bir kaynakta kabul edilir. Yönetilen bir HTTPS Git kimliği kullanan bir skill kaynağı yine HTTPS ister.
+- `http://host/group/repo.git` biçiminde yazılan skill kaynakları, listedeki bir kaynakta kabul edilir.
 - `service`, `network`, `origins` veya `transcript` isteyen uzantılar, yine `allowedExtensions` altındaki bir depodan gelmek zorundadır.
 
 ### Model üstverilerini dahili bir adrese yönlendirin
