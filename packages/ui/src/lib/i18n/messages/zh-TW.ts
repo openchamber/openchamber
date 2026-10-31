@@ -2332,6 +2332,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.failed': '驗證失敗',
   'chat.fileAttachment.toast.attachFailed': '附加檔案失敗',
   'chat.fileAttachment.toast.tooLarge': '{name} 過大，無法附加（超過 {size}）。如果它在專案中，請用 @ 提及。',
+  'chat.fileAttachment.toast.overSendLimit': '{name} 過大，無法附加（超過 {size}）。',
   'chat.fileAttachment.toast.someFilesSkipped': '以下檔案被跳過：\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': '在 VS Code 中選擇檔案失敗',
   'chat.fileAttachment.fileFallback': '檔案',

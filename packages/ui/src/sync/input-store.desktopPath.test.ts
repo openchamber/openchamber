@@ -66,6 +66,21 @@ test('a desktop-dropped file carries its on-disk path while the chip label stays
   expect(file?.agentPath).toBe('/Users/me/Documents/report.txt');
 });
 
+test('a desktop file over the send limit is refused, while one under it still attaches by path', async () => {
+  const { useInputStore } = await import('./input-store');
+  useInputStore.getState().clearAttachedFiles();
+
+  await expect(useInputStore.getState().addAttachedFile(
+    new File([new Uint8Array(20 * 1024 * 1024 + 1)], 'map.bin'),
+  )).rejects.toThrow('map.bin');
+  expect(useInputStore.getState().attachedFiles).toEqual([]);
+
+  expect(await useInputStore.getState().addAttachedFile(
+    new File([new Uint8Array(15 * 1024 * 1024)], 'dump.log'),
+  )).toBe(true);
+  expect(useInputStore.getState().attachedFiles.map((file) => file.serverPath)).toEqual(['/Users/me/Documents/dump.log']);
+});
+
 for (const [wireName, basename] of [
   ['/Users/me/Documents/report.txt', 'report.txt'],
   ['C:\\Users\\me\\report.txt', 'report.txt'],

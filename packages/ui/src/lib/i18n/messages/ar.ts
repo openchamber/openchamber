@@ -2284,6 +2284,7 @@ export const dict = {
   'session.githubIntegration.validation.failed': 'تعذّر التحقق',
   'chat.fileAttachment.toast.attachFailed': 'تعذّر إرفاق الملف',
   'chat.fileAttachment.toast.tooLarge': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}). إذا كان ضمن المشروع، فاذكره باستخدام @.',
+  'chat.fileAttachment.toast.overSendLimit': '{name} كبير جدًا بحيث لا يمكن إرفاقه (أكثر من {size}).',
   'chat.fileAttachment.toast.someFilesSkipped': "تم تخطي بعض الملفات:\n{summary}",
   'chat.fileAttachment.toast.vscodePickFailed': 'تعذّر اختيار الملفات في VS Code',
   'chat.fileAttachment.fileFallback': 'ملف',

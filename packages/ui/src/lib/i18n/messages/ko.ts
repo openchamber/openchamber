@@ -2356,6 +2356,7 @@ export const dict: Record<I18nKey, string> = {
   'session.githubIntegration.validation.failed': '유효성 검사에 실패했습니다',
   'chat.fileAttachment.toast.attachFailed': '첨부 파일 실패',
   'chat.fileAttachment.toast.tooLarge': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과). 프로젝트에 있는 파일이면 @로 멘션하세요.',
+  'chat.fileAttachment.toast.overSendLimit': '{name}은(는) 너무 커서 첨부할 수 없습니다({size} 초과).',
   'chat.fileAttachment.toast.someFilesSkipped': '일부 파일을 건너뛰었습니다:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'VS Code에서 파일 선택에 실패했습니다',
   'chat.fileAttachment.fileFallback': '파일',

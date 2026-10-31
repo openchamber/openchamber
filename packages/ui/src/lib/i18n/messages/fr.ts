@@ -2105,6 +2105,7 @@ export const dict = {
   'session.githubIntegration.validation.failed': 'Échec de la validation',
   'chat.fileAttachment.toast.attachFailed': 'Impossible de joindre le fichier',
   'chat.fileAttachment.toast.tooLarge': '{name} est trop volumineux pour être joint (plus de {size}). S\'il fait partie du projet, mentionnez-le avec @.',
+  'chat.fileAttachment.toast.overSendLimit': '{name} est trop volumineux pour être joint (plus de {size}).',
   'chat.fileAttachment.toast.someFilesSkipped': 'Certains fichiers ont été ignorés :\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Échec de la sélection des fichiers dans VS Code',
   'chat.fileAttachment.fileFallback': 'fichier',

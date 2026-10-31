@@ -2325,6 +2325,7 @@ export const dict: Record<I18nKey, string> = {
   "session.githubIntegration.validation.failed": "Não foi possível validar",
   "chat.fileAttachment.toast.attachFailed": "Não foi possível anexar o arquivo",
   "chat.fileAttachment.toast.tooLarge": "{name} é grande demais para anexar (mais de {size}). Se estiver no projeto, mencione-o com @.",
+  "chat.fileAttachment.toast.overSendLimit": "{name} é grande demais para anexar (mais de {size}).",
   "chat.fileAttachment.toast.someFilesSkipped": "Alguns arquivos foram omitidos:\n{summary}",
   "chat.fileAttachment.toast.vscodePickFailed": "Não foi possível selecionar arquivos em VS Code",
   "chat.fileAttachment.fileFallback": "arquivo",

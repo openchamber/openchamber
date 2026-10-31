@@ -109,6 +109,27 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles).toEqual([])
   })
 
+  testWithMockFileReader("refuses a file over 20 MB without suggesting an @-mention, which OpenCode would refuse too", async () => {
+    const huge = new File([new Uint8Array(20 * 1024 * 1024 + 1)], "map.png", { type: "image/png" })
+
+    let message = ""
+    try {
+      await useInputStore.getState().addAttachedFile(huge)
+    } catch (error) {
+      message = error instanceof Error ? error.message : ""
+    }
+
+    expect(message.includes("map.png")).toBe(true)
+    expect(message.includes("@")).toBe(false)
+    expect(pendingReaders).toHaveLength(0)
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  test("refuses a VS Code file over 20 MB, which OpenCode would refuse on every send", () => {
+    expect(() => useInputStore.getState().addVSCodeFileAttachment("/workspace/map.bin", "map.bin", 20 * 1024 * 1024 + 1)).toThrow("map.bin")
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
   testWithMockFileReader("does not attach a local file that finishes reading after attachments are cleared", async () => {
     const addPromise = useInputStore.getState().addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }))
     expect(pendingReaders).toHaveLength(1)

@@ -2356,6 +2356,7 @@ export const dict = {
   'session.githubIntegration.validation.failed': 'Validation failed',
   'chat.fileAttachment.toast.attachFailed': 'Failed to attach file',
   'chat.fileAttachment.toast.tooLarge': '{name} is too large to attach (over {size}). Mention it with @ if it is in the project.',
+  'chat.fileAttachment.toast.overSendLimit': '{name} is too large to attach (over {size}).',
   'chat.fileAttachment.toast.someFilesSkipped': 'Some files were skipped:\n{summary}',
   'chat.fileAttachment.toast.vscodePickFailed': 'Failed to pick files in VS Code',
   'chat.fileAttachment.fileFallback': 'file',

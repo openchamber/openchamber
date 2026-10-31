@@ -493,7 +493,12 @@ export const ActiveEditorFileSuggestion = memo(() => {
   const displayName = fileName;
 
   const handleAddFile = () => {
-    addVSCodeFileAttachment(filePath, fileName, fileSize);
+    try {
+      addVSCodeFileAttachment(filePath, fileName, fileSize);
+    } catch (error) {
+      // The store names the cause (a file too large to send).
+      if (error instanceof Error) toast.error(error.message);
+    }
   };
 
   const handlePinSelection = async () => {
