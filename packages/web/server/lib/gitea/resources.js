@@ -423,6 +423,8 @@ export function createGiteaResourceService({
       const query = { type: 'issues', state: LIST_STATES[options.state] ?? 'open', q: options.query };
       if (options.people === 'created') query.created_by = await readCurrentLogin();
       if (options.people === 'assigned') query.assigned_by = await readCurrentLogin();
+      if (options.label) query.label = options.label;
+      if (options.milestone) query.milestone = options.milestone;
       const result = await client.page(`${repoPath(primary.project)}/issues`, query, { page, limit: LIST_PAGE });
       const items = result.items.flatMap((raw) => (raw?.pull_request != null ? [] : [requireIssue(raw, primary.project)]));
       return { items, page, hasMore: result.hasMore };

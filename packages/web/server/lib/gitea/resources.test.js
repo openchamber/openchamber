@@ -395,3 +395,37 @@ describe('Gitea milestones', () => {
       .resolves.toEqual([{ name: 'v0.9', state: 'closed' }]);
   });
 });
+
+describe('Gitea issue list filters', () => {
+  const issueListRoutes = (label, milestone) => ({
+    'GET /repos/bob/app/issues': (call) => {
+      const query = call.url.searchParams;
+      if (label && query.get('label') !== label) return pullsPage([]);
+      if (milestone && query.get('milestone') !== milestone) return pullsPage([]);
+      if (!label && !milestone && (query.get('label') !== null || query.get('milestone') !== null)) return pullsPage([]);
+      return pullsPage([fixtures.issue]);
+    },
+  });
+
+  it('passes label and milestone to the host query', async () => {
+    const { service, calls } = setup(issueListRoutes('bug', 'v1.0'));
+
+    const result = await service.listIssues('/repo', { state: 'open', people: 'any', label: 'bug', milestone: 'v1.0' });
+
+    expect(result.items).toHaveLength(1);
+    const call = calls.find((entry) => entry.url.pathname === '/api/v1/repos/bob/app/issues');
+    expect(call.url.searchParams.get('label')).toBe('bug');
+    expect(call.url.searchParams.get('milestone')).toBe('v1.0');
+  });
+
+  it('sends neither parameter when the filter names none', async () => {
+    const { service, calls } = setup(issueListRoutes(null, null));
+
+    const result = await service.listIssues('/repo', { state: 'open', people: 'any' });
+
+    expect(result.items).toHaveLength(1);
+    const call = calls.find((entry) => entry.url.pathname === '/api/v1/repos/bob/app/issues');
+    expect(call.url.searchParams.get('label')).toBeNull();
+    expect(call.url.searchParams.get('milestone')).toBeNull();
+  });
+});

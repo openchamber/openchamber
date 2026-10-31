@@ -295,7 +295,7 @@ export interface ProviderImplementation {
       /** Only with `capabilities.revisions`: files and diff of that revision (40-hex). */
       revision?: string;
     }): Promise<Json>;
-    listIssues?(input: ReadInput & { page: number; query?: string; state: string; people: string }): Promise<Json>;
+    listIssues?(input: ReadInput & { page: number; query?: string; state: string; people: string; label?: string; milestone?: string }): Promise<Json>;
     getIssue?(input: ReadInput & { number: number; project?: ProjectSelector }): Promise<Json>;
     issueComments?(input: ReadInput & { number: number; project?: ProjectSelector }): Promise<Json>;
     projectUpstream?(input: ReadInput): Promise<Json>;

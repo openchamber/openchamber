@@ -973,6 +973,8 @@ export function registerProviderRoutes(app, {
         directory,
         page: requestNumber(req.query?.page) ?? 1,
         query: requestText(req.query?.query) || undefined,
+        label: requestText(req.query?.label) || undefined,
+        milestone: requestText(req.query?.milestone) || undefined,
         ...readListFilter(req.query),
         context: trustedContext, remote: trustedContext.primaryRemote,
       }));
