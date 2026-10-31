@@ -28,6 +28,7 @@ import type { ToolPopupContent } from './message/types';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath } from './markdown/streamdownPlugins';
 import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
 import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
+import { remarkCodeReferences } from './markdown/remarkCodeReferences';
 import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
 import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
 import { MarkdownMediaProvider, type MarkdownDocumentAssets } from './markdown/MarkdownMediaContext';
@@ -274,6 +275,8 @@ export interface MarkdownContentProps {
   onExportCode?: (source: string, language: string) => void;
   /** Item text of this repository: `#12`, `@someone` and commit ids link as its host links them. Keep the object stable. */
   repositoryLinks?: RepositoryLinkContext | null;
+  /** The folder an item text's `path/to/file.ext` references resolve and open against; without it they stay text. */
+  codeReferences?: { directory: string } | null;
   /** `:tada:` reads as 🎉 with these names (`useEmojiShortcodes`); text keeps its shortcodes without them. */
   emojiShortcodes?: EmojiShortcodes | null;
 }
@@ -303,6 +306,7 @@ export function MarkdownContent({
   preparedHighlights,
   onExportCode,
   repositoryLinks,
+  codeReferences = null,
   emojiShortcodes,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
@@ -397,9 +401,10 @@ export function MarkdownContent({
     const extra: Pluggable[] = [];
     if (emojiShortcodes) extra.push([remarkEmojiShortcodes, emojiShortcodes]);
     if (repositoryLinks) extra.push([remarkRepositoryReferences, repositoryLinks]);
+    if (codeReferences) extra.push([remarkCodeReferences, codeReferences.directory]);
     if (extra.length === 0) return base;
     return { ...base, remarkPlugins: [...(base.remarkPlugins ?? []), ...extra] };
-  }, [allowRawHtml, emojiShortcodes, isVSCode, repositoryLinks, singleTilde]);
+  }, [allowRawHtml, emojiShortcodes, isVSCode, repositoryLinks, codeReferences, singleTilde]);
   const presentation = React.useMemo(() => ({
     directory,
     fileReferences,

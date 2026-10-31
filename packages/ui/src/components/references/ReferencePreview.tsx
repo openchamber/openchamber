@@ -9,9 +9,11 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { parseCodeReferences } from '@/lib/trackers/codeReferences';
 
 import type { CachedValue } from './referenceCache';
 import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './projectUploads';
@@ -235,6 +237,11 @@ const ChangeFlags: React.FC<{ reference: RepositoryReference }> = ({ reference }
 const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
     const rewrite = React.useContext(ReferenceMarkdownRewriteContext);
     const links = React.useContext(ReferenceLinksContext);
+    // A tracker item is read without a repository folder; its code references resolve against the panel's project.
+    const projectDirectory = useEffectiveDirectory();
+    const directory = links.directory ?? projectDirectory ?? '';
+    // Cheap gate first: the remark plugin only pays for texts that hold one.
+    const references = React.useMemo(() => parseCodeReferences(content), [content]);
     const shown = React.useMemo(() => (rewrite ? rewrite(content) : content), [content, rewrite]);
     const emojiShortcodes = useEmojiShortcodes(shown);
     return (
@@ -247,6 +254,7 @@ const ReferenceBody: React.FC<{ content: string }> = ({ content }) => {
             repositoryLinks={links.repository}
             emojiShortcodes={emojiShortcodes}
             directory={links.directory}
+            codeReferences={references && directory ? { directory } : null}
         />
     );
 };

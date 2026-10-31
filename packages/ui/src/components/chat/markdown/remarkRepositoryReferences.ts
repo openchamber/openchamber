@@ -49,8 +49,8 @@ const linkFor = (context: RepositoryLinkContext, groups: Record<string, string |
   return null;
 };
 
-/** How an inline HTML node opens (+1) or closes (-1) an author's link or code span. */
-const rawTagDepth = (html: string): number => {
+/** How an inline HTML node opens (+1) or closes (-1) an author's link or code span. Shared by the remark reference plugins. */
+export const rawTagDepth = (html: string): number => {
   let depth = 0;
   for (const tag of html.matchAll(/<(\/?)(a|code)\b[^>]*?(\/?)>/gi)) {
     if (tag[3]) continue;

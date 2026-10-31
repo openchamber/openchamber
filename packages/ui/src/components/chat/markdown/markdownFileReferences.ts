@@ -48,6 +48,26 @@ export function useOpenMarkdownFile() {
   }, [directory, editor, isVSCode, mobileActions]);
 }
 
+/**
+ * Opens the file a code reference in an item's text names: the path and folder
+ * come resolved from the reference's link (`remarkCodeReferences`), so no
+ * probing happens here. A line number lands on that line, like the chat's own
+ * file references do.
+ */
+export function useOpenCodeReferenceFile() {
+  const apis = React.useContext(RuntimeAPIContext);
+  const editor = apis?.editor;
+  const isVSCode = apis?.runtime.isVSCode;
+  const mobileActions = useMobileAppActions();
+  return React.useCallback((target: { path: string; directory: string; line: number | null }) => {
+    if (isVSCode && editor) { void editor.openFile(target.path, target.line ?? undefined); return; }
+    const ui = useUIStore.getState();
+    if (target.line !== null) ui.openContextFileAtLine(target.directory, target.path, target.line, 1);
+    else ui.openContextFile(target.directory, target.path);
+    mobileActions?.openFiles();
+  }, [editor, isVSCode, mobileActions]);
+}
+
 // A `file:` link the click rules do not take as a file is usually a folder.
 // It opens in the system file manager, as "Reveal in Finder" in the Files
 // tree does, and only where that tree offers it: not in a browser, which

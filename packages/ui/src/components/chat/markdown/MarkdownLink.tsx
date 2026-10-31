@@ -17,8 +17,9 @@ import { parseAgentHref, parseAttachmentHref, parseSkillHref, INLINE_REFERENCE_C
 import { openAppLinkWithConfirmation } from '../appLinkConfirmation';
 import { useOpenChatLink } from '../useOpenChatLink';
 import { useMarkdownPresentation, type FileReferenceSource } from './MarkdownPresentationContext';
-import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile, useRevealMarkdownPath } from './markdownFileReferences';
+import { activateMarkdownFile, resolveMarkdownFile, useOpenCodeReferenceFile, useOpenMarkdownFile, useRevealMarkdownPath } from './markdownFileReferences';
 import { localPathFromFileUrl } from '../fileReferenceParser';
+import type { CodeReferenceLinkProperties } from './remarkCodeReferences';
 import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-context';
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
 
@@ -61,6 +62,20 @@ export function MarkdownInlineCode({ children, node: _node, ...props }: React.Co
     </code>
   );
 }
+
+/** A code reference link's resolved file (`remarkCodeReferences`); null for any other anchor. */
+const codeReferenceTargetOf = (node: ExtraProps['node']): { path: string; directory: string; line: number | null } | null => {
+  const properties = node?.properties;
+  if (!properties) return null;
+  // SAFETY: `remarkCodeReferences` is the only maker of these attributes.
+  const attributes = properties as CodeReferenceLinkProperties;
+  const path = attributes.dataOcCodeRef;
+  const directory = attributes.dataOcCodeRefDir;
+  if (!path || !directory) return null;
+  const digits = attributes.dataOcCodeRefLine;
+  const line = digits && /^\d{1,5}$/.test(digits) ? Number(digits) : null;
+  return { path, directory, line };
+};
 
 export function MarkdownLink(props: React.ComponentProps<'a'> & ExtraProps) {
   const { purpose } = useMarkdownPresentation();
@@ -118,6 +133,8 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   const { t } = useI18n();
   const openChatLink = useOpenChatLink(directory);
   const openFile = useOpenMarkdownFile();
+  const openCodeReferenceFile = useOpenCodeReferenceFile();
+  const codeReference = codeReferenceTargetOf(node);
   const media = useMarkdownMedia();
   const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel);
   const text = textOf(node);
@@ -148,6 +165,10 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
     && !(isDesktopShell() && openLinksInBrowserPanel);
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (media?.documentAssets && openMarkdownDocumentLink(event, media.documentAssets)) return;
+    if (codeReference) {
+      activateMarkdownFile(event, () => openCodeReferenceFile(codeReference));
+      return;
+    }
     if (textFile && path) {
       activateMarkdownFile(event, (external) => { void openFile(text, path, external); });
       return;

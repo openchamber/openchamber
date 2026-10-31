@@ -7,7 +7,8 @@ today): the contract types (`types.ts`, the same shapes as
 `packages/web/server/lib/trackers/tracker-contract.d.ts`), the registry of the
 connected server's trackers, their per-id presentation, and the neutral helpers
 every surface uses: state looks, link matching, the agent context text, session
-status posts and project mapping.
+status posts, project mapping and the code references an item's text names
+(`codeReferences.ts`).
 
 Surfaces (references, board, composer, sidebar, work status, overview, New
 Worktree, Settings cards and search) consume it; none of them names a tracker. Data
@@ -131,8 +132,18 @@ another surface moves them behind the interface then.
 
 ### Why surfaces offer only signed-in trackers and not every served one
 
-Every tracker the server serves used to get a board tab and an attach row
-that asked to connect. A server ships trackers whether or not anyone uses
-them, so people who never use Linear saw a Linear tab and menu row that led
-only to a sign-in prompt. Connecting is a Settings task; the working surfaces
-show what the person can already read.
+Every tracker the server serves used to get a board tab and an attach row that
+asked to connect. A server ships trackers whether or not anyone uses them, so
+people who never use Linear saw a Linear tab and menu row that led only to a
+sign-in prompt. Connecting is a Settings task; the working surfaces show what
+the person can already read.
+
+### Why the code-reference match stays lexical and reserves bare names for code extensions
+
+The renderer cannot stat a candidate: item text is written on other machines
+and often other runtimes, and a probe per token would cost every description a
+round of reads. A path with a `/` is unambiguous enough to take any extension;
+without one, only a known code extension (`scanner.js`) counts, so version
+numbers (`v1.2.3`) and dotted words stay text. A match also refuses to start
+right after a word, path or URL character, which keeps the tail of a URL from
+reading as a file path.

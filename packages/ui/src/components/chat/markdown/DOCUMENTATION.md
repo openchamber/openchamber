@@ -12,6 +12,7 @@ The shared renderer classifies and confirms local references before opening them
 - Existing file-URL handling, file classification, and final-path containment checks remain in place.
 - Ordinary local hrefs bypass prose-only filename filters. External schemes and protocol-relative URLs are rejected before decoding.
 - Encoded edge spaces remain part of the filename during resolution, existence checks, and file-tab navigation.
+- Code-reference links in item text (`remarkCodeReferences.ts`) carry their resolved absolute path, folder and line as `data-oc-code-ref*` attributes; `MarkdownLink` opens them through `useOpenCodeReferenceFile` (`openContextFile`/`openContextFileAtLine`, VS Code's editor) without re-resolving or probing.
 
 ## Decisions
 
@@ -30,3 +31,7 @@ A link target can contain repeated spaces, angle brackets, or encoded `://` in i
 ### Why decoded href paths preserve whitespace
 
 Text references are trimmed as prose, but an href's encoded edge spaces identify a different file. Href resolution opts out of trimming, and stat checks and absolute file-tab targets retain those spaces.
+
+### Why code-reference links resolve at render time and skip the existence probe
+
+An item's text is written away from the machine that renders it, so a lexical match (`lib/trackers/codeReferences.ts`) links without a stat per candidate; the path is confined to the folder it resolves against when the link is built, and a stale or wrong path simply opens an empty viewer. Chat's own file references probe because chat text is written where the files live.
