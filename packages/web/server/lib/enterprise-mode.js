@@ -365,15 +365,40 @@ const readProfileInsecureGitOrigins = ({ env = process.env, readFile = defaultRe
 };
 
 /**
+ * One exact plain-HTTP origin, or null: not text, over 512 characters, a
+ * non-`http:` scheme, credentials, a path, a query, a fragment, or a hostname
+ * no real origin can have (empty, wildcard). A missing scheme is repaired as
+ * `http://`, so `git.internal:8080` is the same origin as `http://git.internal:8080`.
+ * The Settings → Git parser in `packages/ui/src/lib/settings/parsers.ts`
+ * mirrors this by hand, and `opencode/settings-helpers.js` reuses it directly:
+ * what persists and the trust it buys never diverge.
+ */
+export const normalizeInsecureGitOrigin = (raw) => {
+  const parsed = z.string().safeParse(raw);
+  const value = parsed.success ? parsed.data.trim() : '';
+  if (!value || value.length > 512) return null;
+  let url;
+  try {
+    url = new URL(value.includes('://') ? value : `http://${value}`);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' || url.username || url.password || url.search || url.hash) return null;
+  if (url.pathname !== '' && url.pathname !== '/') return null;
+  if (!url.hostname || url.hostname.includes('*')) return null;
+  return url.origin;
+};
+
+/**
  * The exact plain-HTTP origins allowed for Git hosting providers: the policy
  * file's `allowedInsecureGitOrigins` plus, while enterprise mode is off, the
- * user setting of the same name in `preferences.json`. Validated at use: only
- * a bare `http:` origin without credentials, path, query or fragment decides,
- * and a malformed entry counts as unset. Read at every use, like the rest of
- * the policy; the callers that consult it are `source-control/origin-instance.js`,
- * the Git transport checks (`git/network-operation-plan.js`,
- * `git/credential-resolver.js`, `git/network-operation-storage.js`,
- * `git/repository-credential-runtime.js`) and the provider listing route.
+ * user setting of the same name in `preferences.json`. Entries go through
+ * `normalizeInsecureGitOrigin`; a malformed one counts as unset. Read at every
+ * use, like the rest of the policy; the callers that consult it are
+ * `source-control/origin-instance.js`, the Git transport checks
+ * (`git/network-operation-plan.js`, `git/credential-resolver.js`,
+ * `git/network-operation-storage.js`, `git/repository-credential-runtime.js`)
+ * and the provider listing route.
  */
 export const allowedInsecureGitOrigins = (options) => {
   const policy = readEnterprisePolicy(options);
@@ -381,16 +406,8 @@ export const allowedInsecureGitOrigins = (options) => {
   if (!policy.enterpriseMode) entries.push(...readProfileInsecureGitOrigins(options));
   const origins = new Set();
   for (const entry of entries) {
-    let url;
-    try {
-      url = new URL(entry);
-    } catch {
-      continue;
-    }
-    if (url.protocol === 'http:' && !url.username && !url.password && !url.search && !url.hash
-      && ['', '/'].includes(url.pathname)) {
-      origins.add(url.origin);
-    }
+    const origin = normalizeInsecureGitOrigin(entry);
+    if (origin) origins.add(origin);
   }
   return origins;
 };

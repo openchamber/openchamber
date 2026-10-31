@@ -199,8 +199,9 @@ describe('enterprise policy', () => {
       const options = machine({ [LINUX_POLICY]: JSON.stringify({ allowedInsecureGitOrigins: [
         'http://git.lab', 'http://git.lab/', ' http://port.lab:8443 ', 'https://secure.lab',
         'http://path.lab/group', 'http://user:pw@git.lab', 'not a url', 'http://query.lab?x=1',
+        'bare.lab:8080', 'http://*.lab', 'http://',
       ] }) });
-      expect(allowedInsecureGitOrigins(options)).toEqual(new Set(['http://git.lab', 'http://port.lab:8443']));
+      expect(allowedInsecureGitOrigins(options)).toEqual(new Set(['http://git.lab', 'http://port.lab:8443', 'http://bare.lab:8080']));
     });
 
     it('allow nothing when the file is broken', () => {
@@ -375,7 +376,13 @@ describe('enterprise policy', () => {
     const policy = publicEnterprisePolicy(machine({
       [LINUX_POLICY]: '{"enterpriseMode": true, "organization": "Acme", "jev": {"url": "https://x.test", "apiKey": "secret"}}',
     }));
-    expect(policy).toEqual({ enterpriseMode: true, source: 'policy-file', organization: 'Acme', policyError: null, networkAccessBlocked: true, opencodeBinary: null });
+    expect(policy).toEqual({ enterpriseMode: true, source: 'policy-file', organization: 'Acme', policyError: null, networkAccessBlocked: true, opencodeBinary: null, modelsDevUrlPinned: false });
+  });
+
+  it('reports a pinned model catalog as a boolean without the address', () => {
+    const policy = publicEnterprisePolicy(machine({ [LINUX_POLICY]: '{"modelsDevUrl": "http://models.corp.internal/api.json"}' }));
+    expect(policy.modelsDevUrlPinned).toBe(true);
+    expect(JSON.stringify(policy)).not.toContain('models.corp.internal');
   });
 
   describe('file location', () => {

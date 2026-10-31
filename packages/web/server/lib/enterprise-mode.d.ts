@@ -34,12 +34,14 @@ export interface EnterprisePolicy {
   }>;
 }
 
-export type PublicEnterprisePolicy = Pick<EnterprisePolicy, 'enterpriseMode' | 'source' | 'organization' | 'policyError' | 'opencodeBinary'> & { networkAccessBlocked: boolean };
+export type PublicEnterprisePolicy = Pick<EnterprisePolicy, 'enterpriseMode' | 'source' | 'organization' | 'policyError' | 'opencodeBinary'> & { networkAccessBlocked: boolean; modelsDevUrlPinned: boolean };
 
 export function policyFilePaths(options?: Pick<EnterprisePolicyOptions, 'platform' | 'env'>): string[];
 export function readEnterprisePolicy(options?: EnterprisePolicyOptions): EnterprisePolicy;
 /** The validated model catalog URL pinned by the policy file, or null when unset or malformed. */
 export function readPinnedModelsDevUrl(options?: EnterprisePolicyOptions): string | null;
+/** One exact plain-HTTP origin, or null: malformed, a non-`http:` scheme, credentials, path, query, fragment, or a wildcard/empty hostname; a missing scheme is repaired as `http://`. */
+export function normalizeInsecureGitOrigin(raw: string): string | null;
 export function isEnterpriseMode(options?: EnterprisePolicyOptions): boolean;
 /** The validated set of exact plain-HTTP origins in force: the policy file's list plus, while enterprise mode is off, the user's Settings → Git list; malformed entries are dropped. */
 export function allowedInsecureGitOrigins(options?: EnterprisePolicyOptions): Set<string>;
