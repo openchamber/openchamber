@@ -561,3 +561,14 @@ test('the issues tab remembers its filter and open issue per project', () => {
   expect(entry.filter).toEqual({ state: 'closed', people: 'assigned', labelNames: ['bug'], milestoneNames: ['v1.0'] });
   expect(entry.openIssueNumber).toBe(7);
 });
+
+test('a filter set alone seeds the entry with no open issue', () => {
+  const id = resolveProjectContextId(project);
+  useIssuesPanelStore.getState().setFilter(id, { state: 'closed', people: 'assigned', labelNames: [], milestoneNames: [] });
+
+  // The first write to a project seeds the missing entry from the defaults, so
+  // the field the write did not touch reads back as its default, not `undefined`.
+  const entry = useIssuesPanelStore.getState().getEntry(id);
+  expect(entry.filter).toEqual({ state: 'closed', people: 'assigned', labelNames: [], milestoneNames: [] });
+  expect(entry.openIssueNumber).toBeNull();
+});

@@ -130,6 +130,23 @@ const row: RepositoryIssueReference = {
   state: 'open',
 };
 
+// A second issue the switch-race test opens while the first is still loading.
+const issueB: Issue = {
+  ...issue,
+  id: 'issue-8',
+  number: 8,
+  title: 'The release build doubles in size',
+  body: 'The release build is twice as large as it was.',
+  url: 'https://gitea.test/org/chats/issues/8',
+};
+
+const rowB: RepositoryIssueReference = {
+  ...row,
+  number: 8,
+  title: issueB.title,
+  url: issueB.url,
+};
+
 const unexpected = (): never => { throw new Error('Unexpected source-control call'); };
 const sourceControl: SourceControlAPI = {
   providers: unexpected,
@@ -229,30 +246,48 @@ let root: ReturnType<typeof createRoot> | null = null;
 
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
 
+// The open issue the section is rendered with. A row click updates it, the way
+// the panel's parent does, and `reopen` re-renders the tree with it.
+let openIssueNumber: number | null = null;
+let renderFilter: IssueFilter = DEFAULT_ISSUE_FILTER;
+let renderSplit = false;
+
+const sectionTree = (openIssue: number | null) => (
+  <RuntimeAPIContext.Provider value={runtimeApis}>
+    <I18nProvider>
+      <IssuesSection
+        directory="/fixture/chats"
+        filter={renderFilter}
+        onFilterChange={() => undefined}
+        openIssueNumber={openIssue}
+        onOpenIssue={(number) => { openIssueNumber = number; }}
+        split={renderSplit}
+      />
+    </I18nProvider>
+  </RuntimeAPIContext.Provider>
+);
+
 const renderSection = async (props: {
   filter?: IssueFilter;
   openIssueNumber?: number | null;
   split?: boolean;
-  onOpenIssue?: (number: number | null) => void;
 } = {}) => {
+  renderFilter = props.filter ?? DEFAULT_ISSUE_FILTER;
+  renderSplit = props.split ?? false;
+  openIssueNumber = props.openIssueNumber ?? null;
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
   await act(async () => {
-    root?.render(
-      <RuntimeAPIContext.Provider value={runtimeApis}>
-        <I18nProvider>
-          <IssuesSection
-            directory="/fixture/chats"
-            filter={props.filter ?? DEFAULT_ISSUE_FILTER}
-            onFilterChange={() => undefined}
-            openIssueNumber={props.openIssueNumber ?? null}
-            onOpenIssue={props.onOpenIssue ?? (() => undefined)}
-            split={props.split ?? false}
-          />
-        </I18nProvider>
-      </RuntimeAPIContext.Provider>,
-    );
+    root?.render(sectionTree(openIssueNumber));
+  });
+  await settle();
+};
+
+// Re-run the tree with the open issue a row click set.
+const reopen = async () => {
+  await act(async () => {
+    root?.render(sectionTree(openIssueNumber));
   });
   await settle();
 };
@@ -264,6 +299,8 @@ beforeEach(() => {
   list.error = null;
   detailIssue = null;
   detailComments = [];
+  sourceControl.issueGet = async () => detailIssue;
+  sourceControl.issueComments = async () => detailComments;
   usePendingComposerReferences.setState({ references: [] });
 });
 
@@ -351,4 +388,48 @@ test('the detail maps onto the list row shape the attach path reads', () => {
   expect(closed.author).toBeNull();
   expect(closed.labels).toEqual([]);
   expect(closed.sourceRepo).toEqual({ owner: 'org', repo: 'chats', source: 'upstream' });
+});
+
+test('a failed detail read falls back to the list, not a phantom detail', async () => {
+  list.items = [row];
+  // The detail read rejects. The section must fall back to the list, not
+  // swallow the failure into a detail, and the rejection must be handled (an
+  // unhandled one fails the process, not the test).
+  sourceControl.issueGet = async () => { throw new Error('offline'); };
+  await renderSection({ openIssueNumber: 7 });
+  const text = host?.textContent ?? '';
+  // The list row is back, not a detail.
+  expect(host?.querySelector('[data-knowledge-entry-id="7"]')).not.toBeNull();
+  expect(text).toContain('Pipelines time out');
+  // The detail is not rendered: its attach action is absent.
+  expect(text).not.toContain('Attach to this session');
+});
+
+test('a late detail answer loses to the issue opened after it', async () => {
+  list.items = [row, rowB];
+  let releaseA: (issue: Issue) => void = () => { throw new Error('No pending read'); };
+  // Issue 7's detail read stays pending; issue 8's answers at once.
+  sourceControl.issueGet = async (_context, number) => {
+    if (number === 7) return new Promise<Issue>((resolve) => { releaseA = resolve; });
+    return issueB;
+  };
+
+  await renderSection({ openIssueNumber: 7 });
+  // Issue 7 is still loading; issue 8 is not shown.
+  expect(host?.textContent).not.toContain(issueB.title);
+
+  // Open issue 8 while issue 7's read is in flight: the parent re-points the
+  // open issue, the way a row click does.
+  openIssueNumber = 8;
+  await reopen();
+
+  // Issue 8 answers first; its detail is shown, issue 7's is not.
+  expect(host?.textContent).toContain(issueB.title);
+  expect(host?.textContent).not.toContain('Pipelines time out');
+
+  // Issue 7's answer lands late. The detail stays issue 8's, never issue 7's.
+  await act(async () => { releaseA(issue); });
+  await settle();
+  expect(host?.textContent).toContain(issueB.title);
+  expect(host?.textContent).not.toContain('Pipelines time out');
 });
