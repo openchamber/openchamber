@@ -824,6 +824,9 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
     }
 
     const sources = [MODELS_DEV_PROXY_URL, MODELS_DEV_API_URL];
+    // Set once the server says an administrator pinned the catalog address: its
+    // answer, even a failure, is final, and models.dev is not tried from here.
+    let catalogPinned = false;
 
     for (const source of sources) {
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
@@ -849,6 +852,10 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
                 ? await fetch(source, requestInit)
                 : await runtimeFetch(source, requestInit);
 
+            if (!isAbsoluteUrl && response.headers?.get?.('X-OpenChamber-Models-Source') === 'pinned') {
+                catalogPinned = true;
+            }
+
             if (!response.ok) {
                 throw new Error(`Metadata request to ${source} returned status ${response.status}`);
             }
@@ -865,6 +872,10 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
             if (timeout) {
                 clearTimeout(timeout);
             }
+        }
+
+        if (catalogPinned) {
+            break;
         }
     }
 
