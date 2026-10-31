@@ -32,7 +32,7 @@ import { applySessionFolderDrop, resolveCurrentSessionFolderDropSource, resolveC
 import { FolderDeleteConfirmDialog, type DeleteFolderConfirmState } from '../shell/ConfirmDialogs';
 import type { SessionGroup } from '../types';
 import { SessionSidebarRows } from '../SessionSidebarRows';
-import { sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
+import { sessionDetailedRowPaddingLeft, sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader, SessionSidebarCaption } from '../sessionSidebarHeaderPresentation';
 import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
 import { SortableProjectItem } from './sortableItems';
@@ -454,11 +454,14 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
       />;
     }
     // Show more and the archive's empty line align with the text of the rows
-    // they close: 10px in under gutterless timeline-style rows; past the tree
-    // level's chevron slot on tree rows.
+    // they close: 10px in under gutterless timeline-style rows; the detailed
+    // text column under two-line rows; past the tree level's chevron slot on
+    // tree rows.
     const rowTextInset = row.kind === 'show-control' && row.flat === true
       ? FLAT_TEXT_INSET_PX
-      : sessionTreeTextInset(row.kind === 'show-control' || row.kind === 'empty' ? row.depth ?? 0 : 0);
+      : row.kind === 'show-control' && row.detailed === true
+        ? sessionDetailedRowPaddingLeft(row.depth ?? 0)
+        : sessionTreeTextInset(row.kind === 'show-control' || row.kind === 'empty' ? row.depth ?? 0 : 0);
     if (row.kind === 'show-control') {
       // Small and short, so it reads as a control under the list, not a row of it.
       const control = (kind: 'more' | 'fewer') => (
