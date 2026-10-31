@@ -119,7 +119,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
   // One choice per line, rarely touched orders behind submenus that name the
   // current choice, so the menu stays short: selection first, then the view,
-  // its orders, the sections, and collapse.
+  // its orders, the sections, and collapse. Choosing a view setting keeps the
+  // menu open, so several can be set in one go; the actions close it.
   const checkMark = <Icon name="check" className="h-4 w-4 text-primary" />;
   const choiceSubmenu = <T extends string>(
     { labelKey, icon }: { labelKey: I18nKey; icon: IconName },
@@ -137,7 +138,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="min-w-[160px]">
           {options.map(([value, optionLabelKey]) => (
-            <DropdownMenuItem key={value} onClick={() => onSelect(value)} className="flex items-center justify-between">
+            <DropdownMenuItem key={value} closeOnClick={false} onClick={() => onSelect(value)} className="flex items-center justify-between">
               <span>{t(optionLabelKey)}</span>
               {current === value ? checkMark : null}
             </DropdownMenuItem>
@@ -147,7 +148,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     );
   };
   const toggleItem = ({ labelKey, icon }: { labelKey: I18nKey; icon: IconName }, checked: boolean, onToggle: () => void) => (
-    <DropdownMenuItem onClick={onToggle} className="flex items-center gap-2">
+    <DropdownMenuItem closeOnClick={false} onClick={onToggle} className="flex items-center gap-2">
       <Icon name={icon} className="h-4 w-4" />
       <span className="flex-1">{t(labelKey)}</span>
       {checked ? checkMark : null}
