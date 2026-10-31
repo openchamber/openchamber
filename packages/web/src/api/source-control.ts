@@ -73,7 +73,7 @@ import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
-import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
+import type { PublishedSourceControlProviderDescriptor, SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
 import { fetchChangeRequestListStatuses, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 
@@ -226,12 +226,25 @@ interface WebSourceControlAPIOptions {
  * uses.
  */
 type InstanceFormat = SourceControlProviderDescriptor['instances']['format'];
-const providerInstances = new Map<string, { format: InstanceFormat; label: string; pathStyle: boolean }>();
+type ProviderInstances = { format: InstanceFormat; label: string; pathStyle: boolean; insecureOrigins?: readonly string[] };
+const providerInstances = new Map<string, ProviderInstances>();
 
-const rememberProviderInstances = (descriptors: ReadonlyArray<Pick<SourceControlProviderDescriptor, 'id' | 'label' | 'instances' | 'repository'>>): void => {
+// Plain-HTTP origins any known provider's administrator allows; the binding
+// response parser takes the union, which is what the server's policy lists.
+const insecureOriginsAcrossProviders = (): string[] => [
+  ...new Set([...providerInstances.values()].flatMap((entry) => entry.insecureOrigins ?? [])),
+];
+
+const rememberProviderInstances = (descriptors: ReadonlyArray<{
+  id: string; label: string; repository: Pick<SourceControlProviderDescriptor['repository'], 'pathStyle'>;
+  instances: Pick<PublishedSourceControlProviderDescriptor['instances'], 'format' | 'insecureOrigins'>;
+}>): void => {
   for (const descriptor of descriptors) {
     providerInstances.set(descriptor.id, {
-      format: descriptor.instances.format, label: descriptor.label, pathStyle: descriptor.repository.pathStyle === 'path',
+      format: descriptor.instances.format,
+      label: descriptor.label,
+      pathStyle: descriptor.repository.pathStyle === 'path',
+      insecureOrigins: descriptor.instances.insecureOrigins,
     });
   }
 };
@@ -259,8 +272,9 @@ const normalizeOriginInstance = (identity: SourceControlIdentity): SourceControl
     throw new Error(`Invalid source control instance: ${identity.instance}`);
   }
   const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname.toLowerCase());
+  const allowlisted = providerInstances.get(identity.provider)?.insecureOrigins?.includes(url.origin) === true;
   if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/')
-    || (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback))) {
+    || (url.protocol !== 'https:' && !(url.protocol === 'http:' && (loopback || allowlisted)))) {
     throw new Error(`Invalid ${providerLabel(identity)} instance: ${identity.instance}`);
   }
   return { provider: identity.provider, instance: url.origin };
@@ -316,7 +330,7 @@ const parseRepositoryBinding = (payload: RepositoryBindingDTO): SourceControlBin
     throw new Error('Source control response contained an invalid binding revision');
   }
   if (payload.binding === null) return { status: 'missing', repository, revision: payload.revision, binding: null };
-  const binding = parseBindingResponse(payload.binding);
+  const binding = parseBindingResponse(payload.binding, { insecureOrigins: insecureOriginsAcrossProviders() });
   if (!binding || binding.repositoryId !== repository.repositoryId || binding.revision !== payload.revision
     || !isStringValue(binding.configRevision) || !Array.isArray(binding.providers) || !Array.isArray(binding.auxiliary)
     || (binding.state !== 'bound' && binding.state !== 'needs-attention')) {

@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { allowedInsecureGitOrigins } from '../enterprise-mode.js';
 import { createBindingService } from './binding-service.js';
 import { createBindingStore } from './binding-storage.js';
 import { createChangeRequestWorktreeSource } from './change-request-worktree.js';
@@ -66,6 +67,9 @@ const sendBindingError = (res, error) => {
  */
 export function registerSourceControlRoutes(app, dependencies = {}) {
   const configRoot = dependencies.configRoot ?? defaultConfigRoot();
+  // The plain-HTTP allowlist, read per request so a policy change applies
+  // without a restart. Injectable so a test states the list it publishes.
+  const readInsecureGitOrigins = dependencies.readInsecureGitOrigins ?? (() => allowedInsecureGitOrigins());
   const providers = dependencies.providers ?? createSourceControlProviders({
     // One server token store: GitLab's origins, GitHub Enterprise hosts, and
     // an origin-keyed section per further provider.
@@ -170,7 +174,15 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   app.get('/api/source-control/providers', (_req, res) => {
     // Built-ins in priority order, then extension providers sorted by id
     // (the facade's order), each marked with the extension that serves it.
-    res.json({ providers: providers.list().map((descriptor, order) => publicProviderDescriptor(descriptor, order, descriptor.extension)) });
+    // The insecure-origin allowlist is read now, so a policy change applies
+    // without a restart; it never widens an extension provider.
+    const insecureOrigins = [...readInsecureGitOrigins()];
+    res.json({ providers: providers.list().map((descriptor, order) => publicProviderDescriptor(
+      descriptor,
+      order,
+      descriptor.extension,
+      descriptor.extension ? [] : insecureOrigins,
+    )) });
   });
   // A provider that fails to load or list is named in `unavailableProviders`
   // instead of failing the answer, so the others still list their instances.

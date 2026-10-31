@@ -12,6 +12,7 @@ import type {
   UpdateChangeRequestInput,
 } from '@openchamber/ui/lib/api/types';
 import { SourceControlInstanceOtherProviderError } from '@openchamber/ui/lib/api/types';
+import { BUILT_IN_SOURCE_CONTROL_PROVIDERS } from './source-control-providers';
 import { configureWebTransportBinding, createWebSourceControlAPI, removeWebTransportBinding } from './source-control';
 
 const runtimeFetchMock = vi.fn(async (): Promise<Response> => Response.json({}));
@@ -1233,6 +1234,9 @@ describe('createWebSourceControlAPI', () => {
       body: JSON.stringify({ token: 'secret-token' }), query: new URLSearchParams({ instance: 'https://gitlab.example.com' }),
     }));
 
+    // Plain HTTP stays refused until the server's providers say otherwise.
+    await expect(api.authStatus({ provider: 'gitlab', instance: 'http://gitlab.example.com' })).rejects.toThrow();
+
     // A GitHub Enterprise host is a GHE instance; the request goes to the github
     // provider with the host as the instance and the neutral auth status.
     const gheUser = { provider: 'github', instance: 'github.example.com', id: '42', username: 'ghe-user' };
@@ -1255,6 +1259,30 @@ describe('createWebSourceControlAPI', () => {
     expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/github/auth/status', expect.objectContaining({
       query: new URLSearchParams({ instance: 'github.example.com' }),
     }));
+  });
+
+  // The client mirrors the server's instance rule, reading the allowlist off
+  // the providers the server publishes.
+  it('takes the plain-HTTP origins it accepts from the published providers', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    const instances = {
+      format: 'origin', defaultInstance: null, multiple: true, allowLoopbackHttp: true, allowPort: true,
+      reserved: [], placeholder: 'https://gitlab.example.com', insecureOrigins: ['http://git.lab'],
+    };
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ providers: [{ ...BUILT_IN_SOURCE_CONTROL_PROVIDERS.find((descriptor) => descriptor.id === 'gitlab'), instances }] }));
+    await api.providers();
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ connected: false, accounts: [], cli: { available: false, disabled: true, active: false } }));
+    await expect(api.authStatus({ provider: 'gitlab', instance: 'http://git.lab' })).resolves.toMatchObject({
+      instance: 'http://git.lab',
+    });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/source-control/gitlab/auth/status', expect.objectContaining({
+      query: new URLSearchParams({ instance: 'http://git.lab' }),
+    }));
+    // Exact origins only: a port is another instance, and other hosts are refused.
+    await expect(api.authStatus({ provider: 'gitlab', instance: 'http://git.lab:8443' })).rejects.toThrow();
+    await expect(api.authStatus({ provider: 'gitlab', instance: 'http://other.example.com' })).rejects.toThrow();
+    // A host-form provider reads nothing from the list: GitHub's rule is its own.
+    await expect(api.authStatus({ provider: 'github', instance: 'http://github.example.com' })).rejects.toThrow();
   });
 
   it('parses provider-neutral GitLab merge request context without GitHub identities', async () => {

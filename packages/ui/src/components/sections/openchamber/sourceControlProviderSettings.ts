@@ -10,7 +10,9 @@ const bareHost = (value: string): string => value.trim().toLowerCase().replace(/
  * server expects, or null when the descriptor refuses it. `origin` keeps the
  * scheme (`https://gitlab.example.com`), `host` is the bare lowercase host
  * (`github.example.com`). Only HTTPS is accepted, and HTTP only on a loopback
- * address where the descriptor allows it; a port only where it allows one. User
+ * address where the descriptor allows it or on an origin the descriptor's
+ * `insecureOrigins` names (the administrator's allowlist, as the server
+ * publishes it); a port only where it allows one. User
  * info, a path, a query or a fragment never names an instance. The descriptor's
  * reserved instances and the special-flow instance are refused, so they cannot
  * be added twice.
@@ -29,7 +31,8 @@ export const normalizeInstanceInput = (descriptor: SourceControlProviderDescript
   if (!hostname) return null;
   if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/')) return null;
   const secure = url.protocol === 'https:'
-    || (url.protocol === 'http:' && instances.allowLoopbackHttp && LOOPBACK_HOSTS.has(hostname));
+    || (url.protocol === 'http:'
+      && ((instances.allowLoopbackHttp && LOOPBACK_HOSTS.has(hostname)) || instances.insecureOrigins.includes(url.origin)));
   if (!secure) return null;
   if (url.port && !instances.allowPort) return null;
 

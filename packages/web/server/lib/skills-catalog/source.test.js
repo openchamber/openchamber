@@ -24,4 +24,46 @@ describe('parseSkillRepoSource', () => {
       expect(parseSkillRepoSource(source), source).toMatchObject({ ok: false, error: { kind: 'invalidSource' } });
     }
   });
+
+  describe('plain HTTP sources', () => {
+    const machine = (origins) => ({
+      policy: {
+        platform: 'linux',
+        env: {},
+        readFile: (filePath) => {
+          if (filePath !== '/etc/openchamber/policy.json') throw Object.assign(new Error('no such file'), { code: 'ENOENT' });
+          return JSON.stringify({ enterpriseMode: true, allowedInsecureGitOrigins: origins });
+        },
+      },
+    });
+
+    it('are refused unless their origin is listed in allowedInsecureGitOrigins', () => {
+      expect(parseSkillRepoSource('http://gitlab.corp.internal:8080/platform/skills.git', machine([])))
+        .toMatchObject({ ok: false, error: { kind: 'invalidSource' } });
+      expect(parseSkillRepoSource('http://gitlab.corp.internal:8080/platform/skills.git', machine(['http://gitlab.corp.internal:9090'])))
+        .toMatchObject({ ok: false, error: { kind: 'invalidSource' } });
+    });
+
+    it('are read like https sources when the origin is listed, keeping the scheme and port', () => {
+      expect(parseSkillRepoSource('http://gitlab.corp.internal:8080/platform/team/skills.git#v2', machine(['http://gitlab.corp.internal:8080']))).toMatchObject({
+        ok: true,
+        host: 'gitlab.corp.internal',
+        owner: 'platform/team',
+        repo: 'skills',
+        cloneUrlHttps: 'http://gitlab.corp.internal:8080/platform/team/skills.git',
+        cloneUrlSsh: 'ssh://git@gitlab.corp.internal:8080/platform/team/skills.git',
+        ref: 'v2',
+      });
+    });
+
+    it('keep the scp-style ssh URL when the source names no port', () => {
+      expect(parseSkillRepoSource('http://gitlab.corp.internal/platform/skills.git', machine(['http://gitlab.corp.internal'])))
+        .toMatchObject({ ok: true, cloneUrlSsh: 'git@gitlab.corp.internal:platform/skills.git' });
+    });
+
+    it('leave https sources as they were', () => {
+      expect(parseSkillRepoSource('https://gitlab.corp.internal/platform/skills.git', machine([])))
+        .toMatchObject({ ok: true, cloneUrlHttps: 'https://gitlab.corp.internal/platform/skills.git' });
+    });
+  });
 });

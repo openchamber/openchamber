@@ -6,6 +6,7 @@ import { createCallbackAddress } from '../agent-tool/callback-address.js';
 import { parseGitCredentialQuery } from './credential-broker.js';
 import { parseGitCredentialReference } from './credential-resolver.js';
 import { helperShellCommand } from './helper-launch.js';
+import { allowedInsecureGitOrigins } from '../enterprise-mode.js';
 import { isLoopbackHost } from './loopback-http.js';
 
 const HELPER_PATH = fileURLToPath(new URL('./repository-credential-helper.js', import.meta.url));
@@ -14,16 +15,19 @@ const NONE = Object.freeze({ mode: 'none' });
 const SYSTEM = Object.freeze({ mode: 'system' });
 
 /**
- * The origin a redacted remote URL points at: HTTPS, or plain HTTP on a
- * loopback host (a provider's local development instance; the credential
- * resolver then answers only when that loopback origin is the credential's
- * own provider instance and the provider allows loopback HTTP, the rule
- * every managed transfer follows). Null for anything else.
+ * The origin a redacted remote URL points at: HTTPS, plain HTTP on a
+ * loopback host (a provider's local development instance), or plain HTTP on
+ * an origin the machine policy allows (the administrator's intranet host
+ * without TLS; the credential resolver then answers only when that origin is
+ * the credential's own provider instance, the rule every managed transfer
+ * follows). Null for anything else.
  */
 const transferOrigin = (displayUrl) => {
   try {
     const url = new URL(displayUrl);
-    return url.protocol === 'https:' || (url.protocol === 'http:' && isLoopbackHost(url.hostname)) ? url.origin : null;
+    if (url.protocol === 'https:') return url.origin;
+    if (url.protocol === 'http:' && (isLoopbackHost(url.hostname) || allowedInsecureGitOrigins().has(url.origin))) return url.origin;
+    return null;
   } catch {
     return null;
   }

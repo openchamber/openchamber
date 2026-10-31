@@ -23,10 +23,16 @@ describe('parseInstallInput', () => {
     expect(parseInstallInput('C:\\projects\\panel')).toEqual({ ok: true, request: { path: 'C:\\projects\\panel' } });
   });
 
-  test('refuses empty, http, and other schemes', () => {
+  test('passes an http url on for the server to judge', () => {
+    expect(parseInstallInput('http://gitlab.corp.internal:8080/team/panel.git')).toEqual({
+      ok: true,
+      request: { url: 'http://gitlab.corp.internal:8080/team/panel.git' },
+    });
+  });
+
+  test('refuses empty and other schemes', () => {
     expect(parseInstallInput('')).toEqual({ ok: false, code: 'invalid-path' });
     expect(parseInstallInput('   ')).toEqual({ ok: false, code: 'invalid-path' });
-    expect(parseInstallInput('http://github.com/acme/panel.git')).toEqual({ ok: false, code: 'invalid-url' });
     expect(parseInstallInput('file:///tmp/panel')).toEqual({ ok: false, code: 'invalid-url' });
     expect(parseInstallInput('relative/panel')).toEqual({ ok: false, code: 'invalid-path' });
   });

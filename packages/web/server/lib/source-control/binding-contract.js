@@ -19,8 +19,10 @@ const isPresentationLoopbackHost = (hostname) => {
   return value === 'localhost' || value === '::1' || value === '[::1]' || LOOPBACK_V4.test(value);
 };
 // An instance is either a bare lowercase hostname (GitHub's form) or a
-// normalized origin (GitLab's form): HTTPS, or HTTP on a loopback host.
-const normalizedPresentationInstance = (value) => {
+// normalized origin (GitLab's form): HTTPS, HTTP on a loopback host, or HTTP
+// on an origin the caller's insecure allowlist names (the web adapter passes
+// the policy origins the server published with its provider descriptors).
+const normalizedPresentationInstance = (value, insecureOrigins) => {
   if (!value.instance.includes('://')) {
     return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value.instance);
   }
@@ -29,7 +31,7 @@ const normalizedPresentationInstance = (value) => {
     const loopback = isPresentationLoopbackHost(parsed.hostname);
     return parsed.origin === value.instance && !parsed.username && !parsed.password
       && ['', '/'].includes(parsed.pathname) && !parsed.search && !parsed.hash
-      && (parsed.protocol === 'https:' || parsed.protocol === 'http:' && loopback);
+      && (parsed.protocol === 'https:' || parsed.protocol === 'http:' && (loopback || insecureOrigins.includes(parsed.origin)));
   } catch { return false; }
 };
 // A provider user is `<instance>#<numeric id>` on every provider.
@@ -70,7 +72,7 @@ export const isSafeRepositoryEndpoint = (value) => keys(value, ['displayUrl', 'f
 const endpoint = isSafeRepositoryEndpoint;
 const credentialMatches = (entry) => ['managed', 'system', 'anonymous'].includes(entry.mode)
   && (entry.mode === 'managed' ? text(entry.credentialId) : !Object.hasOwn(entry, 'credentialId'));
-const credentialPresentation = (value) => plain(value) && Object.hasOwn(value, 'status') && (value.status === 'unavailable'
+const credentialPresentation = (value, insecureOrigins) => plain(value) && Object.hasOwn(value, 'status') && (value.status === 'unavailable'
   && keys(value, ['status']) || value.status === 'available' && (
     keys(value, ['status', 'transport', 'fingerprint']) && value.transport === 'ssh'
       && /^SHA256:[A-Za-z0-9+/]{43}=?$/.test(value.fingerprint)
@@ -78,11 +80,11 @@ const credentialPresentation = (value) => plain(value) && Object.hasOwn(value, '
       && value.transport === 'https' && isProviderId(value.provider)
       && ['oauth', 'pat', 'cli'].includes(value.source) && safePresentationText(value.instance, 2048)
       && isProviderUsername(value.username) && safePresentationText(value.providerUserId)
-      && normalizedPresentationInstance(value) && providerUserIdentityMatches(value)
+      && normalizedPresentationInstance(value, insecureOrigins) && providerUserIdentityMatches(value)
   ));
 const unique = (entries, key) => new Set(entries.map(key)).size === entries.length;
 const invalid = () => Object.assign(new Error('Source control binding storage is invalid'), { code: 'INVALID_SOURCE_CONTROL_BINDINGS' });
-const validateBinding = (value, allowPresentation = false) => {
+const validateBinding = (value, allowPresentation = false, insecureOrigins = []) => {
   if (!keys(value, ['repositoryId', 'revision', 'state', 'configRevision', 'providers', 'remotes'], ['auxiliary'])
     || !text(value.repositoryId) || !Number.isSafeInteger(value.revision) || value.revision < 1
     || !text(value.configRevision) || !['bound', 'needs-attention'].includes(value.state)
@@ -103,7 +105,7 @@ const validateBinding = (value, allowPresentation = false) => {
       ...(allowPresentation ? ['inherited'] : []),
     ])
       || !text(entry.name) || !endpoint(entry.fetch) || !endpoint(entry.push) || !credentialMatches(entry)
-      || entry.presentation !== undefined && !credentialPresentation(entry.presentation)
+      || entry.presentation !== undefined && !credentialPresentation(entry.presentation, insecureOrigins)
       || entry.inherited !== undefined && (entry.inherited !== true || entry.readiness !== 'ready')
       || entry.mode === 'anonymous' && !entry.fetch.displayUrl.startsWith('https://')
       || !['ready', 'confirmation-required', 'config-changed'].includes(entry.readiness)) throw invalid();
@@ -127,8 +129,9 @@ export const parseBinding = (value) => {
   return structuredClone(value);
 };
 
-export const parseBindingResponse = (value) => {
-  validateBinding(value, true);
+/** A binding as a response carries it; `insecureOrigins` is the caller's allowlist of plain-HTTP origins. */
+export const parseBindingResponse = (value, { insecureOrigins = [] } = {}) => {
+  validateBinding(value, true, insecureOrigins);
   return structuredClone(value);
 };
 

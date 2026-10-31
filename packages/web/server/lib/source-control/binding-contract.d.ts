@@ -11,7 +11,13 @@ export type BindingStorageSnapshot = {
 };
 // These parsers are the persisted and process-boundary entrypoints.
 export function parseBinding(value: StoredBinding): StoredBinding;
-export function parseBindingResponse(value: SourceControlRepositoryBinding): SourceControlRepositoryBinding;
+// `insecureOrigins` is the machine policy's plain-HTTP allowlist as the
+// caller resolved it: a response instance may be HTTP on loopback or on one
+// of these exact origins.
+export function parseBindingResponse(
+  value: SourceControlRepositoryBinding,
+  options?: { insecureOrigins?: readonly string[] },
+): SourceControlRepositoryBinding;
 export function parseBindingStore(value: BindingStorageSnapshot): BindingStorageSnapshot;
 export function isSafeRepositoryEndpoint(value: SourceControlRepositoryContext['remotes'][number]['fetch']): boolean;
 export function bindingSummary(binding: Pick<SourceControlRepositoryBinding, 'providers' | 'remotes' | 'auxiliary'>): SourceControlRepositoryBinding['state'];

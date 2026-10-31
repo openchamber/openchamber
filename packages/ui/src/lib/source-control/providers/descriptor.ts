@@ -93,6 +93,12 @@ const descriptorSchema = z.object({
     allowPort: z.boolean(),
     reserved: z.array(z.string().max(256)).max(16),
     placeholder: z.string().max(256),
+    /**
+     * Exact plain-HTTP origins this server's administrator allows for this
+     * provider; an older server or none at all sends nothing, and an
+     * unparsable list reads as none.
+     */
+    insecureOrigins: z.array(z.string().min(1).max(512)).max(100).default([]).catch([]),
     legacyFlow: z.object({ instance: z.string().min(1).max(256), kind: z.literal('github-com-device') }).optional(),
   }),
   auth: z.object({
@@ -211,7 +217,7 @@ export const unknownProviderDescriptor = (id: string): SourceControlProviderDesc
     repository: { nestedNamespaces: false },
     instances: {
       format: 'origin', defaultInstance: null, multiple: false, allowLoopbackHttp: false,
-      allowPort: false, reserved: [], placeholder: '',
+      allowPort: false, reserved: [], placeholder: '', insecureOrigins: [],
     },
     auth: { methods: [], cliTransport: false },
     settings: { fields: [] },

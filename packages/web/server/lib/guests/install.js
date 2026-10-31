@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { removeGuestStorage } from './storage.js';
 import https from 'node:https';
+import http from 'node:http';
 import path from 'node:path';
 import { z } from 'zod';
 
@@ -12,7 +13,7 @@ import {
   toPublicGuest,
 } from './catalog.js';
 import { stopGuestService } from './service.js';
-import { cloneGitRepository, isHttpsZipUrl, isPublicHostname, parseGitInstallUrl, publicAddressesOf } from './clone.js';
+import { cloneGitRepository, installTrust, isInstallableUrl, isInstallableZipUrl, parseGitInstallUrl, publicAddressesOf } from './clone.js';
 import { isReservedBuiltInId } from './builtins.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { extractZipBuffer, unwrapGuestRoot } from './extract-zip.js';
@@ -158,15 +159,9 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
 };
 
 // A redirect hop may land on a signed download URL without a .zip suffix; it
-// still has to be https on a public host.
-const isHttpsRedirectUrl = (value) => {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && isPublicHostname(parsed.hostname);
-  } catch {
-    return false;
-  }
-};
+// still has to be an installable URL: https on a public or trusted host, or a
+// listed http origin.
+const isInstallableRedirectUrl = (value, trust) => isInstallableUrl(value, trust);
 
 const readLocalZip = async (filePath) => {
   try {
@@ -183,18 +178,21 @@ const readLocalZip = async (filePath) => {
 const MAX_ZIP_REDIRECTS = 5;
 
 /**
- * One https request pinned to an address the caller already checked. The
- * socket goes to `address`; TLS still verifies the certificate against the
- * URL's hostname. Redirects are not followed: the status and `location` come
- * back for the caller to check. The body is capped while it streams.
+ * One http(s) request pinned to an address the caller already checked. The
+ * socket goes to `address`; for https, TLS still verifies the certificate
+ * against the URL's hostname. Redirects are not followed: the status and
+ * `location` come back for the caller to check. The body is capped while it
+ * streams. Plain `http:` reaches here only for an origin the administrator
+ * listed.
  * @param {string} url
  * @param {{ address: string, family: 4 | 6 }} target
  * @param {number} maxBytes
  * @returns {Promise<{ status: number, location: string | null, body: Buffer | null }>}
  */
-const requestHttpsPinned = (url, target, maxBytes) => new Promise((resolve, reject) => {
+const requestPinned = (url, target, maxBytes) => new Promise((resolve, reject) => {
   const parsed = new URL(url);
-  const request = https.request(parsed, {
+  const transport = parsed.protocol === 'http:' ? http : https;
+  const request = transport.request(parsed, {
     method: 'GET',
     // Node's connector asks for `all` addresses when it tries families in
     // parallel; either way it only ever gets the one that was checked.
@@ -246,15 +244,15 @@ const requestHttpsPinned = (url, target, maxBytes) => new Promise((resolve, reje
  * answer) before the request is made, and the request goes to the address
  * that was checked, not to whatever a second lookup would say.
  * @param {string} url
- * @param {{ request?: typeof requestHttpsPinned, lookup?: Parameters<typeof publicAddressesOf>[1] }} [options]
+ * @param {{ request?: typeof requestPinned, lookup?: Parameters<typeof publicAddressesOf>[1], trust?: ReturnType<typeof installTrust> }} [options]
  */
-export const downloadZip = async (url, { request = requestHttpsPinned, lookup } = {}) => {
+export const downloadZip = async (url, { request = requestPinned, lookup, trust = installTrust() } = {}) => {
   let current = url;
   for (let hop = 0; hop <= MAX_ZIP_REDIRECTS; hop += 1) {
-    if (!isHttpsZipUrl(current) && !isHttpsRedirectUrl(current)) {
+    if (!isInstallableZipUrl(current, trust) && !isInstallableRedirectUrl(current, trust)) {
       return null;
     }
-    const addresses = await publicAddressesOf(new URL(current).hostname, lookup);
+    const addresses = await publicAddressesOf(new URL(current).hostname, lookup, trust);
     if (!addresses) {
       return null;
     }
@@ -327,9 +325,10 @@ export const installGuestFromPath = async (rawPath, persistPath, { openchamberVe
 };
 
 export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVersion, replace = false, gitBinary, gitIdentityId } = {}) => {
-  if (isHttpsZipUrl(rawUrl)) {
+  const trust = installTrust();
+  if (isInstallableZipUrl(rawUrl, trust)) {
     try {
-      const buffer = await downloadZip(rawUrl);
+      const buffer = await downloadZip(rawUrl, { trust });
       if (!buffer) {
         return { ok: false, code: 'extract-failed' };
       }
@@ -338,7 +337,7 @@ export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVers
       return { ok: false, code: 'extract-failed' };
     }
   }
-  const gitSource = parseGitInstallUrl(rawUrl);
+  const gitSource = parseGitInstallUrl(rawUrl, trust);
   if (!gitSource) {
     return { ok: false, code: 'invalid-url' };
   }

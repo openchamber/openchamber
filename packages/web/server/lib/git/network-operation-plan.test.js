@@ -588,6 +588,38 @@ describe('Git network operation planner', () => {
     })).rejects.toMatchObject({ code: 'INVALID_GIT_NETWORK_OPERATION', status: 400 });
   });
 
+  // The planner takes the policy's allowlist as a dependency: the caller that
+  // reads the machine policy resolves it once, and no plaintext host passes
+  // that is not on the list.
+  it('plans transfers to a plain-HTTP endpoint only the injected allowlist names', async () => {
+    const insecureGitOrigins = () => new Set(['http://git.internal.example.com']);
+    const httpAuthority = { ...authority, endpoint: 'http://git.internal.example.com/team/repo.git',
+      endpointFingerprint: fingerprintRemoteUrl('http://git.internal.example.com/team/repo.git') };
+    const makeInsecurePlanner = (overrides = {}) => makePlanner({
+      insecureGitOrigins, validateGitTransportContext: async () => httpAuthority, ...overrides,
+    });
+    const cloneInput = (remoteUrl) => ({
+      operation: 'clone', remoteUrl, destinationPath: '/projects/repo', transportMode: 'system', unverifiedConfirmed: true,
+    });
+    const plans = await makeInsecurePlanner().planNetworkOperation(cloneInput(httpAuthority.endpoint));
+    expect(plans.publicPlan.target.remote.displayUrl).toBe(httpAuthority.endpoint);
+    const httpInput = existingInput('fetch', {
+      remote: { name: 'upstream', endpoint: { displayUrl: httpAuthority.endpoint, fingerprint: httpAuthority.endpointFingerprint } },
+    });
+    await expect(makeInsecurePlanner().planNetworkOperation(httpInput))
+      .resolves.toMatchObject({ publicPlan: { state: 'planned' } });
+
+    const other = 'http://git.other.example.com/team/repo.git';
+    await expect(makeInsecurePlanner().planNetworkOperation(cloneInput(other)))
+      .rejects.toMatchObject({ code: 'INVALID_GIT_NETWORK_OPERATION', status: 400 });
+    // A port is a different origin.
+    await expect(makeInsecurePlanner().planNetworkOperation(cloneInput('http://git.internal.example.com:8443/team/repo.git')))
+      .rejects.toMatchObject({ code: 'INVALID_GIT_NETWORK_OPERATION', status: 400 });
+    // Without the policy the same endpoints are refused, listed authority included.
+    await expect(makePlanner({ validateGitTransportContext: async () => httpAuthority })
+      .planNetworkOperation(httpInput)).rejects.toThrow();
+  });
+
   it.each([
     ['push', '+refs/heads/main', 'refs/heads/main'],
     ['push', 'refs/heads/main~1', 'refs/heads/main'],

@@ -70,7 +70,9 @@ export const parseInstallInput = (raw: string): ParseInstallInputResult => {
   if (!value) {
     return { ok: false, code: 'invalid-path' };
   }
-  if (value.slice(0, 8).toLowerCase() === 'https://') {
+  // `http://` is passed on too: the server alone decides whether the host is
+  // one the administrator listed in `allowedInsecureGitOrigins`.
+  if (value.slice(0, 8).toLowerCase() === 'https://' || value.slice(0, 7).toLowerCase() === 'http://') {
     return { ok: true, request: { url: value } };
   }
   if (value.slice(0, 6).toLowerCase() === 'ssh://' || /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9.-]+:[^\s]+$/.test(value)) {

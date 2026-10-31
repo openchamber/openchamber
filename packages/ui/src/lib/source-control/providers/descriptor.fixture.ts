@@ -13,7 +13,7 @@ export const acmeDescriptor = (overrides: Partial<SourceControlProviderDescripto
   repository: { nestedNamespaces: false },
   instances: {
     format: 'origin', defaultInstance: null, multiple: true, allowLoopbackHttp: true, allowPort: true,
-    reserved: [], placeholder: 'https://forge.example.com',
+    reserved: [], placeholder: 'https://forge.example.com', insecureOrigins: [],
   },
   auth: { methods: ['pat'], cliTransport: false, token: { scopes: ['repo'], createPath: '/user/settings/applications' } },
   settings: {
@@ -42,7 +42,7 @@ export const githubLikeDescriptor = (): SourceControlProviderDescriptor => acmeD
   icon: { sprite: 'github', filledSprite: 'github-fill' },
   instances: {
     format: 'host', defaultInstance: 'github.com', multiple: true, allowLoopbackHttp: false, allowPort: false,
-    reserved: ['github.com'], placeholder: 'https://github.example.com',
+    reserved: ['github.com'], placeholder: 'https://github.example.com', insecureOrigins: [],
   },
   urls: {
     changeRequest: ['/{owner}/{repo}/pull/{number}'], issue: ['/{owner}/{repo}/issues/{number}'],
@@ -63,7 +63,7 @@ export const gitlabLikeDescriptor = (): SourceControlProviderDescriptor => acmeD
   repository: { nestedNamespaces: true },
   instances: {
     format: 'origin', defaultInstance: 'https://gitlab.com', multiple: true, allowLoopbackHttp: true, allowPort: true,
-    reserved: [], placeholder: 'https://gitlab.example.com',
+    reserved: [], placeholder: 'https://gitlab.example.com', insecureOrigins: [],
   },
   urls: {
     changeRequest: ['/{namespace+}/{repo}/-/merge_requests/{number}'],
