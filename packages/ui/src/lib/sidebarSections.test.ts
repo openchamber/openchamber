@@ -41,6 +41,14 @@ describe('sidebarSectionsSchema', () => {
     expect(entry?.kind === 'custom' ? entry.filter : null).toEqual({ ...EMPTY_SIDEBAR_SECTION_FILTER, projectIds: ['p1'] });
   });
 
+  test('keeps a project named by a long folder path', () => {
+    // A project's id is `path_` and its folder path encoded, longer than the ids sections make.
+    const id = `path_${'L1VzZXJzL2J0cmlhcGl0c3lu'.repeat(4)}`;
+    const entry = sidebarSectionsSchema.parse([{ kind: 'custom', id: 'g', name: 'Clients', grouping: 'project', filter: { projectIds: [id] } }])
+      .find((section) => section.id === 'g');
+    expect(entry?.kind === 'custom' ? entry.filter.projectIds : null).toEqual([id]);
+  });
+
   test('keeps the words to find trimmed and short, and reads a list saved before them as asking none', () => {
     const parsed = sidebarSectionsSchema.parse([
       { kind: 'custom', id: 't', name: 'Relay', filter: { text: `  relay ${'x'.repeat(200)}` } },

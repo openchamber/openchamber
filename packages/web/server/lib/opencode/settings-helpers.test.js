@@ -893,7 +893,7 @@ describe('settings registry gate', () => {
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelHttpsPort: 8443, tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
-    sidebarSections: [{ kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p'] }, claims: true, hideWhenEmpty: false }],
+    sidebarSections: [{ kind: 'builtin', id: 'chats' }, { kind: 'custom', id: 's1', name: 'Clients', grouping: 'project', filter: { projectIds: ['p', `path_${'L1VzZXJzL3Rlc3R1c2Vy'.repeat(4)}`] }, claims: true, hideWhenEmpty: false }],
     sidebarPinLists: [{ id: 'l1', name: 'Release' }], sidebarHiddenSections: ['s1'],
     sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarProjectSortOrder: 'manual',
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'],

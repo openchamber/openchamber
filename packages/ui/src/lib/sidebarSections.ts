@@ -90,12 +90,17 @@ const chips = <const T extends readonly [string, ...string[]]>(values: T) => z.a
     return parsed.success ? [parsed.data] : [];
   }))]
 ));
-const ids = z.array(z.unknown()).transform((entries) => (
+// A project's id names its folder (`path_` and the path encoded), so it grows
+// with the path; the ids this module makes itself stay short.
+const projectIdSchema = z.string().trim().min(1).max(4096);
+const idList = (schema: z.ZodType<string>) => z.array(z.unknown()).transform((entries) => (
   [...new Set(entries.flatMap((entry) => {
-    const parsed = idSchema.safeParse(entry);
+    const parsed = schema.safeParse(entry);
     return parsed.success ? [parsed.data] : [];
   }))]
 ));
+const ids = idList(idSchema);
+const projectIds = idList(projectIdSchema);
 
 const filterSchema = z.object({
   states: chips(SIDEBAR_SECTION_STATES).catch([]),
@@ -103,7 +108,7 @@ const filterSchema = z.object({
   pins: ids.catch([]),
   kinds: chips(SIDEBAR_SECTION_KINDS).catch([]),
   links: chips(SIDEBAR_SECTION_LINKS).catch([]),
-  projectIds: ids.catch([]),
+  projectIds: projectIds.catch([]),
   activity: z.enum(SIDEBAR_SECTION_ACTIVITY).catch('any'),
   text: z.string().transform((value) => value.trim().slice(0, SIDEBAR_SECTION_TEXT_MAX)).catch(''),
 }).partial();

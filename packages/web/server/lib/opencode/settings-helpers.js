@@ -26,12 +26,15 @@ const sidebarChips = (values) => z.array(z.unknown()).transform((entries) => (
     return parsed.success ? [parsed.data] : [];
   }))]
 ));
-const sidebarIds = z.array(z.unknown()).transform((entries) => (
+const sidebarIdList = (schema) => z.array(z.unknown()).transform((entries) => (
   [...new Set(entries.flatMap((entry) => {
-    const parsed = sidebarSectionIdSchema.safeParse(entry);
+    const parsed = schema.safeParse(entry);
     return parsed.success ? [parsed.data] : [];
   }))]
 ));
+const sidebarIds = sidebarIdList(sidebarSectionIdSchema);
+// A project's id names its folder (`path_` and the path encoded), so it grows with the path.
+const sidebarProjectIds = sidebarIdList(z.string().trim().min(1).max(4096));
 const sidebarSectionSchema = z.union([
   z.object({ kind: z.literal('builtin'), id: z.enum(SIDEBAR_BUILTIN_SECTION_IDS) }),
   z.object({
@@ -45,7 +48,7 @@ const sidebarSectionSchema = z.union([
       pins: sidebarIds.catch([]),
       kinds: sidebarChips(['session', 'worktree', 'space', 'run', 'scheduled']).catch([]),
       links: sidebarChips(['pr', 'issue', 'tracker', 'plan', 'goal']).catch([]),
-      projectIds: sidebarIds.catch([]),
+      projectIds: sidebarProjectIds.catch([]),
       activity: z.enum(['any', 'today', 'two-days', 'week', 'stalled']).catch('any'),
       text: z.string().transform((value) => value.trim().slice(0, 100)).catch(''),
     }).partial().catch({}),
