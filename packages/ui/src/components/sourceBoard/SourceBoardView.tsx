@@ -56,7 +56,7 @@ import type {
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
-import { cn } from '@/lib/utils';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import { resolveTrackerMappedProjectPath } from '@/lib/trackers/projectMapping';
 import { trackerPresentation } from '@/lib/trackers/presentation';
 import { useTrackerDescriptor } from '@/lib/trackers/registry';
@@ -77,6 +77,7 @@ import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardContainerPicker, SourceBoardProjectPicker, SourceBoardRepositoryPicker } from './SourceBoardPickers';
+import { TrackerIssueDialog } from './TrackerIssueDialog';
 import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository, useLinkRepository } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
@@ -468,6 +469,30 @@ const SourceBoardBody: React.FC<{
     ), [pinnedItem, pinnedTrackerFollowed, pinnedLookup.followed, pinnedReference]);
     useTrackedItems(onScreen && pinnedItem ? pinnedFollowed : NO_FOLLOWED);
     const { previewItem, setQuery, selectRepositoryKind, showItem } = browser;
+    // The New issue / Edit issue entries. The descriptor's create/edit bits
+    // gate them — absent on an older server, so read as false with `=== true`.
+    const trackerOnline = isTrackerConnected(useTrackerAuthEntry(tracker));
+    const trackerDescriptor = useTrackerDescriptor(tracker);
+    const canCreateIssue = tracker !== null && trackerOnline && trackerDescriptor.capabilities.create === true;
+    const canEditIssue = canCreateIssue && trackerDescriptor.capabilities.edit === true
+        && previewItem?.source === 'tracker' && previewItem.item.provider === tracker
+        // The edit form prefills the item's fields; a summary would leave the
+        // description blank and a submit would clear it, so the detail is waited for.
+        && browser.trackerDetail.status === 'ready';
+    const [issueDialog, setIssueDialog] = React.useState<'create' | 'edit' | null>(null);
+    // The New issue dialog's project options. A tracker with project mapping
+    // offers its containers (Linear teams); one without — the local tracker,
+    // whose container is the project itself — offers the app's projects, the
+    // board's project first.
+    const issueContainers = React.useMemo<{ id: string; name: string }[]>(() => {
+        if (!tracker) return [];
+        if (trackerDescriptor.capabilities.projectMapping) return mapping?.connected ? mapping.containers : [];
+        const ordered = project ? [project, ...projects.filter((entry) => entry.id !== project.id)] : projects;
+        return ordered.map((entry) => ({ id: entry.id, name: entry.label?.trim() || formatDirectoryName(entry.path) || entry.path }));
+    }, [tracker, trackerDescriptor.capabilities.projectMapping, mapping, project, projects]);
+    const issueInitial = previewItem?.source === 'tracker' && canEditIssue && browser.trackerDetail.status === 'ready'
+        ? browser.trackerDetail.value
+        : undefined;
     const shownPinRequestRef = React.useRef(0);
     const trackerFocus = useSourceBoardStore((state) => (
         tracker && state.trackerFocus?.provider === tracker ? state.trackerFocus.identifier : null
@@ -684,6 +709,46 @@ const SourceBoardBody: React.FC<{
             <Icon name="refresh" className={cn('size-4', listRefreshing && 'animate-spin')} />
         </Button>
     );
+    // New issue, beside the list refresh: an icon-only toolbar button, on a
+    // tracker whose descriptor allows creating items.
+    const trackerCreateButton = canCreateIssue ? (
+        <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn('shrink-0 px-0', isMobile ? 'size-8' : 'size-7')}
+            aria-label={t('sourceBoard.tracker.newIssue')}
+            title={t('sourceBoard.tracker.newIssue')}
+            onClick={() => setIssueDialog('create')}
+        >
+            <Icon name="add" className="size-4" />
+        </Button>
+    ) : null;
+    // Edit issue, beside the previewed item's state control: the form opens on
+    // the item's read detail.
+    const trackerEditButton = canEditIssue ? (
+        <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="size-6 shrink-0 px-0"
+            aria-label={t('sourceBoard.tracker.edit')}
+            title={t('sourceBoard.tracker.edit')}
+            onClick={() => setIssueDialog('edit')}
+        >
+            <Icon name="edit" className="size-3.5" />
+        </Button>
+    ) : null;
+    const trackerIssueDialog = issueDialog && tracker ? (
+        <TrackerIssueDialog
+            provider={tracker}
+            mode={issueDialog}
+            containers={issueContainers}
+            initial={issueDialog === 'edit' ? issueInitial : undefined}
+            onDone={() => void refreshList()}
+            onClose={() => setIssueDialog(null)}
+        />
+    ) : null;
 
     const pinnedDiscoveryError = pinnedLink !== null && allRepositories === null && pinnedLinkFolder.status === 'failed' ? (
         <div role="status" className="flex flex-col items-center justify-center gap-3 p-4 text-center typography-meta text-muted-foreground">
@@ -706,7 +771,12 @@ const SourceBoardBody: React.FC<{
             onIncludeDiffChange={() => undefined}
             now={browser.now}
             footer={actions}
-            trackerStateControl={previewItem?.source === 'tracker' ? <SourceBoardTrackerStatus item={previewItem.item} onChanged={browser.list.retry} /> : undefined}
+            trackerStateControl={previewItem?.source === 'tracker' ? (
+                <>
+                    <SourceBoardTrackerStatus item={previewItem.item} onChanged={browser.list.retry} />
+                    {trackerEditButton}
+                </>
+            ) : undefined}
             onOpenTrackerItem={(item) => browser.openItem({ source: 'tracker', provider: item.provider, item })}
             onOpenStackLayer={openStackLayer}
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
@@ -789,7 +859,7 @@ const SourceBoardBody: React.FC<{
     const search = (
         <ReferenceBrowserSearch
             browser={browser}
-            trailing={listRefreshButton}
+            trailing={trackerCreateButton ? <>{trackerCreateButton}{listRefreshButton}</> : listRefreshButton}
             onKeyDown={(event) => {
                 if (narrow) {
                     // Typing or arrows show the results; Enter keeps the one picked.
@@ -937,6 +1007,7 @@ const SourceBoardBody: React.FC<{
                 </ErrorBoundary>
                 {worktreeDialog}
                 {checksDialog}
+                {trackerIssueDialog}
             </>
         );
     }
@@ -996,6 +1067,7 @@ const SourceBoardBody: React.FC<{
             )}
             {worktreeDialog}
             {checksDialog}
+            {trackerIssueDialog}
         </div>
     );
 };

@@ -92,6 +92,28 @@ export type TrackerItemResult = Connected<{ item: TrackerItem | null }>;
 export type TrackerStatesResult = Connected<{ states: TrackerWorkflowState[] }>;
 export type TrackerStateUpdateInput = { id: string; stateId: string };
 
+/** Create input for `POST /api/tracker/:provider/items/create`; the container (a Linear team, a local project) is required. */
+export type TrackerCreateItemInput = {
+  containerId: string;
+  title: string;
+  description?: string | null;
+  priority?: TrackerPriority | null;
+  labels?: string[];
+};
+
+/**
+ * Edit input for `POST /api/tracker/:provider/items/edit`. Only the fields the
+ * input carries are forwarded; an absent field leaves the stored value alone,
+ * an explicit `null` clears it.
+ */
+export type TrackerEditItemInput = {
+  id: string;
+  title?: string;
+  description?: string | null;
+  priority?: TrackerPriority | null;
+  labels?: string[];
+};
+
 export type TrackerAuthMethod = 'oauth' | 'token';
 
 /**

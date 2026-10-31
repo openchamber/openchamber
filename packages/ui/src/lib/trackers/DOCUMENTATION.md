@@ -72,6 +72,7 @@ on the source-control side (`lib/source-control/`).
   the rest open), the status menu's order (triage, backlog, todo, in progress,
   done, canceled, unknown last), and settled (done or canceled: not followed).
 - Capabilities gate what a surface offers: `stateUpdate` the status menu,
+  `create` the board's New issue button, `edit` the preview's Edit issue action,
   `children` parent and children, `labels`, `priority`, `filters` the list
   filters, `projectMapping` the container picker and start-in project,
   `multipleAccounts` the account switch, `sessionComments` the session status
@@ -117,6 +118,16 @@ A server older than `/api/tracker` serves exactly Linear, in Linear's shapes.
 Answering only its built-in descriptor would show a Linear tab that fails every
 read; the adapter instead reads those routes and maps them to the neutral
 shapes, so `packages/ui` never sees which server version answered.
+
+### Why item create and edit post through `runtimeFetch` instead of a `TrackerAPI` method
+
+`mutations.ts` (`createTrackerItem`, `editTrackerItem`) POSTs the board's two
+write routes directly, on the same `runtimeFetch` auth path the web adapter
+uses for its reads, and parses the answer with a schema that rejects an
+unreadable or disconnected answer as a failure. They are board-scoped UI
+writes, so `TrackerAPI` — the contract every surface shares — stays without
+methods only one surface calls; a tracker that later needs these writes in
+another surface moves them behind the interface then.
 
 ### Why surfaces offer only signed-in trackers and not every served one
 
