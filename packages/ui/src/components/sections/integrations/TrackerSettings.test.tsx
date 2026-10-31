@@ -230,6 +230,11 @@ describe('TrackerSettings', () => {
     status = { connected: true, account: { id: 'local', name: 'Local', user: null, current: true } };
     await mount(localTrackerDescriptor());
     expect(container.textContent).toContain('Local');
+    // The account row names the tracker, not the "Unknown user" fallback:
+    // local's account has no user, so the account name leads.
+    expect(container.textContent).not.toContain('Unknown user');
+    const primaryLine = container.querySelector('.text-sm.font-medium');
+    expect(primaryLine?.textContent).toBe('Local');
     expect(container.textContent).toContain('Nothing to connect');
     expect(buttonLabels()).not.toContain('Connect');
     expect(buttonLabels()).not.toContain('Disconnect');

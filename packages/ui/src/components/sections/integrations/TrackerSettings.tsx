@@ -169,7 +169,9 @@ export const TrackerSettings: React.FC<{ descriptor: TrackerDescriptor }> = ({ d
   const otherAccounts = capabilities.multipleAccounts && status?.connected
     ? (status.accounts ?? []).filter((entry) => !entry.current)
     : [];
-  const displayName = user?.name?.trim() || t(copy.unknownUser);
+  // A tracker with no signed-in user still names itself (the local tracker's
+  // "Local"), so the account name stands in before the "Unknown user" copy.
+  const displayName = user?.name?.trim() || account?.name?.trim() || t(copy.unknownUser);
   const statusLabel = isWaiting
     ? t(copy.waiting)
     : isLoading && !hasChecked
