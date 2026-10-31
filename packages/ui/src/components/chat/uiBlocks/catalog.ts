@@ -20,7 +20,9 @@ const nodes = z.array(json);
 export const blockProps = {
   Stack: z.object({ children: nodes }),
   Row: z.object({ children: nodes }),
-  Card: z.object({ title: z.string().optional(), children: nodes }),
+  // The title comes first and is required: a skipped first argument cannot
+  // be written positionally, so an empty title stands for none.
+  Card: z.object({ title: z.string(), children: nodes }),
   Tabs: z.object({ tabs: nodes }),
   Tab: z.object({ label: z.string(), children: nodes }),
   Text: z.object({ markdown: z.string() }),
@@ -37,13 +39,16 @@ export const blockProps = {
     items: z.array(z.object({
       title: z.string(),
       markdown: z.string().optional(),
-      status: z.enum(['done', 'current', 'todo']).optional(),
+      status: z.enum(['done', 'current', 'todo', 'blocked']).optional(),
     })),
     direction: z.enum(['column', 'row']).optional(),
   }),
   BarChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional() }),
   LineChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional() }),
-  Series: z.object({ name: z.string(), values: z.array(z.number()) }),
+  // null is a point with no data: the line breaks there, the bar is left out.
+  Series: z.object({ name: z.string(), values: z.array(z.number().nullable()) }),
+  Stat: z.object({ label: z.string(), value: z.union([z.string(), z.number()]), delta: z.string().optional(), tone: tone.optional() }),
+  Progress: z.object({ label: z.string(), value: z.number(), max: z.number().positive().optional() }),
   Choice: z.object({
     name: z.string(),
     options: z.array(z.string()),
@@ -72,87 +77,94 @@ export const blockNode = z.object({
   props: z.record(z.string(), json),
 });
 
-const Text = defineComponent({ name: 'Text', description: 'Markdown text: a sentence, a short paragraph or a list.', props: blockProps.Text, component: null });
-const Badge = defineComponent({ name: 'Badge', description: 'A short status label.', props: blockProps.Badge, component: null });
-const Callout = defineComponent({ name: 'Callout', description: 'A note set apart by its tone: a warning, a tip, a result.', props: blockProps.Callout, component: null });
-const KeyValue = defineComponent({ name: 'KeyValue', description: 'Label and value pairs, aligned in two columns.', props: blockProps.KeyValue, component: null });
-const Table = defineComponent({ name: 'Table', description: 'Rows of exact values under column headers.', props: blockProps.Table, component: null });
+const Text = defineComponent({ name: 'Text', description: '', props: blockProps.Text, component: null });
+const Badge = defineComponent({ name: 'Badge', description: '', props: blockProps.Badge, component: null });
+const Callout = defineComponent({ name: 'Callout', description: '', props: blockProps.Callout, component: null });
+const KeyValue = defineComponent({ name: 'KeyValue', description: '', props: blockProps.KeyValue, component: null });
+const Table = defineComponent({ name: 'Table', description: '', props: blockProps.Table, component: null });
+const Stat = defineComponent({ name: 'Stat', description: 'a key number; delta like "+12%"', props: blockProps.Stat, component: null });
+const Progress = defineComponent({ name: 'Progress', description: 'max defaults to 100', props: blockProps.Progress, component: null });
 const Steps = defineComponent({
   name: 'Steps',
-  description: 'A sequence or flow: stages in order, joined by arrows. Mark each stage done, current or todo when progress matters.',
+  description: 'flow joined by arrows',
   props: blockProps.Steps,
   component: null,
 });
-const Series = defineComponent({ name: 'Series', description: 'One named series of numbers, one value per chart label.', props: blockProps.Series, component: null });
+const Series = defineComponent({ name: 'Series', description: 'one value per label; null = no data', props: blockProps.Series, component: null });
 const BarChart = defineComponent({
   name: 'BarChart',
-  description: 'Compares values across categories.',
+  description: 'categories',
   props: blockProps.BarChart.extend({ series: z.array(Series.ref) }),
   component: null,
 });
 const LineChart = defineComponent({
   name: 'LineChart',
-  description: 'Shows a trend over ordered labels such as dates.',
+  description: 'trend',
   props: blockProps.LineChart.extend({ series: z.array(Series.ref) }),
   component: null,
 });
 
 const Choice = defineComponent({
   name: 'Choice',
-  description: 'A field: pick one of the options, or several with multiple. name is the key of the value in the answer.',
+  description: 'name keys the answer',
   props: blockProps.Choice,
   component: null,
 });
 const Input = defineComponent({
   name: 'Input',
-  description: 'A text field; multiline for longer text. name is the key of the value in the answer.',
+  description: 'name keys the answer',
   props: blockProps.Input,
   component: null,
 });
 const Button = defineComponent({
   name: 'Button',
-  description: 'Sends the user\'s answer: the button\'s label, its value and the values of every field in the block. Give value when buttons repeat across cards, such as the item each one is about. primary marks the option you recommend, at most one per group; the rest are secondary.',
+  description: 'value = the item it decides; primary = your pick, one per decision',
   props: blockProps.Button,
   component: null,
 });
 
 const leaf = z.union([
   Text.ref, Badge.ref, Callout.ref, KeyValue.ref, Table.ref, Steps.ref, BarChart.ref, LineChart.ref,
-  Choice.ref, Input.ref, Button.ref,
+  Stat.ref, Progress.ref, Choice.ref, Input.ref, Button.ref,
 ]);
 
-const Card = defineComponent({
-  name: 'Card',
-  description: 'Groups related content as one unit, with an optional title.',
-  props: blockProps.Card.extend({ children: z.array(leaf) }),
-  component: null,
-});
+// The guidance names what nests where (guidance.ts); these unions only feed
+// the parser's references, which it does not check against a parent.
 const Row = defineComponent({
   name: 'Row',
-  description: 'Places items side by side; they wrap on a narrow screen.',
-  props: blockProps.Row.extend({ children: z.array(z.union([leaf, Card.ref])) }),
+  description: 'side by side, wraps',
+  props: blockProps.Row.extend({ children: z.array(leaf) }),
+  component: null,
+});
+const Card = defineComponent({
+  name: 'Card',
+  description: 'title "" for none',
+  props: blockProps.Card.extend({ children: z.array(z.union([leaf, Row.ref])) }),
   component: null,
 });
 const Tab = defineComponent({
   name: 'Tab',
-  description: 'One tab of Tabs.',
+  description: '',
   props: blockProps.Tab.extend({ children: z.array(z.union([leaf, Card.ref, Row.ref])) }),
   component: null,
 });
 const Tabs = defineComponent({
   name: 'Tabs',
-  description: 'Alternatives the reader switches between; one shows at a time.',
+  description: '',
   props: blockProps.Tabs.extend({ tabs: z.array(Tab.ref) }),
   component: null,
 });
 const Stack = defineComponent({
   name: 'Stack',
-  description: 'The root: items top to bottom.',
+  description: 'the root',
   props: blockProps.Stack.extend({ children: z.array(z.union([leaf, Card.ref, Row.ref, Tabs.ref])) }),
   component: null,
 });
 
-const components = [Stack, Row, Card, Tabs, Tab, Text, Badge, Callout, KeyValue, Table, Steps, BarChart, LineChart, Series, Choice, Input, Button];
+const components = [
+  Stack, Row, Card, Tabs, Tab, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Series,
+  Choice, Input, Button,
+];
 
 export const uiBlockLibrary = createLibrary({ components, root: 'Stack' });
 

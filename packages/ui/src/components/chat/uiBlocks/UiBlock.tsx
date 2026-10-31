@@ -1,5 +1,5 @@
 import React from 'react';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { Icon } from '@/components/icon/Icon';
 import { Button as UiButton } from '@/components/ui/button';
 import { Input as UiInput } from '@/components/ui/input';
@@ -83,11 +83,18 @@ const toneFill = {
   error: 'bg-[var(--status-error-background)]',
 } satisfies Record<Tone, string>;
 
-// A table inside a card drops its frame, so no box sits in a box.
-const InCardContext = React.createContext(false);
-
 const seriesColor = (index: number) => `var(--chart-${(index % 5) + 1})`;
-const formatValue = (value: number, unit = '') => `${Number.isInteger(value) ? value : value.toFixed(2)}${unit ? ` ${unit}` : ''}`;
+// Grouped for reading, never rounded: a table or a stat shows the value the agent gave.
+// Groups split by a narrow space in every UI language: the agent writes in
+// its own language, and "2,318" next to its "184 200" read as two formats.
+const numberFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 20 });
+const formatNumber = (value: number) => numberFormat.format(value).replace(/,/g, ' ');
+const number = z.number();
+/** A value as the reader sees it: numbers grouped, text as written. */
+const display = (value: string | number) => {
+  const parsed = number.safeParse(value);
+  return parsed.success ? formatNumber(parsed.data) : String(value);
+};
 
 function useBlockProps<S extends z.ZodType>(schema: S, props: BlockValue): z.infer<S> | null {
   const parsed = schema.safeParse(props);
@@ -104,8 +111,23 @@ function Markdown({ source }: { source?: string }) {
   return <MarkdownContent content={source} mode="static" settled directory={directory} className="oc-ui-block-text" />;
 }
 
+const isButtonNode = (value: BlockValue) => blockNode.safeParse(value).data?.typeName === 'Button';
+
+/** Buttons next to each other share a row, whether or not the agent wrapped them in one. */
 function Children({ nodes }: { nodes: BlockValue[] }) {
-  return <>{nodes.map((child, index) => <Node key={index} value={child} />)}</>;
+  const groups: BlockValue[][] = [];
+  for (const node of nodes) {
+    const last = groups.at(-1);
+    if (last && isButtonNode(node) && isButtonNode(last[0])) last.push(node);
+    else groups.push([node]);
+  }
+  return (
+    <>
+      {groups.map((group, index) => (group.length > 1
+        ? <div key={index} className="flex flex-wrap gap-2">{group.map((node, inner) => <Node key={inner} value={node} />)}</div>
+        : <Node key={index} value={group[0]} />))}
+    </>
+  );
 }
 
 function Stack({ props }: NodeProps) {
@@ -115,8 +137,13 @@ function Stack({ props }: NodeProps) {
 
 function Row({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Row, props);
-  // Cards, tables and charts share the row's width; badges and buttons keep their own.
-  return value && <div className="flex flex-wrap items-start gap-x-3 gap-y-2 [&>div]:min-w-[12rem] [&>div]:flex-1"><Children nodes={value.children} /></div>;
+  // Cards, tables and charts share the row's width and its height; badges and
+  // buttons keep their own size.
+  return value && (
+    <div className="flex flex-wrap items-stretch gap-3 [&>div]:min-w-[12rem] [&>div]:flex-1 [&>button]:self-center [&>span]:self-center">
+      <Children nodes={value.children} />
+    </div>
+  );
 }
 
 function Card({ props }: NodeProps) {
@@ -164,47 +191,68 @@ function Callout({ props }: NodeProps) {
 function KeyValue({ props }: NodeProps) {
   const value = useBlockProps(blockProps.KeyValue, props);
   if (!value) return null;
+  // A long label wraps inside its column instead of pushing the values aside.
   return (
-    <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-1">
+    <dl className="m-0 grid grid-cols-[fit-content(40%)_minmax(0,1fr)] gap-x-4 gap-y-1">
       {value.items.map((item, index) => (
         <React.Fragment key={index}>
           <dt className="text-muted-foreground">{item.label}</dt>
-          <dd className="m-0 tabular-nums">{item.value}</dd>
+          <dd className="m-0 tabular-nums">{display(item.value)}</dd>
         </React.Fragment>
       ))}
     </dl>
   );
 }
 
+const tableCell = (cell: string | number | undefined) => (cell === undefined ? '' : number.safeParse(cell).success
+  ? display(cell)
+  // A pipe splits a GFM cell, also inside code, unless an odd run of
+  // backslashes escapes it; backslashes are otherwise the cell's own text.
+  : String(cell).replace(/(\\*)\|/g, (match, slashes: string) => (slashes.length % 2 ? match : `${slashes}\\|`)).replace(/\r?\n/g, ' '));
+
+/**
+ * The chat's own Markdown table: the same column fitting, copy and download
+ * as a table written straight into a reply.
+ */
 function Table({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Table, props);
-  const inCard = React.useContext(InCardContext);
+  if (!value || value.columns.length === 0) return null;
+  const numeric = value.columns.map((_, index) => value.rows.length > 0 && value.rows.every((row) => number.safeParse(row[index]).success));
+  const lines = [
+    `| ${value.columns.map((column) => tableCell(column)).join(' | ')} |`,
+    `| ${numeric.map((isNumeric) => (isNumeric ? '---:' : '---')).join(' | ')} |`,
+    ...value.rows.map((row) => `| ${value.columns.map((_, index) => tableCell(row[index])).join(' | ')} |`),
+  ];
+  return <Markdown source={lines.join('\n')} />;
+}
+
+function Stat({ props }: NodeProps) {
+  const value = useBlockProps(blockProps.Stat, props);
   if (!value) return null;
-  // The reply's own table look (`data-streamdown` styles in index.css).
   return (
-    <div data-streamdown="table-wrapper">
-      <div className={cn('min-w-0 overflow-x-auto', inCard && '!border-0 !bg-transparent')}>
-        <table data-streamdown="table">
-          <thead data-streamdown="table-header">
-            <tr data-streamdown="table-row">
-              {value.columns.map((column, index) => <th key={index} data-streamdown="table-header-cell">{column}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {value.rows.map((row, rowIndex) => (
-              <tr key={rowIndex} data-streamdown="table-row">
-                {value.columns.map((_, cellIndex) => {
-                  const cell = row[cellIndex] ?? '';
-                  return (
-                    <td key={cellIndex} data-streamdown="table-cell" className={Number.isFinite(cell) ? 'tabular-nums text-end' : undefined}>
-                      {cell}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="flex flex-col gap-0.5">
+      <span className="typography-meta text-muted-foreground">{value.label}</span>
+      <span className="flex items-baseline gap-2">
+        <span className="text-2xl font-semibold tabular-nums">{display(value.value)}</span>
+        {value.delta && <span className={cn('typography-meta tabular-nums', toneText[value.tone ?? 'neutral'])}>{value.delta}</span>}
+      </span>
+    </div>
+  );
+}
+
+function Progress({ props }: NodeProps) {
+  const value = useBlockProps(blockProps.Progress, props);
+  if (!value) return null;
+  const max = value.max ?? 100;
+  const share = Math.max(0, Math.min(1, value.value / max));
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-baseline justify-between gap-3 typography-meta">
+        <span className="min-w-0 truncate text-muted-foreground">{value.label}</span>
+        <span className="shrink-0 tabular-nums">{formatNumber(value.value)} / {formatNumber(max)}</span>
+      </div>
+      <div className="oc-tile-inset h-1.5 overflow-hidden rounded-full" role="progressbar" aria-valuenow={value.value} aria-valuemax={max} aria-label={value.label}>
+        <div className="h-full rounded-full bg-[var(--primary-base)]" style={{ width: `${share * 100}%` }} />
       </div>
     </div>
   );
@@ -214,6 +262,7 @@ type StepStatus = z.infer<typeof blockProps.Steps>['items'][number]['status'];
 
 function StepMark({ status, index }: { status: StepStatus; index: number }) {
   if (status === 'done') return <Icon name="checkbox-circle" className="size-4 shrink-0 text-[var(--status-success)]" />;
+  if (status === 'blocked') return <Icon name="error-warning" className="size-4 shrink-0 text-[var(--status-error)]" />;
   return (
     <span
       className={cn(
@@ -226,36 +275,71 @@ function StepMark({ status, index }: { status: StepStatus; index: number }) {
   );
 }
 
+/**
+ * Whether a row of `count` steps fits the width it has: each tile's minimum
+ * (8rem) and, between tiles, an arrow (1rem) with its two gaps (0.375rem each).
+ */
+function useStepsFitRow(count: number) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [fits, setFits] = React.useState(true);
+  React.useLayoutEffect(() => {
+    const element = ref.current;
+    const view = element?.ownerDocument.defaultView;
+    if (!element || !view || count === 0) return;
+    const check = () => {
+      const rem = parseFloat(view.getComputedStyle(element.ownerDocument.documentElement).fontSize) || 16;
+      setFits(element.clientWidth >= count * 8 * rem + (count - 1) * 1.75 * rem);
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [count]);
+  return [ref, fits] as const;
+}
+
 function Steps({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Steps, props);
+  const [ref, fits] = useStepsFitRow(value?.direction === 'row' ? value.items.length : 0);
   if (!value) return null;
-  if (value.direction === 'row') {
-    return (
-      <div className="flex flex-wrap items-stretch gap-1.5">
-        {value.items.map((item, index) => (
-          <React.Fragment key={index}>
-            {index > 0 && <Icon name="arrow-right-s" className="size-4 shrink-0 self-center text-muted-foreground" />}
-            <div className="oc-tile flex min-w-[8rem] flex-1 flex-col gap-1 rounded-xl px-3 py-2">
-              <div className="flex items-center gap-1.5 font-medium"><StepMark status={item.status} index={index} />{item.title}</div>
-              <Markdown source={item.markdown} />
-            </div>
-          </React.Fragment>
-        ))}
-      </div>
-    );
-  }
+  // A row that does not fit the width falls back to a column: scrolled
+  // sideways, the steps past the edge went unseen.
+  return <div ref={ref}>{value.direction === 'row' && fits ? <StepsRow items={value.items} /> : <StepsColumn items={value.items} />}</div>;
+}
+
+type StepItems = z.infer<typeof blockProps.Steps>['items'];
+
+function StepsRow({ items }: { items: StepItems }) {
+  // One line, never wrapped: wrapped, the arrows lose their order.
   return (
-    <ol className="m-0 flex list-none flex-col gap-2 p-0">
-      {value.items.map((item, index) => (
-        <li key={index} className="flex gap-2">
-          <span className="mt-[3px]"><StepMark status={item.status} index={index} /></span>
+    <div className="flex items-stretch gap-1.5 overflow-x-auto pb-1">
+      {items.map((item, index) => (
+        <React.Fragment key={index}>
+          {index > 0 && <Icon name="arrow-right-s" className="size-4 shrink-0 self-center text-muted-foreground" />}
+          <div className="oc-tile flex min-w-[8rem] max-w-[16rem] flex-1 shrink-0 flex-col gap-1 rounded-xl px-3 py-2">
+            <div className="flex items-center gap-1.5 font-medium"><StepMark status={item.status} index={index} />{item.title}</div>
+            <Markdown source={item.markdown} />
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function StepsColumn({ items }: { items: StepItems }) {
+  // Plain divs: list styles from the surrounding Markdown would take over an ol.
+  return (
+    <div className="flex flex-col gap-2" role="list">
+      {items.map((item, index) => (
+        <div key={index} className="flex gap-2" role="listitem">
+          <span className="mt-[3px] shrink-0"><StepMark status={item.status} index={index} /></span>
           <div className="min-w-0 flex-1">
             <div className={cn('font-medium', item.status === 'todo' && 'text-muted-foreground')}>{item.title}</div>
             <Markdown source={item.markdown} />
           </div>
-        </li>
+        </div>
       ))}
-    </ol>
+    </div>
   );
 }
 
@@ -267,44 +351,60 @@ const seriesOf = (nodes: BlockValue[]): Series[] => nodes.flatMap((node) => {
   return series.success ? [series.data] : [];
 });
 
-function Legend({ series }: { series: Series[] }) {
-  if (series.length < 2) return null;
+/** Series names when there are several, and the unit once for the whole chart. */
+function ChartHeader({ series, unit }: { series: Series[]; unit?: string }) {
+  if (series.length < 2 && !unit) return null;
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 typography-meta text-muted-foreground">
-      {series.map((item, index) => (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-meta text-muted-foreground">
+      {series.length > 1 && series.map((item, index) => (
         <span key={index} className="inline-flex items-center gap-1.5">
           <span className="size-2 rounded-full" style={{ background: seriesColor(index) }} />
           {item.name}
         </span>
       ))}
+      {unit && <span className="ms-auto">{unit}</span>}
     </div>
   );
 }
+
+// A card already frames what it holds.
+const InCardContext = React.createContext(false);
+
+/** A chart outside a card gets a frame of its own, so two charts in a row never read as one. */
+function ChartFrame({ className, ...props }: React.ComponentProps<'div'>) {
+  const inCard = React.useContext(InCardContext);
+  return <div {...props} className={cn(className, !inCard && 'oc-tile rounded-xl px-3 py-2.5')} />;
+}
+
+const pointsOf = (series: Series[]) => series.flatMap((item) => item.values.filter((point) => point !== null));
 
 /** Horizontal bars: long category labels stay readable on a phone. */
 function BarChart({ props }: NodeProps) {
   const value = useBlockProps(blockProps.BarChart, props);
   if (!value) return null;
   const series = seriesOf(value.series);
-  const max = Math.max(0, ...series.flatMap((item) => item.values));
+  const max = Math.max(0, ...pointsOf(series));
   return (
-    <div className="flex flex-col gap-2">
-      <Legend series={series} />
-      <div className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5">
+    <ChartFrame className="flex flex-col gap-2">
+      <ChartHeader series={series} unit={value.unit} />
+      <div className={cn('grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] items-center gap-x-3', series.length > 1 ? 'gap-y-3' : 'gap-y-1.5')}>
         {value.labels.map((label, labelIndex) => (
           <React.Fragment key={labelIndex}>
             <span className="truncate typography-meta text-muted-foreground" title={label}>{label}</span>
             <div className="flex flex-col gap-0.5">
               {series.map((item, seriesIndex) => {
                 const point = item.values[labelIndex];
-                if (point === undefined) return null;
+                // A missing value keeps its place, so every group has as many rows.
+                if (point === undefined || point === null) {
+                  return <span key={seriesIndex} className="typography-meta text-muted-foreground">–</span>;
+                }
                 return (
                   <div key={seriesIndex} className="flex items-center gap-2">
                     <div
                       className="h-2.5 rounded-sm"
                       style={{ width: max > 0 ? `${Math.max(0, point / max) * 85}%` : 0, background: seriesColor(seriesIndex) }}
                     />
-                    <span className="shrink-0 typography-meta tabular-nums">{formatValue(point, value.unit)}</span>
+                    <span className="shrink-0 typography-meta tabular-nums">{formatNumber(point)}</span>
                   </div>
                 );
               })}
@@ -312,54 +412,80 @@ function BarChart({ props }: NodeProps) {
           </React.Fragment>
         ))}
       </div>
-    </div>
+    </ChartFrame>
   );
 }
+
+/** Splits a series at its missing points, so the line breaks there instead of dropping to zero. */
+const segmentsOf = (values: Array<number | null>): Array<Array<{ index: number; point: number }>> => {
+  const segments: Array<Array<{ index: number; point: number }>> = [];
+  let current: Array<{ index: number; point: number }> = [];
+  values.forEach((point, index) => {
+    if (point === null) {
+      if (current.length) segments.push(current);
+      current = [];
+    } else {
+      current.push({ index, point });
+    }
+  });
+  if (current.length) segments.push(current);
+  return segments;
+};
 
 function LineChart({ props }: NodeProps) {
   const value = useBlockProps(blockProps.LineChart, props);
   if (!value) return null;
   const { labels } = value;
   const series = seriesOf(value.series);
-  const values = series.flatMap((item) => item.values);
-  const max = Math.max(...values, 0);
-  const min = Math.min(...values, 0);
+  const points = pointsOf(series);
+  const max = Math.max(...points, 0);
+  const min = Math.min(...points, 0);
   const width = 600;
   const height = 140;
   const span = max - min || 1;
   const x = (index: number) => (labels.length < 2 ? width / 2 : (index / (labels.length - 1)) * width);
   const y = (point: number) => height - ((point - min) / span) * height;
-  const axisLabels = [labels[0], labels.length > 2 ? labels[Math.floor((labels.length - 1) / 2)] : undefined, labels.length > 1 ? labels[labels.length - 1] : undefined]
-    .filter((label) => label !== undefined);
+  // Up to six labels under the plot, spread evenly and always with both ends.
+  const step = Math.max(1, Math.ceil((labels.length - 1) / 5));
+  const axisLabels = labels.map((label, index) => ({ label, index }))
+    .filter(({ index }) => index % step === 0 || index === labels.length - 1);
   // Time runs left to right in every UI language, so the plot and its labels stay LTR.
   return (
-    <div className="flex flex-col gap-2" dir="ltr">
-      <Legend series={series} />
-      {/* The scale sits over the plot's start edge, so the plot and the labels under it share one width. */}
-      <div className="relative">
-        <div className="pointer-events-none absolute inset-y-0 start-0 flex flex-col justify-between typography-meta text-muted-foreground tabular-nums">
-          <span>{formatValue(max, value.unit)}</span>
-          <span>{formatValue(min, value.unit)}</span>
-        </div>
-        <svg viewBox={`-4 -4 ${width + 8} ${height + 8}`} className="h-[140px] w-full overflow-visible" preserveAspectRatio="none" aria-hidden="true">
-          <line x1={0} x2={width} y1={y(0)} y2={y(0)} stroke="var(--interactive-border)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-          {series.map((item, seriesIndex) => (
-            <polyline
-              key={seriesIndex}
-              fill="none"
-              stroke={seriesColor(seriesIndex)}
-              strokeWidth={2}
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-              points={item.values.slice(0, labels.length).map((point, index) => `${x(index)},${y(point)}`).join(' ')}
+    <ChartFrame className="flex flex-col gap-1" dir="ltr">
+      <ChartHeader series={series} unit={value.unit} />
+      <span className="typography-meta text-muted-foreground tabular-nums">{formatNumber(max)}</span>
+      <svg viewBox={`-4 -4 ${width + 8} ${height + 8}`} className="h-[140px] w-full overflow-visible" preserveAspectRatio="none" aria-hidden="true">
+        <line x1={0} x2={width} y1={y(0)} y2={y(0)} stroke="var(--interactive-border)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+        {series.map((item, seriesIndex) => segmentsOf(item.values.slice(0, labels.length)).map((segment, segmentIndex) => (segment.length === 1
+          // A point with no neighbour draws no line; a round-capped zero-length
+          // line is a dot that stays round in the stretched plot.
+          ? (
+            <line
+              key={`${seriesIndex}-${segmentIndex}`}
+              x1={x(segment[0].index)} x2={x(segment[0].index)} y1={y(segment[0].point)} y2={y(segment[0].point)}
+              stroke={seriesColor(seriesIndex)} strokeWidth={6} strokeLinecap="round" vectorEffect="non-scaling-stroke"
             />
-          ))}
-        </svg>
+          )
+          : <polyline
+            key={`${seriesIndex}-${segmentIndex}`}
+            fill="none"
+            stroke={seriesColor(seriesIndex)}
+            strokeWidth={2}
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+            points={segment.map(({ index, point }) => `${x(index)},${y(point)}`).join(' ')}
+          />
+        )))}
+      </svg>
+      <div className="relative h-4 typography-meta text-muted-foreground">
+        {axisLabels.map(({ label, index }) => {
+          const share = labels.length < 2 ? 0.5 : index / (labels.length - 1);
+          const edge = index === 0 ? 'translate-x-0' : index === labels.length - 1 ? '-translate-x-full' : '-translate-x-1/2';
+          return <span key={index} className={cn('absolute top-0 whitespace-nowrap', edge)} style={{ left: `${share * 100}%` }}>{label}</span>;
+        })}
       </div>
-      <div className="flex justify-between gap-2 typography-meta text-muted-foreground">
-        {axisLabels.map((label, index) => <span key={index} className="truncate">{label}</span>)}
-      </div>
-    </div>
+      {min < 0 && <span className="typography-meta text-muted-foreground tabular-nums">{formatNumber(min)}</span>}
+    </ChartFrame>
   );
 }
 
@@ -427,6 +553,13 @@ function Choice({ props }: NodeProps) {
             disabled={form.disabled}
             onClick={() => toggle(option)}
           >
+            {/* Square for several, circle for one: the chips look alike otherwise. */}
+            <Icon
+              name={value.multiple
+                ? (chosen.includes(option) ? 'checkbox' : 'checkbox-blank')
+                : (chosen.includes(option) ? 'checkbox-circle' : 'checkbox-blank-circle')}
+              className="size-3.5 opacity-70"
+            />
             {option}
           </UiButton>
         ))}
@@ -456,11 +589,13 @@ function Button({ props }: NodeProps) {
   const form = React.useContext(FormContext);
   if (!value) return null;
   const chosen = form.chosen.get(value.value ?? '') === value.label;
+  // Only a chosen button is filled. A primary one is the agent's pick: drawn
+  // filled before any press, it read as already chosen for the user.
   return (
     <UiButton
       type="button"
-      variant={value.variant === 'secondary' ? 'outline' : 'default'}
-      className="w-fit"
+      variant={chosen ? 'default' : 'outline'}
+      className={cn('w-fit', !chosen && value.variant !== 'secondary' && 'text-[var(--primary-text)]')}
       aria-pressed={chosen}
       disabled={form.disabled}
       onClick={() => form.press(value.label, value.value)}
@@ -473,10 +608,10 @@ function Button({ props }: NodeProps) {
 
 // Tab and Series draw inside their parents.
 const renderers = {
-  Stack, Row, Card, Tabs, Text, Badge, Callout, KeyValue, Table, Steps, BarChart, LineChart, Choice, Input, Button,
+  Stack, Row, Card, Tabs, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Choice, Input, Button,
 } satisfies Partial<Record<BlockName, React.FC<NodeProps>>>;
 const drawn = blockName.extract([
-  'Stack', 'Row', 'Card', 'Tabs', 'Text', 'Badge', 'Callout', 'KeyValue', 'Table', 'Steps', 'BarChart', 'LineChart',
+  'Stack', 'Row', 'Card', 'Tabs', 'Text', 'Badge', 'Callout', 'KeyValue', 'Table', 'Stat', 'Progress', 'Steps', 'BarChart', 'LineChart',
   'Choice', 'Input', 'Button',
 ]);
 

@@ -33,6 +33,14 @@ The language streams well: the parser returns a partial tree for any prefix, so 
 
 The choices in a reply's block reach the agent as OpenCode synthetic input with `resume: true` (`replyAnswer.ts`), which starts the agent's next turn without a user bubble. Sending each press as a user message, as the first version did, gave the agent a turn per press: with four cards it answered the first choice and drew the other three again. Collected into one input, the agent gets the whole decision at once. The input's metadata (`openchamberUiBlockAnswer`: message id, block key, answer) is the record the block reads back after a reload, so no store of our own keeps answers. A block on a waiting `openchamber_render` call answers that call through `/api/openchamber/render/answer`, like an HTML page.
 
+### Why Table draws as a Markdown table
+
+A `Table` in a block becomes a GFM table string drawn by the chat's Markdown renderer, so it gets the same column fitting, copy and download as a table written straight into a reply; a second table implementation drifted from it in every detail. Cells escape the pipes that would split them and keep their own backslashes.
+
+### Why text with a block stays out of a collapsed Activity
+
+Text the agent wrote before a later step counts as a step, so a collapsed Activity used to fold it away, blocks included: a showcase of eight blocks followed by one question showed only the question. `getShownPages` lists such text with the pages, so it stays in view like them (`message/parts/DOCUMENTATION.md`).
+
 ### Why OpenUI's state, bindings and actions are left out
 
 The language can declare `$state`, bind fields and run action plans. Each needs a reactive store and its own security review, while a question needs only fields whose values a Button sends. A finished block that declares state, a query or a mutation is invalid.

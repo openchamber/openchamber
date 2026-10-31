@@ -26,7 +26,8 @@ export const useTurnFold = (turn: TurnRecord, hasLaterAssistant: boolean, expand
     // A page the agent showed is never folded away: it sits below the fold,
     // above the answer once one arrives, and stays there in a turn that ended
     // without one.
-    const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
+    // The final answer's own text is the answer, so it is never hoisted.
+    const pages = React.useMemo(() => getShownPages(turn.assistantMessages, finalMessage), [turn.assistantMessages, finalMessage]);
     return { finalMessage, activityMessages, settled, isExpanded: !settled || expanded, pages };
 };
 

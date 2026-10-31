@@ -1,5 +1,5 @@
 import { isInvisibleText } from '@/lib/invisibleText';
-import { getLastConversationRecord, type ToolPart } from '@/lib/opencode/model';
+import { getLastConversationRecord, type TextPart, type ToolPart } from '@/lib/opencode/model';
 import { isShownInPlace } from '@/lib/opencode/tools';
 import { isSessionNoticePart } from '@/lib/opencode/session-notices';
 import { isStandaloneTool } from '../../message/parts/toolRenderUtils';
@@ -40,13 +40,22 @@ export function hasLiveActivity(turn: TurnRecord, showReasoning: boolean): boole
     ));
 }
 
+/** Something the turn showed the user that a collapsed Activity never folds away. */
+export type ShownPart = ToolPart | TextPart;
+
+// An opening `openui-lang` fence; `openui-lang literal` is a code sample and stays text.
+const UI_BLOCK_FENCE = /^ {0,3}(`{3,}|~{3,})openui-lang[ \t]*$/m;
+
 /**
- * What a turn's calls showed the user, in the order they ran: the pages of
- * `openchamber_render` calls, waiting ones included, and the workflow runs
- * `workflow.run` calls proposed.
+ * What a turn showed the user, in the order it happened: the pages of
+ * `openchamber_render` calls, waiting ones included, the workflow runs
+ * `workflow.run` calls proposed, and text with a UI block that the agent
+ * wrote before a later step. The final answer's own text is the answer, so
+ * it is never hoisted.
  */
-export function getShownPages(messages: readonly ChatMessageEntry[]): ToolPart[] {
-    return messages.flatMap((message) => message.parts.filter((part): part is ToolPart => (
-        part.type === 'tool' && isShownInPlace(part.tool, part.state)
+export function getShownPages(messages: readonly ChatMessageEntry[], finalMessage?: ChatMessageEntry): ShownPart[] {
+    return messages.flatMap((message) => message.parts.filter((part): part is ShownPart => (
+        (part.type === 'tool' && isShownInPlace(part.tool, part.state))
+        || (part.type === 'text' && message !== finalMessage && UI_BLOCK_FENCE.test(part.text))
     )));
 }

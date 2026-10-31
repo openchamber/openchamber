@@ -13,7 +13,8 @@ function WaitingDot() {
 export function PageAskStatus({ ask, answeredSummary }: { ask: RenderedPageAsk; answeredSummary: string | undefined }) {
     const { t } = useI18n();
     const status = answeredSummary !== undefined
-        ? t('chat.htmlRender.answered', { summary: answeredSummary })
+        // A form's summary has a line per field; on one line they need a separator.
+        ? t('chat.htmlRender.answered', { summary: answeredSummary.trim().replace(/\s*\n\s*/g, ' · ') })
         : ask.kind === 'waiting'
             ? t('chat.htmlRender.waiting')
             : ask.kind === 'answered-in-chat'

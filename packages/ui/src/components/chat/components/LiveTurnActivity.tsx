@@ -13,7 +13,7 @@ import type { ChatMessageEntry, TurnRecord } from '../lib/turns/types';
 import { getShownPages } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
-import { ShownToolCard } from '../message/parts/ShownToolCard';
+import { ShownPartCard } from '../message/parts/ShownToolCard';
 import { useActivityRowGlide } from './useActivityRowGlide';
 import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFold';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
@@ -153,7 +153,7 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
 function TurnPages({ pages }: { pages: ReturnType<typeof getShownPages> }) {
     return (
         <div className="chat-message-column">
-            {pages.map((part) => <ShownToolCard key={part.id} part={part} />)}
+            {pages.map((part) => <ShownPartCard key={part.id} part={part} />)}
         </div>
     );
 }

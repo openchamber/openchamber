@@ -70,3 +70,19 @@ describe('blockDecisions', () => {
     expect(blockDecisions(parsed.root)).toEqual(['#1', '#2', '']);
   });
 });
+
+describe('catalog additions', () => {
+  test('a series may leave a point empty with null', () => {
+    expect(parseUiBlock('root = Stack([LineChart(["a", "b", "c"], [Series("s", [1, null, 3])])])', true).kind).toBe('ready');
+  });
+
+  test('stat, progress and a blocked step parse', () => {
+    expect(parseUiBlock([
+      'root = Stack([Stat("Installs", 48210, "+12%", "success"), Progress("Budget", 87), Steps([{title: "Review", status: "blocked"}])])',
+    ].join('\n'), true).kind).toBe('ready');
+  });
+
+  test('a card with an empty title parses', () => {
+    expect(parseUiBlock('root = Stack([Card("", [Text("no title")])])', true).kind).toBe('ready');
+  });
+});

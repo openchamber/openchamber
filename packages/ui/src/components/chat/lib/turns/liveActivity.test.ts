@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage, Part, ToolPart, ToolStateCompleted } from '@/lib/opencode/model';
 import { attachSyntheticContext } from '../attachSyntheticContext';
-import { getLiveFinalMessage, getTurnsWithLaterAssistant, hasLiveActivity } from './liveActivity';
+import { getLiveFinalMessage, getShownPages, getTurnsWithLaterAssistant, hasLiveActivity } from './liveActivity';
 import { projectTurnRecords } from './projectTurnRecords';
 import { summarizeLiveActivity } from './liveActivitySummary';
 import type { ChatMessageEntry } from './types';
@@ -299,5 +299,15 @@ describe('live activity report', () => {
             { file: '/project/noop', additions: 0, deletions: 0, status: 'modified' },
             { file: '/project/empty', additions: 0, deletions: 0, status: 'added' },
         ] } })])])).toMatchObject({ files: 1, additions: 0, deletions: 0, hasCompleteDiff: true });
+    });
+});
+
+describe('getShownPages', () => {
+    test('keeps text with a UI block in view, except the final answer and code samples', () => {
+        const block = text('Overview:\n```openui-lang\nroot = Stack([])\n```');
+        const sample = text('```openui-lang literal\nroot = Stack([])\n```');
+        const step = assistant('step', [block, sample], { finish: 'tool-calls' });
+        const answer = assistant('answer', [text('```openui-lang\nroot = Stack([])\n```')], { finish: 'stop' });
+        expect(getShownPages([step, answer], answer)).toEqual([block]);
     });
 });

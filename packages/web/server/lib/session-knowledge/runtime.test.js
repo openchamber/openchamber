@@ -231,7 +231,7 @@ describe('when to draw a page', () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
     expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
-    expect(entries[GUIDANCE]).toContain('Skip it for a few numbers');
+    expect(entries[GUIDANCE]).toContain('Not for a few numbers');
     expect(entries[GUIDANCE]).toContain('root = Stack([...])');
   });
 
