@@ -1,6 +1,9 @@
 # Agent memory
 .graymatter/
 
+# CodeGraph local index (generated, ~430 MB)
+.codegraph/
+
 # Logs
 logs
 *.log
