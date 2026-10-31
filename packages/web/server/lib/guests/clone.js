@@ -17,6 +17,38 @@ const PRIVATE_IPV4 = [
  * loopback or LAN address would turn "install from URL" into a request against
  * OpenChamber's own machine or network.
  */
+/**
+ * The eight 16-bit groups of an IPv6 address, or null when it is not spelled
+ * as eight groups. Covers every expansion of `::`, so `::1` and
+ * `0:0:0:0:0:0:0:1` compare equal.
+ */
+const ipv6Groups = (host) => {
+  const halves = host.split('::');
+  if (halves.length > 2) return null;
+  const [head, tail = ''] = halves;
+  const headGroups = head ? head.split(':') : [];
+  const tailGroups = tail ? tail.split(':') : [];
+  const missing = 8 - headGroups.length - tailGroups.length;
+  if (missing < 0) return null;
+  const groups = [...headGroups, ...Array(missing).fill('0'), ...tailGroups];
+  if (groups.length !== 8) return null;
+  return groups.map((group) => (/^[0-9a-f]{1,4}$/i.test(group) ? parseInt(group, 16) : -1));
+};
+
+/**
+ * The IPv6 addresses that are never an install target, in any spelling:
+ * loopback (`::1`), the unspecified address (`::`), IPv4-mapped space
+ * (`::ffff:…`), and link-local (`fe80::/10`). An address that does not parse
+ * as eight groups is refused outright.
+ */
+const isReservedIPv6 = (host) => {
+  if (host.startsWith('fe80:') || host.startsWith('::ffff:')) return true;
+  const groups = ipv6Groups(host);
+  if (!groups || groups.some((group) => group < 0)) return true;
+  if (groups[4] === 0 && groups[5] === 0xffff) return true;
+  return groups.slice(0, 7).every((group) => group === 0) && (groups[7] === 0 || groups[7] === 1);
+};
+
 const isPublicHostname = (hostname) => {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
@@ -27,7 +59,7 @@ const isPublicHostname = (hostname) => {
     return !PRIVATE_IPV4.some((pattern) => pattern.test(host));
   }
   if (version === 6) {
-    return !(host === '::1' || host === '::' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('::ffff:'));
+    return !(host.startsWith('fc') || host.startsWith('fd')) && !isReservedIPv6(host);
   }
   return host.includes('.');
 };
@@ -61,7 +93,7 @@ const isLocalOnlyHost = (hostname) => {
   if (!host || host === 'localhost' || host.endsWith('.localhost')) return true;
   const version = net.isIP(host);
   if (version === 4) return /^127\./.test(host) || /^0\./.test(host) || /^169\.254\./.test(host);
-  if (version === 6) return host === '::1' || host === '::' || host.startsWith('fe80:') || host.startsWith('::ffff:');
+  if (version === 6) return isReservedIPv6(host);
   return false;
 };
 

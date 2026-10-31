@@ -92,7 +92,7 @@ describe('settings registry', () => {
   });
 
   test('keeps only whole plain-HTTP origins in the insecure Git allowlist', () => {
-    const box = 'git.internal\nhttp://git.internal:8443\nhttps://secure.internal\nhttp://user@git.internal\nhttp://path.internal/group\nnot a url\n\n';
+    const box = 'git.internal\nhttp://git.internal:8443\nhttps://secure.internal\nhttp://user@git.internal\nhttp://path.internal/group\nnot a url\nhttp://*.internal\nhttp://\n\n';
     expect(parseSettingsDocument({ allowedInsecureGitOrigins: box }))
       .toEqual({ allowedInsecureGitOrigins: 'http://git.internal\nhttp://git.internal:8443' });
     expect(parseSettingsDocument({ allowedInsecureGitOrigins: 'https://secure.internal' })).toEqual({ allowedInsecureGitOrigins: '' });

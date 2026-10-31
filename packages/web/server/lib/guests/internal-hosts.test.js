@@ -62,8 +62,8 @@ describe('isInstallableUrl', () => {
   });
 
   it('never opens loopback or link-local, even when the list names them', () => {
-    const named = installTrust(policyWith(['http://127.0.0.1:8080', 'http://localhost:3000', 'http://169.254.169.254']));
-    for (const url of ['http://127.0.0.1:8080/x.git', 'https://127.0.0.1/x.git', 'http://localhost:3000/x.git', 'https://localhost/x.git', 'http://169.254.169.254/x.git']) {
+    const named = installTrust(policyWith(['http://127.0.0.1:8080', 'http://localhost:3000', 'http://169.254.169.254', 'http://[0:0:0:0:0:0:0:1]:8080']));
+    for (const url of ['http://127.0.0.1:8080/x.git', 'https://127.0.0.1/x.git', 'http://localhost:3000/x.git', 'https://localhost/x.git', 'http://169.254.169.254/x.git', 'http://[0:0:0:0:0:0:0:1]:8080/x.git']) {
       expect(isInstallableUrl(url, named), url).toBe(false);
     }
   });
@@ -103,10 +103,18 @@ describe('publicAddressesOf with a trusted host', () => {
     expect(await publicAddressesOf('gitlab.corp.internal', lanLookup, trusted)).toEqual([{ address: '10.1.2.3', family: 4 }]);
   });
 
-  it('refuses a listed name that resolves to loopback or link-local', async () => {
+  it('refuses a listed name that resolves to loopback or link-local, in any IPv6 spelling', async () => {
     expect(await publicAddressesOf('gitlab.corp.internal', async () => [{ address: '127.0.0.1' }], trusted)).toBeNull();
     expect(await publicAddressesOf('gitlab.corp.internal', async () => [{ address: '169.254.169.254' }], trusted)).toBeNull();
     expect(await publicAddressesOf('gitlab.corp.internal', async () => [{ address: '10.1.2.3' }, { address: '127.0.0.1' }], trusted)).toBeNull();
+    expect(await publicAddressesOf('gitlab.corp.internal', async () => [{ address: '0:0:0:0:0:0:0:1' }], trusted)).toBeNull();
+    expect(await publicAddressesOf('gitlab.corp.internal', async () => [{ address: '0:0:0:0:0:0:0:0' }], trusted)).toBeNull();
+    expect(await publicAddressesOf('gitlab.corp.internal', async () => [{ address: 'fe80:0:0:0:1:2:3:4' }], trusted)).toBeNull();
+  });
+
+  it('lets a listed name resolve to a public IPv6 address', async () => {
+    expect(await publicAddressesOf('gitlab.corp.internal', async () => [{ address: '2001:db8::1' }], trusted))
+      .toEqual([{ address: '2001:db8::1', family: 6 }]);
   });
 
   it('still refuses a public name that resolves to a private address', async () => {

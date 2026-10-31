@@ -5,6 +5,7 @@ import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 import { isWorkflowFeatureAvailable } from '../workflows/feature-flag.js';
 import { isOverviewFeatureAvailable } from '../overview/feature-flag.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
+import { normalizeInsecureGitOrigin } from '../enterprise-mode.js';
 import { asNonEmptyString } from '../shared/guards.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
@@ -106,25 +107,11 @@ export const createSettingsHelpers = (dependencies) => {
   const LAST_USED_EFFORTS_MAX_KEYS = 512;
   const lastUsedEffortsSchema = z.record(z.string(), z.string().trim().min(1).nullable().catch(undefined));
 
-  const normalizeInsecureGitOrigin = (raw) => {
-    const parsed = z.string().safeParse(raw);
-    const value = parsed.success ? parsed.data.trim() : '';
-    if (!value || value.length > 512) return null;
-    let url;
-    try {
-      url = new URL(value.includes('://') ? value : `http://${value}`);
-    } catch {
-      return null;
-    }
-    if (url.protocol !== 'http:' || url.username || url.password || url.search || url.hash) return null;
-    if (url.pathname !== '' && url.pathname !== '/') return null;
-    return url.origin;
-  };
-
   // One origin per line, as typed in Settings → Git. The stored text holds
   // exactly the origins the server's check accepts — the UI's registry parser
-  // mirrors this by hand — so what persists and the trust it buys never
-  // diverge. An empty string means the user cleared the list.
+  // mirrors this by hand, and the normalizer is the same one the policy file's
+  // list goes through — so what persists and the trust it buys never diverge.
+  // An empty string means the user cleared the list.
   const sanitizeInsecureGitOriginsText = (input) => {
     const parsed = z.string().safeParse(input);
     if (!parsed.success) return null;

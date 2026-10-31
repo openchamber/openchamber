@@ -562,7 +562,7 @@ describe('settings helpers', () => {
     const helpers = createTestHelpers();
 
     expect(helpers.sanitizeSettingsUpdate({
-      allowedInsecureGitOrigins: 'http://git.internal\n http://port.internal:8443 \ngit.host\nhttps://secure.internal\nhttp://user@git.internal\nhttp://path.internal/group\nnot a url',
+      allowedInsecureGitOrigins: 'http://git.internal\n http://port.internal:8443 \ngit.host\nhttps://secure.internal\nhttp://user@git.internal\nhttp://path.internal/group\nnot a url\nhttp://*.internal\nhttp://',
     })).toEqual({
       allowedInsecureGitOrigins: 'http://git.internal\nhttp://port.internal:8443\nhttp://git.host',
     });

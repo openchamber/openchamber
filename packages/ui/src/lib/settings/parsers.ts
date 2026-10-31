@@ -81,9 +81,11 @@ export const parseTrimmedStringUpTo = (maxLength: number): SettingsParser<string
 
 /**
  * One typed plain-HTTP Git origin, as the server's allowlist accepts it:
- * `http:` only, no credentials, path, query or fragment. A bare host gets the
+ * `http:` only, no credentials, path, query or fragment, a hostname a real
+ * origin can have (empty and wildcard hosts are refused). A bare host gets the
  * scheme added. `null` for anything else, so a control can show the line back
- * as not understood.
+ * as not understood. Mirrors `normalizeInsecureGitOrigin` in the server's
+ * `enterprise-mode.js` by hand.
  */
 export const normalizeInsecureGitOrigin = (raw: string): string | null => {
   const value = raw.trim();
@@ -96,6 +98,7 @@ export const normalizeInsecureGitOrigin = (raw: string): string | null => {
   }
   if (url.protocol !== 'http:' || url.username || url.password || url.search || url.hash) return null;
   if (url.pathname !== '' && url.pathname !== '/') return null;
+  if (!url.hostname || url.hostname.includes('*')) return null;
   return url.origin;
 };
 
