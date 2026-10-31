@@ -53,8 +53,10 @@ function authorizationCompleted(previous: AccountSnapshot, next: AccountSnapshot
  * One tracker on Settings → Integrations → Built-in integrations, drawn from
  * the descriptor the server serves: connect through the browser and wait for
  * the account to appear, disconnect, and switch between accounts where the
- * tracker keeps several (`multipleAccounts`). Project mapping and session
- * comments show where the tracker's capabilities offer them.
+ * tracker keeps several (`multipleAccounts`). A tracker with no sign-in this
+ * version performs (`authMethods: []`) is always connected and only shows its
+ * account. Project mapping and session comments show where the tracker's
+ * capabilities offer them.
  */
 export const TrackerSettings: React.FC<{ descriptor: TrackerDescriptor }> = ({ descriptor }) => {
   const { t } = useI18n();
@@ -158,6 +160,9 @@ export const TrackerSettings: React.FC<{ descriptor: TrackerDescriptor }> = ({ d
   // Browser sign-in is the one method this version draws; a tracker that only
   // takes another asks for an update instead of showing a dead Connect.
   const canConnect = descriptor.authMethods.includes('oauth');
+  // A tracker that signs in through no method this version performs takes no
+  // auth actions here: its connection is always on (the local tracker).
+  const hasAuthMethods = descriptor.authMethods.length > 0;
   const connected = Boolean(status?.connected);
   const account = status?.connected ? status.account ?? null : null;
   const user = account?.user;
@@ -239,23 +244,25 @@ export const TrackerSettings: React.FC<{ descriptor: TrackerDescriptor }> = ({ d
                 </div>
               </div>
             ) : null}
-            <div className="flex flex-wrap items-center gap-2">
-              {capabilities.multipleAccounts && canConnect ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void startConnect()}
-                  disabled={isBusy || isWaiting}
-                  data-settings-item={`${settingsItem}.add-workspace`}
-                >
-                  {t(copy.addAccount, { provider })}
+            {hasAuthMethods ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {capabilities.multipleAccounts && canConnect ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void startConnect()}
+                    disabled={isBusy || isWaiting}
+                    data-settings-item={`${settingsItem}.add-workspace`}
+                  >
+                    {t(copy.addAccount, { provider })}
+                  </Button>
+                ) : null}
+                <Button type="button" size="sm" variant="destructive" onClick={() => void disconnect()} disabled={isBusy}>
+                  {t(copy.disconnect)}
                 </Button>
-              ) : null}
-              <Button type="button" size="sm" variant="destructive" onClick={() => void disconnect()} disabled={isBusy}>
-                {t(copy.disconnect)}
-              </Button>
-            </div>
+              </div>
+            ) : null}
           </>
         ) : isWaiting ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -277,9 +284,9 @@ export const TrackerSettings: React.FC<{ descriptor: TrackerDescriptor }> = ({ d
             {isBusy ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
             {t(copy.connect, { provider })}
           </Button>
-        ) : (
+        ) : hasAuthMethods ? (
           <p className="typography-meta text-muted-foreground">{t(copy.unsupportedSignIn, { provider })}</p>
-        )}
+        ) : null}
       </div>
     </IntegrationCatalogCard>
   );

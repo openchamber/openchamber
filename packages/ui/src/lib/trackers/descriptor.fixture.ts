@@ -24,6 +24,30 @@ export const linearLikeTrackerDescriptor = (overrides: Partial<TrackerDescriptor
   ...overrides,
 });
 
+/** The local tracker as the server describes it (`server/lib/local/tracker.js`): no sign-in, always connected. */
+export const localTrackerDescriptor = (overrides: Partial<TrackerDescriptor> = {}): TrackerDescriptor => ({
+  id: 'local',
+  name: 'Local',
+  authMethods: [],
+  capabilities: {
+    multipleAccounts: false,
+    stateUpdate: true,
+    children: false,
+    labels: true,
+    priority: true,
+    filters: { people: false, priority: true },
+    projectMapping: false,
+    sessionComments: true,
+    hostAccess: false,
+    create: true,
+    edit: true,
+  },
+  stateFilters: ['open', 'all', 'triage', 'backlog', 'todo', 'in-progress', 'done', 'canceled'],
+  urlPatterns: [{ host: 'openchamber.local', path: '^/tracker/local/([A-Za-z][A-Za-z0-9]*-\\d+)(?:/|$)' }],
+  identifierPattern: '^[A-Za-z][A-Za-z0-9]*-\\d+$',
+  ...overrides,
+});
+
 /** A tracker the UI has no presentation for: token auth, no extras, its own links. */
 export const acmeTrackerDescriptor = (overrides: Partial<TrackerDescriptor> = {}): TrackerDescriptor => ({
   id: 'acme-tickets',

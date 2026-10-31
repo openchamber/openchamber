@@ -110,7 +110,17 @@ const LINEAR_COPY: TrackerSettingsCopy = {
   },
 };
 
-const COPY_BY_TRACKER = new Map<string, TrackerSettingsCopy>([['linear', LINEAR_COPY]]);
+// The local tracker never connects to a server, so its card describes where
+// its issues live instead of asking to connect.
+const LOCAL_COPY: TrackerSettingsCopy = {
+  ...GENERIC_COPY,
+  description: 'settings.integrations.local.description',
+};
+
+const COPY_BY_TRACKER = new Map<string, TrackerSettingsCopy>([
+  ['linear', LINEAR_COPY],
+  ['local', LOCAL_COPY],
+]);
 
 /** The Settings sentences of a tracker, by its id; a tracker without its own reads the generic ones. */
 export const trackerSettingsCopy = (id: string): TrackerSettingsCopy => COPY_BY_TRACKER.get(id) ?? GENERIC_COPY;

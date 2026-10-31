@@ -4,7 +4,7 @@ import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import type { RuntimeAPIs, TrackerAPI, TrackerAuthStatus, TrackerDescriptor } from '@/lib/api/types';
-import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
+import { acmeTrackerDescriptor, linearLikeTrackerDescriptor, localTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 
 const unexpected = (): never => { throw new Error('Unexpected runtime API access'); };
@@ -224,5 +224,22 @@ describe('TrackerSettings', () => {
     expect(container.querySelector('[data-settings-item="integrations.acme-tickets"]')).not.toBeNull();
     expect(buttonLabels()).not.toContain('Connect');
     expect(container.textContent).toContain('Update OpenChamber');
+  });
+
+  test('shows the connected account of a tracker without auth methods, with no sign-in actions', async () => {
+    status = { connected: true, account: { id: 'local', name: 'Local', user: null, current: true } };
+    await mount(localTrackerDescriptor());
+    expect(container.textContent).toContain('Local');
+    expect(container.textContent).toContain('Nothing to connect');
+    expect(buttonLabels()).not.toContain('Connect');
+    expect(buttonLabels()).not.toContain('Disconnect');
+    expect(container.textContent).not.toContain('Update OpenChamber');
+    expect(container.querySelector('[data-settings-item="integrations.local.session-comments"]')).not.toBeNull();
+  });
+
+  test('shows neither a connect button nor the update copy while a tracker without auth methods is unchecked', async () => {
+    await mount(localTrackerDescriptor());
+    expect(buttonLabels()).not.toContain('Connect');
+    expect(container.textContent).not.toContain('Update OpenChamber');
   });
 });

@@ -74,8 +74,28 @@ const LINEAR_SETTINGS_SEARCH: TrackerSettingsSearch = {
   },
 };
 
+// Local issues live on this machine, so nothing to add an account for or map;
+// the sub-entries stay the generic ones the type requires and the capabilities
+// keep them out of search.
+const LOCAL_SETTINGS_SEARCH: TrackerSettingsSearch = {
+  title: 'settings.integrations.local.title',
+  description: 'settings.integrations.local.description',
+  keywords: ['local', 'issues', 'markdown', 'files', 'offline'],
+  addAccount: { title: 'settings.integrations.tracker.actions.addAccount', keywords: ['local', 'account', 'add'] },
+  mapping: {
+    title: 'settings.integrations.tracker.mapping.defaultProject',
+    description: 'settings.integrations.tracker.mapping.defaultProject.info',
+    keywords: ['local', 'project', 'map', 'directory'],
+  },
+};
+
 // Local issues are markdown files in the project's folder on this machine, so the folder marks the tracker.
-const LOCAL_PRESENTATION: TrackerPresentation = { icon: 'folder', copy: GENERIC_COPY, branchName: issueBranchName };
+const LOCAL_PRESENTATION: TrackerPresentation = {
+  icon: 'folder',
+  copy: GENERIC_COPY,
+  branchName: issueBranchName,
+  settingsSearch: LOCAL_SETTINGS_SEARCH,
+};
 
 const PRESENTATIONS = new Map<string, TrackerPresentation>([
   ['linear', { icon: 'linear', copy: LINEAR_COPY, branchName: issueBranchName, settingsSearch: LINEAR_SETTINGS_SEARCH }],

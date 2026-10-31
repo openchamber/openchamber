@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { I18nKey, I18nParams } from '@/lib/i18n/store';
-import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
+import { acmeTrackerDescriptor, linearLikeTrackerDescriptor, localTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
 import { acmeDescriptor, githubLikeDescriptor, gitlabLikeDescriptor } from '@/lib/source-control/providers/descriptor.fixture';
 import { buildSettingsSearchResults, SETTINGS_ANCHOR_PAGES } from './search';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -160,6 +160,8 @@ describe('settings search', () => {
     expect(results.filter((result) => result.id.startsWith('integrations.linear')).map((result) => result.id)).toEqual(['integrations.linear']);
     const acme = buildSettingsSearchResults({ query: 'acme', runtimeCtx, t, getPageTitle: (page) => page, trackers: [acmeTrackerDescriptor()] });
     expect(acme.some((result) => result.id.startsWith('integrations.acme'))).toBe(false);
+    const local = buildSettingsSearchResults({ query: 'local issues', runtimeCtx, t, getPageTitle: (page) => page, trackers: [localTrackerDescriptor()] });
+    expect(local.filter((result) => result.id.startsWith('integrations.local')).map((result) => result.id)).toEqual(['integrations.local']);
   });
 
   test('finds the small model effort setting by thinking and reasoning keywords', () => {
