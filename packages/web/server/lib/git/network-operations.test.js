@@ -2154,6 +2154,93 @@ process.exit(safe ? 0 : 1);
     expect(setupValue.calls.find((call) => call.args.includes('clone'))?.options.cwd).toBe(alpha);
   });
 
+  it.each([
+    ['submodule', true], ['lfs', true], ['submodule', false],
+  ])('authorizes a %s first found inside a child the same run cloned, granted=%s', async (kind, granted) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-fresh-nested-'));
+    temporaryDirectories.push(root);
+    const alpha = path.join(root, 'vendor', 'alpha');
+    const nested = path.join(alpha, 'nested');
+    const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${'d'.repeat(64)}\nsize 12\n`;
+    const childEndpoint = kind === 'lfs'
+      ? 'https://example.com/owner/alpha.git/info/lfs'
+      : 'https://example.com/owner/nested.git';
+    const rootManifest = 'submodule.alpha.path\nvendor/alpha\0submodule.alpha.url\n../alpha.git\0';
+    const childManifest = 'submodule.nested.path\nnested\0submodule.nested.url\n../nested.git\0';
+    const validateGitAuxiliaryContext = vi.fn(async ({ rawEndpoint }) => {
+      if (!granted && rawEndpoint === childEndpoint) {
+        throw Object.assign(new Error('Missing grant'), { code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED' });
+      }
+      return {
+        endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+        transportMode: 'system', transportRevision: 'transport_one',
+      };
+    });
+    const setupValue = setup({
+      validateGitAuxiliaryContext,
+      spawnResponder: ({ args, options }) => {
+        const command = args.join(' ');
+        const inLfsChild = kind === 'lfs' && options.cwd === alpha;
+        if (command.includes('config --blob HEAD:.gitmodules')) {
+          if (options.cwd === root) return { code: 0, stdout: rootManifest };
+          return kind === 'submodule' && options.cwd === alpha ? { code: 0, stdout: childManifest } : { code: 1 };
+        }
+        if (command.includes('ls-tree -rz')) {
+          if (options.cwd === root) return { code: 0, stdout: `160000 commit ${'b'.repeat(40)}\tvendor/alpha\0` };
+          return kind === 'submodule' && options.cwd === alpha
+            ? { code: 0, stdout: `160000 commit ${'c'.repeat(40)}\tnested\0` }
+            : { code: 0 };
+        }
+        if (command.includes('clone --no-checkout')) {
+          fsSync.mkdirSync(path.join(args.at(-1), '.git'));
+          return { code: 0 };
+        }
+        if (command.includes('rev-parse --verify HEAD')) {
+          if (options.cwd === alpha) return { code: 0, stdout: 'b'.repeat(40) };
+          return { code: 0, stdout: options.cwd === nested ? 'c'.repeat(40) : SHA };
+        }
+        if (args.includes('ls-files')) return inLfsChild ? { code: 0, stdout: 'asset.bin\0' } : { code: 0 };
+        if (inLfsChild && args.includes('check-attr')) return { code: 0, stdout: 'asset.bin\0filter\0lfs\0' };
+        if (inLfsChild && args.includes('--batch-check')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n` };
+        if (inLfsChild && args.includes('--batch')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n${pointer}\n` };
+        if (command.includes('HEAD:.lfsconfig') || command.includes('config --includes')) return { code: 1 };
+        if (command.includes('lfs version')) return inLfsChild ? { code: 0, stdout: 'git-lfs/3.0' } : { code: 1 };
+        return { code: 0 };
+      },
+    });
+
+    const result = await setupValue.service.hydrateBoundCheckout({
+      directory: root, parentRemoteName: 'publish',
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'config_one' },
+    });
+
+    // Planning could not see this endpoint, so execution checks it against the binding revision planning pinned.
+    expect(validateGitAuxiliaryContext).toHaveBeenCalledWith(expect.objectContaining({
+      directory: root, repositoryId: 'repo_one', bindingRevision: 2, kind, rawEndpoint: childEndpoint,
+    }));
+    const clones = setupValue.calls.filter((call) => call.args.includes('clone')).map((call) => call.args.at(-1));
+    if (!granted) {
+      expect(result.submodules).toMatchObject([
+        { path: 'vendor/alpha', status: 'succeeded' },
+        { path: 'vendor/alpha/nested', status: 'authorization-required' },
+      ]);
+      expect(clones).toEqual([alpha]);
+      return;
+    }
+    expect(result.status).toBe('succeeded');
+    if (kind === 'submodule') {
+      expect(result.submodules).toMatchObject([
+        { path: 'vendor/alpha', status: 'succeeded' },
+        { path: 'vendor/alpha/nested', status: 'succeeded', endpoint: { displayUrl: childEndpoint } },
+      ]);
+      expect(clones).toEqual([alpha, nested]);
+    } else {
+      expect(result.lfs).toContainEqual(expect.objectContaining({
+        path: 'vendor/alpha', status: 'succeeded', endpoint: expect.objectContaining({ displayUrl: childEndpoint }),
+      }));
+    }
+  });
+
   it('does not report a freshly cloned submodule as hydrated when discovery inside it fails', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-recursive-'));
     temporaryDirectories.push(root);
