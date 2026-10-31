@@ -135,6 +135,39 @@ export function registerTrackerRoutes(app, { registry }) {
     return tracker.updateState({ id, stateId });
   }, (descriptor) => descriptor.capabilities.stateUpdate));
 
+  const hasCreate = (descriptor) => descriptor.capabilities.create === true;
+  const hasEdit = (descriptor) => descriptor.capabilities.edit === true;
+  const readLabels = (value) => (Array.isArray(value) ? value.filter(isString).map((label) => label.trim()).filter(Boolean) : []);
+
+  app.post('/api/tracker/:provider/items/create', parseJsonBody, handle('create item', ({ req, tracker }) => {
+    const body = readBody(req);
+    const title = readString(body.title);
+    const containerId = readString(body.containerId);
+    if (!title) throw invalid('title is required');
+    if (!containerId) throw invalid('containerId is required');
+    return tracker.create({
+      containerId,
+      title,
+      description: readString(body.description) || null,
+      priority: readString(body.priority) || null,
+      labels: readLabels(body.labels),
+    });
+  }, hasCreate));
+
+  // Only the fields the body carries are forwarded; an absent field means the
+  // tracker leaves the stored value alone, an explicit `null` clears it.
+  app.post('/api/tracker/:provider/items/edit', parseJsonBody, handle('edit item', ({ req, tracker }) => {
+    const body = readBody(req);
+    const id = readString(body.id);
+    if (!id) throw invalid('id is required');
+    const input = { id };
+    if (body.title !== undefined) input.title = readString(body.title);
+    if (body.description !== undefined) input.description = readString(body.description) || null;
+    if (body.priority !== undefined) input.priority = readString(body.priority) || null;
+    if (body.labels !== undefined) input.labels = readLabels(body.labels);
+    return tracker.edit(input);
+  }, hasEdit));
+
   app.get('/api/tracker/:provider/states', handle('load workflow states', ({ req, tracker }) => {
     const containerId = queryValue(req, 'containerId');
     if (!containerId) throw invalid('containerId is required');

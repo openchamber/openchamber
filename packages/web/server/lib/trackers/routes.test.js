@@ -28,6 +28,8 @@ const fakeTracker = () => ({
   get: vi.fn(async () => ({ connected: true, item })),
   states: vi.fn(async () => ({ connected: true, states: [] })),
   updateState: vi.fn(async () => ({ connected: true, item })),
+  create: vi.fn(async () => ({ connected: true, item })),
+  edit: vi.fn(async () => ({ connected: true, item })),
   liveSummaries: vi.fn(),
   matchUrl: () => null,
   mapping: {
@@ -79,6 +81,8 @@ describe('tracker routes', () => {
       request(app).get('/api/tracker/nope/items/list'),
       request(app).get('/api/tracker/nope/items/get?id=ENG-12'),
       request(app).post('/api/tracker/nope/items/update').send({ id: 'ENG-12', stateId: 's' }),
+      request(app).post('/api/tracker/nope/items/create').send({ title: 'x', containerId: 't' }),
+      request(app).post('/api/tracker/nope/items/edit').send({ id: 'ENG-12' }),
       request(app).get('/api/tracker/nope/states?containerId=t'),
       request(app).get('/api/tracker/nope/mapping'),
       request(app).put('/api/tracker/nope/mapping').send({}),
@@ -231,7 +235,7 @@ describe('tracker routes', () => {
     };
     const limited = createApp([
       {
-        descriptor: descriptorFor('limited', { multipleAccounts: false, stateUpdate: false, projectMapping: false, sessionComments: false }),
+        descriptor: descriptorFor('limited', { multipleAccounts: false, stateUpdate: false, projectMapping: false, sessionComments: false, create: false, edit: false }),
         load: async () => tracker,
       },
       // Capabilities claim more than the implementation carries.
@@ -240,6 +244,8 @@ describe('tracker routes', () => {
     const calls = [
       request(limited).post('/api/tracker/limited/auth/activate').send({ accountId: 'known' }),
       request(limited).post('/api/tracker/limited/items/update').send({ id: 'ENG-12', stateId: 's' }),
+      request(limited).post('/api/tracker/limited/items/create').send({ title: 'x', containerId: 't' }),
+      request(limited).post('/api/tracker/limited/items/edit').send({ id: 'ENG-12' }),
       request(limited).get('/api/tracker/limited/states?containerId=t'),
       request(limited).get('/api/tracker/limited/mapping'),
       request(limited).put('/api/tracker/limited/mapping').send({}),
@@ -255,7 +261,46 @@ describe('tracker routes', () => {
       expect(response.body.code).toBe('UNSUPPORTED');
     }
     expect(tracker.updateState).not.toHaveBeenCalled();
+    expect(tracker.create).not.toHaveBeenCalled();
+    expect(tracker.edit).not.toHaveBeenCalled();
     expect(tracker.mapping.set).not.toHaveBeenCalled();
+  });
+
+  it('creates and edits items behind the capability bits', async () => {
+    const full = createApp([{
+      descriptor: descriptorFor('full', { create: true, edit: true }),
+      load: async () => tracker,
+    }]);
+
+    await request(full).post('/api/tracker/full/items/create').send({ containerId: 'team-1' }).expect(400);
+    await request(full).post('/api/tracker/full/items/create').send({ title: 'Broken login' }).expect(400);
+    await request(full)
+      .post('/api/tracker/full/items/create')
+      .send({ title: '  Broken login ', containerId: 'team-1', description: 'It fails', priority: 'high', labels: [' bug ', 7, 'ui', ''] })
+      .expect(200);
+    expect(tracker.create).toHaveBeenLastCalledWith({
+      containerId: 'team-1', title: 'Broken login', description: 'It fails', priority: 'high', labels: ['bug', 'ui'],
+    });
+    await request(full).post('/api/tracker/full/items/create').send({ title: 'Broken login', containerId: 'team-1' }).expect(200);
+    expect(tracker.create).toHaveBeenLastCalledWith({
+      containerId: 'team-1', title: 'Broken login', description: null, priority: null, labels: [],
+    });
+
+    await request(full).post('/api/tracker/full/items/edit').send({ title: 'Fixed login' }).expect(400);
+    await request(full).post('/api/tracker/full/items/edit').send({ id: 'ENG-12', title: 'Fixed login', description: null }).expect(200);
+    expect(tracker.edit).toHaveBeenLastCalledWith({ id: 'ENG-12', title: 'Fixed login', description: null });
+    await request(full).post('/api/tracker/full/items/edit').send({ id: 'ENG-12', labels: [' a ', 1, 'b'] }).expect(200);
+    expect(tracker.edit).toHaveBeenLastCalledWith({ id: 'ENG-12', labels: ['a', 'b'] });
+    // Fields left out of the body are not forwarded.
+    await request(full).post('/api/tracker/full/items/edit').send({ id: 'ENG-12', title: 'Renamed' }).expect(200);
+    expect(tracker.edit).toHaveBeenLastCalledWith({ id: 'ENG-12', title: 'Renamed' });
+
+    const gatedTracker = fakeTracker();
+    const gated = createApp([{ descriptor: descriptorFor('gated'), load: async () => gatedTracker }]);
+    await request(gated).post('/api/tracker/gated/items/create').send({ title: 'x', containerId: 't' }).expect(404);
+    await request(gated).post('/api/tracker/gated/items/edit').send({ id: 'ENG-12' }).expect(404);
+    expect(gatedTracker.create).not.toHaveBeenCalled();
+    expect(gatedTracker.edit).not.toHaveBeenCalled();
   });
 
   it('caps JSON bodies at 16kb', async () => {
