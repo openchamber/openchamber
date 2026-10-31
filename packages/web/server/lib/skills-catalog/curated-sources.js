@@ -37,8 +37,23 @@ const CURATED_SKILLS_SOURCES = [
   },
 ];
 
-/** The built-in catalogs, or none when the machine policy hides them. */
+/**
+ * The catalogs on offer. The machine policy's `skillsCatalogSources` replaces
+ * the built-in list (an administrator who names catalogs wants those, whether
+ * or not the built-in ones are hidden); otherwise the built-in catalogs, or
+ * none when the policy hides them.
+ */
 export function getCuratedSkillsSources(policyOptions) {
-  if (readEnterprisePolicy(policyOptions).hideBuiltinSkillCatalogs) return [];
+  const policy = readEnterprisePolicy(policyOptions);
+  if (policy.skillsCatalogSources.length > 0) {
+    return policy.skillsCatalogSources.map((entry) => {
+      const source = { id: entry.id, label: entry.label, source: entry.source, sourceType: 'git' };
+      if (entry.description) source.description = entry.description;
+      if (entry.defaultSubpath) source.defaultSubpath = entry.defaultSubpath;
+      if (entry.excludedSkills?.length) source.excludedSkills = [...entry.excludedSkills];
+      return source;
+    });
+  }
+  if (policy.hideBuiltinSkillCatalogs) return [];
   return CURATED_SKILLS_SOURCES.slice();
 }

@@ -28,7 +28,7 @@ The following functions are exported and used by the web server:
 - Scan results persist to `skills-catalog-cache.json` in the OpenChamber data dir (debounced, atomic rename) and survive server restarts within the TTL.
 
 ### Curated Sources (`curated-sources.js`)
-- `getCuratedSkillsSources()`: Return list of curated skill sources (Anthropic, OpenAI, Cursor, Matt Pocock).
+- `getCuratedSkillsSources(policyOptions)`: Return the catalogs on offer. The machine policy's `skillsCatalogSources` replaces the built-in list when non-empty (an administrator who names catalogs wants those, hidden built-ins or not); otherwise the built-in list (Anthropic, OpenAI, Cursor, Matt Pocock), or none when `hideBuiltinSkillCatalogs` is set.
 - `CURATED_SKILLS_SOURCES`: Constant array of predefined sources.
 - `excludedSkills` (optional, per source): skill directory names the catalog never lists for that source. Used for skills whose license forbids redistribution (Anthropic's `docx`, `pdf`, `pptx`, `xlsx`). Server-only; stripped from the sources sent to the UI.
 
@@ -37,7 +37,7 @@ The following functions are exported and used by the web server:
 - `clearGitHubMetaCache()`: Test-only cache reset.
 
 ### Source Parsing (`source.js`)
-- `parseSkillRepoSource(source, { subpath })`: Parse git repository source string into structured object with SSH/HTTPS clone URLs, normalized repo, and effective subpath. Supports SSH URLs, HTTPS URLs, and shorthand `owner/repo[/subpath]` format.
+- `parseSkillRepoSource(source, { subpath })`: Parse git repository source string into structured object with SSH/HTTPS clone URLs, normalized repo, and effective subpath. Supports SSH URLs, HTTPS URLs, and shorthand `owner/repo[/subpath]` format. Plain `http://` parses like `https://` only when its exact origin is in `allowedInsecureGitOrigins` (machine policy plus, outside enterprise mode, the Settings → Git list); any other `http://` source is refused as `invalidSource`, and a managed HTTPS account identity still needs HTTPS.
 
 ### Git Repository Scanning (`scan.js`)
 - `scanSkillsRepository({ source, subpath, defaultSubpath, identity, credentialResolver })`: Scan a Git repository for skills by cloning it and reading its `SKILL.md` files. Account identities use their connected HTTPS credential, SSH identities use their managed key, anonymous identities use credential-free HTTPS, and no identity (labelled "This machine" in the catalog dialog) uses the server's own Git configuration and credential helpers.
@@ -99,11 +99,11 @@ The following functions are internal helpers used by exported functions:
 
 ### Parse Source Response
 - `ok`: Boolean indicating success.
-- `host`: Git host (e.g., `github.com`, `gitlab.com`).
+- `host`: Git host, no port (e.g., `github.com`, `gitlab.com`).
 - `owner`: Repository owner.
 - `repo`: Repository name.
-- `cloneUrlSsh`: SSH clone URL.
-- `cloneUrlHttps`: HTTPS clone URL.
+- `cloneUrlSsh`: SSH clone URL. scp-style `git@host:owner/repo.git`, or `ssh://git@host:port/owner/repo.git` when the source named a port — `git@host:port:owner/repo.git` addresses a `port`-owned repo, not a ported host.
+- `cloneUrlHttps`: Clone URL on the source's own scheme and port (`https://host/...`, or `http://host:port/...` for an allowlisted plain-HTTP source).
 - `effectiveSubpath`: Subpath for scanning (from source string or options).
 - `normalizedRepo`: Normalized repo string (`owner/repo`).
 - `error`: Error object with `{ kind, message }` on failure.

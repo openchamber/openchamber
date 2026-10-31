@@ -2160,7 +2160,7 @@ export type RuntimeAPISelector<TValue> = (apis: RuntimeAPIs) => TValue;
 
 type SkillsCatalogSourceId = string;
 
-type SkillsCatalogSourceType = 'github';
+type SkillsCatalogSourceType = 'github' | 'git';
 
 export interface SkillsCatalogSource {
   id: SkillsCatalogSourceId;
