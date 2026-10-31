@@ -63,6 +63,36 @@ describe('list', () => {
     const scanner = await scannerWith();
     expect((await scanner.list({ state: 'all' })).issues).toEqual([]);
   });
+  it('keys containerByIssue by project when two projects both have LOCAL-1', async () => {
+    const dirOne = path.join(root, 'one', '.issues');
+    const dirTwo = path.join(root, 'two', '.issues');
+    fs.mkdirSync(dirOne, { recursive: true });
+    fs.mkdirSync(dirTwo, { recursive: true });
+    fs.writeFileSync(path.join(dirOne, 'LOCAL-1-a.md'), issue(1, 'One'));
+    fs.writeFileSync(path.join(dirTwo, 'LOCAL-1-a.md'), issue(1, 'Two'));
+    const projects = [
+      { id: 'proj-1', path: path.join(root, 'one'), label: 'Proj One' },
+      { id: 'proj-2', path: path.join(root, 'two'), label: 'Proj Two' },
+    ];
+    const scanner = createLocalScanner({ listProjects: async () => projects });
+
+    const { issues, containerByIssue } = await scanner.list({ state: 'all' });
+    expect(issues.map((i) => [i.identifier, i.title, i.containerId])).toEqual([
+      ['LOCAL-1', 'One', 'proj-1'],
+      ['LOCAL-1', 'Two', 'proj-2'],
+    ]);
+    expect(containerByIssue.get('proj-1')).toEqual({ id: 'proj-1', name: 'Proj One' });
+    expect(containerByIssue.get('proj-2')).toEqual({ id: 'proj-2', name: 'Proj Two' });
+    for (const issue of issues) {
+      expect(containerByIssue.get(issue.containerId)).toEqual({ id: issue.containerId, name: issue.containerId === 'proj-1' ? 'Proj One' : 'Proj Two' });
+    }
+
+    // get stays first-project-wins: the first project holding LOCAL-1 resolves.
+    const found = await scanner.get('LOCAL-1');
+    expect(found.issue.title).toBe('One');
+    expect(found.issue.containerId).toBe('proj-1');
+    expect(found.container).toEqual({ id: 'proj-1', name: 'Proj One' });
+  });
 });
 
 describe('create', () => {
@@ -135,6 +165,7 @@ it('get returns the issue with its container, null when unknown', async () => {
   const scanner = await scannerWith();
   const found = await scanner.get('LOCAL-1');
   expect(found.issue.title).toBe('T');
+  expect(found.issue.containerId).toBe('proj-1');
   expect(found.container).toEqual({ id: 'proj-1', name: 'Proj One' });
   expect(await scanner.get('LOCAL-9')).toBeNull();
 });

@@ -55,6 +55,7 @@ const asStringArray = (value) => (Array.isArray(value) ? value.filter(isString) 
 
 const toIssueView = (project, parsed) => ({
   projectId: project.id,
+  containerId: project.id,
   number: parsed.number,
   fileName: parsed.fileName,
   identifier: parsed.identifier,
@@ -171,16 +172,20 @@ const createLocalScanner = ({ listProjects }) => {
     const query = isString(options.query) && options.query.trim() ? options.query.trim().toLowerCase() : null;
     const containerId = isString(options.containerId) && options.containerId ? options.containerId : null;
 
+    // Keyed by projectId, not identifier: identifiers restart at LOCAL-1 in
+    // every project, so an identifier key would collide across projects and
+    // hand consumers the wrong container. Consumers resolve a returned issue's
+    // container via `containerByIssue.get(issue.containerId)`.
     const containerByIssue = new Map();
     const filtered = [];
     for (const { project, issues } of await scanAll()) {
       if (containerId && project.id !== containerId) continue;
       const container = containerOf(project);
+      containerByIssue.set(project.id, container);
       for (const issue of issues) {
         if (!matchesState(issue.state, stateFilter)) continue;
         if (!matchesQuery(issue, query)) continue;
         filtered.push(issue);
-        containerByIssue.set(issue.identifier, container);
       }
     }
 
