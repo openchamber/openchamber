@@ -609,7 +609,9 @@ function Steps({ props }: NodeProps) {
   if (!value) return null;
   // A row that does not fit the width falls back to a column: scrolled
   // sideways, the steps past the edge went unseen.
-  return <div ref={ref}>{value.direction === 'row' && fits ? <StepsRow items={value.items} /> : <StepsColumn items={value.items} />}</div>;
+  // The current mark's 3px halo reaches past the block's edge, where the reply
+  // clips it: the steps leave that much room before and above them.
+  return <div ref={ref} className="ps-[3px] pt-[3px]">{value.direction === 'row' && fits ? <StepsRow items={value.items} /> : <StepsColumn items={value.items} />}</div>;
 }
 
 type StepItems = z.infer<typeof blockProps.Steps>['items'];
