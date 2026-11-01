@@ -539,7 +539,8 @@ sections as toggles too; it has no manager.
   runs) take 5px of vertical padding (a 30px row) and two-line rows 6px, so the one-line
   list reads denser (maintainer, 2026-10-28).
   A zone's label is a bare muted word at the row's size, with no icon, and
-  the widest gap above it (20px); its chevron follows the word, always while
+  the widest gap above it (16px: with the user's sections there are more of
+  them, and 20px left wide empty bands, maintainer 2026-11-01); its chevron follows the word, always while
   the zone is closed and on hover while it is open. At a project's weight
   zones made the list read as a document of sections, and a quiet label with
   an icon in the projects' column read as one more row (maintainer,

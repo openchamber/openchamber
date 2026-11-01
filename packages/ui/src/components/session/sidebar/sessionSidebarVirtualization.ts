@@ -24,7 +24,7 @@ export const findFirstVisibleSessionSidebarRowIndex = (
   scrollOffset: number,
 ): number => items.find((item) => item.end > scrollOffset)?.index ?? 0;
 
-const SECTION_SPACING_ESTIMATE = { 'pb-5': 20, 'pb-3': 12, 'pb-1.5': 6, 'pb-0.5': 2 } as const;
+const SECTION_SPACING_ESTIMATE = { 'pb-4': 16, 'pb-3': 12, 'pb-1.5': 6, 'pb-0.5': 2 } as const;
 
 type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
 
@@ -297,6 +297,6 @@ export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSide
     if (row.kind === 'caption') return undefined;
     return row.kind === 'project-header' ? 'pb-0.5' : 'pb-3';
   }
-  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption') return 'pb-5';
+  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption') return 'pb-4';
   return nextRow?.kind === 'group-header' && !isGroupWork(nextRow.group) && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };
