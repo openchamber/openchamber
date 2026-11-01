@@ -2,6 +2,7 @@
 export const sidebarSectionsI18n = {
   en: {
     "sessions.sidebar.sections.alsoInProjects": "Also show under projects",
+    "sessions.sidebar.sections.customName": "Custom",
     "sessions.sidebar.sections.alsoInProjectsShort": "Also in projects",
     "sessions.sidebar.sections.orderHint": "Drag to reorder.",
     "sessions.sidebar.sections.link.tracker": "Tracker issue",
@@ -86,6 +87,7 @@ export const sidebarSectionsI18n = {
   },
   de: {
     "sessions.sidebar.sections.alsoInProjects": "Auch unter Projekten zeigen",
+    "sessions.sidebar.sections.customName": "Eigener",
     "sessions.sidebar.sections.alsoInProjectsShort": "Auch in Projekten",
     "sessions.sidebar.sections.orderHint": "Zum Umsortieren ziehen.",
     "sessions.sidebar.sections.link.tracker": "Tracker-Aufgabe",
@@ -170,6 +172,7 @@ export const sidebarSectionsI18n = {
   },
   fr: {
     "sessions.sidebar.sections.alsoInProjects": "Afficher aussi sous les projets",
+    "sessions.sidebar.sections.customName": "Personnalisée",
     "sessions.sidebar.sections.alsoInProjectsShort": "Aussi dans les projets",
     "sessions.sidebar.sections.orderHint": "Faites glisser pour réorganiser.",
     "sessions.sidebar.sections.link.tracker": "Ticket du tracker",
@@ -254,6 +257,7 @@ export const sidebarSectionsI18n = {
   },
   nl: {
     "sessions.sidebar.sections.alsoInProjects": "Ook onder projecten tonen",
+    "sessions.sidebar.sections.customName": "Eigen",
     "sessions.sidebar.sections.alsoInProjectsShort": "Ook in projecten",
     "sessions.sidebar.sections.orderHint": "Sleep om de volgorde te wijzigen.",
     "sessions.sidebar.sections.link.tracker": "Trackertaak",
@@ -338,6 +342,7 @@ export const sidebarSectionsI18n = {
   },
   es: {
     "sessions.sidebar.sections.alsoInProjects": "Mostrar también bajo los proyectos",
+    "sessions.sidebar.sections.customName": "Personalizada",
     "sessions.sidebar.sections.alsoInProjectsShort": "También en proyectos",
     "sessions.sidebar.sections.orderHint": "Arrastra para reordenar.",
     "sessions.sidebar.sections.link.tracker": "Tarea del tracker",
@@ -422,6 +427,7 @@ export const sidebarSectionsI18n = {
   },
   ja: {
     "sessions.sidebar.sections.alsoInProjects": "プロジェクトの下にも表示",
+    "sessions.sidebar.sections.customName": "カスタム",
     "sessions.sidebar.sections.alsoInProjectsShort": "プロジェクトにも",
     "sessions.sidebar.sections.orderHint": "ドラッグして並べ替え。",
     "sessions.sidebar.sections.link.tracker": "トラッカーの課題",
@@ -506,6 +512,7 @@ export const sidebarSectionsI18n = {
   },
   'pt-BR': {
     "sessions.sidebar.sections.alsoInProjects": "Mostrar também nos projetos",
+    "sessions.sidebar.sections.customName": "Personalizada",
     "sessions.sidebar.sections.alsoInProjectsShort": "Também nos projetos",
     "sessions.sidebar.sections.orderHint": "Arraste para reordenar.",
     "sessions.sidebar.sections.link.tracker": "Tarefa do tracker",
@@ -590,6 +597,7 @@ export const sidebarSectionsI18n = {
   },
   uk: {
     "sessions.sidebar.sections.alsoInProjects": "Показувати також у проєктах",
+    "sessions.sidebar.sections.customName": "Власна",
     "sessions.sidebar.sections.alsoInProjectsShort": "Також у проєктах",
     "sessions.sidebar.sections.orderHint": "Перетягніть, щоб змінити порядок.",
     "sessions.sidebar.sections.link.tracker": "Задача трекера",
@@ -674,6 +682,7 @@ export const sidebarSectionsI18n = {
   },
   ko: {
     "sessions.sidebar.sections.alsoInProjects": "프로젝트 아래에도 표시",
+    "sessions.sidebar.sections.customName": "사용자 지정",
     "sessions.sidebar.sections.alsoInProjectsShort": "프로젝트에도",
     "sessions.sidebar.sections.orderHint": "드래그하여 순서 변경.",
     "sessions.sidebar.sections.link.tracker": "트래커 이슈",
@@ -758,6 +767,7 @@ export const sidebarSectionsI18n = {
   },
   pl: {
     "sessions.sidebar.sections.alsoInProjects": "Pokazuj też pod projektami",
+    "sessions.sidebar.sections.customName": "Własna",
     "sessions.sidebar.sections.alsoInProjectsShort": "Także w projektach",
     "sessions.sidebar.sections.orderHint": "Przeciągnij, aby zmienić kolejność.",
     "sessions.sidebar.sections.link.tracker": "Zadanie z trackera",
@@ -842,6 +852,7 @@ export const sidebarSectionsI18n = {
   },
   'zh-CN': {
     "sessions.sidebar.sections.alsoInProjects": "也在项目下显示",
+    "sessions.sidebar.sections.customName": "自定义",
     "sessions.sidebar.sections.alsoInProjectsShort": "也在项目中",
     "sessions.sidebar.sections.orderHint": "拖动以调整顺序。",
     "sessions.sidebar.sections.link.tracker": "跟踪器事项",
@@ -926,6 +937,7 @@ export const sidebarSectionsI18n = {
   },
   'zh-TW': {
     "sessions.sidebar.sections.alsoInProjects": "也在專案下顯示",
+    "sessions.sidebar.sections.customName": "自訂",
     "sessions.sidebar.sections.alsoInProjectsShort": "也在專案中",
     "sessions.sidebar.sections.orderHint": "拖曳以調整順序。",
     "sessions.sidebar.sections.link.tracker": "追蹤器事項",
@@ -1010,6 +1022,7 @@ export const sidebarSectionsI18n = {
   },
   tr: {
     "sessions.sidebar.sections.alsoInProjects": "Projelerin altında da göster",
+    "sessions.sidebar.sections.customName": "Özel",
     "sessions.sidebar.sections.alsoInProjectsShort": "Projelerde de",
     "sessions.sidebar.sections.orderHint": "Sıralamak için sürükleyin.",
     "sessions.sidebar.sections.link.tracker": "Takipçi görevi",
@@ -1094,6 +1107,7 @@ export const sidebarSectionsI18n = {
   },
   ar: {
     "sessions.sidebar.sections.alsoInProjects": "إظهارها أيضًا تحت المشاريع",
+    "sessions.sidebar.sections.customName": "مخصص",
     "sessions.sidebar.sections.alsoInProjectsShort": "في المشاريع أيضاً",
     "sessions.sidebar.sections.orderHint": "اسحب لإعادة الترتيب.",
     "sessions.sidebar.sections.link.tracker": "مهمة المتتبع",
@@ -1178,6 +1192,7 @@ export const sidebarSectionsI18n = {
   },
   he: {
     "sessions.sidebar.sections.alsoInProjects": "להציג גם תחת הפרויקטים",
+    "sessions.sidebar.sections.customName": "מותאם אישית",
     "sessions.sidebar.sections.alsoInProjectsShort": "גם בפרויקטים",
     "sessions.sidebar.sections.orderHint": "גררו כדי לשנות את הסדר.",
     "sessions.sidebar.sections.link.tracker": "משימה במעקב",

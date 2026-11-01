@@ -197,7 +197,7 @@ const SectionList: React.FC = () => {
             <DropdownMenuItem onClick={() => editSection(createSidebarSectionFromTemplate('projects', t(TEMPLATE_KEY.projects)), true)}>
               {t(TEMPLATE_KEY.projects)}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => editSection(createSidebarSectionFromTemplate('blank', ''), true)}>
+            <DropdownMenuItem onClick={() => editSection(createSidebarSectionFromTemplate('blank', t('sessions.sidebar.sections.customName')), true)}>
               {t(TEMPLATE_KEY.blank)}
             </DropdownMenuItem>
           </DropdownMenuContent>

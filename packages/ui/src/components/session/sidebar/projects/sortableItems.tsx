@@ -32,6 +32,8 @@ type ProjectHeaderIdentityProps = ProjectIdentityProps & {
   isCollapsed?: boolean;
   alwaysShowActions?: boolean;
   labelClassName?: string;
+  /** A project header in the list: its name a step larger than the rows under it. */
+  header?: boolean;
 };
 
 type ProjectPickerOption = ProjectIdentityProps & { projectDescription: string };
@@ -46,6 +48,7 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
   isCollapsed,
   alwaysShowActions = false,
   labelClassName,
+  header = false,
 }) => {
   const { currentTheme } = useThemeSystem();
   const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
@@ -96,10 +99,11 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
           <Icon name="folder" className={cn('h-3.5 w-3.5 text-muted-foreground', iconVisibilityClassName)} style={iconColor ? { color: iconColor } : undefined} />
         )}
       </span>
-      {/* The row's size, medium weight, with its icon: under the Projects
-          caption a project is an item of the list, and its icon, weight and
-          the indent of its sessions set it apart from them. */}
-      <span className={cn('truncate typography-ui-label font-medium text-foreground', labelClassName)}>{projectLabel}</span>
+      {/* Medium weight with its icon, and in a project header a step larger
+          than the rows (maintainer, 2026-11-01): under the Projects caption a
+          project is an item of the list, and its icon, weight, size and the
+          indent of its sessions set it apart from them. */}
+      <span className={cn('truncate font-medium text-foreground', header ? 'typography-ui-section' : 'typography-ui-label', labelClassName)}>{projectLabel}</span>
     </>
   );
 };
@@ -349,7 +353,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       )}
                       aria-label={t('sessions.sidebar.project.selectAria', { project: projectLabel })}
                     >
-                      <ProjectHeaderIdentity id={id} projectLabel={projectLabel} projectIcon={projectIcon} projectColor={projectColor} projectIconImage={projectIconImage} projectIconBackground={projectIconBackground} labelClassName={cn('[--oc-actions-inset:1.25rem]', headerLabelMaskClass)} />
+                      <ProjectHeaderIdentity id={id} projectLabel={projectLabel} projectIcon={projectIcon} projectColor={projectColor} projectIconImage={projectIconImage} projectIconBackground={projectIconBackground} header labelClassName={cn('[--oc-actions-inset:1.25rem]', headerLabelMaskClass)} />
                       <Icon name="arrow-down-s" className={cn('h-3.5 w-3.5 flex-shrink-0 text-muted-foreground', headerCoveredFadeClass)} />
                       {projectDirectory ? <DirectoryActionIndicator directory={projectDirectory} className={cn('ms-auto', headerCoveredFadeClass)} /> : null}
                     </button>
@@ -388,6 +392,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       isCollapsed={isCollapsed}
                       alwaysShowActions={alwaysShowActions}
                       // The label starts past the 14px icon and the 6px gap.
+                      header
                       labelClassName={cn('[--oc-actions-inset:1.25rem]', headerLabelMaskClass)}
                     />
                     {folderMissing ? (
