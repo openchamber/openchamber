@@ -117,6 +117,69 @@ OpenChamber est livré avec quelques catalogues de skills publics (Anthropic, Op
 
 Les réglages ne proposent alors que les catalogues ajoutés par les utilisateurs, et OpenChamber ne charge aucun catalogue intégré, même sur demande directe. Il n’y a pas de variable d’environnement pour cela, car un utilisateur peut les définir lui-même.
 
+### Autoriser des origines Git en HTTP simple
+
+Lors de la connexion d’un hébergeur Git (GitLab, Gitea, Gerrit, Forgejo), OpenChamber exige du HTTPS, car un jeton envoyé en HTTP simple peut être lu par n’importe qui sur le réseau. Une machine d’intranet sans HTTPS peut être autorisée dans le fichier de stratégie. Cela fonctionne avec ou sans le mode entreprise. Chacun peut aussi autoriser ses propres origines dans Settings → Git : tant que le mode entreprise est désactivé, sa liste s’ajoute à celle du fichier ; une fois le mode activé, elle est ignorée.
+
+```json
+{
+  "allowedInsecureGitOrigins": ["http://gitlab.corp.internal"]
+}
+```
+
+- Chaque entrée est une origine exacte : schéma, hôte et, si utile, port. Sans chemin, sans `*`, sans identifiants. `http://gitlab.corp.internal` ne couvre pas `http://gitlab.corp.internal:8443`.
+- Seules les origines listées passent. Les instances publiques de GitHub et GitLab, et tous les autres hôtes, exigent toujours du HTTPS.
+- La liste n’ouvre rien d’autre : une extension d’hébergeur auto-hébergé n’accepte toujours que du HTTPS et du HTTP en bouclage local, et les transferts anonymes exigent toujours du HTTPS. Les téléchargements Git LFS suivent la même liste : HTTP en clair uniquement sur une origine listée.
+- Retirer une origine de la liste fait refuser à OpenChamber les instances qui y sont liées, jusqu’à ce qu’elles soient reliées à nouveau.
+- La liste de Settings → Git suit les mêmes règles : une origine exacte par ligne, et une ligne qui n’est pas une origine acceptée est écartée à l’enregistrement. Une fois le mode entreprise activé, elle est entièrement ignorée — élargir la confiance en clair reste la décision de l’administrateur.
+
+La même liste décide aussi d’où les extensions et les skills peuvent être installés. « Installer depuis une URL » et les mises à jour des extensions refusent normalement les adresses privées, les noms internes (`.internal`, `.local`) et le HTTP simple, car c’est le serveur qui va chercher l’adresse lui-même. Un hôte nommé dans `allowedInsecureGitOrigins` est reconnu de confiance pour cela :
+
+- Son hôte est accepté en HTTPS et en SSH sur n’importe quel port, et en HTTP uniquement sur l’origine exactement listée. Les clones Git et les téléchargements `.zip` suivent tous deux cette règle.
+- L’adresse à laquelle il résout ne doit pas être une adresse de bouclage (`127.0.0.0/8`, `::1`) ni lien-local (`169.254.0.0/16`, qui inclut les métadonnées cloud). Les inscrire dans la liste ne change rien.
+- Les redirections ne sont jamais suivies aveuglément : chaque saut est vérifié à nouveau, si bien qu’un hôte de confiance ne peut pas renvoyer une installation vers une autre machine d’intranet.
+- Les sources de skills écrites sous la forme `http://host/group/repo.git` sont acceptées sur une origine listée.
+- Les extensions qui demandent `service`, `network`, `origins` ou `transcript` doivent toujours venir d’un dépôt sous `allowedExtensions`.
+
+### Pointer les métadonnées des modèles vers une adresse interne
+
+Le sélecteur de modèles lit les tailles de contexte et les prix depuis `https://models.dev/api.json`. Sur un réseau sans route vers ce site, indiquez une copie interne de ce fichier. Cela fonctionne avec ou sans le mode entreprise.
+
+```json
+{
+  "modelsDevUrl": "http://nginx.corp.internal/models/api.json"
+}
+```
+
+- Le fichier utilise le format de models.dev. Seuls `id`, `name`, `limit`, `modalities`, `cost` et quelques indicateurs de capacité sont lus, donc un fichier court écrit à la main suffit.
+- Une fois indiqué, OpenChamber ne lit que cette adresse, côté serveur comme côté navigateur. Il ne revient jamais sur models.dev.
+- Une valeur qui n’est pas une URL `http(s)` simple, ou qui porte des identifiants, compte comme non définie.
+- Les métadonnées des modèles servent à l’affichage et aux indices de routage. Les sessions fonctionnent sans elles.
+
+### Remplacer les catalogues de skills intégrés
+
+`hideBuiltinSkillCatalogs` ne masque que les catalogues publics. Pour offrir les vôtres à leur place, listez-les :
+
+```json
+{
+  "skillsCatalogSources": [
+    {
+      "id": "corp",
+      "label": "Skills de l’entreprise",
+      "description": "Skills entretenus par l’équipe plateforme",
+      "source": "https://gitlab.corp.internal/platform/skills.git",
+      "defaultSubpath": "skills",
+      "excludedSkills": ["draft"]
+    }
+  ]
+}
+```
+
+- `id`, `label` et `source` sont obligatoires. Une source est une URL Git : du HTTPS, du SSH, ou du HTTP pour une origine listée dans `allowedInsecureGitOrigins`.
+- Quand la liste n’est pas vide, elle remplace les catalogues intégrés, qu’ils soient masqués ou non.
+- Une entrée que le fichier ne sait pas lire rend tout le fichier de stratégie invalide, et alors aucun catalogue n’est proposé.
+- Il n’y a pas de variable d’environnement pour cela.
+
 ### Exemples
 
 Pour placer le fichier de politique sur un Mac, exécutez ceci dans le Terminal en tant qu’administrateur :

@@ -117,6 +117,69 @@ OpenChamber ma kilka publicznych katalogów skilli (Anthropic, OpenAI, Cursor, M
 
 Ustawienia pokażą wtedy tylko katalogi dodane przez użytkowników, a OpenChamber nie wczyta wbudowanego nawet na bezpośrednie żądanie. Nie ma do tego zmiennej środowiskowej, bo użytkownik może je ustawić sam.
 
+### Zezwalaj na źródła Git przez plain HTTP
+
+Przy łączeniu hostingu Git (GitLab, Gitea, Gerrit, Forgejo) OpenChamber wymaga HTTPS, bo token wysłany plain HTTP może przeczytać każdy w sieci. Host intranetu bez HTTPS można wpisać w pliku zasad. Działa z trybem enterprise i bez niego. Każdy użytkownik może też sam wpisywać źródła w Settings → Git: gdy tryb enterprise jest wyłączony, jego lista jest dodawana do listy z pliku; po włączeniu trybu jest ignorowana.
+
+```json
+{
+  "allowedInsecureGitOrigins": ["http://gitlab.corp.internal"]
+}
+```
+
+- Każdy wpis to dokładne źródło: schemat, host i, jeśli ma znaczenie, port. Bez ścieżki, bez `*`, bez danych logowania. `http://gitlab.corp.internal` nie obejmuje `http://gitlab.corp.internal:8443`.
+- Przechodzi tylko to, co wypisane. Publiczne instancje GitHub i GitLab oraz wszystkie inne hosty nadal wymagają HTTPS.
+- Ta lista nic więcej nie otwiera: rozszerzenie providera z własnej instalacji nadal przyjmuje tylko HTTPS i HTTP loopback, a transfery anonimowe nadal wymagają HTTPS. Pobrania Git LFS podlegają tej samej liście: HTTP w postaci jawnej tylko na wypisanym źródle.
+- Usunięcie źródła z listy sprawi, że OpenChamber odrzuci instancje z nim powiązane, dopóki nie powiążesz ich ponownie.
+- Lista w Settings → Git rządzi się tymi samymi regułami: jedno dokładne źródło na wiersz, a wiersz, który nie jest akceptowanym źródłem, znika przy zapisie. Gdy tryb enterprise jest włączony, ta lista jest całkowicie ignorowana — poluzowanie reguły HTTPS pozostaje decyzją administratora.
+
+Ta sama lista decyduje też, skąd wolno instalować rozszerzenia i skille. Ponieważ serwer sam pobiera ten adres, „Zainstaluj z URL" i aktualizacje rozszerzeń zwykle odrzucają adresy prywatne, wewnętrzne nazwy (`.internal`, `.local`) i plain HTTP. Host wpisany w `allowedInsecureGitOrigins` jest w tej kwestii zaufany:
+
+- Jego host jest akceptowany przez HTTPS i SSH na dowolnym porcie, a przez HTTP tylko na dokładnie wypisanym źródle. Klony Git i pobrania `.zip` przestrzegają tej zasady.
+- Adres, na jaki ta nazwa się rozwiązuje, nie może być loopbackiem (`127.0.0.0/8`, `::1`) ani link-local (`169.254.0.0/16`, zawiera metadane chmury). Wpisanie takich adresów na listę nic nie zmienia.
+- Przekierowania nigdy nie są ślepo podążane: każdy skok jest sprawdzany ponownie, więc zaufany host nie może przerzucić instalacji na inny host intranetu.
+- Źródła skilli zapisane jako `http://host/group/repo.git` są akceptowane na wypisanym źródle.
+- Rozszerzenia proszące o `service`, `network`, `origins` albo `transcript` nadal muszą pochodzić z repozytorium pod `allowedExtensions`.
+
+### Skieruj metadane modeli na wewnętrzny adres
+
+Selektor modeli czyta rozmiary kontekstu i ceny z `https://models.dev/api.json`. W sieci bez drogi do niego przypnij wewnętrzną kopię tego pliku. Działa z trybem enterprise i bez niego.
+
+```json
+{
+  "modelsDevUrl": "http://nginx.corp.internal/models/api.json"
+}
+```
+
+- Plik używa formatu models.dev. Czytane są tylko `id`, `name`, `limit`, `modalities`, `cost` i kilka znaczników możliwości, więc wystarczy krótki plik napisany ręcznie.
+- Po przypięciu OpenChamber czyta tylko ten adres, w serwerze i w przeglądarce. Nigdy nie wraca do models.dev.
+- Wartość, która nie jest zwykłym URL `http(s)` albo zawiera dane logowania, liczy się jako nieustawiona.
+- Metadane modeli służą do wyświetlania i jako podpowiedzi routingu. Sesje działają bez nich.
+
+### Zastąp wbudowane katalogi skilli
+
+`hideBuiltinSkillCatalogs` tylko ukrywa publiczne katalogi. Żeby w ich miejsce oferować własne, wypisz je:
+
+```json
+{
+  "skillsCatalogSources": [
+    {
+      "id": "corp",
+      "label": "Skille firmowe",
+      "description": "Skille utrzymywane przez zespół platformowy",
+      "source": "https://gitlab.corp.internal/platform/skills.git",
+      "defaultSubpath": "skills",
+      "excludedSkills": ["draft"]
+    }
+  ]
+}
+```
+
+- `id`, `label` i `source` są wymagane. Źródło to URL Git: HTTPS, SSH albo HTTP dla źródła wpisanego w `allowedInsecureGitOrigins`.
+- Gdy lista nie jest pusta, zastępuje wbudowane katalogi, niezależnie od tego, czy są ukryte.
+- Wpis, którego plik nie potrafi odczytać, unieważnia cały plik zasad, a wtedy żaden katalog nie jest oferowany.
+- Nie ma do tego zmiennej środowiskowej.
+
 ### Przykłady
 
 Aby umieścić plik polityki na Macu, uruchom w Terminalu jako administrator:

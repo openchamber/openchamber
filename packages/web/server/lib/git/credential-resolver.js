@@ -6,6 +6,7 @@ import { constants as fsConstants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { isProviderId } from '../source-control/provider-id.js';
+import { allowedInsecureGitOrigins } from '../enterprise-mode.js';
 import { descriptorAllowsLoopbackHttp, isLoopbackHost } from './loopback-http.js';
 
 const REFERENCE_PREFIX = 'ocgit:v1';
@@ -405,14 +406,16 @@ export async function inspectManagedSshCredential(record, { snapshotRoot, fsImpl
  * Whether a normalized Git endpoint is a provider instance's own origin: the
  * same host and port over HTTPS, or over plain HTTP when the instance is a
  * loopback origin of a provider that allows loopback HTTP
- * (`loopback-http.js`). No other host is ever reached in the clear.
+ * (`loopback-http.js`) or an origin the machine policy lists in
+ * `allowedInsecureGitOrigins`. No other host is ever reached in the clear.
  */
-export const endpointIsInstanceOrigin = (descriptor, origin, endpoint) => {
+export const endpointIsInstanceOrigin = (descriptor, origin, endpoint, insecureOrigins = null) => {
   const https = origin.protocol === 'https:' && endpoint.protocol === 'https';
-  const loopbackHttp = origin.protocol === 'http:' && endpoint.protocol === 'http'
-    && isLoopbackHost(origin.hostname) && descriptorAllowsLoopbackHttp(descriptor);
-  return (https || loopbackHttp) && origin.hostname.toLowerCase() === endpoint.host
-    && Number(origin.port || (https ? 443 : 80)) === endpoint.port;
+  const plainHttp = origin.protocol === 'http:' && endpoint.protocol === 'http'
+    && ((isLoopbackHost(origin.hostname) && descriptorAllowsLoopbackHttp(descriptor))
+      || (insecureOrigins ?? allowedInsecureGitOrigins()).has(origin.origin));
+  return (https || plainHttp) && origin.hostname.toLowerCase() === endpoint.host
+    && Number(origin.port || (origin.protocol === 'https:' ? 443 : 80)) === endpoint.port;
 };
 
 /**

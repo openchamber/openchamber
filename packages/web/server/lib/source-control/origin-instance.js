@@ -1,3 +1,4 @@
+import { allowedInsecureGitOrigins } from '../enterprise-mode.js';
 import { isString } from '../shared/guards.js';
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
@@ -6,11 +7,14 @@ const isLoopbackHost = (hostname) => LOOPBACK_HOSTS.has(String(hostname).toLower
 
 /**
  * An instance identified by its URL origin (GitLab and other self-hostable
- * providers): HTTPS, or HTTP on a loopback host for local deployments and
- * tests; no credentials, path, query, or fragment. `label` names the provider
- * in the errors a person reads.
+ * providers): HTTPS, HTTP on a loopback host for local deployments and
+ * tests, or HTTP on an origin the machine policy lists in
+ * `allowedInsecureGitOrigins` for an intranet host without TLS; no
+ * credentials, path, query, or fragment. `label` names the provider in the
+ * errors a person reads. `insecureOrigins` overrides the policy read for
+ * tests and callers that resolved it already.
  */
-export function normalizeOriginInstance(value, { label }) {
+export function normalizeOriginInstance(value, { label, insecureOrigins = null } = {}) {
   const raw = isString(value) ? value.trim() : '';
   if (!raw) throw new Error(`${label} instance is required`);
 
@@ -24,7 +28,9 @@ export function normalizeOriginInstance(value, { label }) {
   if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/')) {
     throw new Error(`${label} instance must be an origin`);
   }
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHost(url.hostname))) {
+  if (url.protocol !== 'https:'
+    && !(url.protocol === 'http:' && (isLoopbackHost(url.hostname)
+      || (insecureOrigins ?? allowedInsecureGitOrigins()).has(url.origin)))) {
     throw new Error(`${label} instances must use HTTPS`);
   }
   return url.origin;

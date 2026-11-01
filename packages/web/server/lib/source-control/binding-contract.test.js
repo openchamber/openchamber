@@ -14,9 +14,9 @@ const bindingWith = (presentation) => ({
 const httpsPresentation = (instance, username = 'alice') => ({
   status: 'available', transport: 'https', provider: 'gerrit', instance, source: 'pat', username, providerUserId: `${instance}#7`,
 });
-const accepts = (presentation) => {
+const accepts = (presentation, options) => {
   try {
-    parseBindingResponse(bindingWith(presentation));
+    parseBindingResponse(bindingWith(presentation), options);
     return true;
   } catch {
     return false;
@@ -38,4 +38,13 @@ describe('binding credential presentation', () => {
       expect(accepts(httpsPresentation(`http://${host}:8080`))).toBe(isLoopbackHost(new URL(`http://${host}`).hostname));
     },
   );
+
+  // The web adapter passes the insecure origins its provider descriptors published.
+  it('accepts a plain-HTTP instance the caller allowlists, and only that exact origin', () => {
+    const insecureOrigins = ['http://git.lab:8080'];
+    expect(accepts(httpsPresentation('http://git.lab:8080'), { insecureOrigins })).toBe(true);
+    expect(accepts(httpsPresentation('http://git.lab:8080'))).toBe(false);
+    expect(accepts(httpsPresentation('http://git.lab:9090'), { insecureOrigins })).toBe(false);
+    expect(accepts(httpsPresentation('http://git.lab:8080/group'), { insecureOrigins })).toBe(false);
+  });
 });

@@ -112,8 +112,12 @@ export const sourceControlProviderDescriptors = createProviderDescriptors();
  * the presentation's `branchHeads` and `submitRequirements`) and
  * `discussions` (with `urls.discussion`) appear only when the descriptor
  * declares them, and so do `urls.commit` and `urls.user`.
+ * `insecureOrigins` (the policy's allowlisted plain-HTTP origins, resolved by
+ * the caller at read time) is published for origin-form providers only when
+ * non-empty, so the client's instance check accepts exactly what the server
+ * will.
  */
-export function publicProviderDescriptor(descriptor, order, extension) {
+export function publicProviderDescriptor(descriptor, order, extension, insecureOrigins = []) {
   const { presentation } = descriptor;
   const cli = descriptor.authMethods.cli;
   const methods = ['device', 'pat', 'cli'].filter((method) => Boolean(descriptor.authMethods[method]));
@@ -161,6 +165,9 @@ export function publicProviderDescriptor(descriptor, order, extension) {
   };
   // Optional fields are left out, not sent empty, where a provider has none.
   if (legacyFlow) published.instances.legacyFlow = { instance: legacyFlow.instance, kind: legacyFlow.kind };
+  if (descriptor.instance.form === 'origin' && insecureOrigins.length > 0) {
+    published.instances.insecureOrigins = [...new Set(insecureOrigins)];
+  }
   if (cli) published.auth.cliName = cli.tool;
   if (presentation.token) {
     published.auth.token = { scopes: [...presentation.token.scopes] };

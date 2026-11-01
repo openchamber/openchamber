@@ -13,4 +13,12 @@ describe('normalizeGitLabInstance', () => {
     expect(() => normalizeGitLabInstance('https://gitlab.example.com/group')).toThrow('must be an origin');
     expect(() => normalizeGitLabInstance('https://user:pass@gitlab.example.com')).toThrow('must be an origin');
   });
+
+  it('accepts a plain-HTTP origin the resolved allowlist names', () => {
+    const insecureOrigins = new Set(['http://gitlab.example.com']);
+    expect(normalizeGitLabInstance('http://GitLab.Example.com/', { insecureOrigins })).toBe('http://gitlab.example.com');
+    // Exact origins only: a different port is a different instance.
+    expect(() => normalizeGitLabInstance('http://gitlab.example.com:8443', { insecureOrigins })).toThrow('must use HTTPS');
+    expect(() => normalizeGitLabInstance('http://other.example.com', { insecureOrigins })).toThrow('must use HTTPS');
+  });
 });

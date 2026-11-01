@@ -117,6 +117,69 @@ OpenChamber bringt einige öffentliche Skill-Kataloge mit (Anthropic, OpenAI, Cu
 
 Die Einstellungen bieten dann nur Kataloge an, die Personen selbst hinzufügen, und OpenChamber lädt keinen integrierten, auch nicht auf direkte Anfrage. Eine Umgebungsvariable gibt es dafür nicht, da Nutzer diese selbst setzen können.
 
+### Plain-HTTP-Herkünfte für Git erlauben
+
+Beim Verbinden eines Git-Hosting-Dienstes (GitLab, Gitea, Gerrit, Forgejo) verlangt OpenChamber HTTPS, weil ein über plain HTTP gesendetes Token von jedem im Netz mitgelesen werden kann. Ein Intranet-Rechner ohne HTTPS lässt sich in der Policy-Datei erlauben. Das funktioniert mit und ohne Enterprise-Modus. Nutzer können in **Einstellungen → Git** auch eigene Herkünfte zulassen: Solange der Enterprise-Modus aus ist, wird ihre Liste der Liste in der Policy-Datei hinzugefügt; ist der Modus an, wird sie ignoriert.
+
+```json
+{
+  "allowedInsecureGitOrigins": ["http://gitlab.corp.internal"]
+}
+```
+
+- Jeder Eintrag ist eine exakte Herkunft: Schema, Host und, wenn relevant, Port. Kein Pfad, kein `*`, keine Zugangsdaten. `http://gitlab.corp.internal` umfasst nicht `http://gitlab.corp.internal:8443`.
+- Nur was hier steht, wird durchgelassen. Die öffentlichen Instanzen von GitHub und GitLab und alle übrigen Hosts verlangen weiter HTTPS.
+- Die Liste öffnet nichts anderes: Ein Provider-Extension einer eigenen Instanz akzeptiert weiterhin nur HTTPS und Loopback-HTTP, und anonyme Übertragungen verlangen weiterhin HTTPS. Git-LFS-Downloads folgen derselben Liste: Klartext-HTTP nur auf einer gelisteten Herkunft.
+- Entfernen Sie eine Herkunft aus der Liste, lehnt OpenChamber die daran gebundenen Instanzen ab, bis Sie sie neu binden.
+- Die Liste in **Einstellungen → Git** folgt denselben Regeln: pro Zeile eine exakte Herkunft; eine Zeile, die keine akzeptierte Herkunft ist, entfällt beim Speichern. Solange der Enterprise-Modus aktiv ist, wird sie komplett ignoriert — die HTTPS-Regel zu lockern bleibt allein die Entscheidung der Verwaltung.
+
+Dieselbe Liste bestimmt auch, von wo aus Extensions und Skills installiert werden dürfen. „Über URL installieren“ und Extensions-Updates lehnen private Adressen, interne Namen (`.internal`, `.local`) und plain HTTP normalerweise ab, weil der Server die Adresse selbst abruft. Ein in `allowedInsecureGitOrigins` genannter Host wird dafür akzeptiert:
+
+- Sein Host wird über HTTPS und SSH auf jedem Port akzeptiert, über HTTP nur auf der exakt gelisteten Herkunft. Git-Klone und `.zip`-Downloads folgen beide dieser Regel.
+- Die Adresse, auf die der Host auflöst, darf weder Loopback (`127.0.0.0/8`, `::1`) noch link-local (`169.254.0.0/16`, schließt die Cloud-Metadaten ein) sein. Solche Adressen in die Liste zu schreiben, ändert nichts.
+- Weiterleitungen werden nie blind gefolgt: Jeder Zwischenschritt wird erneut geprüft, damit ein vertrauter Host eine Installation nicht an einen anderen Intranet-Rechner weiterreicht.
+- Skill-Quellen der Form `http://host/group/repo.git` werden auf einer gelisteten Herkunft akzeptiert.
+- Extensions, die `service`, `network`, `origins` oder `transcript` verlangen, müssen weiterhin aus einem Repository unter `allowedExtensions` stammen.
+
+### Modellmetadaten auf eine interne Adresse richten
+
+Die Modellauswahl liest Kontextgrößen und Preise aus `https://models.dev/api.json`. In einem Netz ohne Route dorthin legen Sie eine interne Kopie dieser Datei fest. Das funktioniert mit und ohne Enterprise-Modus.
+
+```json
+{
+  "modelsDevUrl": "http://nginx.corp.internal/models/api.json"
+}
+```
+
+- Die Datei nutzt das Format von models.dev. Gelesen werden nur `id`, `name`, `limit`, `modalities`, `cost` und ein paar Fähigkeits-Flags, deshalb reicht eine kurze handgeschriebene Datei.
+- Einmal festgelegt, liest OpenChamber nur diese Adresse, im Server und im Browser. Es fällt nie auf models.dev zurück.
+- Ein Wert, der keine einfache `http(s)`-URL ist oder Zugangsdaten enthält, zählt als nicht gesetzt.
+- Modellmetadaten dienen der Anzeige und als Routing-Hinweise. Sessions funktionieren auch ohne sie.
+
+### Integrierte Skill-Kataloge ersetzen
+
+`hideBuiltinSkillCatalogs` blendet die öffentlichen Kataloge nur aus. Um stattdessen eigene anzubieten, listen Sie sie auf:
+
+```json
+{
+  "skillsCatalogSources": [
+    {
+      "id": "corp",
+      "label": "Firmen-Skills",
+      "description": "Skills, die das Platform-Team pflegt",
+      "source": "https://gitlab.corp.internal/platform/skills.git",
+      "defaultSubpath": "skills",
+      "excludedSkills": ["draft"]
+    }
+  ]
+}
+```
+
+- `id`, `label` und `source` sind Pflicht. Eine Quelle ist eine Git-URL: HTTPS, SSH oder HTTP für eine Herkunft, die in `allowedInsecureGitOrigins` gelistet ist.
+- Ist die Liste nicht leer, ersetzt sie die integrierten Kataloge, ganz gleich, ob diese ausgeblendet sind.
+- Ein Eintrag, den die Datei nicht lesen kann, macht die gesamte Policy-Datei ungültig, und dann wird gar kein Katalog angeboten.
+- Eine Umgebungsvariable gibt es dafür nicht.
+
 ### Beispiele
 
 Die Richtliniendatei auf einem Mac ablegen. Führen Sie im Terminal als Administrator aus:

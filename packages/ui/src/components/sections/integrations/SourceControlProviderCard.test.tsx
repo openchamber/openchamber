@@ -55,6 +55,15 @@ describe('normalizeInstanceInput', () => {
     expect(normalizeInstanceInput(host, 'https://github.com')).toBeNull();
     expect(normalizeInstanceInput(host, 'https://github.example.com:8443')).toBeNull();
   });
+
+  test('reads an instance the administrator allowlisted as insecure', () => {
+    const allowlisted = acmeDescriptor({ instances: { ...origin.instances, insecureOrigins: ['http://forge.example.com'] } });
+    expect(normalizeInstanceInput(allowlisted, 'http://forge.example.com')).toBe('http://forge.example.com');
+    expect(normalizeInstanceInput(allowlisted, 'http://Forge.Example.com/')).toBe('http://forge.example.com');
+    // Exact origins only: a port or another host is a different instance.
+    expect(normalizeInstanceInput(allowlisted, 'http://forge.example.com:8080')).toBeNull();
+    expect(normalizeInstanceInput(allowlisted, 'http://other.example.com')).toBeNull();
+  });
 });
 
 const capabilitiesFor = (

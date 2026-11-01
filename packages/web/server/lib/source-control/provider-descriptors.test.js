@@ -128,6 +128,18 @@ describe('source control provider descriptors', () => {
     expect(BUILT_IN_SOURCE_CONTROL_PROVIDERS.map((descriptor) => descriptor.id)).toEqual(['github', 'gitlab']);
   });
 
+  // The routes resolve the policy allowlist per request and pass it for
+  // built-ins, but nothing for an extension: an extension's instances stay
+  // loopback-only however the policy is set.
+  it('publishes the allowlisted plain-HTTP origins for origin-form providers only', () => {
+    const insecure = ['http://gitlab.example.com', 'http://git.lab:8080', 'http://gitlab.example.com'];
+    expect(publicProviderDescriptor(gitlab, 1, undefined, insecure).instances.insecureOrigins)
+      .toEqual(['http://gitlab.example.com', 'http://git.lab:8080']);
+    expect(publicProviderDescriptor(gitlab, 1)).not.toHaveProperty('instances.insecureOrigins');
+    // GitHub's instances are host-form: the allowlist has nothing to widen there.
+    expect(publicProviderDescriptor(github, 0, undefined, insecure).instances).not.toHaveProperty('insecureOrigins');
+  });
+
   it('refuses a descriptor list with an invalid, reserved or duplicate id', () => {
     expect(() => createProviderDescriptors([{ id: 'Bad' }])).toThrow();
     expect(() => createProviderDescriptors([{ id: 'link' }])).toThrow();

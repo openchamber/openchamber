@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'util';
+import { allowedInsecureGitOrigins } from '../enterprise-mode.js';
 import { createGitCredentialBroker, GIT_CREDENTIAL_NONCE_ENV } from '../git/credential-broker.js';
 import { normalizeGitRemoteEndpoint } from '../git/credential-resolver.js';
 import { managedSshCommand } from '../git/network-operations.js';
@@ -9,6 +10,10 @@ const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BUFFER = 4 * 1024 * 1024;
+
+// Protocols that speak HTTP, and so keep the netrc-hiding HOME. `ssh` is the
+// only one that needs the real HOME (for known_hosts).
+const HTTP_PROTOCOLS = new Set(['https', 'https:http']);
 
 const isolatedGitEnvironment = (allowedProtocol) => {
   const env = { ...process.env };
@@ -27,7 +32,7 @@ const isolatedGitEnvironment = (allowedProtocol) => {
   env.GIT_CONFIG_NOSYSTEM = '1';
   env.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
   env.GIT_ALLOW_PROTOCOL = allowedProtocol;
-  if (allowedProtocol === 'https') {
+  if (HTTP_PROTOCOLS.has(allowedProtocol)) {
     // Git's Curl transport also consults netrc outside Git configuration; an
     // ambient ~/.netrc entry must not authenticate as another account than
     // the selected one. SSH keeps HOME for known_hosts.
@@ -50,6 +55,23 @@ export function looksLikeAuthError(message) {
     /fatal: could not/i.test(text)
   );
 }
+
+/**
+ * The protocols an isolated run may speak: `https` for a remote that is HTTPS,
+ * and `http` as well when the URL is on an origin the machine policy lists in
+ * `allowedInsecureGitOrigins` — the source parser refused every other
+ * plain-HTTP remote, but Git refuses the transport itself before it connects,
+ * so the allowlist has to be repeated here.
+ */
+const allowedProtocolsFor = (args, options) => {
+  const source = args.find((value) => /^http:\/\//i.test(value));
+  if (!source) return 'https';
+  try {
+    return allowedInsecureGitOrigins(options.policyOptions).has(new URL(source).origin) ? 'https:http' : 'https';
+  } catch {
+    return 'https';
+  }
+};
 
 export async function runGit(args, options = {}) {
   const cwd = options.cwd;
@@ -84,10 +106,11 @@ export async function runGit(args, options = {}) {
       }
 
       if (credential.transport === 'https') {
+        const protocols = allowedProtocolsFor(normalizedArgs, options);
         broker = createGitCredentialBroker({ capacity: 1, ttlMs: timeoutMs });
         await broker.start();
         lease = broker.issue({ operationId, credential });
-        env = isolatedGitEnvironment('https');
+        env = isolatedGitEnvironment(protocols);
         env[GIT_CREDENTIAL_NONCE_ENV] = lease.env[GIT_CREDENTIAL_NONCE_ENV];
         normalizedArgs.unshift(
           '-c', 'credential.helper=',
@@ -109,7 +132,7 @@ export async function runGit(args, options = {}) {
         return { ok: false, stdout: '', stderr: '', message: 'Selected Git identity cannot authenticate this repository' };
       }
     } else if (identity?.anonymous) {
-      env = isolatedGitEnvironment('https');
+      env = isolatedGitEnvironment(allowedProtocolsFor(normalizedArgs, options));
       normalizedArgs.unshift(
         '-c', 'credential.helper=',
         '-c', 'http.proxy=',

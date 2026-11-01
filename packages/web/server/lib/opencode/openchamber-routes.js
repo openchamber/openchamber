@@ -506,9 +506,12 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   app.get('/api/openchamber/models-metadata', async (_req, res) => {
     try {
-      const { getModelsMetadata, toClientModelsMetadata } = await import('./models-metadata.js');
+      const { getModelsMetadata, toClientModelsMetadata, resolveModelsDevUrl, isModelsDevUrlPinned } = await import('./models-metadata.js');
+      // Tells the browser the administrator chose where the catalog comes from,
+      // so it must not try models.dev itself when this answer is an error.
+      if (isModelsDevUrlPinned()) res.setHeader('X-OpenChamber-Models-Source', 'pinned');
       const { metadata, fromCache, stale } = await getModelsMetadata({
-        url: modelsDevApiUrl,
+        url: resolveModelsDevUrl(modelsDevApiUrl),
         ttlMs: modelsMetadataCacheTtl,
       });
       res.setHeader('Cache-Control', fromCache && !stale ? 'public, max-age=60' : 'public, max-age=300');

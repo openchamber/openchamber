@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { constants as fsConstants } from 'node:fs';
 import { withSourceControlFileLock } from '../source-control/file-lock.js';
+import { allowedInsecureGitOrigins } from '../enterprise-mode.js';
 import { isLoopbackHost } from './loopback-http.js';
 
 const VERSION = 1;
@@ -94,8 +95,10 @@ const isSafeDisplayEndpoint = (value) => {
     const endpoint = new URL(value);
     const pathname = decodeURIComponent(endpoint.pathname);
     // Plain HTTP only to this machine (a provider's loopback development
-    // instance); the planner decided it may be reached.
-    return (['https:', 'ssh:'].includes(endpoint.protocol) || (endpoint.protocol === 'http:' && isLoopbackHost(endpoint.hostname)))
+    // instance) or to an origin the machine policy allows; the planner
+    // decided it may be reached.
+    return (['https:', 'ssh:'].includes(endpoint.protocol)
+      || (endpoint.protocol === 'http:' && (isLoopbackHost(endpoint.hostname) || allowedInsecureGitOrigins().has(endpoint.origin))))
       && !endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash
       && Boolean(endpoint.hostname && endpoint.pathname && endpoint.pathname !== '/')
       && !/[\0-\x20\x7f\\]/.test(pathname)

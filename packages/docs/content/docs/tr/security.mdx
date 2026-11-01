@@ -117,6 +117,69 @@ OpenChamber birkaç herkese açık skill kataloğuyla gelir (Anthropic, OpenAI, 
 
 Ayarlar bundan sonra yalnızca kişilerin kendi eklediği katalogları sunar ve OpenChamber doğrudan istense bile yerleşik bir kataloğu yüklemez. Kullanıcı bunları kendisi ayarlayabildiği için bunun bir ortam değişkeni yoktur.
 
+### Düz HTTP Git kaynaklarına izin verin
+
+Bir Git barındırma hizmeti (GitLab, Gitea, Gerrit, Forgejo) bağlanırken OpenChamber HTTPS ister; çünkü düz HTTP üzerinden gönderilen bir belirteci ağdaki herkes okuyabilir. HTTPS'i olmayan bir intranet sunucusu ilke dosyasında izinli gösterilebilir. Kurumsal mod açık ya da kapalı, fark etmez. Kullanıcılar Settings → Git üzerinden kendi kaynaklarını da izinli gösterebilir: kurumsal mod kapalıyken bu liste, dosyadaki listeye eklenir; mod açıldığında ise tümüyle yok sayılır.
+
+```json
+{
+  "allowedInsecureGitOrigins": ["http://gitlab.corp.internal"]
+}
+```
+
+- Her madde tam bir kaynaktır: şema, ana bilgisayar ve gerekiyorsa port. Yol, `*` ya da kimlik bilgisi olmaz. `http://gitlab.corp.internal`, `http://gitlab.corp.internal:8443` kapsamaz.
+- Yalnızca listelenen geçer. GitHub ve GitLab'ın herkese açık örnekleri ve geri kalan tüm ana bilgisayarlar HTTPS istemeye devam eder.
+- Bu liste başka bir şeyi açmaz: kendi barındırılan bir sağlayıcı uzantısı bundan sonra da yalnızca HTTPS ve loopback HTTP kabul eder, anonim aktarımlar HTTPS istemeye devam eder. Git LFS indirmeleri de aynı listeyi izler: düz metin HTTP yalnızca listedeki bir kaynakta.
+- Bir kaynağı listeden çıkarınca OpenChamber, ona bağlı örnekleri yeniden bağlayana dek reddeder.
+- Settings → Git listesi de aynı kurallara uyar: satır başına tam bir kaynak; kabul edilmeyen satır, liste kaydedilirken düşer. Kurumsal mod açıkken bu liste tümüyle yok sayılır — düz metin güvenini genişletmek yine yöneticinin kararıdır.
+
+Aynı liste, uzantıların ve skill'lerin nerelerden kurulabileceğine de karar verir. Adresi sunucunun kendisi getirdiği için "URL'den kur" ve uzantı güncellemeleri normalde özel adresleri, iç adları (`.internal`, `.local`) ve düz HTTP'yi reddeder. `allowedInsecureGitOrigins` içinde adı geçen bir ana bilgisayar bu işte güvenilir sayılır:
+
+- Bu ana bilgisayar HTTPS ve SSH üzerinde her portta kabul edilir; HTTP'de ise yalnızca listelenen tam kaynakta. Git klonları ve `.zip` indirmeleri bu kurala uyar.
+- Adının çözüldüğü adres loopback (`127.0.0.0/8`, `::1`) veya link-local (`169.254.0.0/16`, bulut üstverileri dahil) olmamalıdır. Bunları listeye yazmak bir şeyi değiştirmez.
+- Yönlendirmeler asla körü körüne izlenmez: her atlama yeniden denetlenir, böylece güvenilir bir ana bilgisayar bir kurulumu başka bir intranet ana bilgisayarına yönlendiremez.
+- `http://host/group/repo.git` biçiminde yazılan skill kaynakları, listedeki bir kaynakta kabul edilir.
+- `service`, `network`, `origins` veya `transcript` isteyen uzantılar, yine `allowedExtensions` altındaki bir depodan gelmek zorundadır.
+
+### Model üstverilerini dahili bir adrese yönlendirin
+
+Model seçici, bağlam boyutlarını ve fiyatları `https://models.dev/api.json` adresinden okur. Oraya yolu olmayan bir ağda bu dosyanın dahili bir kopyasını sabitleyin. Kurumsal mod açık ya da kapalı, fark etmez.
+
+```json
+{
+  "modelsDevUrl": "http://nginx.corp.internal/models/api.json"
+}
+```
+
+- Dosya models.dev biçimini kullanır. Yalnızca `id`, `name`, `limit`, `modalities`, `cost` ve birkaç yetenek bayrağı okunur; bu yüzden elle yazılmış kısa bir dosya yeter.
+- Bir kez sabitlenince OpenChamber, sunucuda da tarayıcıda da yalnızca o adresi okur. Asla models.dev'e geri düşmez.
+- Düz bir `http(s)` URL olmayan veya kimlik bilgisi taşıyan değer atanmamış sayılır.
+- Model üstverileri gösterim ve yönlendirme ipuçları içindir. Oturumlar onsuz da çalışır.
+
+### Yerleşik skill kataloglarını değiştirin
+
+`hideBuiltinSkillCatalogs` herkese açık katalogları yalnızca gizler. Yerlerine kendi kataloglarınızı sunmak için onları listeye yazın:
+
+```json
+{
+  "skillsCatalogSources": [
+    {
+      "id": "corp",
+      "label": "Kurum skill'leri",
+      "description": "Platform ekibinin tuttuğu skill'ler",
+      "source": "https://gitlab.corp.internal/platform/skills.git",
+      "defaultSubpath": "skills",
+      "excludedSkills": ["draft"]
+    }
+  ]
+}
+```
+
+- `id`, `label` ve `source` zorunlu. Bir kaynak bir Git URL'sidir: HTTPS, SSH ya da `allowedInsecureGitOrigins` içinde listelenmiş bir kaynak için HTTP.
+- Liste boş olmadığında, yerleşik katalogları — gizli olsunlar ya da olmasın — değiştirir.
+- Dosyanın okuyamadığı bir madde tüm ilke dosyasını geçersiz kılar; o durumda hiçbir katalog sunulmaz.
+- Bunun için bir ortam değişkeni yoktur.
+
 ### Örnekler
 
 Politika dosyasını bir Mac'e koymak için Terminal'de yönetici olarak şunu çalıştırın:

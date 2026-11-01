@@ -117,6 +117,69 @@ OpenChamber ships with a few public skills catalogs (Anthropic, OpenAI, Cursor, 
 
 Settings then offers only the catalogs people add themselves, and OpenChamber won't load a built-in one even if asked directly. There's no environment variable for this, since a user can set those themselves.
 
+### Allow plain-HTTP Git origins
+
+OpenChamber asks for HTTPS when you connect a Git hosting provider (GitLab, Gitea, Gerrit, Forgejo), because a token sent over plain HTTP can be read by anyone on the network. An intranet host with no HTTPS can be allowed in the policy file. This works with or without enterprise mode. People can also allow origins themselves in Settings → Git: while enterprise mode is off, their list is added to the file's, and once the mode is on, it is ignored.
+
+```json
+{
+  "allowedInsecureGitOrigins": ["http://gitlab.corp.internal"]
+}
+```
+
+- Each entry is one exact origin, with scheme, host and, if it matters, port. No path, no `*`, no credentials. `http://gitlab.corp.internal` does not cover `http://gitlab.corp.internal:8443`.
+- Only what you list is let through. GitHub and GitLab's public instances, and everything else, still require HTTPS.
+- The allowlist doesn't open anything else: a self-hosted provider extension keeps accepting HTTPS and loopback HTTP only, and anonymous transfers keep requiring HTTPS. Git LFS downloads follow the same list: plain HTTP only on a listed origin.
+- Remove an origin from the list and OpenChamber stops accepting the instances bound to it until you bind them again.
+- The Settings → Git list follows the same rules: one exact origin per line, and a line that isn't an accepted origin is dropped when the list is saved. While enterprise mode is on it is ignored entirely — widening plaintext trust stays the administrator's move.
+
+The same list also decides where extensions and skills may be installed from. "Install from URL" and extension updates normally refuse private addresses, internal names (`.internal`, `.local`) and plain HTTP, because the server fetches the address itself. A host named in `allowedInsecureGitOrigins` is trusted for that:
+
+- Its host is accepted over HTTPS and SSH on any port, and over HTTP on the exact listed origin. Git clones and `.zip` downloads both follow this.
+- The address it resolves to must not be loopback (`127.0.0.0/8`, `::1`) or link-local (`169.254.0.0/16`, which includes cloud metadata). Naming those in the list changes nothing.
+- Redirects are never followed blindly: every hop is checked again, so a trusted host can't bounce an install to another internal host.
+- Skill sources written as `http://host/group/repo.git` are accepted on a listed origin.
+- Extensions that ask for `service`, `network`, `origins` or `transcript` still have to come from a repository under `allowedExtensions`.
+
+### Point model metadata at an internal address
+
+The model picker reads context sizes and prices from `https://models.dev/api.json`. On a network with no route there, pin an internal copy of that file. This works with or without enterprise mode.
+
+```json
+{
+  "modelsDevUrl": "http://nginx.corp.internal/models/api.json"
+}
+```
+
+- The file uses the models.dev format. Only `id`, `name`, `limit`, `modalities`, `cost` and a few capability flags are read, so a short hand-written file is enough.
+- Once pinned, OpenChamber reads only that address, in the server and in the browser. It never falls back to models.dev.
+- A value that isn't a plain `http(s)` URL, or that carries credentials, counts as unset.
+- Model metadata is for display and routing hints. Sessions work without it.
+
+### Replace the built-in skills catalogs
+
+`hideBuiltinSkillCatalogs` only hides the public catalogs. To offer your own in their place, list them:
+
+```json
+{
+  "skillsCatalogSources": [
+    {
+      "id": "corp",
+      "label": "Corp skills",
+      "description": "Skills kept by the platform team",
+      "source": "https://gitlab.corp.internal/platform/skills.git",
+      "defaultSubpath": "skills",
+      "excludedSkills": ["draft"]
+    }
+  ]
+}
+```
+
+- `id`, `label` and `source` are required. A source is a Git URL: HTTPS, SSH, or HTTP for an origin listed in `allowedInsecureGitOrigins`.
+- When the list isn't empty it replaces the built-in catalogs, whether or not they are hidden.
+- An entry the file can't read makes the whole policy file invalid, and then no catalog is offered at all.
+- There's no environment variable for this.
+
 ### Examples
 
 Put the policy file on a Mac. Run in Terminal as an administrator:

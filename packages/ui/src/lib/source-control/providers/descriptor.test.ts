@@ -59,6 +59,22 @@ describe('source-control provider descriptors', () => {
     expect(older?.urls.discussion).toEqual([]);
   });
 
+  test('reads the insecure-origin allowlist where a server names one, and as nothing besides', () => {
+    const descriptor = acmeDescriptor();
+    // A server from before the field, and one whose value this version cannot read, accept only HTTPS.
+    for (const instances of [
+      { ...descriptor.instances, insecureOrigins: undefined },
+      { ...descriptor.instances, insecureOrigins: 'http://forge.example.com' },
+    ]) {
+      const [parsed] = sourceControlProviderListSchema.parse([{ ...descriptor, instances }]);
+      expect(parsed?.instances.insecureOrigins).toEqual([]);
+    }
+    const [published] = sourceControlProviderListSchema.parse([
+      { ...descriptor, instances: { ...descriptor.instances, insecureOrigins: ['http://forge.example.com'] } },
+    ]);
+    expect(published?.instances.insecureOrigins).toEqual(['http://forge.example.com']);
+  });
+
   test('reads a change host: its term, review model, revisions, submit, push-created changes and credential fields', () => {
     const [parsed] = sourceControlProviderListSchema.parse([changeHostDescriptor()]);
     expect(parsed?.terminology).toMatchObject({ changeRequest: 'change', abbreviation: 'CL', changeRequestPrefix: '#' });

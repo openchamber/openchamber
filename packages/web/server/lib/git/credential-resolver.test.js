@@ -8,6 +8,7 @@ import {
   createGitCredentialResolver,
   createHttpsCredentialReference,
   createSshCredentialReference,
+  endpointIsInstanceOrigin,
   gitLfsCredentialEndpointAliases,
   normalizeGitRemoteEndpoint,
   parseGitCredentialReference,
@@ -360,5 +361,25 @@ describe('Git credential resolver', () => {
       operationId: 'git_one',
     })).rejects.toThrow('snapshot failed');
     expect(rm).toHaveBeenCalledWith('/snapshots/git_one.key', { force: true });
+  });
+});
+
+describe('endpointIsInstanceOrigin', () => {
+  const gitlabLike = { presentation: { instances: { allowLoopbackHttp: false } } };
+  const loopbackAllowed = { presentation: { instances: { allowLoopbackHttp: true } } };
+  const insecureOrigins = new Set(['http://192.168.1.100']);
+
+  it('reaches a managed credential over plain HTTP only for an allowlisted origin', () => {
+    const httpEndpoint = { protocol: 'http', host: '192.168.1.100', port: 80 };
+    expect(endpointIsInstanceOrigin(gitlabLike, new URL('http://192.168.1.100'), httpEndpoint, insecureOrigins)).toBe(true);
+    expect(endpointIsInstanceOrigin(gitlabLike, new URL('http://192.168.1.100'), httpEndpoint, new Set())).toBe(false);
+    expect(endpointIsInstanceOrigin(gitlabLike, new URL('http://192.168.1.100:8080'), { ...httpEndpoint, port: 8080 }, insecureOrigins)).toBe(false);
+    expect(endpointIsInstanceOrigin(gitlabLike, new URL('http://192.168.1.100'), { ...httpEndpoint, protocol: 'https' }, insecureOrigins)).toBe(false);
+    expect(endpointIsInstanceOrigin(gitlabLike, new URL('https://gitlab.example.com'), { protocol: 'https', host: 'gitlab.example.com', port: 443 }, new Set())).toBe(true);
+  });
+
+  it('keeps a loopback HTTP instance working without the policy', () => {
+    expect(endpointIsInstanceOrigin(loopbackAllowed, new URL('http://localhost:3000'), { protocol: 'http', host: 'localhost', port: 3000 }, new Set())).toBe(true);
+    expect(endpointIsInstanceOrigin(gitlabLike, new URL('http://localhost:3000'), { protocol: 'http', host: 'localhost', port: 3000 }, new Set())).toBe(false);
   });
 });

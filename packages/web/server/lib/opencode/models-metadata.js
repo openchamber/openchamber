@@ -1,3 +1,5 @@
+import { readPinnedModelsDevUrl } from '../enterprise-mode.js';
+
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 8000;
@@ -25,12 +27,21 @@ const fetchCatalog = async (url, timeoutMs) => {
 };
 
 /**
+ * The catalog URL in force: the one the machine policy pins (`modelsDevUrl`),
+ * else the caller's default, else models.dev.
+ */
+export const resolveModelsDevUrl = (fallback = MODELS_DEV_API_URL, policyOptions) => readPinnedModelsDevUrl(policyOptions) ?? fallback;
+
+/** Whether the machine policy pins the catalog URL, so no public address is to be tried. */
+export const isModelsDevUrlPinned = (policyOptions) => readPinnedModelsDevUrl(policyOptions) !== null;
+
+/**
  * Returns the models.dev catalog, serving the in-memory copy while fresh.
  * On fetch failure a stale cached copy is returned when available; otherwise
  * the error propagates.
  */
 export async function getModelsMetadata({
-  url = MODELS_DEV_API_URL,
+  url = resolveModelsDevUrl(),
   ttlMs = DEFAULT_TTL_MS,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 } = {}) {

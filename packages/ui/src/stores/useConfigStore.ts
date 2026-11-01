@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listModelVariantIds, modelVariantNames } from "@/lib/modelVariants";
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
+import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
@@ -824,8 +825,11 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
     }
 
     const sources = [MODELS_DEV_PROXY_URL, MODELS_DEV_API_URL];
+    // Set once the server says an administrator pinned the catalog address: its
+    // answer, even a failure, is final, and models.dev is not tried from here.
+    let catalogPinned = false;
 
-    for (const source of sources) {
+    for (const [index, source] of sources.entries()) {
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
         const timeout = controller ? setTimeout(() => controller.abort(), 8000) : undefined;
 
@@ -849,6 +853,10 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
                 ? await fetch(source, requestInit)
                 : await runtimeFetch(source, requestInit);
 
+            if (!isAbsoluteUrl && response.headers?.get?.('X-OpenChamber-Models-Source') === 'pinned') {
+                catalogPinned = true;
+            }
+
             if (!response.ok) {
                 throw new Error(`Metadata request to ${source} returned status ${response.status}`);
             }
@@ -864,6 +872,21 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
         } finally {
             if (timeout) {
                 clearTimeout(timeout);
+            }
+        }
+
+        if (catalogPinned) {
+            break;
+        }
+
+        // The proxy failed without an answer, and a network error carries no
+        // header. Whether its answer would have been final is the
+        // administrator's call, so read the flag once from the policy store
+        // before models.dev is tried.
+        if (index === 0) {
+            await useEnterprisePolicyStore.getState().load();
+            if (useEnterprisePolicyStore.getState().modelsDevUrlPinned) {
+                break;
             }
         }
     }

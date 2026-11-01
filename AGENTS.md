@@ -85,6 +85,19 @@ implementation skills unless a specialized subsystem has to be interpreted.
 - Use `package.json` scripts as the command source of truth. Which checks a change needs is in `openchamber-change-discipline`.
 - Before every commit of source changes, `bun run check:changed` passes (`scripts/check-changed.mjs` says what it runs). Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
 
+## Fork and upstream
+
+This checkout is a personal fork: `upstream` is the source repository, `fork`
+(github.com/Meiuxs/openchamber) is where work is published. Feature branches push to
+`fork`; `upstream` stays read-only. Work meant for the source repository follows
+*Pull Request Handoff* below; fork-only work needs no upstream issue or pull request.
+
+To fold an upstream update in: `git fetch upstream`, `git merge upstream/main`, resolve
+conflicts, run `bun run check:changed`, then push the branch to `fork`. Merge rather
+than rebase: the fork carries long-lived customizations (the intranet policy features,
+for example), and one merge per upstream update resolves those conflicts once. Keep
+customizations small and layered so future merges stay cheap.
+
 ## Pull Request Handoff
 
 Before creating or updating a pull request, read `CONTRIBUTING.md` (*Pull Requests*) and fill `.github/PULL_REQUEST_TEMPLATE.md` with evidence for the final HEAD.

@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
+import { allowedInsecureGitOrigins } from '../enterprise-mode.js';
 import { normalizeSourceControlProviderInstance } from '../source-control/provider-instance.js';
 import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 import { createHttpsCredentialReference, endpointIsInstanceOrigin, normalizeGitRemoteEndpoint } from './credential-resolver.js';
@@ -200,9 +201,11 @@ const parseAuxiliaryGrants = (value) => {
  * password are credentials and never pass. Clone and every existing-remote
  * transfer share this rule. With `providers`, plain HTTP passes for a
  * loopback host when a provider allows loopback HTTP instances
- * (`loopback-http.js`); never for any other host.
+ * (`loopback-http.js`), and for an origin the machine policy lists in
+ * `allowedInsecureGitOrigins` (`insecureOrigins` overrides that read for
+ * tests and callers that resolved it already); never for any other host.
  */
-const isSafeTransferEndpoint = (value, providers = null) => {
+const isSafeTransferEndpoint = (value, providers = null, insecureOrigins = null) => {
   if (value.length > 4096) return false;
   if (!value.includes('://')) {
     const match = value.match(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:([^\s:\\]+)$/);
@@ -217,16 +220,17 @@ const isSafeTransferEndpoint = (value, providers = null) => {
   } catch {
     return false;
   }
-  const loopbackHttp = parsed.protocol === 'http:' && loopbackHttpPermitted(parsed.hostname, providers);
-  return (['https:', 'ssh:'].includes(parsed.protocol) || loopbackHttp)
+  const plainHttp = parsed.protocol === 'http:' && (loopbackHttpPermitted(parsed.hostname, providers)
+    || (insecureOrigins ?? allowedInsecureGitOrigins()).has(parsed.origin));
+  return (['https:', 'ssh:'].includes(parsed.protocol) || plainHttp)
     && (!parsed.username || (parsed.protocol === 'ssh:' && /^[A-Za-z0-9._][A-Za-z0-9._-]*$/.test(parsed.username)))
     && !parsed.password && !parsed.search && !parsed.hash
     && Boolean(parsed.hostname) && Boolean(parsed.pathname) && parsed.pathname !== '/'
     && !/[\0-\x20\x7f\\]/.test(pathname)
     && pathname.split('/').slice(1).every((part) => part && part !== '.' && part !== '..');
 };
-const assertSafeExistingEndpoint = (endpoint, providers = null) => {
-  if (!isSafeTransferEndpoint(requiredString(endpoint, 'Git endpoint'), providers)) throw planError('Git endpoint is invalid');
+const assertSafeExistingEndpoint = (endpoint, providers = null, insecureOrigins = null) => {
+  if (!isSafeTransferEndpoint(requiredString(endpoint, 'Git endpoint'), providers, insecureOrigins)) throw planError('Git endpoint is invalid');
 };
 // Display URLs are redacted, so a URL-form display never carries userinfo.
 const assertSafeDisplayEndpoint = (endpoint) => {
@@ -320,9 +324,9 @@ const parseRemoteFetchMapping = (remoteName, output) => {
   }
   return { refspec: output.slice(0, -1), force: output.startsWith('+') };
 };
-const parseCloneEndpoint = (value, providers) => {
+const parseCloneEndpoint = (value, providers, insecureOrigins = null) => {
   const endpoint = requiredString(value, 'remoteUrl');
-  if (!isSafeTransferEndpoint(endpoint, providers)) throw planError('remoteUrl is invalid');
+  if (!isSafeTransferEndpoint(endpoint, providers, insecureOrigins)) throw planError('remoteUrl is invalid');
   return endpoint;
 };
 /**
@@ -370,6 +374,7 @@ export function createNetworkOperationPlanner({
   validateManagedSshCredential,
   resolveSourceControlAccount,
   sourceControlProviders = sourceControlProviderDescriptors,
+  insecureGitOrigins = allowedInsecureGitOrigins,
   contributorProvenance,
   resolveRef,
   resolveSymbolicRef = async () => null,
@@ -489,7 +494,7 @@ export function createNetworkOperationPlanner({
     const pushAuthority = await validateGitTransportContext(authorityInput(pushRemote, 'push'));
     const validateAuthority = (authority, remote, transportMode) => {
       const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
-      assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
+      assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders, insecureGitOrigins());
       if (transportMode === 'anonymous' && (authority.credentialId !== undefined
         || normalizeGitRemoteEndpoint(authority.endpoint).protocol !== 'https')) {
         throw planError('Anonymous Git transport requires credential-free HTTPS', 501, 'RUNTIME_UNSUPPORTED');
@@ -658,7 +663,7 @@ export function createNetworkOperationPlanner({
       endpointKind,
     });
     const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
-    assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
+    assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders, insecureGitOrigins());
     if (transportMode === 'anonymous' && (authority.credentialId !== undefined
       || normalizeGitRemoteEndpoint(authority.endpoint).protocol !== 'https')) {
       throw planError('Anonymous Git transport requires credential-free HTTPS', 501, 'RUNTIME_UNSUPPORTED');
@@ -773,7 +778,7 @@ export function createNetworkOperationPlanner({
       ['operation', 'remoteUrl', 'destinationPath', 'transportMode'],
       ['credentialAccount', 'providerAccount', 'sshCredentialId', 'unverifiedConfirmed', 'gitIdentityId', 'auxiliaryGrants'],
     )) throw planError('Git clone input is invalid');
-    const endpoint = parseCloneEndpoint(input.remoteUrl, sourceControlProviders);
+    const endpoint = parseCloneEndpoint(input.remoteUrl, sourceControlProviders, insecureGitOrigins());
     const transportMode = parseTransportMode(input.transportMode);
     const dotGitOrigins = [];
     const noteDotGitInstance = (provider, instance) => {
@@ -809,7 +814,7 @@ export function createNetworkOperationPlanner({
         try { instance = normalizeSourceControlProviderInstance(account.provider, account.instance, sourceControlProviders); }
         catch { throw planError('Credential account instance is invalid'); }
         const descriptor = sourceControlProviders.get(account.provider);
-        if (!endpointIsInstanceOrigin(descriptor, descriptor.instance.origin(instance), parsedEndpoint)) {
+        if (!endpointIsInstanceOrigin(descriptor, descriptor.instance.origin(instance), parsedEndpoint, insecureGitOrigins())) {
           throw planError('Credential account does not match the HTTPS endpoint');
         }
         noteDotGitInstance(account.provider, instance);
@@ -892,7 +897,7 @@ export function createNetworkOperationPlanner({
       remote: remote.name,
       endpointKind: 'fetch',
     });
-    assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders);
+    assertSafeExistingEndpoint(authority.endpoint, sourceControlProviders, insecureGitOrigins());
     if (authority.endpointFingerprint !== remote.endpoint.fingerprint
       || redactRemoteUrl(authority.endpoint) !== remote.endpoint.displayUrl) {
       throw planError('Git checkout hydration source changed', 409, 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED');

@@ -39,6 +39,10 @@ import { extensionProviderId } from './provider-id.js';
 
 /** @typedef {import('./provider-contract').ProviderDescriptor} ProviderDescriptor */
 
+// The administrator's insecure-origin allowlist never widens an extension's
+// instances: passed instead of reading the policy.
+const EMPTY_ORIGINS = new Set();
+
 // Bounded placeholders: no unbounded repetition anywhere, so a path cannot
 // make the compiled pattern backtrack without limit, whatever the templates.
 const SEGMENT = '[^/]{1,256}';
@@ -135,7 +139,10 @@ export function buildExtensionDescriptor({ guestId, contribution, guest }) {
 
   const { label, instances: declared, capabilities, presentation, limits } = contribution;
   const normalizeOrigin = (raw) => {
-    const origin = normalizeOriginInstance(raw, { label });
+    // An extension's instances stay exactly as strict as before: the
+    // administrator's insecure-origin allowlist never widens them, so this
+    // empty set is passed instead of reading the policy.
+    const origin = normalizeOriginInstance(raw, { label, insecureOrigins: EMPTY_ORIGINS });
     const url = new URL(origin);
     if (url.protocol === 'http:' && !declared.allowLoopbackHttp) throw new Error(`${label} instances must use HTTPS`);
     if (url.port && !declared.allowPort) throw new Error(`${label} instance must not name a port`);

@@ -19,7 +19,7 @@ const BUILT_INS = ['github', 'gitlab', 'gitea'];
 const ALL = [...BUILT_INS, 'gerrit'];
 const INSTANCES = { github: 'github.com', gitlab: 'https://gitlab.com', gitea: 'https://gitea.example.com', gerrit: 'https://gerrit.example.com' };
 
-const appWith = () => {
+const appWith = ({ insecureOrigins = [] } = {}) => {
   // The instance probe is the implementation's; the static half is the descriptor's.
   const loaders = Object.fromEntries(ALL.map((id) => [id, async () => ({
     createProvider: () => ({
@@ -37,6 +37,8 @@ const appWith = () => {
   app.use(express.json());
   registerSourceControlRoutes(app, {
     providers,
+    // The frozen answer is the one a machine with no plain-HTTP allowlist gets.
+    readInsecureGitOrigins: () => new Set(insecureOrigins),
     bindingService: { validateReadContext: vi.fn(), validateMutationContext: vi.fn(), accountUnavailable: vi.fn(), accountConnected: vi.fn() },
     identityProvisioning: { backfillAccountIdentities: vi.fn(), ensureAccountIdentity: vi.fn(), repointAccountIdentities: vi.fn() },
     mutationExecutor: { read: vi.fn(), execute: vi.fn() },
@@ -63,5 +65,23 @@ describe('published built-in providers', () => {
     expect(providers.find((provider) => provider.id === 'gerrit')).toEqual(frozen.gerrit.provider);
     const capabilities = await request(app).get('/api/source-control/gerrit/capabilities').query({ instance: INSTANCES.gerrit }).expect(200);
     expect(capabilities.body).toEqual(frozen.gerrit.capabilities);
+  });
+
+  // The allowlist is the only transport policy that ever reaches a client, and
+  // it reaches an origin-form provider only: GitHub's instances are hosts.
+  it('adds the plain-HTTP allowlist to the origin-form built-ins and to nothing else', async () => {
+    const app = appWith({ insecureOrigins: ['http://git.lab:8080'] });
+    const { providers } = (await request(app).get('/api/source-control/providers').expect(200)).body;
+    const byId = Object.fromEntries(providers.map((provider) => [provider.id, provider]));
+    for (const id of ['gitlab', 'gitea', 'gerrit']) {
+      expect(byId[id].instances.insecureOrigins).toEqual(['http://git.lab:8080']);
+    }
+    expect(byId.github.instances).not.toHaveProperty('insecureOrigins');
+    // Everything else is exactly what a machine without the allowlist published.
+    for (const id of ['gitlab', 'gitea', 'gerrit']) {
+      const { insecureOrigins: _origins, ...instances } = byId[id].instances;
+      expect(instances).toEqual(frozen.providers.find((provider) => provider.id === id)?.instances
+        ?? frozen.gerrit.provider.instances);
+    }
   });
 });

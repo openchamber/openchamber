@@ -20,6 +20,9 @@ const enterprisePolicySchema = z.object({
   networkAccessBlocked: z.boolean().default(false),
   // OpenCode CLI path the administrator pinned; servers from before the pin have none.
   opencodeBinary: z.string().min(1).nullable().default(null),
+  // Whether the model catalog address is pinned, as a boolean; the address itself stays on
+  // the server. Servers from before the pin report nothing.
+  modelsDevUrlPinned: z.boolean().default(false),
 });
 
 type EnterprisePolicy = z.infer<typeof enterprisePolicySchema>;
@@ -31,6 +34,7 @@ const NO_POLICY: EnterprisePolicy = {
   policyError: null,
   networkAccessBlocked: false,
   opencodeBinary: null,
+  modelsDevUrlPinned: false,
 };
 
 /**
