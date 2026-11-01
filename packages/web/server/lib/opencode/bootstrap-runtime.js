@@ -68,6 +68,7 @@ export const createBootstrapRuntime = (dependencies) => {
       setAutoAcceptSession,
       agentToolRuntime,
       limitFailoverRuntime,
+      retryPolicyRuntime,
       pluginNotificationEmitter,
       desktopUpdater,
       skipBodyParsing,
@@ -104,6 +105,7 @@ export const createBootstrapRuntime = (dependencies) => {
 
     registerAgentToolRoutes(app, { express, agentToolRuntime });
     limitFailoverRuntime?.registerRoutes(app, express);
+    retryPolicyRuntime?.registerRoutes(app, express);
 
     const notificationEmitRoutes = registerNotificationEmitRoutes(app, {
       express,

@@ -1,6 +1,7 @@
 import { appendManagedPermissions, appendManagedPlugin } from './managed-plugin-config.js';
 import { managedPermissionRules } from '../agent-tool/runtime.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
+import { isRetryPolicyConfigured } from '../retry-policy/policy.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
@@ -53,6 +54,7 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * @param {NodeJS.ProcessEnv} [dependencies.env] environment the managed child inherits
  * @param {object|null} [dependencies.agentToolRuntime]
  * @param {object|null} [dependencies.limitFailoverRuntime] `../limit-failover/runtime.js`; its plugin calls back through the agent tool's address
+ * @param {object|null} [dependencies.retryPolicyRuntime] `../retry-policy/runtime.js`; its plugin calls back through the agent tool's address
  * @param {() => Promise<object|null>} dependencies.readSettings
  * @param {() => boolean} [dependencies.isWorkflowAvailable] whether workflows ship in this build (`../workflows/feature-flag.js`)
  */
@@ -63,6 +65,7 @@ export const createManagedConfigRuntime = ({
   env = process.env,
   agentToolRuntime = null,
   limitFailoverRuntime = null,
+  retryPolicyRuntime = null,
   readSettings,
   isWorkflowAvailable = () => false,
 }) => {
@@ -118,6 +121,11 @@ export const createManagedConfigRuntime = ({
     // plugin a round trip to hear "do nothing".
     if (agentToolRuntime && limitFailoverRuntime && isLimitFailoverConfigured(settings)) {
       directories.push(await limitFailoverRuntime.materializePlugin());
+    }
+    // Only while a cap is set: otherwise every retry would cost a round trip
+    // to hear "use OpenCode's own delay".
+    if (agentToolRuntime && retryPolicyRuntime && isRetryPolicyConfigured(settings)) {
+      directories.push(await retryPolicyRuntime.materializePlugin());
     }
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
     const disabled = includeImage ? [...DISABLED_BUILTIN_PLUGINS, BUILTIN_IMAGE_PLUGIN] : DISABLED_BUILTIN_PLUGINS;
