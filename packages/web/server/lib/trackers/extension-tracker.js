@@ -277,7 +277,9 @@ export function createExtensionTracker({
   const forwardAs = async (method, input) => {
     requireLive();
     const stored = await accounts.read(id);
-    const account = stored ? await freshAccount(stored, currentAccount(stored) ?? null) : null;
+    // Every stored account written off reads as disconnected, as no account does.
+    const current = currentAccount(stored);
+    const account = current ? await freshAccount(stored, current) : null;
     if (!account) return null;
     try {
       return await forward(method, {
@@ -621,13 +623,16 @@ export function createExtensionTracker({
       set: async (input) => {
         requireLive();
         const paths = Object.fromEntries(Object.entries(input?.containerProjectPaths ?? {}).filter(([, value]) => String(value) === value && value.trim()));
+        // A mapping belongs to the connected server: with no account there is nothing to map it for.
+        if (!currentAccount(await accounts.read(id))) return { connected: false };
         await accounts.setMapping(id, { defaultProjectPath: String(input?.defaultProjectPath ?? '') === input?.defaultProjectPath && input.defaultProjectPath.trim() ? input.defaultProjectPath : null, containerProjectPaths: paths });
         const data = await forwardAs('containers.list', {});
+        if (!data) return { connected: false };
         const mapping = await accounts.mapping(id);
         return {
           connected: true,
           defaultProjectPath: mapping.defaultProjectPath,
-          containers: (data?.containers ?? []).map((container) => ({ ...container, projectPath: mapping.containerProjectPaths[container.id] ?? null })),
+          containers: data.containers.map((container) => ({ ...container, projectPath: mapping.containerProjectPaths[container.id] ?? null })),
         };
       },
     }),

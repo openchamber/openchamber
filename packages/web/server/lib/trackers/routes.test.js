@@ -407,6 +407,7 @@ describe('tracker routes over an extension tracker', () => {
     tracker.auth.completeAuthorization.mockRejectedValueOnce(new Error('boom'));
     const broken = await request(app).get('/api/tracker/ext-yt/oauth/callback?code=x&state=y').expect(500);
     expect(broken.text).not.toContain('boom');
+    expect(broken.text).toContain('The authorization callback failed.');
     await request(app).get('/api/tracker/nope/oauth/callback?code=1&state=2').expect(404);
   });
 });

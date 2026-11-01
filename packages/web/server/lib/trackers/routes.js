@@ -162,7 +162,7 @@ export function registerTrackerRoutes(app, { registry }) {
       });
       return finish(200, 'Connected', 'You can close this tab and return to OpenChamber.');
     } catch (error) {
-      if (error instanceof TrackerRouteError || isCodedError(error) || isUserError(error)) {
+      if (error instanceof TrackerRouteError || isUserError(error)) {
         return finish(400, 'Could not connect', error.message);
       }
       console.error(`Failed to finish the sign-in (tracker ${req.params.provider}):`, error);

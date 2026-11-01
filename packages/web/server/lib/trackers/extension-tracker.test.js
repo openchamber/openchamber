@@ -242,6 +242,7 @@ describe('reading and writing through an extension tracker', () => {
     expect(await h.tracker.get('id-PROJ-1')).toEqual({ connected: false });
     expect(await h.tracker.liveSummaries(['PROJ-1'])).toEqual({ connected: false });
     expect(await h.tracker.mapping.get()).toEqual({ connected: false });
+    expect(await h.tracker.mapping.set({ defaultProjectPath: '/repo', containerProjectPaths: {} })).toEqual({ connected: false });
     expect(h.calls).toHaveLength(0);
   });
 
@@ -325,6 +326,11 @@ describe('reading and writing through an extension tracker', () => {
     // Written off, not gone: the card shows the account with the reason, on its server, and can remove it.
     expect(status).toMatchObject({ connected: false, accounts: [{ id: 'u-1', status: 'invalid', invalidReason: 'unauthorized', current: false }], connect: { instance: INSTANCE } });
     expect(h.warnings.join('\n')).toContain('refused');
+    // With every account written off, reads answer disconnected and send nothing.
+    const sent = h.calls.length;
+    expect(await h.tracker.list()).toEqual({ connected: false });
+    expect(await h.tracker.get('id-PROJ-1')).toEqual({ connected: false });
+    expect(h.calls).toHaveLength(sent);
     expect(await h.tracker.auth.disconnect()).toEqual({ removed: true });
     expect(await h.tracker.auth.status()).toEqual({ connected: false, connect: expect.objectContaining({ instance: null }) });
     // A delayed 401 for the replaced credential cannot write the replacement off.

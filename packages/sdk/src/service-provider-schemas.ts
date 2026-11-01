@@ -356,7 +356,8 @@ export const notificationsProviderMethodSchema = z.enum(NOTIFICATIONS_PROVIDER_M
 
 const trackerText = z.string().min(1).max(1_024);
 const trackerTitle = z.string().max(4_096);
-const trackerUrl = z.string().min(1).max(2_048);
+// An item's link is opened and drawn as a link in the app: http(s) only, so an answer cannot hand the UI a `javascript:` URL.
+const trackerUrl = z.string().min(1).max(2_048).refine((value) => /^https?:\/\//i.test(value) && URL.canParse(value), { message: 'must be an http(s) URL' });
 const trackerCategory = z.enum(['triage', 'backlog', 'todo', 'in-progress', 'done', 'canceled']);
 const trackerPriority = z.enum(['none', 'urgent', 'high', 'medium', 'low']);
 const trackerPerson = z.object({ name: z.string().max(256).nullable(), avatarUrl: z.string().max(2_048).nullable() }).strict();

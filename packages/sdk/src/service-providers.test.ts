@@ -392,6 +392,8 @@ describe('tracker provider contract', () => {
     expect(schemas.data['auth.probe'].safeParse({ supported: false, message: 'Not a YouTrack server' }).success).toBe(true);
     expect(schemas.data['items.list'].safeParse({ items: [summary], cursor: null, hasMore: false }).success).toBe(true);
     expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, provider: 'ext-youtrack' }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, url: 'javascript:alert(1)' }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.get'].safeParse({ item: { ...summary, url: '/issue/PROJ-42' } }).success).toBe(false);
     expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, parent: summary }], cursor: null, hasMore: false }).success).toBe(true);
     // A parent of a parent is not carried: related items are one level deep.
     expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, parent: { ...summary, parent: summary } }], cursor: null, hasMore: false }).success).toBe(false);
