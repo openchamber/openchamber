@@ -39,7 +39,7 @@ const trackers: TrackerAPI = {
     if (statusFails) throw new Error('offline');
     return { connected: false };
   },
-  authStart: unexpected, authDisconnect: unexpected, authActivate: unexpected, list: unexpected,
+  authStart: unexpected, authConnectToken: unexpected, authSaveOAuthClient: unexpected, authDisconnect: unexpected, authActivate: unexpected, list: unexpected,
   refreshListReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
   mappingGet: unexpected, mappingSet: unexpected, sessionStatusPost: unexpected,
   preferencesGet: unexpected, preferencesSet: unexpected,

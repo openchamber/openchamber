@@ -266,6 +266,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 Bir projenin hangi odaya ya da kanala gideceği eklentinizin kendi seçimidir: bildirim `directory` ve `sessionName` taşır. Kurumsal modda, telefonda olduğu gibi yalnızca genel başlığı taşır. `notification-webhook` örneği, karşısında deneyebileceğiniz bir alıcıyla birlikte eksiksiz bir kanaldır.
 
+## İzleyiciler
+
+Bir servis, Linear'ın yanında bir iş öğesi izleyicisi olabilir: `provides: ["tracker"]` tanımlayın ve izleyiciyi `contributes.tracker` içinde tarif edin. OpenChamber bunu, servis daha hiç çalışmadan yalnızca manifestten yola çıkarak izleyicilerin göründüğü her yerde Linear'ın yanında listeler.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+Kullanıcı, Uzantı hesapları altındaki izleyici kartında hesap bağlar: bir token ya da `auth.oauth` tanımladığınızda tarayıcıda oturum açma (OpenChamber oturum açmayı kullanıcının girdiği client id ile yürütür ve token'ları saklar). Servisiniz hiçbir zaman bir kimlik bilgisi görmez. `urls.item`, bir öğenin adresi için şablonlardır; `{id}` tanımlayıcının yerini tutar (sorguda taşındığında `?name={id}` olarak da). OpenChamber bunları derler, böylece yapıştırılan bağlantılar bağlı öğelere dönüşür. `identifier` anahtarın neye benzediğini söyler: `key-number` (`PROJ-42`), `number` ya da `short-code`.
+
+OpenChamber dokuz çağrıyı `POST /tracker` adresine iletir: `auth.probe` ve `auth.verify`, okuma çağrıları `items.list`, `items.get`, `items.liveSummaries`, `states.list` ve `containers.list`, yazma çağrıları `items.updateState` ve `comments.create`. Her birini `readTrackerProviderRequest` ile okuyun, yansız öğe biçimlerinde yanıtlayın ve izleyicinin sunucusuna yalnızca giden yardımcı üzerinden ulaşın; yardımcı isteğinizi çağrının tanıtıcısıyla OpenChamber'a gönderir, OpenChamber kimlik bilgisini ekler ve isteği hesabın sunucusuyla sınırlı tutar. Bir okumanın tanıtıcısı yalnızca `GET` gönderir.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Kullanıcı oturum yorumlarını açtığında OpenChamber, `comments.create` çağrısını "session started", "completed" ya da "failed" ile ve oturuma bir bağlantıyla, her biri için bir kez yapar; yorum başka bir şey taşımaz. `tracker-provider` örneği, karşısında deneyebileceğiniz sahte bir sunucuyla birlikte eksiksiz bir izleyicidir.
+
 ## Dosyalar
 
 Göreli bir yol açık projenin içindedir ve `files` yeteneği gerektirir. `/` veya `~/` ile başlayan bir yol, tanımlanmış bir `contributes.filesystem` deseniyle eşleşmeli ve `filesystem` yeteneği gerektirir. Kurallar için bkz. [Eklenti oluşturma](/sdk/#dosyalar).

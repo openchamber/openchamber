@@ -37,13 +37,23 @@ const MAX_CACHED_BYTES = 2 * 1024 * 1024;
 // The legacy Linear routes stay beside `/api/tracker/linear` for older clients.
 const LEGACY_TRACKER_PREFIXES = Object.freeze({ linear: '/api/linear' });
 
-const routesOf = (sourceControlProviderIds, trackerIds) => [
-  ...sourceControlProviderIds.map((provider) => ({ prefix: `/api/source-control/${provider}`, provider, tracker: false })),
-  ...trackerIds.flatMap((provider) => [
-    { prefix: `/api/tracker/${provider}`, provider, tracker: true },
-    ...(LEGACY_TRACKER_PREFIXES[provider] ? [{ prefix: LEGACY_TRACKER_PREFIXES[provider], provider, tracker: true }] : []),
-  ]),
-];
+const TRACKER_PATH = /^\/api\/tracker\/([a-z][a-z0-9-]{0,31})\//;
+
+/**
+ * The provider a request path belongs to, or null. Source-control prefixes are
+ * fixed at start; tracker ids are read now (`hasTracker`), because an
+ * extension's tracker attaches and detaches while the server runs.
+ */
+const routeOfPath = (path, sourceControlRoutes, hasTracker) => {
+  const sourceControl = sourceControlRoutes.find((route) => path.startsWith(`${route.prefix}/`));
+  if (sourceControl) return sourceControl;
+  const tracker = TRACKER_PATH.exec(path);
+  if (tracker && hasTracker(tracker[1])) return { prefix: `/api/tracker/${tracker[1]}`, provider: tracker[1], tracker: true };
+  for (const [provider, prefix] of Object.entries(LEGACY_TRACKER_PREFIXES)) {
+    if (path.startsWith(`${prefix}/`) && hasTracker(provider)) return { prefix, provider, tracker: true };
+  }
+  return null;
+};
 
 // Lists change when something is opened or closed; previews and comments are
 // read again sooner when someone is looking at one.
@@ -141,7 +151,9 @@ const isConnectedAnswer = (body) => !(Object.prototype.toString.call(body) === '
 
 /**
  * `sourceControlProviderIds` and `trackerIds` are the registered ids, in the
- * one namespace both registries share.
+ * one namespace both registries share. `trackerIds` is a list, or a function
+ * answering the list as it is now, for a registry that changes while the
+ * server runs.
  */
 export function createProviderReadCache({
   sourceControlProviderIds = sourceControlProviderDescriptors.list().map((descriptor) => descriptor.id),
@@ -150,8 +162,9 @@ export function createProviderReadCache({
   onChange = () => {},
   onItemRefresh = () => {},
 } = {}) {
-  const routes = routesOf(sourceControlProviderIds, trackerIds);
-  const routeOf = (path) => routes.find((route) => path.startsWith(`${route.prefix}/`)) ?? null;
+  const sourceControlRoutes = sourceControlProviderIds.map((provider) => ({ prefix: `/api/source-control/${provider}`, provider, tracker: false }));
+  const hasTracker = (provider) => (typeof trackerIds === 'function' ? trackerIds() : trackerIds).includes(provider);
+  const routeOf = (path) => routeOfPath(path, sourceControlRoutes, hasTracker);
   const entries = new Map();
   const inFlight = new Map();
 

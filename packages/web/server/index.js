@@ -1458,7 +1458,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     sessionGoalRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     contextObligatoryRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWarmingRuntime.processPayload(payload);
-    trackerSessionStatus.processPayload(payload);
+    trackerSessionStatus.processPayload(payload, { spaceId: event?.spaceId ?? null });
     extensionSessionEvents.processPayload(payload, directory || payload.properties?.directory || '');
   }
 });
@@ -1643,6 +1643,7 @@ const clientPairingRuntime = createClientPairingRuntime({
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
   trackers: trackerRegistry,
+  trackerSessionStatus,
 });
 const bootstrapRuntime = createBootstrapRuntime({
   createUiAuth,

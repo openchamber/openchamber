@@ -360,3 +360,20 @@ describe('notification channel scopes', () => {
     }
   });
 });
+
+describe('tracker scopes', () => {
+  test('round-trips the service grant\'s tracker scope', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      const scope = { service: { exec: [], sockets: [], tracker: { instances: { kind: 'fixed', origin: 'https://acme.atlassian.net' }, oauth: { authorizeUrl: 'https://auth.example/a', tokenUrl: 'https://auth.example/t' }, urls: ['/browse/{id}'] } } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['service'] }, capabilityScopes: { alpha: scope } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: scope });
+      const typed = { service: { exec: [], sockets: [], tracker: { instances: { kind: 'user' }, oauth: null, urls: ['/issue/{id}'] } } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['service'] }, capabilityScopes: { alpha: typed } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: typed });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

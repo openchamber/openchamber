@@ -88,7 +88,7 @@ Parse rules:
 - `contributes.service` is optional. A guest without `service` is HTML-only.
 - `service.entry` is a relative path inside the package. Ship compiled JS; the host never compiles TypeScript.
 - `service.runtime` phase 1 accepts only `"host"`.
-- `service.provides` is optional: roles the service stands in for on the host, `"browser"` and `"source-control"` (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself.
+- `service.provides` is optional: roles the service stands in for on the host, `"browser"`, `"source-control"`, `"notifications"` and `"tracker"` (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself. An extension is a Git host or a tracker, never both: the two would share the id `ext-<panel.id>`.
 - `service.surface` is optional (`true`): the service shows a live picture the host draws in the extension's rail panel and takes the user's input back (below). With `panel.entry` too, that page is docked to one edge of the picture (`panel.dock`: `top`, `bottom`, `left`, or `right`, default `top`; `panel.size` in CSS px across that edge, 24 to 480, default 40); without it, the picture is the whole panel.
 - `service.permissions.sockets` and `service.permissions.exec` are shown to the user in the approval dialog. They describe intent and do not confine the process: a service runs with the user's full access. Declaring `contributes.service` adds the `service` capability to the package's request list; the user approves the whole list once when the package is installed (Settings → Extensions), and the first `serviceRequest` is refused with `NO_SERVICE` until then.
 - The catalog adds `service.socketBindings`: `{ id, candidates, resolved, override }` for this host. The user can override a path in Extensions. Override empty clears it and the next spawn re-resolves.
@@ -412,6 +412,72 @@ Delivery is at most once: a failed `notify` (a timeout, a non-200, `ok: false`, 
 Authentication and notification calls share one ordered queue per channel, capped at 200 outstanding calls. New calls beyond the cap are dropped with a rate-limited warning for notifications or a busy error for Connect. Pausing the extension cancels its in-flight call and drops queued calls. Disconnect supersedes an earlier pending Connect; a delayed 401 can invalidate only the account used by that call. Enterprise mode is checked again immediately before sending, including for notifications that were queued before it was enabled.
 
 `examples/notification-webhook` is the reference: a channel that posts every notification to a receiver the user names, with the receiver to try it against.
+
+## Tracker (`provides: ["tracker"]`)
+
+A service with this role is a work item tracker next to Linear: YouTrack, Jira, Plane, a tracker of your own. Its items appear wherever Linear's do: the picker and the composer chips, New Worktree, the linked items of a session, the live states of tracked items, and the account card in Settings → Integrations under Extension accounts. The role needs `contributes.tracker` in the same manifest, and the manifest needs it only with the role; either alone fails as `invalid-service`. OpenChamber names the tracker `ext-<panel.id>` (so `panel.id` is at most `TRACKER_GUEST_ID_MAX`, 28), lists it from the contribution without starting the service, and keeps the accounts: the user connects them on the card, tokens stay in OpenChamber, and the service never sees one.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": {
+    "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" },
+    "oauth": { "authorizeUrl": "/hub/api/rest/oauth2/auth", "tokenUrl": "/hub/api/rest/oauth2/token", "scopes": ["YouTrack"] }
+  },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "filters": { "people": true }, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done", "inReview"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}", "/agiles/{segment}/current?issue={id}"] }
+}
+```
+
+| Field | Rules |
+|---|---|
+| `wire` | `1` |
+| `label` | The tracker's name on its card and in the picker, untranslated, 1 to 64 characters |
+| `instances` | `{ kind: "fixed", origin }` when every account lives on one https origin; `{ kind: "user", label, placeholder? }` when the user types the server at connect (a self-hosted server, a per-company site). A typed server is an https origin, or http on this machine for a development server; paths, queries and credentials are refused, the service builds the paths. The accounts of one tracker live on one server; the API and the item pages share that origin |
+| `auth` | `token`, `oauth`, or both. `token` is the Git host's token block (`header`, `scheme`, `username?` with `basic`, `scopes?`, `createPath?`). `oauth` is `{ authorizeUrl, tokenUrl, scopes? }`: https URLs, or paths on the instance for a `user` tracker; OpenChamber runs PKCE S256 with a client id (and secret) the user enters on the card, and keeps the tokens |
+| `capabilities` | Flags, each off when left out: `multipleAccounts`, `stateUpdate` (also `states.list`), `children`, `labels`, `priority`, `filters.people`, `filters.priority`, `projectMapping` (also `containers.list`), `sessionComments` (also `comments.create`). Host access for SDK guests is not declared: the host keeps it off, because the service itself never sees a token |
+| `stateFilters` | In menu order, 2 to 16 unique ids: `open`, `all`, then the neutral categories you answer (`triage`, `backlog`, `todo`, `in-progress`, `done`, `canceled`) and your own ids (`inReview`, `^[a-z][a-zA-Z0-9-]{0,31}$`). What `items.list` is asked for |
+| `identifier` | The shape of an item's key: `key-number` (`PROJ-42`), `number` (`123`), `short-code` (letters and digits). OpenChamber compares identifiers case-insensitively everywhere and sends them upper-cased |
+| `urls.item` | 1 to 8 link templates: `/`, segments that are each a literal (`[A-Za-z0-9._~-]`) or a placeholder of `TRACKER_URL_TOKENS` (`{id}` the identifier, `{segment}` any one segment, `{segments+}` one or more, at most once), and optionally `?name={id}` when the identifier travels in the query. `{id}` once per template, in the path or the query. OpenChamber compiles them against the instance into the pattern that recognises a pasted link, on the server and in every client; an extension never supplies a regular expression |
+
+What the user sees: the card under Extension accounts asks for the server address first when `instances.kind` is `user`, then offers the ways in you declared: a token field (and a username for `basic`) with a link to `createPath`, and, for `oauth`, the client id and secret fields with the redirect URL to register, then a browser sign-in. Connected accounts, switching between them (`multipleAccounts`), project mapping (`projectMapping`) and the session comments switch (`sessionComments`) follow the capabilities. Pausing the extension takes the tracker out of every surface and keeps the accounts; removing it forgets them. In enterprise mode the role installs only from an allowed repository like every service; its reads carry no conversation content and its comments carry a fixed label and a session link, so nothing else is stripped.
+
+### Calls
+
+OpenChamber posts `POST /tracker` (`TRACKER_PROVIDER_PATH`) with the service bearer. Reads may overlap, since the picker, the preview and the board read at once; each call carries its own handle.
+
+```json
+{ "v": 1, "requestId": "…", "method": "items.list", "provider": "ext-youtrack",
+  "session": { "instance": "https://youtrack.example.com", "handle": "…", "account": { "id": "u-1", "login": "mona" } },
+  "input": { "query": "login", "state": "todo", "people": "me", "priority": "all", "containerId": null } }
+```
+
+| Method | Deadline | `input` | Answer `data` |
+|---|---|---|---|
+| `auth.probe` | 15 s | `{}` | `{ supported, message? }`: whether `session.instance` is a server this tracker works with. The handle carries no credential; `account` is null |
+| `auth.verify` | 15 s | `{}` | `{ account: { id, login, name?, avatarUrl? } }`: who the credential belongs to (a pasted token, or the OAuth bearer OpenChamber minted). OpenChamber stores the account under `id`. `account` is null |
+| `items.list` | 20 s | `{ query?, cursor?, state, people, priority, containerId }` | `{ items, cursor, hasMore }`: up to `TRACKER_PROVIDER_LIST_MAX` (100) `TrackerProviderItemSummary`, an opaque cursor for the next page or null. A query that is a link your templates claim, or an identifier of your declared shape, is read through `items.get` first and answered as a page of one; a bare word `items.get` answers null for reaches `items.list` as a search after all |
+| `items.get` | 20 s | `{ id }` | `{ item }`: a `TrackerProviderItem` with description, comments, children, or null for an unknown id. `id` is an item's `id` as you answered it, or its identifier (`PROJ-1`, upper-cased) when OpenChamber resolves a pasted link or key; answer both |
+| `items.updateState` | 30 s | `{ id, stateId }` | `{ item }` after the change. A write: the handle may send `POST`, `PUT`, `PATCH`, `DELETE` |
+| `items.liveSummaries` | 20 s | `{ identifiers }` (up to 50) | `{ items: [{ identifier, title, state: { name, category } }] }`; identifiers you do not know are left out |
+| `states.list` | 20 s | `{ containerId }` | `{ states: [{ id, name, category, position }] }` |
+| `containers.list` | 20 s | `{}` | `{ containers: [{ id, key, name }] }`: the projects, teams or spaces items belong to, for project mapping |
+| `comments.create` | 30 s | `{ identifier, body }` | `{ comment: { id } }`, or `{ comment: null }` for an unknown identifier. A write. `body` is Markdown OpenChamber wrote: `[OpenChamber session completed](https://…/?session=…)` |
+
+Items answer in the neutral shapes without `provider`; OpenChamber adds it. `state.category` is one of the six categories or null; `priority` one of `none`, `urgent`, `high`, `medium`, `low`. Parse the body with `readTrackerProviderRequest` (`TrackerProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`TrackerProviderResult`). OpenChamber checks answers with `trackerProviderSchemasV1`, bounded in count and length; one that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty list. A `status: 401` writes the account off (the card says it needs attention until the user connects again) only when OpenChamber's proxy saw the server answer 401 through the call's handle; a 401 the service reports on its own is a malformed answer.
+
+### Reaching the server
+
+The service never holds a credential. `createTrackerOutbound({ env: process.env })` returns `{ request(handle, req) }`, which posts to `${OPENCHAMBER_HOST_CALLBACK_URL}/tracker/outbound` with `Authorization: Bearer <handle>`; `req` is `{ method, path, query?, headers?, body? }`, `path` on the account's instance origin, `headers` limited to `accept`, `content-type`, `if-none-match` and `range`, the body up to 1 MB. OpenChamber adds the credential (the token per `auth.token`, or `Bearer <access token>` for OAuth, renewed before it lapses), keeps the request on the origin, and relays `{ status, headers, body }`. A read's handle sends `GET` only; a write through it is refused with 403 `METHOD_NOT_ALLOWED`. A refusal is a `TrackerOutboundError`. The handle ends with the call; never store it.
+
+Session comments: when the user turns them on, OpenChamber posts `started` when a session starts from one of your items, then `completed` or `failed` once each when that session's turn ends or fails, each through `comments.create`, with a link only to an origin other people can open. The service runs on demand and stops after `TRACKER_PROVIDER_IDLE_MS` (ten minutes) without a call.
+
+`examples/tracker-provider` is the reference: a tracker over a fake server you run beside it, run by `scripts/tracker-provider-example.test.ts`.
 
 ## Session events (`contributes.sessionEvents`)
 

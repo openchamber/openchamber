@@ -220,6 +220,13 @@
         "@openchamber/sdk": "workspace:*",
       },
     },
+    "packages/sdk/examples/tracker-provider": {
+      "name": "@openchamber/example-tracker-provider",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
     "packages/ui": {
       "name": "@openchamber/ui",
       "version": "2.5.3",
@@ -1143,6 +1150,8 @@
     "@openchamber/example-tasks-demo": ["@openchamber/example-tasks-demo@workspace:packages/sdk/examples/tasks-demo"],
 
     "@openchamber/example-tools-only": ["@openchamber/example-tools-only@workspace:packages/sdk/examples/tools-only"],
+
+    "@openchamber/example-tracker-provider": ["@openchamber/example-tracker-provider@workspace:packages/sdk/examples/tracker-provider"],
 
     "@openchamber/mobile": ["@openchamber/mobile@workspace:packages/mobile"],
 

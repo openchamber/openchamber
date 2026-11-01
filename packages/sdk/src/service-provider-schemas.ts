@@ -12,6 +12,19 @@ import {
   SOURCE_CONTROL_PROVIDER_RESPONSE_MAX,
   SOURCE_CONTROL_PROVIDER_TARGET_MAX,
   type SourceControlProviderMethod,
+  TRACKER_PROVIDER_CONTAINERS_MAX,
+  TRACKER_PROVIDER_LIST_MAX,
+  TRACKER_PROVIDER_LIVE_SUMMARIES_MAX,
+  TRACKER_PROVIDER_METHODS,
+  type TrackerProviderAccountData,
+  type TrackerProviderContainersData,
+  type TrackerProviderItem,
+  type TrackerProviderItemData,
+  type TrackerProviderItemSummary,
+  type TrackerProviderListData,
+  type TrackerProviderLiveSummariesData,
+  type TrackerProviderMethod,
+  type TrackerProviderStatesData,
 } from './service-providers.ts';
 import { SESSION_EVENT_ERROR_MAX, type GuestSessionEventResult } from './session-events.ts';
 
@@ -332,3 +345,121 @@ export const notificationsProviderSchemasV1 = {
 };
 
 export const notificationsProviderMethodSchema = z.enum(NOTIFICATIONS_PROVIDER_METHODS);
+
+/*
+ * Host-side parse of what a tracker answers. The envelope and the error are
+ * the Git host's. Every item is checked in the neutral shapes before the host
+ * hands it to the UI, bounded in count and length, and asserted against the
+ * TypeScript types the service writes against, so the two cannot drift. A
+ * failed parse is a malformed answer, never an empty list.
+ */
+
+const trackerText = z.string().min(1).max(1_024);
+const trackerTitle = z.string().max(4_096);
+const trackerUrl = z.string().min(1).max(2_048);
+const trackerCategory = z.enum(['triage', 'backlog', 'todo', 'in-progress', 'done', 'canceled']);
+const trackerPriority = z.enum(['none', 'urgent', 'high', 'medium', 'low']);
+const trackerPerson = z.object({ name: z.string().max(256).nullable(), avatarUrl: z.string().max(2_048).nullable() }).strict();
+const trackerContainer = z.object({ id: trackerText, key: z.string().max(64).nullable(), name: z.string().min(1).max(256) }).strict();
+const trackerState = z.object({ id: trackerText.nullable(), name: z.string().max(256), category: trackerCategory.nullable() }).strict();
+
+const trackerItemFields = {
+  id: trackerText,
+  identifier: z.string().min(1).max(128),
+  title: trackerTitle,
+  url: trackerUrl,
+  state: trackerState.nullable(),
+  priority: trackerPriority.nullable().optional(),
+  labels: z.array(z.object({ id: trackerText, name: z.string().min(1).max(256), color: z.string().max(32).nullable() }).strict()).max(TRACKER_PROVIDER_LIST_MAX).optional(),
+  assignee: trackerPerson.nullable().optional(),
+  container: trackerContainer.nullable().optional(),
+  progress: z.object({ total: z.number().int().nonnegative(), done: z.number().int().nonnegative(), more: z.boolean() }).strict().nullable().optional(),
+  updatedAt: z.string().max(64).nullable().optional(),
+};
+
+/** A related item (a parent, a child): one level deep, naming no parent of its own (`null` at most). */
+const trackerRelatedItemSchema = z.object({ ...trackerItemFields, parent: z.null().optional() }).strict();
+const trackerItemSummarySchema = z.object({ ...trackerItemFields, parent: trackerRelatedItemSchema.nullable().optional() }).strict();
+const trackerCommentSchema = z.object({
+  id: trackerText,
+  body: z.string().max(65_536),
+  createdAt: z.string().max(64).nullable(),
+  author: trackerPerson.nullable(),
+}).strict();
+const trackerItemSchema = trackerItemSummarySchema.extend({
+  description: z.string().max(262_144).nullable().optional(),
+  comments: z.array(trackerCommentSchema).max(TRACKER_PROVIDER_LIST_MAX).optional(),
+  children: z.array(trackerRelatedItemSchema).max(TRACKER_PROVIDER_LIST_MAX).optional(),
+  childrenMore: z.boolean().optional(),
+}).strict();
+
+const trackerAccountSchema = z.object({
+  account: z.object({
+    id: z.string().min(1).max(256),
+    login: z.string().min(1).max(256).nullable(),
+    name: optionalText,
+    avatarUrl: z.string().max(2_048).optional(),
+  }).strict(),
+}).strict();
+const trackerListSchema = z.object({
+  items: z.array(trackerItemSummarySchema).max(TRACKER_PROVIDER_LIST_MAX),
+  cursor: z.string().min(1).max(2_048).nullable(),
+  hasMore: z.boolean(),
+}).strict();
+const trackerItemDataSchema = z.object({ item: trackerItemSchema.nullable() }).strict();
+const trackerStatesSchema = z.object({
+  states: z.array(z.object({ id: trackerText, name: z.string().min(1).max(256), category: trackerCategory.nullable(), position: z.number() }).strict()).max(TRACKER_PROVIDER_LIST_MAX * 2),
+}).strict();
+const trackerLiveSummariesSchema = z.object({
+  items: z.array(z.object({
+    identifier: z.string().min(1).max(128),
+    title: trackerTitle,
+    state: z.object({ name: z.string().max(256), category: trackerCategory }).strict(),
+  }).strict()).max(TRACKER_PROVIDER_LIVE_SUMMARIES_MAX),
+}).strict();
+const trackerContainersSchema = z.object({ containers: z.array(trackerContainer).max(TRACKER_PROVIDER_CONTAINERS_MAX) }).strict();
+const trackerCommentDataSchema = z.object({ comment: z.object({ id: trackerText }).strict().nullable() }).strict();
+
+// The parsed shapes are exactly the types a service writes against.
+type Parsed<T extends z.ZodType> = z.output<T>;
+const assertTrackerSummary: (value: Parsed<typeof trackerItemSummarySchema>) => TrackerProviderItemSummary = (value) => value;
+const assertTrackerItem: (value: Parsed<typeof trackerItemSchema>) => TrackerProviderItem = (value) => value;
+const assertTrackerAccount: (value: Parsed<typeof trackerAccountSchema>) => TrackerProviderAccountData = (value) => value;
+const assertTrackerList: (value: Parsed<typeof trackerListSchema>) => TrackerProviderListData = (value) => value;
+const assertTrackerItemData: (value: Parsed<typeof trackerItemDataSchema>) => TrackerProviderItemData = (value) => value;
+const assertTrackerStates: (value: Parsed<typeof trackerStatesSchema>) => TrackerProviderStatesData = (value) => value;
+const assertTrackerLive: (value: Parsed<typeof trackerLiveSummariesSchema>) => TrackerProviderLiveSummariesData = (value) => value;
+const assertTrackerContainers: (value: Parsed<typeof trackerContainersSchema>) => TrackerProviderContainersData = (value) => value;
+void assertTrackerSummary; void assertTrackerItem; void assertTrackerAccount; void assertTrackerList;
+void assertTrackerItemData; void assertTrackerStates; void assertTrackerLive; void assertTrackerContainers;
+
+const trackerDataSchemas = {
+  'auth.probe': probeSchema,
+  'auth.verify': trackerAccountSchema,
+  'items.list': trackerListSchema,
+  'items.get': trackerItemDataSchema,
+  'items.updateState': trackerItemDataSchema,
+  'items.liveSummaries': trackerLiveSummariesSchema,
+  'states.list': trackerStatesSchema,
+  'containers.list': trackerContainersSchema,
+  'comments.create': trackerCommentDataSchema,
+} satisfies Record<TrackerProviderMethod, z.ZodType>;
+
+/** Wire 1 of the tracker role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
+export const trackerProviderSchemasV1 = {
+  envelope: envelopeSchema,
+  error: errorSchema,
+  account: trackerAccountSchema,
+  probe: probeSchema,
+  itemSummary: trackerItemSummarySchema,
+  item: trackerItemSchema,
+  list: trackerListSchema,
+  states: trackerStatesSchema,
+  liveSummaries: trackerLiveSummariesSchema,
+  containers: trackerContainersSchema,
+  comment: trackerCommentDataSchema,
+  outboundRequest: outboundRequestSchema,
+  data: trackerDataSchemas,
+};
+
+export const trackerProviderMethodSchema = z.enum(TRACKER_PROVIDER_METHODS);

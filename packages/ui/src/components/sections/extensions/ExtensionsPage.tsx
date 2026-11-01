@@ -472,6 +472,9 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           {guest.notifications ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.providesNotifications')}</p>
           ) : null}
+          {guest.tracker ? (
+            <p className="typography-meta text-foreground">{t('settings.extensions.service.providesTracker', { label: guest.tracker.label })}</p>
+          ) : null}
           {guest.service ? (
             // A security warning: stays visible.
             <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.warning')}</p>

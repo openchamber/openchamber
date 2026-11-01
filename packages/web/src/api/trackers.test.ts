@@ -37,6 +37,25 @@ const trackerServer = (answer: (path: string) => Response) => {
   ));
 };
 
+describe('web trackers: an extension tracker\'s status', () => {
+  it('keeps the written-off accounts a disconnected status lists, and the connect block beside them', async () => {
+    trackerServer(() => Response.json({
+      connected: false,
+      accounts: [{ id: 'u-1', name: 'Mona', user: { name: 'Mona', avatarUrl: null }, current: false, authorizedAt: 5, status: 'invalid', invalidReason: 'unauthorized', method: 'token' }],
+      connect: { instance: 'https://yt.example.com', instances: { kind: 'user', label: 'Server address' }, hasClient: false, redirectUri: null },
+    }));
+    const api = createWebTrackerAPI({ fetch: fetchMock });
+    await expect(api.authStatus('ext-youtrack')).resolves.toEqual({
+      connected: false,
+      accounts: [{ id: 'u-1', name: 'Mona', user: { name: 'Mona', avatarUrl: null }, current: false, authorizedAt: 5, status: 'invalid', invalidReason: 'unauthorized', method: 'token' }],
+      connect: { instance: 'https://yt.example.com', instances: { kind: 'user', label: 'Server address' }, hasClient: false, redirectUri: null },
+    });
+    // A malformed account in the list is left out; the status still reads.
+    trackerServer(() => Response.json({ connected: false, accounts: [{ id: 42 }], connect: { instance: null, instances: { kind: 'fixed', origin: 'https://yt.example.com' }, hasClient: true, redirectUri: null } }));
+    await expect(api.authStatus('ext-youtrack')).resolves.toMatchObject({ connected: false, accounts: [], connect: { hasClient: true } });
+  });
+});
+
 describe('web trackers: providers', () => {
   it('reads the trackers the server serves', async () => {
     fetchMock.mockResolvedValueOnce(Response.json({ providers: [{ ...BUILT_IN_LINEAR_TRACKER, name: 'Linear EU' }] }));

@@ -257,6 +257,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 A qué sala o canal va cada proyecto lo decide tu extensión: la notificación lleva `directory` y `sessionName`. En modo empresa lleva solo el título genérico, como el teléfono. El ejemplo `notification-webhook` es un canal completo con un receptor para probarlo.
 
+## Gestores de incidencias
+
+Un servicio puede ser un gestor de incidencias junto a Linear: declara `provides: ["tracker"]` y describe el gestor en `contributes.tracker`. OpenChamber lo lista entonces junto a Linear en todos los sitios donde aparecen los gestores, solo a partir del manifiesto, antes de que el servicio llegue a ejecutarse.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+El usuario conecta cuentas en la tarjeta del gestor bajo Cuentas de extensiones: un token, o un inicio de sesión en el navegador cuando declaras `auth.oauth` (OpenChamber ejecuta el inicio de sesión con el client id que introduce el usuario y guarda los tokens). Tu servicio nunca ve una credencial. `urls.item` son plantillas para la dirección de un elemento, con `{id}` para el identificador (también como `?name={id}` cuando viaja en la query); OpenChamber las compila para que los enlaces pegados se conviertan en elementos vinculados. `identifier` dice qué aspecto tiene la clave: `key-number` (`PROJ-42`), `number` o `short-code`.
+
+OpenChamber reenvía nueve llamadas a `POST /tracker`: `auth.probe` y `auth.verify`, las lecturas `items.list`, `items.get`, `items.liveSummaries`, `states.list` y `containers.list`, y las escrituras `items.updateState` y `comments.create`. Lee cada una con `readTrackerProviderRequest`, responde con las formas neutras de elemento y llega al servidor del gestor solo a través del helper de salida, que envía tu petición a OpenChamber con el handle de la llamada; OpenChamber añade la credencial y mantiene la petición en el servidor de la cuenta. El handle de una lectura solo envía `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Cuando el usuario activa los comentarios de sesión, OpenChamber llama a `comments.create` con "session started", "completed" o "failed" y un enlace a la sesión, una vez cada uno; el comentario no lleva nada más. El ejemplo `tracker-provider` es un gestor completo con un servidor falso para probarlo.
+
 ## Archivos
 
 Una ruta relativa está dentro del proyecto abierto y necesita la capacidad `files`. Una ruta que empieza por `/` o `~/` debe coincidir con un patrón declarado en `contributes.filesystem` y necesita la capacidad `filesystem`. Consulta [Crea una extensión](/sdk/#archivos) para las reglas.

@@ -53,6 +53,7 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const providesBrowser = serviceProvides(guest?.service, 'browser');
   const providesSourceControl = serviceProvides(guest?.service, 'source-control');
   const providesNotifications = serviceProvides(guest?.service, 'notifications');
+  const providesTracker = serviceProvides(guest?.service, 'tracker');
   const sessionEvents = guest?.sessionEvents?.events ?? [];
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
 
@@ -132,6 +133,13 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                     <p className="typography-meta mt-0.5 text-foreground">
                       {t('settings.extensions.capability.service.providesNotifications', {
                         label: guest?.notifications?.label ?? guest?.name ?? '',
+                      })}
+                    </p>
+                  ) : null}
+                  {capability === 'service' && providesTracker ? (
+                    <p className="typography-meta mt-0.5 text-foreground">
+                      {t('settings.extensions.capability.service.providesTracker', {
+                        label: guest?.tracker?.label ?? guest?.name ?? '',
                       })}
                     </p>
                   ) : null}

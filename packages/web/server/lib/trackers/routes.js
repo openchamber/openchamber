@@ -1,5 +1,6 @@
 import express from 'express';
 
+import { renderOauthCallbackPage, requestOrigin } from '../guests/routes.js';
 import { isPlainObject, isString } from '../shared/guards.js';
 
 /** @typedef {import('./tracker-contract').TrackerRegistry} TrackerRegistry */
@@ -20,6 +21,13 @@ class TrackerRouteError extends Error {
 }
 
 const invalid = (message) => new TrackerRouteError(400, 'INVALID', message);
+// What the account store keeps (`extension-accounts.js`), checked here so an
+// over-long value is refused before the service is asked to verify it.
+const BOUNDS = Object.freeze({ token: 4_096, username: 256, instance: 2_048, clientId: 512, clientSecret: 4_096, projectPath: 4_096, containerId: 256 });
+const bounded = (value, max, name) => {
+  if (isString(value) && value.length > max) throw invalid(`${name} is too long`);
+  return value;
+};
 const unsupported = () => new TrackerRouteError(404, 'UNSUPPORTED', 'This tracker does not support this action');
 
 const readString = (value) => {
@@ -30,6 +38,9 @@ const readString = (value) => {
 const queryValue = (req, key) => readString(req.query?.[key]);
 
 const isUserError = (error) => error?.code === 'INVALID' || error?.userError === true;
+
+/** An error the implementation answered with a status and a code of its own (an extension tracker's connect). */
+const isCodedError = (error) => Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 && isString(error.code) && error.code.length > 0;
 
 /**
  * List options from the query, checked against what the descriptor offers.
@@ -59,7 +70,9 @@ function readListOptions(req, descriptor) {
  * follow the legacy Linear routes: disconnected is 200 `{ connected: false }`,
  * a missing or invalid input and a provider's user error are 400, an unknown
  * tracker is 404 `UNKNOWN_TRACKER`, and an action the tracker's capabilities
- * leave out is 404 `UNSUPPORTED`. Any other path under `/api/tracker` is 404
+ * leave out is 404 `UNSUPPORTED`. An extension tracker's connect routes answer
+ * their own status and code (401 `TOKEN_REFUSED`, 409 `CONNECT_SUPERSEDED`,
+ * 503 `TRACKER_UNAVAILABLE`). Any other path under `/api/tracker` is 404
  * here, so it never falls through to the OpenCode proxy. `/api/tracker` is
  * host-only in `spaces/dispatcher.js`: these routes read with the host's
  * tracker tokens.
@@ -84,7 +97,7 @@ export function registerTrackerRoutes(app, { registry }) {
       if (!supports(descriptor, tracker)) throw unsupported();
       return res.json(await run({ req, descriptor, tracker }));
     } catch (error) {
-      if (error instanceof TrackerRouteError) {
+      if (error instanceof TrackerRouteError || isCodedError(error)) {
         return res.status(error.status).json({ error: error.message, code: error.code });
       }
       if (isUserError(error)) {
@@ -101,11 +114,69 @@ export function registerTrackerRoutes(app, { registry }) {
     res.json({ providers: registry.descriptors() });
   });
 
-  app.get('/api/tracker/:provider/auth/status', handle('read auth status', ({ tracker }) => tracker.auth.status()));
+  // The request's origin is where an extension tracker's browser sign-in returns; a built-in ignores it.
+  app.get('/api/tracker/:provider/auth/status', handle('read auth status', ({ req, tracker }) => tracker.auth.status({ origin: requestOrigin(req) || null })));
 
-  app.post('/api/tracker/:provider/auth/start', parseJsonBody, handle('start authorization', ({ req, tracker }) => (
-    tracker.auth.start({ origin: readBody(req).origin === 'desktop' ? 'desktop' : 'web' })
-  )));
+  app.post('/api/tracker/:provider/auth/start', parseJsonBody, handle('start authorization', ({ req, tracker }) => {
+    const body = readBody(req);
+    return tracker.auth.start({
+      origin: body.origin === 'desktop' ? 'desktop' : 'web',
+      callbackOrigin: requestOrigin(req) || null,
+      instance: bounded(readString(body.instance), BOUNDS.instance, 'instance') || undefined,
+    });
+  }));
+
+  // An extension tracker's own ways in: a pasted token, the OAuth client the
+  // user registered, and the browser's return from that sign-in. Each answers
+  // 404 `UNSUPPORTED` on a tracker without the method.
+  const takesToken = (descriptor, tracker) => descriptor.authMethods.includes('token') && tracker.auth.connectToken instanceof Function;
+  app.post('/api/tracker/:provider/auth/token', parseJsonBody, handle('connect a token', ({ req, tracker }) => {
+    const body = readBody(req);
+    return tracker.auth.connectToken({
+      instance: bounded(readString(body.instance), BOUNDS.instance, 'instance') || undefined,
+      token: bounded(isString(body.token) ? body.token : '', BOUNDS.token, 'token'),
+      username: bounded(readString(body.username), BOUNDS.username, 'username') || undefined,
+    });
+  }, takesToken));
+
+  const takesOauth = (descriptor, tracker) => descriptor.authMethods.includes('oauth') && tracker.auth.setOAuthClient instanceof Function;
+  app.put('/api/tracker/:provider/auth/oauth-client', parseJsonBody, handle('save the OAuth client', ({ req, tracker }) => {
+    const body = readBody(req);
+    return tracker.auth.setOAuthClient({
+      instance: bounded(readString(body.instance), BOUNDS.instance, 'instance') || undefined,
+      clientId: bounded(isString(body.clientId) ? body.clientId : '', BOUNDS.clientId, 'clientId'),
+      clientSecret: bounded(isString(body.clientSecret) ? body.clientSecret : '', BOUNDS.clientSecret, 'clientSecret'),
+    });
+  }, takesOauth));
+
+  // Public: the tracker redirects the browser here with no UI bearer
+  // (`core-routes.js` lets it past the session guard); the implementation
+  // accepts only a `state` it issued.
+  app.get('/api/tracker/:provider/oauth/callback', async (req, res) => {
+    const finish = (status, title, message) => {
+      res.status(status).type('html').send(renderOauthCallbackPage({ title, message }));
+    };
+    try {
+      const descriptor = registry.descriptor(req.params.provider);
+      const tracker = descriptor ? await registry.implementation(descriptor.id) : null;
+      if (!tracker || !(tracker.auth.completeAuthorization instanceof Function)) {
+        return finish(404, 'Unknown tracker', 'That tracker is not installed.');
+      }
+      await tracker.auth.completeAuthorization({
+        code: queryValue(req, 'code'),
+        state: queryValue(req, 'state'),
+        error: queryValue(req, 'error'),
+        errorDescription: queryValue(req, 'error_description'),
+      });
+      return finish(200, 'Connected', 'You can close this tab and return to OpenChamber.');
+    } catch (error) {
+      if (error instanceof TrackerRouteError || isCodedError(error) || isUserError(error)) {
+        return finish(400, 'Could not connect', error.message);
+      }
+      console.error(`Failed to finish the sign-in (tracker ${req.params.provider}):`, error);
+      return finish(500, 'Could not connect', 'The authorization callback failed.');
+    }
+  });
 
   app.post('/api/tracker/:provider/auth/activate', parseJsonBody, handle('switch account', async ({ req, tracker }) => {
     const accountId = readString(readBody(req).accountId);
@@ -145,9 +216,15 @@ export function registerTrackerRoutes(app, { registry }) {
   app.get('/api/tracker/:provider/mapping', handle('load project mapping', ({ tracker }) => tracker.mapping.get(), hasMapping));
   app.put('/api/tracker/:provider/mapping', parseJsonBody, handle('save project mapping', ({ req, tracker }) => {
     if (!isPlainObject(req.body)) throw invalid('Mapping body must be an object');
+    const containerProjectPaths = req.body.containerProjectPaths ?? {};
+    if (!isPlainObject(containerProjectPaths)) throw invalid('containerProjectPaths must be an object');
+    for (const [containerId, projectPath] of Object.entries(containerProjectPaths)) {
+      bounded(containerId, BOUNDS.containerId, 'container id');
+      bounded(projectPath, BOUNDS.projectPath, 'project path');
+    }
     return tracker.mapping.set({
-      defaultProjectPath: req.body.defaultProjectPath ?? null,
-      containerProjectPaths: req.body.containerProjectPaths ?? {},
+      defaultProjectPath: bounded(req.body.defaultProjectPath ?? null, BOUNDS.projectPath, 'defaultProjectPath'),
+      containerProjectPaths,
     });
   }, hasMapping));
 
@@ -169,6 +246,7 @@ export function registerTrackerRoutes(app, { registry }) {
     // The tracker checks the rest in its own order (disconnected and turned
     // off answer before a missing identifier).
     const identifier = readString(body.identifier);
+    if (identifier.length > 128) throw invalid('identifier is too long');
     const sessionOrigin = readString(body.sessionOrigin);
     const input = { kind, sessionId };
     if (identifier) input.identifier = identifier;

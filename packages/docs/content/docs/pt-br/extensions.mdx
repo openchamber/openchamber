@@ -75,6 +75,18 @@ Pausar a extensão tira o host até você ligá-la de novo, e sua conta continua
 
 O SDK do OpenChamber tem um exemplo funcional, `examples/source-control-provider`, para começar ao construir um. Veja [Construir uma extensão](/pt-br/sdk/).
 
+## Uma extensão como rastreador
+
+Uma extensão pode adicionar um rastreador de itens de trabalho ao lado do Linear: YouTrack, Jira, Plane ou um rastreador próprio. A caixa de permissões dela passa a ter uma linha que começa com **Atua como o rastreador** e dá o nome dele. A linha também diz o que o OpenChamber envia a ele: suas buscas e os itens que você abre, e que ele é solicitado a mudar o estado deles e publicar comentários de sessão por você.
+
+Depois que você permite, o rastreador ganha seu próprio card em **Configurações → Integrações** sob **Contas de extensões**. Conecte uma conta ali: com um token, ou entrando pelo navegador depois de informar o client id do app que você registrou no rastreador, e antes o endereço do servidor se o card pedir. A partir daí, os itens dele estão onde os do Linear estão: o menu **+** do chat e o seletor, New Worktree, os itens vinculados de uma sessão e os estados ao vivo dos itens que você acompanha. Um link colado para um dos itens dele é reconhecido do mesmo jeito. Veja [Linear](/pt-br/integrations/#linear) para o que cada uma dessas coisas faz.
+
+Seus tokens ficam no OpenChamber. A extensão pede ao OpenChamber que chame o rastreador por ela, e o OpenChamber adiciona a credencial a cada chamada, só para o servidor que você conectou. A extensão nunca a recebe, e só as chamadas dela de mudança de estado e de comentário podem escrever algo lá.
+
+Pausar a extensão tira o rastreador até você ligá-la de novo, e suas contas continuam. Remover a extensão as esquece. O VS Code não mostra rastreadores; no celular os itens do rastreador aparecem, e as contas são conectadas pelo app web ou desktop.
+
+O SDK do OpenChamber tem um exemplo funcional, `examples/tracker-provider`, com um rastreador falso para rodar ao lado. Veja [Construir uma extensão](/pt-br/sdk/).
+
 ## Conectar a conta dela
 
 Uma extensão que fala com um serviço ganha um card em **Configurações → Integrações** sob **Contas de extensões**. Dependendo do serviço, o card pede um token de API, um usuário e token, ou um client id para um fluxo de login. Escolha **Conectar**; **Desconectar** esquece o token guardado. Campos extras que a extensão declara são salvos sozinhos quando você sai deles.

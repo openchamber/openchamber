@@ -5,6 +5,8 @@ import { Window } from 'happy-dom';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import type { RuntimeAPIs, TrackerAPI, TrackerAuthStatus, TrackerDescriptor } from '@/lib/api/types';
 import { acmeTrackerDescriptor, linearLikeTrackerDescriptor } from '@/lib/trackers/descriptor.fixture';
+import type { TrackerSettingsExtension } from './TrackerSettings';
+import type { InstalledGuest } from '@/lib/guests/types';
 import { useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 
 const unexpected = (): never => { throw new Error('Unexpected runtime API access'); };
@@ -26,6 +28,7 @@ describe('TrackerSettings', () => {
   const calls: string[] = [];
   let status: TrackerAuthStatus = { connected: false };
   let statusFailures = 0;
+  let connectFailure: { ok: false; code: 'TOKEN_REFUSED'; message: string | null } | null = null;
   let pollTick: (() => void) | null = null;
 
   const trackers: TrackerAPI = {
@@ -49,6 +52,16 @@ describe('TrackerSettings', () => {
       return { connected: true, defaultProjectPath: null, containers: [{ id: 'team-1', key: 'ENG', name: 'Engineering', projectPath: null }] };
     },
     preferencesGet: async (provider) => { calls.push(`preferences:${provider}`); return { sessionComments: false }; },
+    authConnectToken: async (provider, input) => {
+      calls.push(`token:${provider}:${input.instance ?? ''}:${input.token}:${input.username ?? ''}`);
+      if (connectFailure) return connectFailure;
+      status = connectedStatus;
+      return { ok: true };
+    },
+    authSaveOAuthClient: async (provider, input) => {
+      calls.push(`client:${provider}:${input.instance ?? ''}:${input.clientId}:${input.clientSecret ?? ''}`);
+      return { ok: true };
+    },
     list: unexpected, refreshListReads: unexpected, get: unexpected, states: unexpected, updateState: unexpected,
     mappingSet: unexpected, sessionStatusPost: unexpected, preferencesSet: unexpected,
   };
@@ -97,6 +110,7 @@ describe('TrackerSettings', () => {
     calls.length = 0;
     status = { connected: false };
     statusFailures = 0;
+    connectFailure = null;
     useTrackerAuthStore.getState().resetForRuntimeSwitch();
     registerRuntimeAPIs(apis);
     container = document.createElement('div');
@@ -116,7 +130,7 @@ describe('TrackerSettings', () => {
     globals.clear();
   });
 
-  const mount = async (descriptor: TrackerDescriptor) => {
+  const mount = async (descriptor: TrackerDescriptor, extension?: TrackerSettingsExtension) => {
     const { createRoot } = await import('react-dom/client');
     const { TrackerSettings } = await import('./TrackerSettings');
     const { I18nProvider } = await import('@/lib/i18n');
@@ -124,7 +138,7 @@ describe('TrackerSettings', () => {
     const mounted = createRoot(container);
     root = mounted;
     await act(async () => {
-      mounted.render(<I18nProvider><TooltipProvider><TrackerSettings descriptor={descriptor} /></TooltipProvider></I18nProvider>);
+      mounted.render(<I18nProvider><TooltipProvider><TrackerSettings descriptor={descriptor} extension={extension} /></TooltipProvider></I18nProvider>);
     });
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-expanded]');
     if (!trigger) throw new Error('Missing tracker card trigger');
@@ -224,5 +238,104 @@ describe('TrackerSettings', () => {
     expect(container.querySelector('[data-settings-item="integrations.acme-tickets"]')).not.toBeNull();
     expect(buttonLabels()).not.toContain('Connect');
     expect(container.textContent).toContain('Update OpenChamber');
+  });
+
+  const type = async (input: HTMLInputElement, value: string) => {
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  const inputs = () => [...container.querySelectorAll<HTMLInputElement>('input')];
+
+  const youtrackGuest: InstalledGuest = { id: 'youtrack', name: 'YouTrack Bridge', icon: 'bug', version: '1.0.0', capabilities: { requested: ['service'], granted: ['service'] } };
+  const youtrack = (overrides: Partial<TrackerDescriptor> = {}): TrackerDescriptor => acmeTrackerDescriptor({
+    id: 'ext-youtrack', name: 'YouTrack', authMethods: ['oauth', 'token'],
+    capabilities: { ...acmeTrackerDescriptor().capabilities, multipleAccounts: true, projectMapping: true },
+    ...overrides,
+  });
+  const extensionOf = (tracker: TrackerSettingsExtension['tracker']): TrackerSettingsExtension => ({ guest: youtrackGuest, tracker });
+  const tokenAndOauth: TrackerSettingsExtension['tracker'] = {
+    label: 'YouTrack', instances: { kind: 'user', label: 'Server address', placeholder: 'https://youtrack.example.com' },
+    authMethods: ['oauth', 'token'], token: { scheme: 'bearer', username: false, scopes: ['YouTrack'], createPath: '/tokens' }, oauth: { scopes: ['YouTrack'] },
+  };
+  const connect = { instance: null, instances: { kind: 'user' as const, label: 'Server address', placeholder: 'https://youtrack.example.com' }, hasClient: false, redirectUri: 'http://localhost/api/tracker/ext-youtrack/oauth/callback' };
+
+  test('an extension tracker asks for the server, offers the token and the client forms, and connects with a token', async () => {
+    status = { connected: false, connect };
+    await mount(youtrack(), extensionOf(tokenAndOauth));
+    expect(container.textContent).toContain('YouTrack Bridge');
+    expect(container.textContent).toContain('Server address');
+    expect(container.textContent).toContain('Client ID');
+    expect(inputs().some((input) => input.readOnly && input.value === 'http://localhost/api/tracker/ext-youtrack/oauth/callback')).toBe(true);
+    expect(buttonLabels()).toContain('Sign in in the browser');
+    expect(buttonLabels()).toContain('Connect with token');
+    expect(container.textContent).not.toContain('Update OpenChamber');
+
+    // The token needs the server first.
+    await click('Connect with token');
+    expect(calls.some((call) => call.startsWith('token:'))).toBe(false);
+    const address = inputs().find((input) => input.placeholder === 'https://youtrack.example.com');
+    if (!address) throw new Error('Missing server address field');
+    await type(address, 'https://yt.example.com');
+    // The token link is made on the typed server.
+    expect(buttonLabels()).toContain('Create token');
+    const tokenField = inputs().filter((entry) => entry.type === 'password').at(-1);
+    if (!tokenField) throw new Error('Missing token field');
+    await type(tokenField, 'secret-1');
+    await click('Connect with token');
+    expect(calls).toContain('token:ext-youtrack:https://yt.example.com:secret-1:');
+    expect(container.textContent).toContain('Acme Org');
+    expect(buttonLabels()).toContain('Disconnect');
+  });
+
+  test('a refused token is said in the tracker\'s name, and a written-off account asks to connect again', async () => {
+    status = { connected: false, connect: { ...connect, instance: 'https://yt.example.com' } };
+    connectFailure = { ok: false, code: 'TOKEN_REFUSED', message: null };
+    await mount(youtrack({ authMethods: ['token'] }), extensionOf({ ...tokenAndOauth, authMethods: ['token'], oauth: undefined }));
+    // The server is known: no address field, and the one button is Connect.
+    expect(inputs().some((input) => input.placeholder === 'https://youtrack.example.com')).toBe(false);
+    expect(buttonLabels()).toContain('Connect');
+    const tokenField = inputs().find((input) => input.type === 'password');
+    if (!tokenField) throw new Error('Missing token field');
+    await type(tokenField, 'bad');
+    await click('Connect');
+    expect(calls).toContain('token:ext-youtrack::bad:');
+    expect(buttonLabels()).toContain('Connect');
+
+    await act(async () => { root?.unmount(); });
+    root = undefined;
+    useTrackerAuthStore.getState().resetForRuntimeSwitch();
+    // The server reports a written-off account as disconnected with the account listed.
+    status = {
+      connected: false,
+      accounts: [{ id: 'u-1', name: 'Mona', user: { name: 'Mona', avatarUrl: null }, current: false, status: 'invalid', invalidReason: 'unauthorized', method: 'token' }],
+      connect: { ...connect, instance: 'https://yt.example.com' },
+    };
+    await mount(youtrack({ authMethods: ['token'] }), extensionOf({ ...tokenAndOauth, authMethods: ['token'], oauth: undefined }));
+    expect(container.textContent).toContain('Account needs attention');
+    expect(container.textContent).toContain('YouTrack refused');
+    expect(container.textContent).toContain('On https://yt.example.com');
+    // Removing it frees the server for a new token; the token form stays beside it.
+    expect(buttonLabels()).toContain('Disconnect');
+    expect(buttonLabels()).toContain('Connect');
+  });
+
+  test('the browser sign-in saves the client the user typed before it starts', async () => {
+    status = { connected: false, connect: { ...connect, instance: 'https://yt.example.com' } };
+    await mount(youtrack({ authMethods: ['oauth'] }), extensionOf({ ...tokenAndOauth, authMethods: ['oauth'], token: undefined }));
+    expect(buttonLabels()).toContain('Connect');
+    expect(buttonLabels()).not.toContain('Connect with token');
+    await click('Connect');
+    // Without a client nothing starts.
+    expect(calls.some((call) => call.startsWith('start:'))).toBe(false);
+    const [clientIdField, clientSecretField] = inputs();
+    await type(clientIdField, 'client-1');
+    await type(clientSecretField, 'shh');
+    await click('Connect');
+    expect(calls).toContain('client:ext-youtrack::client-1:shh');
+    expect(calls).toContain('start:ext-youtrack:web');
+    expect(container.textContent).toContain('Waiting');
   });
 });

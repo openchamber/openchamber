@@ -1,0 +1,70 @@
+{
+  "name": "@openchamber/example-tracker-provider",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.5.3"
+    },
+    "contributes": {
+      "panel": {
+        "id": "tracker-provider",
+        "name": "Teaboard Tracker",
+        "icon": "task-line"
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "provides": [
+          "tracker"
+        ]
+      },
+      "tracker": {
+        "wire": 1,
+        "label": "Teaboard",
+        "instances": {
+          "kind": "user",
+          "label": "Server address",
+          "placeholder": "http://127.0.0.1:4568"
+        },
+        "auth": {
+          "token": {
+            "header": "authorization",
+            "scheme": "bearer",
+            "createPath": "/tokens"
+          }
+        },
+        "capabilities": {
+          "stateUpdate": true,
+          "labels": true,
+          "priority": true,
+          "filters": {
+            "people": true,
+            "priority": true
+          },
+          "projectMapping": true,
+          "sessionComments": true
+        },
+        "stateFilters": [
+          "open",
+          "all",
+          "todo",
+          "in-progress",
+          "done"
+        ],
+        "identifier": "key-number",
+        "urls": {
+          "item": [
+            "/items/{id}",
+            "/{segments+}/items/{id}"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

@@ -257,6 +257,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 Le salon ou le canal où va un projet est le choix de votre extension : la notification porte `directory` et `sessionName`. En mode entreprise, elle ne porte que le titre générique, comme le téléphone. L'exemple `notification-webhook` est un canal complet avec un récepteur pour l'essayer.
 
+## Outils de suivi
+
+Un service peut être un outil de suivi des tâches à côté de Linear : déclarez `provides: ["tracker"]` et décrivez l'outil dans `contributes.tracker`. OpenChamber le liste alors à côté de Linear partout où les outils de suivi apparaissent, à partir du seul manifeste, avant même que le service tourne.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+L'utilisateur connecte des comptes sur la carte de l'outil sous Comptes d’extensions : un jeton, ou une connexion dans le navigateur quand vous déclarez `auth.oauth` (OpenChamber mène la connexion avec le client id saisi par l'utilisateur et garde les jetons). Votre service ne voit jamais d'identifiants. `urls.item` sont des modèles pour l'adresse d'un élément, avec `{id}` pour l'identifiant (aussi sous la forme `?name={id}` quand il passe dans la query) ; OpenChamber les compile pour que les liens collés deviennent des éléments liés. `identifier` dit à quoi ressemble la clé : `key-number` (`PROJ-42`), `number` ou `short-code`.
+
+OpenChamber transmet neuf appels à `POST /tracker` : `auth.probe` et `auth.verify`, les lectures `items.list`, `items.get`, `items.liveSummaries`, `states.list` et `containers.list`, et les écritures `items.updateState` et `comments.create`. Lisez chacun avec `readTrackerProviderRequest`, répondez dans les formes d'élément neutres et n'atteignez le serveur de l'outil que par le helper outbound, qui poste votre requête à OpenChamber avec le handle de l'appel ; OpenChamber ajoute les identifiants et garde la requête sur le serveur du compte. Le handle d'une lecture n'envoie que `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Quand l'utilisateur active les commentaires de session, OpenChamber appelle `comments.create` avec "session started", "completed" ou "failed" et un lien vers la session, une fois chacun ; le commentaire ne porte rien d'autre. L'exemple `tracker-provider` est un outil de suivi complet avec un faux serveur pour l'essayer.
+
 ## Fichiers
 
 Un chemin relatif se trouve dans le projet ouvert et nécessite la capacité `files`. Un chemin qui commence par `/` ou `~/` doit correspondre à un motif `contributes.filesystem` déclaré et nécessite la capacité `filesystem`. Voir [Créer une extension](/sdk/#fichiers) pour les règles.

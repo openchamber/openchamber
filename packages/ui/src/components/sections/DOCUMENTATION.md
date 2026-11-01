@@ -351,6 +351,42 @@ account switch where `multipleAccounts` is set. `TrackerProjectMapping` and
 set. A tracker that offers no browser sign-in asks for an update instead of a
 dead Connect button.
 
+A tracker an extension serves (`ext-<guest id>`, `lib/trackers/extension.ts`)
+gets the same card, drawn by `integrations/GuestIntegrationsSection.tsx` under
+"Extension accounts" beside the extension's notification channel, and
+`IntegrationsPage.tsx` leaves it out of the built-in list. The card takes the
+installed extension and its public tracker contribution (`extension` prop) and
+reads the connect form from the auth status's `connect` block, never from the
+manifest alone: a `user` instance asks for the server address until an account
+lives on one (the first connect fixes it, a saved client alone does not, so a
+mistyped address is corrected by typing again; `INSTANCE_MISMATCH` says a
+second account must be on the same server); `token` auth shows the token form
+with the scopes and "Create token" link the contribution names, and a username
+where its scheme is `basic`; `oauth` auth shows the client id and secret form
+with the redirect URL to copy until the server holds a client (`hasClient`),
+then the browser sign-in. Each failure code the connect routes answer
+(`TOKEN_REQUIRED`, `TOKEN_REFUSED`, `USERNAME_REQUIRED`, `USERNAME_INVALID`,
+`INSTANCE_REQUIRED`, `INSTANCE_MISMATCH`, `UNSUPPORTED_INSTANCE`,
+`CLIENT_MISSING`, `TRACKER_UNAVAILABLE`, `CONNECT_SUPERSEDED`) has its own
+toast (`settings.integrations.tracker.toast.*`), so a refused token is said in
+the tracker's name and never as "something went wrong"; a code the card does
+not know (`ACCOUNTS_FULL`, a route's `INVALID`) shows the server's own
+sentence. `trackerSettings.i18n.test.ts` holds every key these files name to
+the English dictionary. A written-off account
+arrives as `connected: false` with the account in `accounts` (`status:
+'invalid'`): the card shows the attention line, the server it was on, the
+connect form again and Disconnect, which removes it and frees the server. The
+card's description names the extension; its title is the tracker's label. Hosted and Capacitor mobile show
+no extension-account cards, as for channels: accounts are connected from web
+or desktop, and the phone shows the tracker's items once they are.
+
+### Why the extension tracker card sits under Extension accounts
+
+The maintainer placed it beside the extension's notification channel rather
+than among the built-in integrations: everything one extension owns is in one
+place, and "Built-in integrations" stays what ships with OpenChamber. The card
+itself is `TrackerSettings`, so mapping and session comments read the same.
+
 ### Why `{provider}` keys and not keys per provider
 
 The sentences these cards show name the provider through `{provider}` and the

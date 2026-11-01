@@ -56,6 +56,8 @@ describe('postTrackerSessionStarted', () => {
   const posts: string[] = [];
   const unexpected = (): never => { throw new Error('Unexpected tracker call'); };
   const trackers: TrackerAPI = {
+    authConnectToken: unexpected,
+    authSaveOAuthClient: unexpected,
     sessionStatusPost: async (provider, input) => {
       posts.push(`${provider}:${input.identifier}`);
       return { connected: true, posted: true, commentId: null };
