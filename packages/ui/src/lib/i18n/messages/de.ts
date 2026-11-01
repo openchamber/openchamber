@@ -423,6 +423,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Wählen Sie zuerst ein Projekt',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Fehler beim Laden der geplanten Aufgaben',
   'sessions.scheduledTasks.dialog.toast.saved': 'Geplante Aufgabe gespeichert',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'Die Aufgabe läuft jetzt am neuen Ort, aber die alte Kopie konnte nicht gelöscht werden. Löschen Sie sie dort, damit die Aufgabe nicht doppelt läuft.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Fehler beim Aktualisieren der Aufgabe',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Geplante Aufgabe gelöscht',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Fehler beim Löschen der Aufgabe',

@@ -473,6 +473,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Kies eerst een project',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Kan geplande taken niet laden',
   'sessions.scheduledTasks.dialog.toast.saved': 'Geplande taak opgeslagen',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'De taak draait nu op de nieuwe plek, maar de oude kopie kon niet worden verwijderd. Verwijder die daar, zodat de taak niet twee keer draait.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Kan taak niet bijwerken',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Geplande taak verwijderd',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Kan taak niet verwijderen',

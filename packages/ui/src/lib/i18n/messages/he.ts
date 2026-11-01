@@ -421,6 +421,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'יש לבחור פרויקט קודם',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'טעינת המשימות המתוזמנות נכשלה',
   'sessions.scheduledTasks.dialog.toast.saved': 'המשימה המתוזמנת נשמרה',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'המשימה רצה עכשיו במקום החדש, אבל לא ניתן היה למחוק את העותק הישן. מחקו אותו שם כדי שהמשימה לא תרוץ פעמיים.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'עדכון המשימה נכשל',
   'sessions.scheduledTasks.dialog.toast.deleted': 'המשימה המתוזמנת נמחקה',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'מחיקת המשימה נכשלה',

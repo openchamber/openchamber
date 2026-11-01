@@ -483,6 +483,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.error.chooseProjectFirst": "Elige un proyecto primero",
   "sessions.scheduledTasks.dialog.toast.loadFailed": "No se pudo cargar tareas programadas",
   "sessions.scheduledTasks.dialog.toast.saved": "Tarea programada guardada",
+  "sessions.scheduledTasks.dialog.toast.moveLeftOriginal": "La tarea ahora se ejecuta en su nuevo lugar, pero no se pudo eliminar la copia anterior. Elimínala allí para que la tarea no se ejecute dos veces.",
   "sessions.scheduledTasks.dialog.toast.updateFailed": "No se pudo actualizar la tarea",
   "sessions.scheduledTasks.dialog.toast.deleted": "Tarea programada eliminada",
   "sessions.scheduledTasks.dialog.toast.deleteFailed": "No se pudo eliminar la tarea",

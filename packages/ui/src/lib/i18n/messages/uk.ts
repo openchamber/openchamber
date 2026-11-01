@@ -483,6 +483,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.error.chooseProjectFirst": "Спочатку виберіть проєкт",
   "sessions.scheduledTasks.dialog.toast.loadFailed": "Не вдалося завантажити заплановані завдання",
   "sessions.scheduledTasks.dialog.toast.saved": "Заплановане завдання збережено",
+  "sessions.scheduledTasks.dialog.toast.moveLeftOriginal": "Завдання тепер запускається в новому місці, але стару копію не вдалося видалити. Видаліть її там, щоб завдання не запускалося двічі.",
   "sessions.scheduledTasks.dialog.toast.updateFailed": "Не вдалося оновити завдання",
   "sessions.scheduledTasks.dialog.toast.deleted": "Заплановане завдання видалено",
   "sessions.scheduledTasks.dialog.toast.deleteFailed": "Не вдалося видалити завдання",

@@ -483,6 +483,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.error.chooseProjectFirst": "Escolha um projeto primeiro",
   "sessions.scheduledTasks.dialog.toast.loadFailed": "Não foi possível carregar tarefas agendadas",
   "sessions.scheduledTasks.dialog.toast.saved": "Tarefa agendada salva",
+  "sessions.scheduledTasks.dialog.toast.moveLeftOriginal": "A tarefa agora é executada no novo local, mas a cópia antiga não pôde ser excluída. Exclua-a lá para que a tarefa não seja executada duas vezes.",
   "sessions.scheduledTasks.dialog.toast.updateFailed": "Não foi possível atualizar a tarefa",
   "sessions.scheduledTasks.dialog.toast.deleted": "Tarefa agendada excluída",
   "sessions.scheduledTasks.dialog.toast.deleteFailed": "Não foi possível excluir a tarefa",

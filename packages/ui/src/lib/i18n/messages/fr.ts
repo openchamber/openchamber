@@ -309,6 +309,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Choisissez d\'abord un projet',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Échec du chargement des tâches planifiées',
   'sessions.scheduledTasks.dialog.toast.saved': 'Tâche planifiée enregistrée',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'La tâche s’exécute désormais à son nouvel emplacement, mais l’ancienne copie n’a pas pu être supprimée. Supprimez-la là-bas pour que la tâche ne s’exécute pas deux fois.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Échec de la mise à jour de la tâche',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Tâche planifiée supprimée',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Échec de la suppression de la tâche',

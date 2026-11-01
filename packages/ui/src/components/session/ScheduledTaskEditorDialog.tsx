@@ -176,15 +176,24 @@ const CronScheduleSection: React.FC<{
   );
 };
 
+export type ScheduledTaskScopeOption = { id: string; label: React.ReactNode };
+
 export function ScheduledTaskEditorDialog(props: {
   open: boolean;
   task: ScheduledTask | null;
   projectId: string;
+  /** Where a task can run: the chats scope and every project. */
+  scopes: ScheduledTaskScopeOption[];
   onOpenChange: (open: boolean) => void;
-  onSave: (draft: Partial<ScheduledTask>) => Promise<void>;
+  /** `projectId` is where the task is saved; for an existing task it may differ from its owner, which moves it. */
+  onSave: (draft: Partial<ScheduledTask>, projectId: string) => Promise<void>;
 }) {
-  const { open, task, onOpenChange, onSave } = props;
+  const { open, task, scopes, onOpenChange, onSave } = props;
   const { t, locale } = useI18n();
+  const [projectId, setProjectId] = React.useState(props.projectId);
+  React.useEffect(() => {
+    if (open) setProjectId(props.projectId);
+  }, [open, props.projectId]);
   const globalSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const liveSessions = useAllLiveSessions();
   // Candidates only. Whether one belongs to the task is the scheduler's own
@@ -208,14 +217,14 @@ export function ScheduledTaskEditorDialog(props: {
   >({ status: 'idle' });
   const [eligibilityAttempt, setEligibilityAttempt] = React.useState(0);
   React.useEffect(() => {
-    if (!open || !props.projectId || !candidatesKey) {
+    if (!open || !projectId || !candidatesKey) {
       setEligibility({ status: 'idle' });
       return undefined;
     }
     const controller = new AbortController();
     setEligibility((current) => (current.status === 'ready' ? current : { status: 'loading' }));
     fetchEligibleScheduledTaskTargets(
-      props.projectId,
+      projectId,
       candidatesRef.current.map((session) => ({ sessionId: session.id, directory: session.directory ?? '' })),
       controller.signal,
     ).then(
@@ -227,7 +236,7 @@ export function ScheduledTaskEditorDialog(props: {
       },
     );
     return () => controller.abort();
-  }, [open, props.projectId, candidatesKey, eligibilityAttempt]);
+  }, [open, projectId, candidatesKey, eligibilityAttempt]);
   const sessions = React.useMemo(
     () => (eligibility.status === 'ready' ? candidates.filter((session) => eligibility.ids.has(session.id)) : []),
     [candidates, eligibility],
@@ -245,7 +254,7 @@ export function ScheduledTaskEditorDialog(props: {
   const isMobile = useUIStore((state) => state.isMobile);
   // The project the run works in: the base-branch picker reads its branches
   // from here, the same way the New worktree dialog and multi-run do.
-  const projectPath = useProjectsStore((state) => state.projects.find((entry) => entry.id === props.projectId)?.path ?? null);
+  const projectPath = useProjectsStore((state) => state.projects.find((entry) => entry.id === projectId)?.path ?? null);
   // Same hook `BranchSelector` uses; calling it here only reads the store's
   // answer so the editor can say when the folder is not a repository.
   const branchOptions = useBranchOptions(projectPath);
@@ -593,14 +602,23 @@ export function ScheduledTaskEditorDialog(props: {
 
     setSaving(true);
     try {
-      await onSave(payload);
+      await onSave(payload, projectId);
       onOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.editor.toast.saveFailed'));
     } finally {
       setSaving(false);
     }
-  }, [branchOptions.isGitRepository, draft, onOpenChange, onSave, t]);
+  }, [branchOptions.isGitRepository, draft, onOpenChange, onSave, projectId, t]);
+
+  // A target session and a base branch belong to the project they were picked
+  // in; another project starts without them.
+  const changeProject = React.useCallback((nextProjectId: string) => {
+    if (nextProjectId === projectId) return;
+    setProjectId(nextProjectId);
+    setEligibility({ status: 'loading' });
+    setDraft((prev) => ({ ...prev, targetSessionId: '', baseBranch: '' }));
+  }, [projectId]);
 
   const descriptionId = React.useId();
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -617,6 +635,20 @@ export function ScheduledTaskEditorDialog(props: {
 
   const formBody = (
     <div className="flex flex-col gap-5">
+      {scopes.length > 1 ? (
+        <SettingsStackedField label={t('sessions.scheduledTasks.dialog.project.label')}>
+          <Select value={projectId} onValueChange={changeProject}>
+            <SelectTrigger>
+              <SelectValue>{scopes.find((scope) => scope.id === projectId)?.label}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {scopes.map((scope) => (
+                <SelectItem key={scope.id} value={scope.id}>{scope.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsStackedField>
+      ) : null}
       <SettingsStackedField label={t('sessions.scheduledTasks.editor.sessionMode')}>
         <Select value={draft.sessionMode} onValueChange={(value: 'new' | 'existing') => setDraft((prev) => ({
           ...prev, sessionMode: value,

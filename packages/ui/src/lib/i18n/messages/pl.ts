@@ -646,6 +646,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Najpierw wybierz projekt',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Nie udało się załadować zaplanowanych zadań',
   'sessions.scheduledTasks.dialog.toast.saved': 'Zaplanowane zadanie zapisane',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'Zadanie działa teraz w nowym miejscu, ale nie udało się usunąć starej kopii. Usuń ją tam, aby zadanie nie uruchamiało się dwa razy.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Nie udało się zaktualizować zadania',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Zaplanowane zadanie usunięte',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Nie udało się usunąć zadania',

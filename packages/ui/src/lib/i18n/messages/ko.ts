@@ -474,6 +474,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '먼저 프로젝트를 선택하세요',
   'sessions.scheduledTasks.dialog.toast.loadFailed': '예약 작업 로드 실패',
   'sessions.scheduledTasks.dialog.toast.saved': '예약 작업 저장됨',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': '작업이 이제 새 위치에서 실행되지만 이전 사본을 삭제하지 못했습니다. 작업이 두 번 실행되지 않도록 해당 위치에서 삭제하세요.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': '작업 업데이트 실패',
   'sessions.scheduledTasks.dialog.toast.deleted': '예약 작업 삭제됨',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': '작업 삭제 실패',

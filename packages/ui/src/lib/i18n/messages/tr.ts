@@ -395,6 +395,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Önce bir proje seçin',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Zamanlanmış görevler yüklenemedi',
   'sessions.scheduledTasks.dialog.toast.saved': 'Zamanlanmış görev kaydedildi',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'Görev artık yeni yerinde çalışıyor ancak eski kopya silinemedi. Görevin iki kez çalışmaması için onu orada silin.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Görev güncellenemedi',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Zamanlanmış görev silindi',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Görev silinemedi',

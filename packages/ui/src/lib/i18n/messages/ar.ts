@@ -421,6 +421,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'اختر مشروعًا أولًا',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'تعذّر تحميل المهام المجدولة',
   'sessions.scheduledTasks.dialog.toast.saved': 'تم حفظ المهمة المجدولة',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'تعمل المهمة الآن في مكانها الجديد، لكن تعذّر حذف النسخة القديمة. احذفها هناك حتى لا تعمل المهمة مرتين.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'تعذّر تحديث المهمة',
   'sessions.scheduledTasks.dialog.toast.deleted': 'تم حذف المهمة المجدولة',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'تعذّر حذف المهمة',

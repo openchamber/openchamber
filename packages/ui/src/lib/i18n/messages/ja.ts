@@ -474,6 +474,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '先にプロジェクトを選択してください',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'スケジュールタスクの読み込みに失敗しました',
   'sessions.scheduledTasks.dialog.toast.saved': 'スケジュールタスクを保存しました',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'タスクは新しい場所で実行されるようになりましたが、古いコピーを削除できませんでした。タスクが二重に実行されないよう、元の場所で削除してください。',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'タスクの更新に失敗しました',
   'sessions.scheduledTasks.dialog.toast.deleted': 'スケジュールタスクを削除しました',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'タスクの削除に失敗しました',

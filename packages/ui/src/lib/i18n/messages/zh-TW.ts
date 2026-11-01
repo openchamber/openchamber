@@ -499,6 +499,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '請先選擇一個專案',
   'sessions.scheduledTasks.dialog.toast.loadFailed': '載入排程任務失敗',
   'sessions.scheduledTasks.dialog.toast.saved': '排程任務已儲存',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': '任務現在會在新位置執行，但無法刪除舊副本。請在原位置將其刪除，以免任務執行兩次。',
   'sessions.scheduledTasks.dialog.toast.updateFailed': '更新任務失敗',
   'sessions.scheduledTasks.dialog.toast.deleted': '排程任務已刪除',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': '刪除任務失敗',

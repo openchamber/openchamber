@@ -473,6 +473,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Choose a project first',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Failed to load scheduled tasks',
   'sessions.scheduledTasks.dialog.toast.saved': 'Scheduled task saved',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'The task now runs in its new place, but the old copy could not be deleted. Delete it there so the task doesn\'t run twice.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Failed to update task',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Scheduled task deleted',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Failed to delete task',

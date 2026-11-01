@@ -474,6 +474,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '请先选择一个项目',
   'sessions.scheduledTasks.dialog.toast.loadFailed': '加载计划任务失败',
   'sessions.scheduledTasks.dialog.toast.saved': '计划任务已保存',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': '任务现在会在新位置运行，但无法删除旧副本。请在原位置将其删除，以免任务运行两次。',
   'sessions.scheduledTasks.dialog.toast.updateFailed': '更新任务失败',
   'sessions.scheduledTasks.dialog.toast.deleted': '计划任务已删除',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': '删除任务失败',
