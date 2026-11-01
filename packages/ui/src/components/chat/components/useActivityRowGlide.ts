@@ -68,8 +68,15 @@ export const useActivityRowGlide = (
  * a hole under the header). A grown row raises it before the frame is drawn
  * (a resize observer runs between layout and paint). A change of width is
  * no step: the rows re-wrap, and the floor follows their new height, so a
- * chat that narrowed and widened again leaves no space behind.
+ * chat that narrowed and widened again leaves no space behind. Nor is a big
+ * row leaving the window (a long reply with a table among the latest rows):
+ * the floor holds no more than a few lines, or the steps after it were drawn
+ * at the top of hundreds of pixels of empty space.
  */
+// The most a step can shrink the window and keep its height: the difference
+// between rows of a few lines and a tool row.
+const LIVE_ROWS_FLOOR_HOLD_PX = 96;
+
 export const useLiveRowsFloor = (
     floorRef: React.RefObject<HTMLElement | null>,
     contentRef: React.RefObject<HTMLElement | null>,
@@ -88,7 +95,8 @@ export const useLiveRowsFloor = (
             const height = rows.offsetHeight;
             const resized = rows.offsetWidth !== width;
             width = rows.offsetWidth;
-            if (resized || height > (parseFloat(floor.style.minHeight) || 0)) floor.style.minHeight = `${height}px`;
+            const held = parseFloat(floor.style.minHeight) || 0;
+            if (resized || height > held || held - height > LIVE_ROWS_FLOOR_HOLD_PX) floor.style.minHeight = `${height}px`;
         };
         raise();
         const observer = new ResizeObserver(raise);

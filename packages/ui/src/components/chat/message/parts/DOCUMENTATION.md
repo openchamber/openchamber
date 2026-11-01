@@ -426,7 +426,10 @@ pushed a tall row out for a short one shrank the window, and a reader following
 the end glided down for one step and was pulled back up by the next. A change of
 width is no step: the rows re-wrap and the floor takes their new height, or a
 chat narrowed and widened again (a panel opened and closed) kept the narrow
-height as empty space above the rows until the fold was opened. The trim
+height as empty space above the rows until the fold was opened. Nor is a big row
+leaving the window: the floor holds at most 96 px, or a long reply among the
+latest rows (one with a table, before the reader's answer to its question)
+left hundreds of pixels of empty space under the steps that followed. The trim
 stays while the settled fold closes and lifts when the reader opens it.
 
 A long turn, in either mode, is several list rows: a row per step once the
