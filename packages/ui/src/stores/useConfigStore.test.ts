@@ -1181,6 +1181,38 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('high');
   });
 
+  test('[issue-5933] a manual model pick survives picking an agent that configures a model', () => {
+    const sessionId = 'ses_5933_manual_model_survives_agent';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [
+        provider('openai', 'gpt-5.5', ['low', 'high']),
+        provider('anthropic', 'claude-3', ['low', 'high']),
+      ],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      // The user picked a model in the composer, so the selection is manual.
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude-3',
+      currentVariant: undefined,
+      selectionSource: 'manual',
+      directoryScoped: {},
+    });
+
+    // Picking an agent must not move the session off the model the user chose.
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('anthropic');
+    expect(state.currentModelId).toBe('claude-3');
+    expect(state.selectionSource).toBe('manual');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'plan')).toEqual({
+      providerId: 'anthropic',
+      modelId: 'claude-3',
+    });
+  });
+
   test('[issue-4601] the settings effort stays with the settings model', () => {
     const sessionId = 'ses_4601_settings_effort';
     useSessionUIStore.setState({ currentSessionId: sessionId });

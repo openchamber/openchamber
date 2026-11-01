@@ -3615,6 +3615,22 @@ export const useConfigStore = create<ConfigStore>()(
                             const agentModel = findCatalogModel(agentProvider?.models, modelID);
 
                             if (agentModel) {
+                                // A live manual model choice outranks an agent's configured
+                                // model: picking an agent switches the agent, not the model
+                                // the user chose. Applying the agent's model with "auto"
+                                // here would downgrade the manual pick and let the restore
+                                // effect put the record's old model back before the send
+                                // (#5933). Record the agent's model as the manual choice so
+                                // the session routes on it.
+                                if (hadManualSelection && currentProviderId && currentModelId) {
+                                    if (currentSessionId) {
+                                        const selection = useSelectionStore.getState();
+                                        selection.saveSessionModelSelection(currentSessionId, currentProviderId, currentModelId);
+                                        selection.saveAgentModelForSession(currentSessionId, agentName, currentProviderId, currentModelId);
+                                    }
+                                    return;
+                                }
+
                                 applyResolvedModelSelection(
                                     providerID,
                                     modelID,
