@@ -1,6 +1,6 @@
 import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { matchesRankQuery } from '@/lib/search/fuzzySearch';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
@@ -262,7 +262,7 @@ export const selectFolderIdsForProjection = (
       keep = (childIdsByParentId.get(folderId) ?? []).some(shouldKeep);
     } else {
       if (!keep && !options.searchQuery) keep = true;
-      if (!keep && (entry.nodeCount > 0 || (!isIdQuery && matchesRankQuery([entry.name], options.searchQuery)))) keep = true;
+      if (!keep && (entry.nodeCount > 0 || (!isIdQuery && matchesRankQuery([entry.name], options.searchQuery, SIDEBAR_SEARCH)))) keep = true;
       if (!keep) keep = (childIdsByParentId.get(folderId) ?? []).some(shouldKeep);
     }
 

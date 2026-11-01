@@ -1,4 +1,4 @@
-import { matchesRankQuery } from '@/lib/search/fuzzySearch';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -103,7 +103,7 @@ export const useSessionGrouping = (args: Args) => {
         if (isIdQuery && isArchivedSession(node.session)) return [];
         const nodeMatches = isIdQuery
           ? node.session.id.toLowerCase() === normalizedQuery
-          : matchesRankQuery([buildSessionSearchText(node.session)], query);
+          : matchesRankQuery([buildSessionSearchText(node.session)], query, SIDEBAR_SEARCH);
         if (nodeMatches) {
           return [node];
         }

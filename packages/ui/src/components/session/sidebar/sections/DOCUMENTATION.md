@@ -56,9 +56,12 @@ with its named pin lists. How the rows are drawn stays with the row model
   worktree): a work whose top-level session a scheduled task started
   (`openchamber.kind = 'scheduled'`, cleared on a fork). With the text
   condition it lists the runs of one task, whose sessions carry the task's name.
-- The text condition ("Title or branch") matches as the sidebar search does:
-  every word somewhere in the title of one of the work's top-level sessions,
-  the worktree's name or its branch. Save as section in the search makes a
+- The text condition ("Title or branch") matches as the sidebar search does
+  (`SIDEBAR_SEARCH`): every word at the start of a word in the title of one
+  of the work's top-level sessions, the worktree's name or its branch, so
+  "fix" finds "fix/relay" and not "prefix" (maintainer, 2026-11-01: a standing
+  section filling with mid-word matches is noise; the pickers keep matching
+  anywhere). Save as section in the search makes a
   section from the query this way, then closes the search so the sidebar shows
   the section being made. Sections cached on the device by another build are
   read through the same rules as the stored setting (the persisted store's

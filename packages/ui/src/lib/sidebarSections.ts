@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { matchesRankQuery } from '@/lib/search/fuzzySearch';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 
 /**
  * The sidebar's sections: an ordered list the user arranges, shared by every
@@ -302,7 +302,7 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
   if (filter.kinds.length > 0 && !filter.kinds.some((kind) => (kind === 'scheduled' ? facts.scheduled : kind === facts.kind))) return false;
   if (filter.links.length > 0 && !filter.links.some((link) => matchesLink(link, facts))) return false;
   if (filter.projectIds.length > 0 && (facts.projectId === null || !filter.projectIds.includes(facts.projectId))) return false;
-  if (filter.text.trim() !== '' && !matchesRankQuery(facts.texts, filter.text)) return false;
+  if (filter.text.trim() !== '' && !matchesRankQuery(facts.texts, filter.text, SIDEBAR_SEARCH)) return false;
   return matchesActivity(filter.activity, facts.lastActivityAt, now);
 };
 
