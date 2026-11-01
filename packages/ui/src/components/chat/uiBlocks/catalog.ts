@@ -17,6 +17,13 @@ const json = z.json();
 export type BlockValue = z.infer<typeof json>;
 const nodes = z.array(json);
 
+const choiceOptionObject = z.object({ label: z.string(), description: z.string().optional() });
+/** A Choice option read as its label and description, whichever way the agent wrote it. */
+export const choiceOption = z.union([
+  z.string().transform((label) => ({ label, description: undefined })),
+  choiceOptionObject,
+]);
+
 export const blockProps = {
   Stack: z.object({ children: nodes }),
   Row: z.object({ children: nodes }),
@@ -43,7 +50,7 @@ export const blockProps = {
     })),
     direction: z.enum(['column', 'row']).optional(),
   }),
-  BarChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional() }),
+  BarChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional(), whole: z.boolean().optional() }),
   LineChart: z.object({ labels: z.array(z.string()), series: nodes, unit: z.string().optional() }),
   // null is a point with no data: the line breaks there, the bar is left out.
   Series: z.object({ name: z.string(), values: z.array(z.number().nullable()) }),
@@ -51,7 +58,8 @@ export const blockProps = {
   Progress: z.object({ label: z.string(), value: z.number(), max: z.number().positive().optional() }),
   Choice: z.object({
     name: z.string(),
-    options: z.array(z.string()),
+    // An option is its label, or a label with a line saying what choosing it means.
+    options: z.array(z.union([z.string(), choiceOptionObject])),
     label: z.string().optional(),
     multiple: z.boolean().optional(),
   }),
@@ -61,6 +69,23 @@ export const blockProps = {
     placeholder: z.string().optional(),
     multiline: z.boolean().optional(),
   }),
+  // A local date, with a time when asked: YYYY-MM-DD or YYYY-MM-DDTHH:mm.
+  DateInput: z.object({
+    name: z.string(),
+    label: z.string().optional(),
+    time: z.boolean().optional(),
+    value: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/).optional(),
+  }),
+  Slider: z.object({
+    name: z.string(),
+    min: z.number(),
+    max: z.number(),
+    label: z.string().optional(),
+    step: z.number().positive().optional(),
+    value: z.number().optional(),
+    unit: z.string().optional(),
+  }).refine((slider) => slider.max > slider.min),
+  Details: z.object({ title: z.string(), children: nodes }),
   Button: z.object({ label: z.string(), variant: z.enum(['primary', 'secondary']).optional(), value: z.string().optional() }),
 };
 
@@ -93,7 +118,7 @@ const Steps = defineComponent({
 const Series = defineComponent({ name: 'Series', description: 'one value per label; null = no data', props: blockProps.Series, component: null });
 const BarChart = defineComponent({
   name: 'BarChart',
-  description: 'categories, not time',
+  description: 'categories, not time; whole: one series of parts adding up to a whole, shows the total and shares',
   props: blockProps.BarChart.extend({ series: z.array(Series.ref) }),
   component: null,
 });
@@ -106,7 +131,7 @@ const LineChart = defineComponent({
 
 const Choice = defineComponent({
   name: 'Choice',
-  description: 'name keys the answer',
+  description: 'name keys the answer (the chosen labels); add a description where a label alone leaves its meaning unclear',
   props: blockProps.Choice,
   component: null,
 });
@@ -114,6 +139,18 @@ const Input = defineComponent({
   name: 'Input',
   description: 'name keys the answer',
   props: blockProps.Input,
+  component: null,
+});
+const DateInput = defineComponent({
+  name: 'DateInput',
+  description: 'name keys the answer: YYYY-MM-DD, with time YYYY-MM-DDTHH:mm; value prefills it',
+  props: blockProps.DateInput,
+  component: null,
+});
+const Slider = defineComponent({
+  name: 'Slider',
+  description: 'name keys the answer, a number; value is where it starts',
+  props: blockProps.Slider,
   component: null,
 });
 const Button = defineComponent({
@@ -125,7 +162,7 @@ const Button = defineComponent({
 
 const leaf = z.union([
   Text.ref, Badge.ref, Callout.ref, KeyValue.ref, Table.ref, Steps.ref, BarChart.ref, LineChart.ref,
-  Stat.ref, Progress.ref, Choice.ref, Input.ref, Button.ref,
+  Stat.ref, Progress.ref, Choice.ref, Input.ref, DateInput.ref, Slider.ref, Button.ref,
 ]);
 
 // The guidance names what nests where (guidance.ts); these unions only feed
@@ -136,16 +173,22 @@ const Row = defineComponent({
   props: blockProps.Row.extend({ children: z.array(leaf) }),
   component: null,
 });
+const Details = defineComponent({
+  name: 'Details',
+  description: 'collapsed until opened: detail not every reader needs',
+  props: blockProps.Details.extend({ children: z.array(z.union([leaf, Row.ref])) }),
+  component: null,
+});
 const Card = defineComponent({
   name: 'Card',
   description: 'title: inline Markdown, "" for none',
-  props: blockProps.Card.extend({ children: z.array(z.union([leaf, Row.ref])) }),
+  props: blockProps.Card.extend({ children: z.array(z.union([leaf, Row.ref, Details.ref])) }),
   component: null,
 });
 const Tab = defineComponent({
   name: 'Tab',
   description: '',
-  props: blockProps.Tab.extend({ children: z.array(z.union([leaf, Card.ref, Row.ref])) }),
+  props: blockProps.Tab.extend({ children: z.array(z.union([leaf, Card.ref, Row.ref, Details.ref])) }),
   component: null,
 });
 const Tabs = defineComponent({
@@ -157,13 +200,13 @@ const Tabs = defineComponent({
 const Stack = defineComponent({
   name: 'Stack',
   description: 'the root',
-  props: blockProps.Stack.extend({ children: z.array(z.union([leaf, Card.ref, Row.ref, Tabs.ref])) }),
+  props: blockProps.Stack.extend({ children: z.array(z.union([leaf, Card.ref, Row.ref, Tabs.ref, Details.ref])) }),
   component: null,
 });
 
 const components = [
-  Stack, Row, Card, Tabs, Tab, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Series,
-  Choice, Input, Button,
+  Stack, Row, Card, Tabs, Tab, Details, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Series,
+  Choice, Input, DateInput, Slider, Button,
 ];
 
 export const uiBlockLibrary = createLibrary({ components, root: 'Stack' });
@@ -262,7 +305,8 @@ function checkFinishedNode(value: BlockValue, errors: string[]): void {
   for (const child of [...slots.data.children ?? [], ...slots.data.tabs ?? [], ...slots.data.series ?? []]) checkFinishedNode(child, errors);
 }
 
-export type BlockField = { name: string; label: string };
+/** A field of a block; `initial` is the value it starts with, which an answer carries unless the user changes it. */
+export type BlockField = { name: string; label: string; initial?: string };
 
 /** Every node of a block, parent before children, in reading order, with the title of the card it sits in. */
 function eachNode(root: BlockValue, visit: (node: z.infer<typeof blockNode>, cardTitle: string) => void, cardTitle = ''): void {
@@ -275,16 +319,51 @@ function eachNode(root: BlockValue, visit: (node: z.infer<typeof blockNode>, car
   for (const child of [...slots.data.children ?? [], ...slots.data.tabs ?? []]) eachNode(child, visit, title);
 }
 
+const fieldOf = (node: z.infer<typeof blockNode>): BlockField | null => {
+  const named = (data: { name: string; label?: string }, initial?: string): BlockField => (
+    initial === undefined ? { name: data.name, label: data.label || data.name } : { name: data.name, label: data.label || data.name, initial }
+  );
+  switch (node.typeName) {
+    case 'Choice': { const field = blockProps.Choice.safeParse(node.props); return field.success ? named(field.data) : null; }
+    case 'Input': { const field = blockProps.Input.safeParse(node.props); return field.success ? named(field.data) : null; }
+    case 'DateInput': { const field = blockProps.DateInput.safeParse(node.props); return field.success ? named(field.data, dateStart(field.data)) : null; }
+    case 'Slider': {
+      const field = blockProps.Slider.safeParse(node.props);
+      return field.success ? named(field.data, String(sliderStart(field.data))) : null;
+    }
+    default: return null;
+  }
+};
+
+/** The time a date field shows before the user picks one. */
+export const DEFAULT_TIME = '09:00';
+
+/** What a prefilled date field holds, in the shape its answer takes: a time only when the field asks for one. */
+const dateStart = (field: z.infer<typeof blockProps.DateInput>): string | undefined => {
+  if (!field.value) return undefined;
+  const date = field.value.slice(0, 10);
+  return field.time ? `${date}T${field.value.slice(11, 16) || DEFAULT_TIME}` : date;
+};
+
+/**
+ * Where a slider starts: its value, else the middle, on the nearest step the
+ * slider can stand on, so the label and the answer match the thumb.
+ */
+export function sliderStart(slider: z.infer<typeof blockProps.Slider>): number {
+  const step = slider.step ?? 1;
+  const wanted = slider.value ?? slider.min + (slider.max - slider.min) / 2;
+  const lastStep = Math.floor((slider.max - slider.min) / step);
+  const steps = Math.min(lastStep, Math.max(0, Math.round((wanted - slider.min) / step)));
+  // Rounded to clear float noise such as 0.30000000000000004.
+  return Number((slider.min + steps * step).toFixed(10));
+}
+
 /** The fields of a block, in reading order; their values make up an answer. */
 export function blockFields(root: BlockValue): BlockField[] {
   const fields: BlockField[] = [];
   eachNode(root, (node) => {
-    const field = node.typeName === 'Choice'
-      ? blockProps.Choice.safeParse(node.props)
-      : node.typeName === 'Input' ? blockProps.Input.safeParse(node.props) : null;
-    if (field?.success && !fields.some((known) => known.name === field.data.name)) {
-      fields.push({ name: field.data.name, label: field.data.label || field.data.name });
-    }
+    const field = fieldOf(node);
+    if (field && !fields.some((known) => known.name === field.name)) fields.push(field);
   });
   return fields;
 }
@@ -353,7 +432,7 @@ const decisionsIn = (root: BlockValue, titles: ReadonlySet<string>) => {
   const decisions: string[] = [];
   let fields = false;
   eachNode(root, (node, cardTitle) => {
-    if (node.typeName === 'Choice' || node.typeName === 'Input') fields = true;
+    if (fieldOf(node)) fields = true;
     const button = node.typeName === 'Button' ? blockProps.Button.safeParse(node.props) : null;
     const decision = button?.success ? decisionOf(titles, cardTitle, button.data.value) : null;
     if (decision !== null && !decisions.includes(decision)) decisions.push(decision);

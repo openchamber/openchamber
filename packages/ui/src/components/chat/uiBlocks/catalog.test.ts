@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { blockDecisions, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue } from './catalog';
+import { blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue } from './catalog';
 
 const program = `root = Stack([note, flow])
 note = Callout("Routers rewrite **MAC** addresses", "info")
@@ -51,6 +51,30 @@ describe('parseUiBlock', () => {
   test('a chart series must carry one value per label', () => {
     expect(parseUiBlock('root = Stack([BarChart(["a", "b"], [Series("s", [10])])])', true).kind).toBe('invalid');
     expect(parseUiBlock('root = Stack([BarChart(["a", "b"], [Series("s", [10, 20])])])', true).kind).toBe('ready');
+  });
+
+  test('Choice options take a label or a label with a description', () => {
+    const parsed = parseUiBlock('root = Stack([Choice("plan", ["Keep", {label: "Move", description: "Moves the job to Monday"}])])', true);
+    if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${parsed.kind}`);
+    expect(blockProps.Choice.parse(childrenOf(parsed.root)[0].props).options).toEqual(['Keep', { label: 'Move', description: 'Moves the job to Monday' }]);
+  });
+
+  test('a slider needs max above min, and a date its ISO shape', () => {
+    expect(parseUiBlock('root = Stack([Slider("budget", 10, 5)])', true).kind).toBe('invalid');
+    expect(parseUiBlock('root = Stack([DateInput("when", "When", true, "next Monday")])', true).kind).toBe('invalid');
+    expect(parseUiBlock('root = Stack([DateInput("when", "When", true, "2026-11-09T09:00"), Slider("budget", 0, 100)])', true).kind).toBe('ready');
+  });
+
+  test('prefilled fields start as their answer reads: a time only when asked, a slider on a step it can stand on', () => {
+    const parsed = parseUiBlock('root = Stack([Details("More", [DateInput("when", "", false, "2026-11-09T18:30"), DateInput("at", "", true, "2026-11-10")]), Slider("budget", 0, 50, "Budget", 5, 20), Slider("sessions", 1, 10, "", 2, 99), Slider("share", 0, 100, "", 10)])', true);
+    if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${parsed.kind}`);
+    expect(blockFields(parsed.root)).toEqual([
+      { name: 'when', label: 'when', initial: '2026-11-09' },
+      { name: 'at', label: 'at', initial: '2026-11-10T09:00' },
+      { name: 'budget', label: 'Budget', initial: '20' },
+      { name: 'sessions', label: 'sessions', initial: '9' },
+      { name: 'share', label: 'share', initial: '50' },
+    ]);
   });
 
   test('a node whose child slot is not a list is invalid, not a crash', () => {

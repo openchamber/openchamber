@@ -3,11 +3,13 @@ import { z } from 'zod';
 import { Icon } from '@/components/icon/Icon';
 import { Button as UiButton } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Radio } from '@/components/ui/radio';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
+import { DatePicker, TimePill } from '@/components/ui/date-time';
+import { Input as FieldInput } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useCalendarPreferences } from '@/components/ui/useCalendarPreferences';
 import { useI18n } from '@/lib/i18n';
 import { KIT_SHARED_CSS, kitVariables, seriesColor } from '../lib/visualKit';
 import { cn } from '@/lib/utils';
@@ -15,7 +17,7 @@ import { MarkdownContent } from '../MarkdownRenderer';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { axisTicks } from './axisTicks';
 import {
-  blockDecisions, blockFields, cardDecision, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, type BlockName, type BlockPath, type BlockValue, tones,
+  blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
 } from './catalog';
 import {
   describeUiBlockAnswer,
@@ -126,6 +128,11 @@ const toneFill = {
 // its own language, and "2,318" next to its "184 200" read as two formats.
 const numberFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 20 });
 const formatNumber = (value: number) => numberFormat.format(value).replace(/,/g, ' ');
+/** A chart's unit follows its number, so "126 k" or "42%" reads as one value. */
+const unitSuffix = (unit?: string) => (!unit ? '' : /^[%°]/.test(unit) ? unit : ` ${unit}`);
+// Dollars and pounds are written before the amount.
+const unitLeads = (unit?: string) => unit === '$' || unit === '£';
+const formatWithUnit = (value: number, unit?: string) => (unitLeads(unit) ? `${unit}${formatNumber(value)}` : `${formatNumber(value)}${unitSuffix(unit)}`);
 const number = z.number();
 /** A value as the reader sees it: numbers grouped, text as written. */
 const display = (value: string | number) => {
@@ -282,17 +289,15 @@ function CardNoteSlot({ decision, card, children }: { decision: string; card: Bl
   // with the note alone, sit at the end of their line, so a card is no taller
   // until the user wants a note.
   const element = open ? (
-    <Textarea
+    <ShortTextarea
       value={note}
       placeholder={t('chat.uiBlock.note.placeholder')}
       aria-label={t('chat.uiBlock.note.label')}
       disabled={form.disabled}
       onChange={(event) => form.setNote(decision, event.target.value)}
-      // A short field: notes on several cards are a line or two each.
-      className="min-h-10"
+      // Notes on several cards are a line or two each.
       rows={1}
       autoFocus
-      maxLength={4000}
     />
   ) : null;
   const trailing = form.disabled ? null : !open ? (
@@ -408,19 +413,29 @@ function Callout({ props }: NodeProps) {
   );
 }
 
-/** Label and value joined by a dotted leader, as the shortcuts dialog lists keys; narrow, so the eye does not cross a wide reply. */
+/**
+ * Labels in one column, values at the end of the other, joined by a dotted
+ * leader, as the shortcuts dialog lists keys; narrow, so the eye does not
+ * cross a wide reply. A long value wraps within its column: moved to a line
+ * of its own, it dangled under the label.
+ */
 function KeyValue({ props }: NodeProps) {
   const value = useBlockProps(blockProps.KeyValue, props);
   if (!value) return null;
   return (
-    <dl className="m-0 flex max-w-md flex-col">
+    <dl className="m-0 grid max-w-lg grid-cols-[fit-content(55%)_minmax(0,1fr)] gap-y-0.5">
       {value.items.map((item, index) => (
-        <div key={index} className="flex items-baseline gap-3 py-0.5">
-          <dt className="min-w-0 text-muted-foreground">{item.label}</dt>
-          <span aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border" />
-          {/* A long value wraps within its share of the row instead of pushing out of the card. */}
-          <dd className="m-0 min-w-0 max-w-[65%] text-end tabular-nums [overflow-wrap:anywhere]">{display(item.value)}</dd>
-        </div>
+        <React.Fragment key={index}>
+          <dt className="flex min-w-0 items-baseline gap-3 text-muted-foreground">
+            <span className="min-w-0 [overflow-wrap:anywhere]">{item.label}</span>
+            <span aria-hidden className="min-w-4 flex-1 border-b border-dotted border-border" />
+          </dt>
+          {/* The leader runs on to a short value at the end; a long one takes the column and wraps there. */}
+          <dd className="m-0 flex min-w-0 items-baseline">
+            <span aria-hidden className="min-w-0 flex-1 border-b border-dotted border-border" />
+            <span className="ps-3 text-end tabular-nums [overflow-wrap:anywhere]">{display(item.value)}</span>
+          </dd>
+        </React.Fragment>
       ))}
     </dl>
   );
@@ -697,9 +712,9 @@ function useSeriesFocus(count: number): SeriesFocus {
   };
 }
 
-/** Series names when there are several, and the unit once for the whole chart. */
-function ChartHeader({ series, unit, focus }: { series: Series[]; unit?: string; focus?: SeriesFocus }) {
-  if (series.length < 2 && !unit) return null;
+/** Series names when there are several. */
+function ChartHeader({ series, focus }: { series: Series[]; focus?: SeriesFocus }) {
+  if (series.length < 2) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-meta text-muted-foreground">
       {series.length > 1 && series.map((item, index) => {
@@ -729,7 +744,6 @@ function ChartHeader({ series, unit, focus }: { series: Series[]; unit?: string;
           </button>
         );
       })}
-      {unit && <span className="ms-auto">{unit}</span>}
     </div>
   );
 }
@@ -743,26 +757,47 @@ function ChartFrame({ className, ...props }: React.ComponentProps<'div'>) {
   return <div {...props} className={cn(className, !inCard && 'oc-box')} />;
 }
 
+/** The unit by a large figure: after it at text size, so the number stays the thing read first, or a currency sign before it. */
+function HeadlineUnit({ unit, leading = false }: { unit?: string; leading?: boolean }) {
+  if (!unit || unitLeads(unit) !== leading) return null;
+  // A leading currency sign reads as part of the amount, at its size.
+  if (leading) return unit;
+  return <span className="typography-meta font-normal text-muted-foreground">{unitSuffix(unit)}</span>;
+}
+
+/** A share as a whole percent; a sliver that rounds to nothing still shows it is there. */
+const formatShare = (share: number) => (share > 0 && share < 0.005 ? '<1%' : `${Math.round(share * 100)}%`);
+
 const pointsOf = (series: Series[]) => series.flatMap((item) => item.values.filter((point) => point !== null));
 
-/** What a single series of bars sums up to at a glance: its largest value and the average. */
-function BarSummary({ points, unit }: { points: number[]; unit?: string }) {
+/**
+ * What a single series of bars sums up to at a glance: its largest value and
+ * the average, or for parts of a whole the total and the largest.
+ */
+function BarSummary({ points, unit, total }: { points: number[]; unit?: string; total: number | null }) {
   const { t } = useI18n();
   const average = points.reduce((sum, point) => sum + point, 0) / points.length;
   const figure = (label: string, value: number) => (
     <span className="flex flex-col">
       <span className="typography-meta text-muted-foreground">{label}</span>
-      <span className="text-xl font-semibold tabular-nums">{formatNumber(value)}</span>
+      <span className="text-xl font-semibold tabular-nums"><HeadlineUnit unit={unit} leading />{formatNumber(value)}<HeadlineUnit unit={unit} /></span>
     </span>
   );
-  // Sum and shares are left out: they mean something only for parts of a whole,
-  // and a chart of percentages or averages would show false ones.
+  // Sum and shares only for parts of a whole, which the agent says: a chart of
+  // percentages or averages would show false ones.
+  if (total !== null) {
+    return (
+      <div className="flex items-start gap-5">
+        {figure(t('chat.uiBlock.chart.total'), total)}
+        {figure(t('chat.uiBlock.chart.largest'), Math.max(...points))}
+      </div>
+    );
+  }
   return (
     <div className="flex items-start gap-5">
       {figure(t('chat.uiBlock.chart.largest'), Math.max(...points))}
       {/* Four significant digits: 69.25 and 0.015 stay as they are, a long fraction does not run on. */}
       {figure(t('chat.uiBlock.chart.average'), Math.abs(average) >= 1000 ? Math.round(average) : Number(average.toPrecision(4)))}
-      {unit && <span className="ms-auto typography-meta text-muted-foreground">{unit}</span>}
     </div>
   );
 }
@@ -788,9 +823,14 @@ function BarChart({ props }: NodeProps) {
   const width = (point: number) => `${Math.max(0, Math.min(1, point / scale)) * 100}%`;
   // From a third of the colour at the smallest value to all of it at the largest.
   const strength = (point: number) => (largest === smallest ? 100 : Math.round(30 + (70 * (point - smallest)) / (largest - smallest)));
+  // Parts of a whole: each bar is its share of the total, so the track stands
+  // for the whole. Negative parts or several series make no whole.
+  const sum = points.reduce((total, point) => total + point, 0);
+  const total = value.whole && single && smallest >= 0 && sum > 0 ? sum : null;
+  const barWidth = (point: number) => (total === null ? width(point) : `${(point / total) * 100}%`);
   return (
     <ChartFrame className="flex flex-col gap-3">
-      {single ? <BarSummary points={points} unit={value.unit} /> : <ChartHeader series={series} unit={value.unit} />}
+      {single ? <BarSummary points={points} unit={value.unit} total={total} /> : <ChartHeader series={series} />}
       <div className="flex flex-col gap-3">
         {value.labels.map((label, labelIndex) => {
           const values = series.map((item) => item.values[labelIndex] ?? null);
@@ -807,9 +847,12 @@ function BarChart({ props }: NodeProps) {
                 <span className="flex shrink-0 items-baseline gap-2.5 tabular-nums">
                   {values.map((point, seriesIndex) => (
                     <span key={seriesIndex} className={cn(top && 'font-semibold')} style={single ? undefined : { color: seriesColor(seriesIndex) }}>
-                      {point === null ? '–' : formatNumber(point)}
+                      {point === null ? '–' : formatWithUnit(point, value.unit)}
                     </span>
                   ))}
+                  {total !== null && values[0] !== null && (
+                    <span className="min-w-[2.5em] text-end font-normal text-muted-foreground">{formatShare(values[0] / total)}</span>
+                  )}
                 </span>
               </div>
               {values.map((point, seriesIndex) => (
@@ -818,7 +861,7 @@ function BarChart({ props }: NodeProps) {
                     <div
                       className="oc-bar-grow h-full rounded-full transition-[filter] duration-150 group-hover/bar:brightness-125"
                       style={{
-                        width: width(point),
+                        width: barWidth(point),
                         animationDelay: `${Math.min(labelIndex, 12) * 45}ms`,
                         background: single
                           ? `color-mix(in srgb, ${seriesColor(0)} ${strength(point)}%, transparent)`
@@ -876,16 +919,15 @@ function TrendHeader({ series, labels, unit }: { series: Series; labels: string[
   const start = values[first] ?? 0;
   const change = start === 0 || last.index === first ? null : ((last.point - start) / Math.abs(start)) * 100;
   return (
-    <div className="flex items-baseline justify-between gap-3">
+    <div className="flex items-baseline">
       <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-        <span className="text-2xl font-semibold tabular-nums">{formatNumber(last.point)}</span>
+        <span className="text-2xl font-semibold tabular-nums"><HeadlineUnit unit={unit} leading />{formatNumber(last.point)}<HeadlineUnit unit={unit} /></span>
         {change !== null && (
           <span className="typography-meta text-muted-foreground tabular-nums">
             {t('chat.uiBlock.chart.changeSince', { change: `${change > 0 ? '+' : ''}${formatNumber(Math.round(change))}%`, label: labels[first] })}
           </span>
         )}
       </span>
-      {unit && <span className="shrink-0 typography-meta text-muted-foreground">{unit}</span>}
     </div>
   );
 }
@@ -928,19 +970,21 @@ function LineChart({ props }: NodeProps) {
   };
   const hoveredShare = hovered === null ? 0 : xShare(hovered);
   const dimmedSeries = (index: number) => !area && focus.focused !== null && focus.focused !== index;
+  // Several lines have no headline figure, so the top tick carries the unit.
+  const tickLabel = (tick: number) => (!area && tick === ticks[ticks.length - 1] ? formatWithUnit(tick, value.unit) : formatNumber(tick));
   // Time runs left to right in every UI language, so the plot and its labels stay LTR.
   return (
     <ChartFrame className="flex flex-col gap-2" dir="ltr">
-      {area ? <TrendHeader series={series[0]} labels={labels} unit={value.unit} /> : <ChartHeader series={series} unit={value.unit} focus={focus} />}
+      {area ? <TrendHeader series={series[0]} labels={labels} unit={value.unit} /> : <ChartHeader series={series} focus={focus} />}
       {/* The top tick's label rises half its height above the plot; the padding keeps it off the header. */}
       <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1.5 pt-2">
         <div className="relative h-[140px] typography-meta text-muted-foreground tabular-nums">
           {ticks.map((tick) => (
-            <span key={tick} className="block text-end leading-none opacity-0" aria-hidden="true">{formatNumber(tick)}</span>
+            <span key={tick} className="block whitespace-nowrap text-end leading-none opacity-0" aria-hidden="true">{tickLabel(tick)}</span>
           ))}
           {ticks.map((tick) => (
             <span key={tick} className="absolute end-0 -translate-y-1/2 whitespace-nowrap leading-none" style={{ top: `${yShare(tick) * 100}%` }}>
-              {formatNumber(tick)}
+              {tickLabel(tick)}
             </span>
           ))}
         </div>
@@ -1048,7 +1092,7 @@ function LineChart({ props }: NodeProps) {
               )}
               style={{ left: `${xShare(end.index) * 100}%`, top: `${yShare(end.point) * 100}%` }}
             >
-              {formatNumber(end.point)}
+              {formatWithUnit(end.point, value.unit)}
             </span>
           )}
           {hovered !== null && (
@@ -1068,7 +1112,7 @@ function LineChart({ props }: NodeProps) {
                     <span className="size-2 shrink-0 rounded-full" style={{ background: seriesColor(seriesIndex) }} />
                     {series.length > 1 && <span className="min-w-0 truncate text-muted-foreground">{item.name}</span>}
                     <span className="ms-auto ps-2 tabular-nums">
-                      {point === null || point === undefined ? '–' : `${formatNumber(point)}${value.unit ? ` ${value.unit}` : ''}`}
+                      {point === null || point === undefined ? '–' : formatWithUnit(point, value.unit)}
                     </span>
                   </span>
                 );
@@ -1140,20 +1184,25 @@ function Choice({ props }: NodeProps) {
     <div className="flex flex-col gap-0.5">
       {value.label && <span className="typography-meta font-medium text-foreground">{value.label}</span>}
       <div className="flex flex-col" role={value.multiple ? 'group' : 'radiogroup'} aria-label={value.label || value.name}>
-        {value.options.map((option) => {
+        {value.options.map((entry) => {
+          const { label: option, description } = choiceOption.parse(entry);
           const selected = chosen.includes(option);
-          // The control is the focusable part; a click anywhere on the line
+          // The control is the focusable part; a click anywhere on the option
           // toggles too, and the control stops its own click from bubbling here.
           return (
             <div
               key={option}
               onClick={() => toggle(option)}
-              className={cn('flex items-center gap-2 px-1.5 py-1', form.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}
+              className={cn('px-1.5 py-1', form.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}
             >
-              {value.multiple
-                ? <Checkbox checked={selected} onChange={() => toggle(option)} disabled={form.disabled} ariaLabel={option} />
-                : <Radio checked={selected} onChange={() => toggle(option)} disabled={form.disabled} ariaLabel={option} />}
-              <span className={cn('typography-meta min-w-0', selected ? 'font-medium text-foreground' : 'text-foreground/80')}>{option}</span>
+              <div className="flex items-center gap-2">
+                {value.multiple
+                  ? <Checkbox checked={selected} onChange={() => toggle(option)} disabled={form.disabled} ariaLabel={option} />
+                  : <Radio checked={selected} onChange={() => toggle(option)} disabled={form.disabled} ariaLabel={option} />}
+                <span className={cn('typography-meta min-w-0', selected ? 'font-medium text-foreground' : 'text-foreground/80')}>{option}</span>
+              </div>
+              {/* Under the label, as the question tool hangs an option's description. */}
+              {description && <div className="typography-micro break-words ps-[22px] text-muted-foreground">{description}</div>}
             </div>
           );
         })}
@@ -1162,25 +1211,13 @@ function Choice({ props }: NodeProps) {
   );
 }
 
-/** A text field as the question tool draws one: compact, so a form reads as one piece with its options. */
-const FIELD_CLASS = cn(
-  'w-full resize-none rounded border border-edge-muted bg-background/50 px-2 py-1 typography-meta text-foreground',
-  'placeholder:text-muted-foreground focus:border-edge focus:outline-none disabled:opacity-60',
-);
-
-/** What the user types reaches the agent as typed: a branch name or a command must not be capitalised or corrected. */
-const TYPED_AS_IS = { spellCheck: false, autoComplete: 'off', autoCorrect: 'off', autoCapitalize: 'off' } as const;
-
-/** A compact text box with the emoji picker every text box in the app offers on `:`. */
-function CompactTextarea(props: React.ComponentProps<'textarea'>) {
-  const ref = React.useRef<HTMLTextAreaElement>(null);
-  const emojiPicker = useEmojiPicker(ref);
-  return (
-    <>
-      <textarea ref={ref} className={FIELD_CLASS} {...TYPED_AS_IS} {...props} />
-      {emojiPicker}
-    </>
-  );
+/**
+ * A short text box, as the note on a decision card draws one: the app's own
+ * field, a line or two tall. It already takes what the user types as typed
+ * and offers emoji on `:`.
+ */
+function ShortTextarea(props: React.ComponentProps<typeof Textarea>) {
+  return <Textarea className="min-h-10" maxLength={4000} {...props} />;
 }
 
 function Input({ props }: NodeProps) {
@@ -1194,9 +1231,116 @@ function Input({ props }: NodeProps) {
     <label className="flex flex-col gap-1">
       {value.label && <span className="typography-meta font-medium text-foreground">{value.label}</span>}
       {value.multiline
-        ? <CompactTextarea rows={2} value={text} placeholder={value.placeholder} disabled={form.disabled} onChange={onChange} />
-        : <input className={FIELD_CLASS} {...TYPED_AS_IS} value={text} placeholder={value.placeholder} disabled={form.disabled} onChange={onChange} />}
+        ? <ShortTextarea rows={2} value={text} placeholder={value.placeholder} disabled={form.disabled} onChange={onChange} />
+        : <FieldInput value={text} placeholder={value.placeholder} disabled={form.disabled} onChange={onChange} />}
     </label>
+  );
+}
+
+/** A date as the scheduled task editor asks for one, with the time beside it when the agent wants it. */
+function DateInput({ props }: NodeProps) {
+  const value = useBlockProps(blockProps.DateInput, props);
+  const form = React.useContext(FormContext);
+  const { t } = useI18n();
+  const { use24Hour } = useCalendarPreferences();
+  const current = value ? form.values[value.name] : undefined;
+  const text = Array.isArray(current) ? '' : current ?? '';
+  const date = text.slice(0, 10);
+  // The time waits here until a date is picked, then travels with it.
+  const [pendingTime, setPendingTime] = React.useState(DEFAULT_TIME);
+  if (!value) return null;
+  const time = text.slice(11, 16) || pendingTime;
+  const set = (nextDate: string, nextTime: string) => {
+    if (!form.disabled) form.setValue(value.name, value.time ? `${nextDate}T${nextTime}` : nextDate);
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      {value.label && <span className="typography-meta font-medium text-foreground">{value.label}</span>}
+      {/* A fieldset disables the time's own inputs and menu with the form. */}
+      <fieldset disabled={form.disabled} className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0">
+        <DatePicker
+          value={date}
+          onChange={(nextDate) => set(nextDate, time)}
+          placeholder={t('sessions.scheduledTasks.editor.date.placeholder')}
+          ariaLabel={value.label || value.name}
+          disabled={form.disabled}
+        />
+        {value.time && (
+          <TimePill
+            value={time}
+            use24Hour={use24Hour}
+            hourAriaLabel={t('sessions.scheduledTasks.editor.time.hourAria')}
+            minuteAriaLabel={t('sessions.scheduledTasks.editor.time.minuteAria')}
+            periodAriaLabel={t('sessions.scheduledTasks.editor.time.periodAria')}
+            amLabel={t('sessions.scheduledTasks.editor.time.period.am')}
+            pmLabel={t('sessions.scheduledTasks.editor.time.period.pm')}
+            onChange={(nextTime) => {
+              setPendingTime(nextTime);
+              if (date) set(date, nextTime);
+            }}
+          />
+        )}
+      </fieldset>
+    </div>
+  );
+}
+
+/** The voice settings' slider, with the value it stands at beside the label and the range under the track. */
+const SLIDER_CLASS = 'h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[var(--interactive-border)] disabled:cursor-not-allowed disabled:opacity-50 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--primary-base)]';
+
+function Slider({ props }: NodeProps) {
+  const value = useBlockProps(blockProps.Slider, props);
+  const form = React.useContext(FormContext);
+  if (!value) return null;
+  const stored = Number(form.values[value.name]);
+  const position = Number.isFinite(stored) ? stored : sliderStart(value);
+  return (
+    <label className="flex max-w-md flex-col gap-1.5">
+      <span className="flex items-baseline justify-between gap-3 typography-meta">
+        <span className="font-medium text-foreground">{value.label || value.name}</span>
+        <span className="font-semibold tabular-nums text-foreground">{formatWithUnit(position, value.unit)}</span>
+      </span>
+      <input
+        type="range"
+        min={value.min}
+        max={value.max}
+        step={value.step ?? 1}
+        value={position}
+        disabled={form.disabled}
+        onChange={(event) => form.setValue(value.name, event.target.value)}
+        className={SLIDER_CLASS}
+      />
+      <span className="flex justify-between typography-micro tabular-nums text-muted-foreground">
+        <span>{formatWithUnit(value.min, value.unit)}</span>
+        <span>{formatWithUnit(value.max, value.unit)}</span>
+      </span>
+    </label>
+  );
+}
+
+/** A section folded under its title, as Markdown folds `<details>`: a chevron that turns, the content under it. */
+function Details({ props }: NodeProps) {
+  const value = useBlockProps(blockProps.Details, props);
+  const [open, setOpen] = React.useState(false);
+  const panelId = React.useId();
+  if (!value) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-fit items-center gap-1 text-start font-medium text-foreground/80 transition-colors hover:text-foreground"
+      >
+        <Icon name="arrow-right-s" className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-90 rtl:-rotate-90')} />
+        <Markdown source={value.title} className="oc-ui-block-title" />
+      </button>
+      {/* Kept mounted while closed, so a field inside keeps what the user typed. */}
+      <div id={panelId} hidden={!open} className="flex flex-col gap-3 ps-5">
+        <Children nodes={value.children} />
+      </div>
+    </div>
   );
 }
 
@@ -1228,11 +1372,12 @@ function Button({ props }: NodeProps) {
 
 // Tab and Series draw inside their parents.
 const renderers = {
-  Stack, Row, Card, Tabs, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Choice, Input, Button,
+  Stack, Row, Card, Tabs, Details, Text, Badge, Callout, KeyValue, Table, Stat, Progress, Steps, BarChart, LineChart, Choice, Input,
+  DateInput, Slider, Button,
 } satisfies Partial<Record<BlockName, React.FC<NodeProps>>>;
 const drawn = blockName.extract([
-  'Stack', 'Row', 'Card', 'Tabs', 'Text', 'Badge', 'Callout', 'KeyValue', 'Table', 'Stat', 'Progress', 'Steps', 'BarChart', 'LineChart',
-  'Choice', 'Input', 'Button',
+  'Stack', 'Row', 'Card', 'Tabs', 'Details', 'Text', 'Badge', 'Callout', 'KeyValue', 'Table', 'Stat', 'Progress', 'Steps', 'BarChart',
+  'LineChart', 'Choice', 'Input', 'DateInput', 'Slider', 'Button',
 ]);
 
 function Node({ value }: { value: BlockValue }) {
@@ -1329,6 +1474,11 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   const fields = React.useMemo(() => (root && complete ? blockFields(root) : []), [root, complete]);
   const decisions = React.useMemo(() => (root ? blockDecisions(root) : []), [root]);
   const titles = React.useMemo(() => (root ? decisionTitles(root) : new Set<string>()), [root]);
+  // A field the agent prefilled (a date, a slider's start) answers with that until the user changes it.
+  const answerValues = React.useMemo<Record<string, UiBlockFieldValue>>(() => ({
+    ...Object.fromEntries(fields.flatMap((field) => (field.initial === undefined ? [] : [[field.name, field.initial]]))),
+    ...values,
+  }), [fields, values]);
   const disabled = !host.submit || !complete || sending || sent;
 
   const deliver = React.useCallback((send: () => Promise<void>) => {
@@ -1341,7 +1491,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
     const { submit } = host;
     const answer: UiBlockReplyAnswerData = {
       picks: [],
-      values,
+      values: answerValues,
       skipped: [],
     };
     // A note written on a card answers it even when no button was pressed.
@@ -1356,10 +1506,10 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
       else answer.skipped.push(decision);
     }
     deliver(() => submit(answer, describeUiBlockReplyAnswer(fields, answer)));
-  }, [host, decisions, values, notes, fields, deliver]);
+  }, [host, decisions, answerValues, notes, fields, deliver]);
 
   const form = React.useMemo<FormState>(() => ({
-    values,
+    values: answerValues,
     disabled,
     chosen,
     folds: host.kind === 'reply',
@@ -1386,7 +1536,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         if (!host.submit) return;
         const { submit } = host;
         const trimmedNote = note.trim();
-        const data: UiBlockAnswerData = { button, values };
+        const data: UiBlockAnswerData = { button, values: answerValues };
         if (value) data.value = value;
         if (trimmedNote) data.note = trimmedNote;
         setChosen(new Map([[decision, button]]));
@@ -1400,7 +1550,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
       setChosen(next);
       if (decisions.every((item) => next.has(item))) sendReply(next);
     },
-  }), [values, disabled, chosen, titles, notes, host, fields, decisions, deliver, sendReply, note, t]);
+  }), [answerValues, disabled, chosen, titles, notes, host, fields, decisions, deliver, sendReply, note, t]);
   // Sending what is chosen so far, or again after a failed send.
   // Every waiting form lets the user qualify their answer, whether or not the
   // agent thought to ask: "this option, and also ...". It sits before the
@@ -1409,7 +1559,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   const slotPlace = React.useMemo(() => (root && showNote ? noteSlot(root) : null), [root, showNote]);
   // The form's own fields are compact, so its note is too.
   const noteElement = !showNote ? null : noteOpen ? (
-    <CompactTextarea
+    <ShortTextarea
       value={note}
       placeholder={t('chat.uiBlock.note.placeholder')}
       aria-label={t('chat.uiBlock.note.label')}

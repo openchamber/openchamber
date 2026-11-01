@@ -47,7 +47,7 @@ export function buildUiBlocksGuidance(): string {
     '- decisions on several separate items, each with its own context: a block in your reply, a Card per item, a Button per option, value = the item. Choices collect until each decision has one (or the user sends early), then reach you together as your next turn, with any note the user wrote on a card.',
     '',
     'Syntax: one statement per line, name = Component(args); first line root = Stack([...]). Positional args in signature order, optional ones droppable from the end. Strings "...", arrays [...], objects {key: value}. Every name must be reachable from root.',
-    `Item = any component below except Tab and Series. Card holds no Card or Tabs; Row holds no Row or Tabs; Tab holds no Tabs. Tone = ${TONE_UNION}.`,
+    `Item = any component below except Tab and Series. Card holds no Card or Tabs; Row holds no Row, Tabs or Details; Tab holds no Tabs; Details holds no Card, Tabs or Details. Tone = ${TONE_UNION}.`,
     '',
     'Examples:',
     UI_BLOCK_EXAMPLES[0],
