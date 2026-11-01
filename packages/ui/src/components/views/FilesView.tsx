@@ -3877,7 +3877,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               content={`\`\`\`mermaid\n${fileContent}\n\`\`\``}
               className="markdown-mermaid-fullscreen h-full"
               enableFileReferences={false}
-              allowMermaidWheelEvents
             />
           </ErrorBoundary>
         </div>

@@ -789,6 +789,20 @@ shapes)"). Agents carry `system`, `steps`, `request.body.temperature` /
 rule list; commands carry `template` and `subagent`; MCP servers carry
 `disabled`, `codemode` and `timeout: { startup, catalog, execution }`.
 
+#### Why the MCP switch writes `disabled` and not only disconnects
+
+The on/off switch in the MCP dropdown and the Work status panel goes through
+`useMcpStore.setEnabled`. OpenCode keeps a runtime disconnect only while the
+location lives: after an idle hour or a restart it starts the location again
+and connects every server its config enables, so a switched-off server came
+back. `setEnabled` writes `disabled` into the file that defines the server, a
+global file for a global server, so off in one project is off everywhere that
+definition applies; OpenCode watches the file and stops or starts the server
+itself. A server no config file defines (one an integration adds) can only be
+disconnected, and switching on a server its config already enables is a
+reconnect. Settings keeps its separate connect and disconnect buttons, which
+are runtime-only.
+
 Two rules follow from the routes:
 
 - **The list is not the config.** `opencodeClient.listAgents` answers OpenCode's

@@ -221,7 +221,7 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
     event.preventDefault();
     event.stopPropagation();
     if (action === 'down' && isCopyChord(event)) clipboardAfterFlushRef.current = true;
-    queue({ type: 'key', action, key: event.key, code: event.code, modifiers: modifiersOf(event) });
+    queue({ type: 'key', action, key: event.key, code: event.code, keyCode: event.keyCode, modifiers: modifiersOf(event) });
   };
 
   const onPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {

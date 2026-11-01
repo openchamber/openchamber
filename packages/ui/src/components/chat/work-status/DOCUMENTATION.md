@@ -192,7 +192,7 @@ which requests only providers enabled for this panel.
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed; active mounts read warm records once for the previous turn; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Keep-warm switch | `useSessionWarmingStore`, mirrored from the server's `lib/session-warming` | on the Context row, shown only while Settings chose per-session warming and for a root session outside an isolated space; the tooltip's countdown ticks only while it is open |
 | Goal | `useSessionGoal` | respects the Settings toggle |
-| MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
+| MCP | `useMcpStore` | the switch reuses the dropdown's `setEnabled` |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
 | Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
 
@@ -653,7 +653,7 @@ Rows that name something the app can already show are buttons:
 | Subagent | that child session's chat tab, read-only |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
-| MCP switch | connects/disconnects the server |
+| MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`) |
 | MCP status | the state doubles as the button that reconnects |
 | Pinned (pin icon) | unpins the message |
 | Pinned (text) | jumps the transcript to that message |

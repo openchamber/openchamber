@@ -145,7 +145,8 @@ test('quote reveal opens real folded Activity, including a source prepended from
         for (let index = 0; index < 30 && !highlights.has('oc-chat-quote'); index += 1) await flush();
         const source = host.querySelector(`[data-message-id="${prefix}-source"]`);
         expect(source).not.toBeNull();
-        expect(source?.closest('[data-live-activity-content]')?.getAttribute('aria-hidden')).toBe('false');
+        // An opened fold draws its steps as rows of their own, outside any closed fold.
+        expect(source?.closest('[data-live-activity-content][aria-hidden="true"]')).toBeNull();
         expect(source?.textContent).toContain(`${prefix} quoted text`);
         expect([...highlights.get('oc-chat-quote') ?? []].map((range) => range.toString())).toEqual([`${prefix} quoted text`]);
     };

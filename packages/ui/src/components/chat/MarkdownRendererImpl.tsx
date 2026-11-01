@@ -221,7 +221,9 @@ function selectedCopyPayload(element: HTMLElement): { text: string; html: string
   if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
 
   const range = selection.getRangeAt(0);
-  if (!element.contains(range.startContainer) || !element.contains(range.endContainer)) return null;
+  // A selection that ends in a later row of the same long answer is copied by
+  // the row it starts in (`getMarkdownSelectionText` reads every row it crosses).
+  if (!element.contains(range.startContainer)) return null;
 
   const containingCode = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest('pre code');
   const code = containingCode(range.startContainer);
@@ -270,7 +272,6 @@ export interface MarkdownContentProps {
   documentAssets?: MarkdownDocumentAssets;
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControls;
-  allowMermaidWheelEvents?: boolean;
   purpose?: 'copy' | 'image';
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
@@ -302,7 +303,6 @@ export function MarkdownContent({
   documentAssets,
   onShowPopup,
   mermaidControls = defaultMermaidControls,
-  allowMermaidWheelEvents,
   purpose,
   preparedHighlights,
   onExportCode,
@@ -426,14 +426,13 @@ export function MarkdownContent({
     disableLinkSafety,
     theme,
     mermaidControls,
-    allowMermaidWheelEvents,
     onShowPopup,
     onExportCode,
     confirmFile,
     code,
   }), [
     directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, disableLinkSafety, theme,
-    mermaidControls, allowMermaidWheelEvents, onShowPopup, onExportCode, confirmFile, code,
+    mermaidControls, onShowPopup, onExportCode, confirmFile, code,
   ]);
 
   let body = (
@@ -535,6 +534,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   const identity = `${messageId}:${part?.id ?? ''}`;
   const initialMode: 'streaming' | 'static' = isStreaming || (part && !settledPart) ? 'streaming' : 'static';
   const [renderMode, setRenderMode] = React.useState({ identity, mode: initialMode });
+  const mode = renderMode.identity === identity ? renderMode.mode : initialMode;
   // A live part keeps its block tree when it settles. A different part starts
   // fresh; already-completed history uses the whole-document static renderer.
   if (renderMode.identity !== identity) {
@@ -545,7 +545,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       key={identity}
       content={content}
       singleTilde={false}
-      mode={renderMode.identity === identity ? renderMode.mode : initialMode}
+      mode={mode}
       mediaMode={variant === 'assistant' ? 'assistant' : 'local'}
       isStreaming={isStreaming}
       variant={variant}

@@ -167,10 +167,40 @@ export function rankByQuery<T>(
 export function matchesRankQuery(
   texts: ReadonlyArray<string | null | undefined>,
   query: string,
+  options?: { wordStart?: boolean },
 ): boolean {
   const tokens = tokenizeRankQuery(query);
   if (tokens.length === 0) return true;
   const rankFields = buildRankFields(texts);
+  if (options?.wordStart) return tokens.every((token) => matchesTokenAtWordStart(token, rankFields));
   return tokens.every((token) => scoreRankToken(token, rankFields) !== RANK_TOKEN_MISS);
 }
+
+/**
+ * How the sidebar's search and its sections' title condition match: each word
+ * from the start of a word, so a standing section does not fill with "prefix"
+ * for "fix". The pickers keep matching anywhere.
+ */
+export const SIDEBAR_SEARCH = { wordStart: true } as const;
+
+const WORD_CHARACTER = /[\p{L}\p{N}]/u;
+
+/**
+ * Whether a token starts a word in one of the fields: at the field's start or
+ * after a character that is not a letter or a digit, in any script. "fix"
+ * finds "Fix login" and "bugfix/fix-relay" but not "prefix". Punctuation inside
+ * the token may be left out from a word start on: "sidebarcustom" finds
+ * "openchamber/sidebar-custom-sections".
+ */
+const matchesTokenAtWordStart = (token: string, { fields }: RankFields): boolean => {
+  const compactToken = compactText(token);
+  return fields.some((field) => {
+    for (let index = 0; index < field.length; index += 1) {
+      if (index > 0 && WORD_CHARACTER.test(field[index - 1])) continue;
+      if (field.startsWith(token, index)) return true;
+      if (token.length > 1 && compactToken.length > 0 && compactText(field.slice(index)).startsWith(compactToken)) return true;
+    }
+    return false;
+  });
+};
 

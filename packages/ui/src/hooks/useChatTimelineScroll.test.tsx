@@ -16,6 +16,7 @@ let writes: number;
 let loads: number;
 let missing: number;
 let checkLinkedMessage: (() => Promise<'exists' | 'missing'>) | undefined;
+let contentLength: number;
 let dom: Window;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 
@@ -32,10 +33,10 @@ function Harness() {
         const list: TimelineListHandle = {
             getScrollableNode: () => node,
             getState: () => ({
-                data: [], scroll: node.scrollTop, scrollLength: 500, contentLength: 2000,
+                data: [], scroll: node.scrollTop, scrollLength: 500, contentLength,
                 positionAtIndex: () => undefined, sizeAtIndex: () => undefined,
                 listen: (_type, callback) => {
-                    const notify = () => callback(2000);
+                    const notify = () => callback(contentLength);
                     subscribers.add(notify);
                     return () => { subscribers.delete(notify); };
                 },
@@ -59,7 +60,7 @@ const frame = async () => {
 
 beforeEach(() => {
     dom = new Window({ url: 'https://app.test' });
-    frames = new Map(); subscribers = new Set(); writes = 0; loads = 0; missing = 0; checkLinkedMessage = undefined;
+    frames = new Map(); subscribers = new Set(); writes = 0; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000;
     let nextFrame = 0;
     const request = (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; };
     const cancel = (id: number) => { frames.delete(id); };
@@ -205,4 +206,51 @@ test('leaves a reader who scrolled up away from a page waiting for an answer', a
     act(() => dispatchPageWaiting(block));
     await frame();
     expect(targets).toEqual([]);
+});
+
+// The list reports a new total before it moves the viewport for rows above
+// the reader that measured smaller; in between, the reader reads as on the end.
+test('rows above a reader measuring smaller do not bring them back to the end', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 1300;
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    expect(scroll.userOwnsScroll).toBe(true);
+    await act(async () => {
+        contentLength = 1700;
+        scroll.onTimelineDataChange();
+        node.scrollTop = 1000;
+    });
+    await frame();
+    expect(scroll.userOwnsScroll).toBe(true);
+});
+
+test('content closing below a reader brings the end to them', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 1300;
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    await act(async () => {
+        contentLength = 1700;
+        node.scrollTop = 1200;
+        scroll.onTimelineDataChange();
+    });
+    await frame();
+    expect(scroll.userOwnsScroll).toBe(false);
+});
+
+test('a check waiting for its frame sees the end a later gesture and closing row brought', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 1300;
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    await act(async () => {
+        contentLength = 1700;
+        scroll.onTimelineDataChange();
+        node.scrollTop = 1000;
+    });
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    await act(async () => {
+        node.scrollTop = 1200;
+        scroll.onTimelineDataChange();
+    });
+    await frame();
+    expect(scroll.userOwnsScroll).toBe(false);
 });

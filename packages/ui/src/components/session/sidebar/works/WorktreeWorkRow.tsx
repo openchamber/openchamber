@@ -1,4 +1,5 @@
 import React from 'react';
+import { PinToMenu } from '../sections/PinToMenu';
 import { Icon } from '@/components/icon/Icon';
 import {
   DropdownMenu,
@@ -343,10 +344,12 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
         </Slots.Item>
       ) : null}
       {canPin ? (
-        <Slots.Item onClick={() => { void work.togglePin(); }}>
-          <Icon name={pinned ? 'unpin' : 'pushpin'} className="h-4 w-4" />
-          <span>{pinned ? t('sessions.sidebar.work.menu.unpin') : t('sessions.sidebar.work.menu.pin')}</span>
-        </Slots.Item>
+        <PinToMenu
+          slots={Slots}
+          current={work.pinList}
+          onPin={(list) => { void work.setPin(true, list); }}
+          onUnpin={() => { void work.setPin(false); }}
+        />
       ) : null}
       {projectFolders.length > 0 ? (
         <Slots.Sub>

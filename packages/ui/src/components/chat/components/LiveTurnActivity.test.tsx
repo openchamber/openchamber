@@ -18,7 +18,11 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { projectTurnRecords } from '../lib/turns/projectTurnRecords';
 import type { ChatMessageEntry, TurnChangedFile, TurnRecord } from '../lib/turns/types';
-import { LiveTurnActivity } from './LiveTurnActivity';
+import { TurnFold, TurnPagesRow } from './LiveTurnActivity';
+import { useTurnFoldContexts } from './useTurnFold';
+import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
+import { buildTimelineRows } from '../lib/turns/timelineRows';
+import { MessageSliceContext } from '../message/messageSliceContext';
 import { useWorkflowRunsStore } from '@/lib/workflows/store';
 import type { WorkflowRun } from '@/lib/workflows/model';
 import { PendingWorkflowApprovals } from '../workflows/PendingWorkflowApprovals';
@@ -93,6 +97,36 @@ function turn(messages: ChatMessageEntry[]): TurnRecord {
     }, ...messages]).turns[0];
 }
 
+// The rows a turn under a fold becomes in the list, drawn the way MessageList draws them.
+function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
+    record: TurnRecord;
+    retired: boolean;
+    expanded: boolean;
+    onToggle: () => void;
+    renderMessage: (message: ChatMessageEntry) => React.ReactNode;
+}) {
+    const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
+        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+    }, []);
+    const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
+    const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId);
+    return <LiveTurnHoistedPagesContext.Provider value={hoistedPages}>
+        {rows.map((row) => {
+            if (row.kind === 'turn-fold') {
+                return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded}
+                    finalMessageId={row.finalMessageId} onToggle={onToggle} renderMessage={renderMessage} />;
+            }
+            if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} />;
+            if (row.kind !== 'turn-message') return null;
+            const message = record.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
+            if (!message) return null;
+            return <MessageSliceContext.Provider key={row.key} value={row.slice}>
+                {row.final ? <LiveFinalActivityContext.Provider value={finalContext}>{renderMessage(message)}</LiveFinalActivityContext.Provider> : renderMessage(message)}
+            </MessageSliceContext.Provider>;
+        })}
+    </LiveTurnHoistedPagesContext.Provider>;
+}
+
 function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn }: {
     record: TurnRecord;
     retired?: boolean;
@@ -125,7 +159,7 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, o
         <ThemeSystemContext.Provider value={themeContext}>
             <SyncProvider sdk={sdk} directory="/project">
                 <I18nProvider>
-                    <LiveTurnActivity turn={record} hasLaterAssistant={retired} expanded={expanded}
+                    <TurnRows record={record} retired={retired} expanded={expanded}
                         onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
                 </I18nProvider>
             </SyncProvider>
@@ -271,7 +305,7 @@ describe('live Activity with the real message body', () => {
         };
         await act(async () => store.setState({ part: { 'live-step': [...step.parts, call] } }));
         expect(messages[1].parts).toEqual(step.parts);
-        expect(container.querySelectorAll('[data-turn-id] [data-component="workflow-run"]')).toHaveLength(1);
+        expect(container.querySelectorAll('[data-turn-row] [data-component="workflow-run"]')).toHaveLength(1);
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
         await act(async () => useUIStore.setState({ activityRenderMode: 'collapsed' }));
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
@@ -280,7 +314,7 @@ describe('live Activity with the real message body', () => {
         const next = assistant('next-step', [text('continuation', 'Continuing the work')]);
         messages = [...messages, next];
         await act(async () => root.render(draw()));
-        expect(container.querySelectorAll('[data-turn-id] [data-component="workflow-run"]')).toHaveLength(1);
+        expect(container.querySelectorAll('[data-turn-row] [data-component="workflow-run"]')).toHaveLength(1);
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(1);
         geometry.mockRestore();
     });

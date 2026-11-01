@@ -14,6 +14,80 @@ import { sshHostSchema } from '../spaces/places/ssh-host.js';
 // `createRequire` (import attributes differ across the Node versions we run on).
 const settingsRegistry = createRequire(import.meta.url)('./settings-registry.json');
 
+// The sidebar's sections and pin lists, the same shapes the UI keeps
+// (packages/ui/src/lib/sidebarSections.ts, which also restores missing built-in
+// sections on read). The server keeps what is well formed and drops the rest.
+const SIDEBAR_BUILTIN_SECTION_IDS = ['chats', 'pinned', 'work', 'projects'];
+const sidebarSectionIdSchema = z.string().trim().min(1).max(64);
+const sidebarSectionNameSchema = z.string().trim().min(1).transform((value) => value.slice(0, 60));
+const sidebarChips = (values) => z.array(z.unknown()).transform((entries) => (
+  [...new Set(entries.flatMap((entry) => {
+    const parsed = z.enum(values).safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  }))]
+));
+const sidebarIdList = (schema) => z.array(z.unknown()).transform((entries) => (
+  [...new Set(entries.flatMap((entry) => {
+    const parsed = schema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  }))]
+));
+const sidebarIds = sidebarIdList(sidebarSectionIdSchema);
+// A project's id names its folder (`path_` and the path encoded), so it grows with the path.
+const sidebarProjectIds = sidebarIdList(z.string().trim().min(1).max(4096));
+const sidebarSectionSchema = z.union([
+  z.object({ kind: z.literal('builtin'), id: z.enum(SIDEBAR_BUILTIN_SECTION_IDS) }),
+  z.object({
+    kind: z.literal('custom'),
+    id: sidebarSectionIdSchema,
+    name: sidebarSectionNameSchema,
+    grouping: z.enum(['time', 'project']).catch('time'),
+    filter: z.object({
+      states: sidebarChips(['running', 'needs-answer', 'unread', 'failed', 'looks-done']).catch([]),
+      work: sidebarChips(['in-work', 'done']).catch([]),
+      pins: sidebarIds.catch([]),
+      kinds: sidebarChips(['session', 'worktree', 'space', 'run', 'scheduled']).catch([]),
+      links: sidebarChips(['pr', 'issue', 'tracker', 'plan', 'goal']).catch([]),
+      projectIds: sidebarProjectIds.catch([]),
+      activity: z.enum(['any', 'today', 'two-days', 'week', 'stalled']).catch('any'),
+      // A list of phrases; a build before lists kept one phrase as a string.
+      text: z.union([z.string().transform((value) => [value]), z.array(z.unknown())]).transform((entries) => (
+        [...new Set(entries.flatMap((entry) => {
+          const phrase = z.string().trim().transform((value) => value.slice(0, 100)).safeParse(entry);
+          return phrase.success && phrase.data ? [phrase.data] : [];
+        }))].slice(0, 12)
+      )).catch([]),
+    }).partial().catch({}),
+    claims: z.boolean().catch(false),
+    hideWhenEmpty: z.boolean().catch(true),
+  }),
+]);
+
+const sanitizeSidebarSections = (entries) => {
+  const result = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    const parsed = sidebarSectionSchema.safeParse(entry);
+    if (!parsed.success || seen.has(parsed.data.id) || result.length >= 28) continue;
+    if (parsed.data.kind === 'custom' && SIDEBAR_BUILTIN_SECTION_IDS.includes(parsed.data.id)) continue;
+    seen.add(parsed.data.id);
+    result.push(parsed.data);
+  }
+  return result;
+};
+
+const sanitizeSidebarPinLists = (entries) => {
+  const result = [];
+  const seen = new Set(['pinned']);
+  for (const entry of entries) {
+    const parsed = z.object({ id: sidebarSectionIdSchema, name: sidebarSectionNameSchema }).safeParse(entry);
+    if (!parsed.success || seen.has(parsed.data.id) || result.length >= 24) continue;
+    seen.add(parsed.data.id);
+    result.push(parsed.data);
+  }
+  return result;
+};
+
 /**
  * Whether a client may persist this key through PUT /api/config/settings:
  * it must be a registry key, not a server-computed flag, not a device field
@@ -409,6 +483,18 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.sidebarWorktreeNameByBranch === true || candidate.sidebarWorktreeNameByBranch === false) {
       result.sidebarWorktreeNameByBranch = candidate.sidebarWorktreeNameByBranch;
+    }
+    if (Array.isArray(candidate.sidebarSections)) {
+      result.sidebarSections = sanitizeSidebarSections(candidate.sidebarSections);
+    }
+    if (Array.isArray(candidate.sidebarPinLists)) {
+      result.sidebarPinLists = sanitizeSidebarPinLists(candidate.sidebarPinLists);
+    }
+    if (Array.isArray(candidate.sidebarHiddenSections)) {
+      result.sidebarHiddenSections = [...new Set(candidate.sidebarHiddenSections.flatMap((entry) => {
+        const parsed = sidebarSectionIdSchema.safeParse(entry);
+        return parsed.success ? [parsed.data] : [];
+      }))];
     }
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {

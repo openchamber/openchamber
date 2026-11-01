@@ -366,6 +366,16 @@
     "sidebarWorktreeNameByBranch": {
       "scope": "profile"
     },
+    "sidebarSections": {
+      "scope": "profile"
+    },
+    "sidebarPinLists": {
+      "scope": "profile"
+    },
+    "sidebarHiddenSections": {
+      "scope": "profile",
+      "perSurface": true
+    },
     "workStatusSectionOrder": {
       "scope": "profile"
     },

@@ -21,7 +21,6 @@ import {
   resolveSessionSidebarScrollAnchor,
   sectionSpacingAfter,
   sectionWrapperClass,
-  sessionSidebarProjectOrderChanged,
   sessionSidebarRowSizeKey,
   sessionSidebarRowVirtualKey,
 } from './sessionSidebarVirtualization';
@@ -64,12 +63,16 @@ type Props = {
   /** How much of the scroller's top a pinned header covers: the row the user sees first sits under it. */
   getStickyHeaderHeight?: (scrollElement: HTMLElement) => number;
   /**
-   * True once after the user dragged projects into another order, which then
-   * keeps the scroll position; projects sorted by recent activity move on
-   * their own, and the list keeps the row the user sees.
+   * A row to hold where it is on screen through the next change of the rows,
+   * handed over once: a dragged project or section stays under the pointer
+   * while the list folds to its headers, and where it was dropped as the list
+   * opens again. The change then neither animates nor keeps another row.
    */
-  takeProjectReorder?: () => boolean;
+  heldRowRef?: React.RefObject<SessionSidebarHeldRow | null>;
 };
+
+/** A row and how far below the top of the list's viewport it is to stay. */
+export type SessionSidebarHeldRow = { key: string; offset: number };
 
 export function SessionSidebarRows({
   model,
@@ -80,7 +83,7 @@ export function SessionSidebarRows({
   guideSlotStartPx = SESSION_TREE_BASE_PADDING_PX,
   scrollRequest = null,
   getStickyHeaderHeight,
-  takeProjectReorder,
+  heldRowRef,
 }: Props): React.ReactNode {
   const rows = model.rows;
   const getScrollElement = React.useCallback(() => scrollElement, [scrollElement]);
@@ -169,7 +172,7 @@ export function SessionSidebarRows({
   // renders before paint too, so the first frame drawn is the motion's start.
   React.useLayoutEffect(() => {
     const last = lastLayoutRef.current;
-    if (!last || last.model.rows === rows || !scrollElement || prefersReducedMotion()) return;
+    if (!last || last.model.rows === rows || !scrollElement || prefersReducedMotion() || heldRowRef?.current) return;
     const disclosure = findSessionSidebarDisclosure(last.model.rows, rows);
     if (!disclosure) return;
     const before = last.measurements;
@@ -205,7 +208,7 @@ export function SessionSidebarRows({
     }
     motionIdRef.current += 1;
     setMotion({ id: motionIdRef.current, revealKeys, ghosts, followingIndex, from, to, slidingIndexes });
-  }, [rows, scrollElement, virtualizer]);
+  }, [rows, scrollElement, virtualizer, heldRowRef]);
 
   // Rows that changed above what the user sees, with nothing the user did to
   // the list (see `isSessionSidebarUserChange`): sessions arriving, leaving or
@@ -217,8 +220,17 @@ export function SessionSidebarRows({
     const last = lastLayoutRef.current;
     // A hidden list (the phone's while projects are reordered) has no viewport to keep.
     if (!last || last.model.rows === model.rows || !scrollElement || scrollElement.clientHeight === 0) return;
+    const held = heldRowRef?.current;
+    if (held && heldRowRef) {
+      heldRowRef.current = null;
+      const index = model.rowIndexByKey.get(held.key);
+      // Brings the measurements up to date with the rows mounted in this commit.
+      virtualizer.getTotalSize();
+      const start = index === undefined ? undefined : virtualizer.measurementsCache[index]?.start;
+      if (start !== undefined) virtualizer.scrollToOffset(Math.max(start - held.offset, 0));
+      return;
+    }
     if (isSessionSidebarUserChange(last.model, model)) return;
-    if (sessionSidebarProjectOrderChanged(last.model, model) && takeProjectReorder?.()) return;
     const inset = getStickyHeaderHeight?.(scrollElement) ?? 0;
     // The last layout's mounted rows hold the viewport: any scroll far enough
     // to change them renders again.
@@ -229,7 +241,7 @@ export function SessionSidebarRows({
     virtualizer.getTotalSize();
     const nextLine = resolveSessionSidebarScrollAnchor(anchor, model.rowIndexByKey, virtualizer.measurementsCache);
     if (nextLine !== null && Math.abs(nextLine - inset - scrollElement.scrollTop) > 0.5) virtualizer.scrollToOffset(Math.max(nextLine - inset, 0));
-  }, [model, scrollElement, virtualizer, renderedScrollTop, getStickyHeaderHeight, takeProjectReorder]);
+  }, [model, scrollElement, virtualizer, renderedScrollTop, getStickyHeaderHeight, heldRowRef]);
 
   // Recorded after the effects above read it, on every commit, so it always
   // holds the layout the user last saw.

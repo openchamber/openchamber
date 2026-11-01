@@ -130,13 +130,33 @@ export function createKeyboardFollowGlide(options: KeyboardFollowGlideOptions): 
         if (Math.abs(top - scrollNode.scrollTop) >= 0.5) scrollNode.scrollTop = top;
     };
 
+    // A turn is several list rows: its prompt row (the header) and the rows
+    // after it (`data-turn-row`). Its extent is theirs, as far as they are
+    // mounted; a prompt row stuck to the top edge says nothing about where
+    // the turn starts, which is above the view.
+    const turnExtent = (content: HTMLElement, header: HTMLElement): { top: number; bottom: number } | null => {
+        const head = header.closest<HTMLElement>('[data-turn-id]');
+        const turnId = head?.dataset.turnId;
+        if (!head || !turnId) return null;
+        const headRect = head.getBoundingClientRect();
+        const stuck = Math.abs(headRect.top - scrollNode.getBoundingClientRect().top) < 1;
+        let top = stuck ? Number.NEGATIVE_INFINITY : headRect.top;
+        let bottom = headRect.bottom;
+        for (const row of content.querySelectorAll<HTMLElement>(`[data-turn-row="${CSS.escape(turnId)}"]`)) {
+            const rect = row.getBoundingClientRect();
+            top = Math.min(top, rect.top);
+            bottom = Math.max(bottom, rect.bottom);
+        }
+        return { top, bottom };
+    };
+
     // A user header stuck to the top edge rides the content's offset unless
     // it gets the opposite one: it must stay where it is. Read before the
     // content moves, with scrollTop already where the motion keeps it.
     const stuckHeaders = (content: HTMLElement): HTMLElement[] => {
         const top = scrollNode.getBoundingClientRect().top;
         return Array.from(content.querySelectorAll<HTMLElement>('[data-turn-sticky-header]')).filter((header) => {
-            const turn = header.parentElement?.getBoundingClientRect();
+            const turn = turnExtent(content, header);
             return Boolean(turn) && Math.abs(header.getBoundingClientRect().top - top) < 1 && turn!.bottom > top;
         });
     };
@@ -151,7 +171,7 @@ export function createKeyboardFollowGlide(options: KeyboardFollowGlideOptions): 
         const low = Math.min(0, travel);
         const high = Math.max(0, travel);
         return Array.from(content.querySelectorAll<HTMLElement>('[data-turn-sticky-header]')).some((header) => {
-            const turn = header.parentElement?.getBoundingClientRect();
+            const turn = turnExtent(content, header);
             if (!turn) return false;
             const edges = [turn.top - top, turn.bottom - header.offsetHeight - top];
             return edges.some((edge) => edge > low && edge <= high);

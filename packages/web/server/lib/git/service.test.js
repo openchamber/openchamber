@@ -6745,13 +6745,26 @@ describe('worktree task titles', () => {
     const entryOf = async () => (await getWorktrees(repo)).find((worktree) => fs.realpathSync(worktree.path) === fs.realpathSync(linked));
 
     expect((await entryOf())?.pinnedAt).toBeUndefined();
-    expect(await setWorktreePinned(linked, true, 1234)).toEqual({ pinned: true, branch: 'feature/task' });
+    expect(await setWorktreePinned(linked, true, null, 1234)).toEqual({ pinned: true, branch: 'feature/task' });
     expect((await entryOf())?.pinnedAt).toBe(1234);
     // Pinning again keeps the first pin's time.
-    await setWorktreePinned(linked, true, 5678);
+    await setWorktreePinned(linked, true, null, 5678);
     expect((await entryOf())?.pinnedAt).toBe(1234);
 
     expect(await setWorktreePinned(linked, false)).toEqual({ pinned: false, branch: 'feature/task' });
     expect((await entryOf())?.pinnedAt).toBeUndefined();
+  });
+
+  it('files a pinned worktree into a pin list and back, keeping the first pin time', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    const entryOf = async () => (await getWorktrees(repo)).find((worktree) => fs.realpathSync(worktree.path) === fs.realpathSync(linked));
+
+    await setWorktreePinned(linked, true, 'release', 1234);
+    expect(await entryOf()).toMatchObject({ pinnedAt: 1234, pinList: 'release' });
+    await setWorktreePinned(linked, true, null, 5678);
+    const entry = await entryOf();
+    expect(entry?.pinnedAt).toBe(1234);
+    expect(entry?.pinList).toBeUndefined();
+    await expect(setWorktreePinned(linked, true, 'bad list')).rejects.toMatchObject({ status: 400 });
   });
 });

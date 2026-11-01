@@ -1744,6 +1744,17 @@ diffs-container {
   margin-block-start: var(--oc-block-edge-start, var(--oc-block-margin-start)) !important;
 }
 
+/* A long answer's later rows (`timelineRows.ts`) start at a paragraph or a
+   heading, whose top margin is the whole gap the answer had there: they keep
+   it at their top edge. */
+[data-answer-continues] .markdown-content [data-oc-streamdown] > [data-oc-markdown-block]:first-child {
+  --oc-block-edge-start: initial;
+}
+
+[data-answer-continues] .markdown-content [data-oc-streamdown] > :first-child:not([data-oc-markdown-block]) {
+  margin-block-start: var(--oc-block-margin-start) !important;
+}
+
 .markdown-content [data-oc-markdown-block] > :last-child {
   margin-block-end: var(--oc-block-edge-end, var(--oc-block-margin-end)) !important;
 }
