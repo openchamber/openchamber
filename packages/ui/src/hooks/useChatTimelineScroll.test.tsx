@@ -17,13 +17,14 @@ let loads: number;
 let missing: number;
 let checkLinkedMessage: (() => Promise<'exists' | 'missing'>) | undefined;
 let contentLength: number;
+let working: boolean;
 let dom: Window;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 
 function Harness() {
     scroll = useChatTimelineScroll({
         currentSessionId: 'session', currentSessionKey: 'runtime\n/repo\nsession', composerOverlayHeight: 0,
-        messageListRef: { current: { alignViewportAnchor: () => 'missing' } }, sessionIsWorking: true,
+        messageListRef: { current: { alignViewportAnchor: () => 'missing' } }, sessionIsWorking: working,
         checkLinkedMessage,
         loadHistoryUntilMessage: async () => { loads += 1; return false; },
         onLinkedMessageMissing: () => { missing += 1; },
@@ -60,7 +61,7 @@ const frame = async () => {
 
 beforeEach(() => {
     dom = new Window({ url: 'https://app.test' });
-    frames = new Map(); subscribers = new Set(); writes = 0; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000;
+    frames = new Map(); subscribers = new Set(); writes = 0; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000; working = true;
     let nextFrame = 0;
     const request = (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; };
     const cancel = (id: number) => { frames.delete(id); };
@@ -252,5 +253,45 @@ test('a check waiting for its frame sees the end a later gesture and closing row
         scroll.onTimelineDataChange();
     });
     await frame();
+    expect(scroll.userOwnsScroll).toBe(false);
+});
+
+// A turn ending cuts its long answer into rows the list counts at estimated
+// heights until measured; the list reports the end with screens still below.
+test('an end the list reports mid-pass does not bring a released reader down', async () => {
+    working = false;
+    await render('visible'); await frame();
+    node.scrollTop = 1300;
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    await act(async () => {
+        contentLength = 1800;
+        scroll.onIsAtEndChange(true);
+        contentLength = 2000;
+    });
+    await frame();
+    expect(scroll.userOwnsScroll).toBe(true);
+});
+
+test('a released reader who scrolls to the end is followed again', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 1300;
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    await act(async () => {
+        node.scrollTop = 1500;
+        scroll.onIsAtEndChange(true);
+    });
+    await frame();
+    expect(scroll.userOwnsScroll).toBe(false);
+});
+
+test('while the turn runs, a reader who scrolls back to the end is followed at once', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 1300;
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    await act(async () => {
+        node.scrollTop = 1500;
+        scroll.onIsAtEndChange(true);
+        contentLength = 2200;
+    });
     expect(scroll.userOwnsScroll).toBe(false);
 });

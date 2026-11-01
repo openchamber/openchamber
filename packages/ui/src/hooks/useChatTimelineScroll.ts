@@ -883,7 +883,7 @@ export const useChatTimelineScroll = ({
         }
     }, [rememberOutgoingPosition]);
 
-    const onIsAtEndChange = React.useCallback((isAtEnd: boolean) => {
+    const applyIsAtEnd = React.useCallback((isAtEnd: boolean) => {
         // While an automatic movement owns the viewport, leaving the end is our
         // own doing (the glide trails its target between corrections) — not a
         // reason to offer the pill. Only a
@@ -917,6 +917,48 @@ export const useChatTimelineScroll = ({
             scheduleShowScrollButton();
         }
     }, [hideScrollButton, isLiveFollowActive, scheduleShowScrollButton]);
+
+    // The end reaching a released reader is judged once the list has
+    // finished the pass that reported it. Mid-pass the list can read as
+    // ending at the reader with screens still below: it reports a new total
+    // before it moves the viewport for rows above the reader that measured
+    // smaller than estimated, sometimes a frame later, and rows it has just
+    // added below (a long answer cut into rows as its turn ends) count at
+    // their estimated height until measured, short enough in a session of
+    // short rows that the browser clamps the scroll to them. Taken at once,
+    // the follow re-armed and pulled the reader down to the end. The check
+    // waits for the frame after the pass (a microtask first, so it runs after
+    // any frame work the pass scheduled) and reads the list's state again
+    // there, within `band` of the end.
+    const endArrivalPendingRef = React.useRef(false);
+    const endArrivalFrameRef = React.useRef<number | null>(null);
+    const endArrivalBandRef = React.useRef(0);
+    const confirmEndArrived = React.useCallback((band: number) => {
+        endArrivalBandRef.current = endArrivalPendingRef.current ? Math.max(endArrivalBandRef.current, band) : band;
+        if (endArrivalPendingRef.current) return;
+        endArrivalPendingRef.current = true;
+        queueMicrotask(() => {
+            if (!endArrivalPendingRef.current) return;
+            endArrivalFrameRef.current = window.requestAnimationFrame(() => {
+                endArrivalFrameRef.current = null;
+                endArrivalPendingRef.current = false;
+                if (isAtEndRef.current) return;
+                const state = listRef.current?.getState();
+                if (!state || state.contentLength === undefined) return;
+                if (state.contentLength - state.scroll - state.scrollLength <= endArrivalBandRef.current) applyIsAtEnd(true);
+            });
+        });
+    }, [applyIsAtEnd]);
+    // Only once the turn has ended: while it runs, a reader who scrolled
+    // back to the end is followed at once, before the next block of the
+    // answer can carry the end past the band.
+    const onIsAtEndChange = React.useCallback((isAtEnd: boolean) => {
+        if (isAtEnd && userOwnsScrollRef.current && !isAtEndRef.current && !isTurnRunning()) {
+            confirmEndArrived(TIMELINE_FOLLOW_REARM_THRESHOLD_PX);
+            return;
+        }
+        applyIsAtEnd(isAtEnd);
+    }, [applyIsAtEnd, confirmEndArrived]);
 
     // The list reports reaching the end once. A report held above while the
     // turn ran does not repeat when it ends, and the pill stayed up under a
@@ -1159,31 +1201,6 @@ export const useChatTimelineScroll = ({
     }, [releaseFollowAtStop, resumeFollow]);
     const revealWaitingPageRef = React.useRef(revealWaitingPage);
     revealWaitingPageRef.current = revealWaitingPage;
-    // The end reaching a reader without a scroll is judged once the list has
-    // finished the pass that reported the new total. The list reports the
-    // total before it moves the viewport for rows above the reader that
-    // measured smaller than estimated, sometimes a frame later; in between,
-    // a reader hundreds of pixels above the end reads as on it, and the
-    // follow it re-armed pulled them down to the end. The check waits for
-    // the frame after the pass (a microtask first, so it runs after any frame
-    // work the pass scheduled) and reads the list's state again there.
-    const endArrivalPendingRef = React.useRef(false);
-    const endArrivalFrameRef = React.useRef<number | null>(null);
-    const confirmEndArrived = React.useCallback(() => {
-        if (endArrivalPendingRef.current) return;
-        endArrivalPendingRef.current = true;
-        queueMicrotask(() => {
-            if (!endArrivalPendingRef.current) return;
-            endArrivalFrameRef.current = window.requestAnimationFrame(() => {
-                endArrivalFrameRef.current = null;
-                endArrivalPendingRef.current = false;
-                if (isAtEndRef.current) return;
-                const state = listRef.current?.getState();
-                if (!state || state.contentLength === undefined) return;
-                if (state.contentLength - state.scroll - state.scrollLength <= 1) onIsAtEndChange(true);
-            });
-        });
-    }, [onIsAtEndChange]);
     React.useEffect(() => () => {
         if (followFrameRef.current !== null) window.cancelAnimationFrame(followFrameRef.current);
         followFrameRef.current = null;
@@ -1242,7 +1259,7 @@ export const useChatTimelineScroll = ({
             const state = list.getState();
             const below = state.contentLength === undefined ? null : state.contentLength - state.scroll - state.scrollLength;
             if (!isAtEndRef.current) {
-                if (below !== null && below <= 1) confirmEndArrived();
+                if (below !== null && below <= 1) confirmEndArrived(1);
                 return;
             }
             // A row opened on the end that grew less than the band leaves the
@@ -1255,7 +1272,7 @@ export const useChatTimelineScroll = ({
                 } else if (opened.grew) {
                     rowExpandReleaseRef.current = null;
                     isAtEndRef.current = false;
-                    onIsAtEndChange(true);
+                    applyIsAtEnd(true);
                     return;
                 }
             }
@@ -1292,7 +1309,7 @@ export const useChatTimelineScroll = ({
         // at 45% of the stream time spent 500-1600px behind at 420x640.
         if (modeRef.current !== 'following-end') return;
         followEnd();
-    }, [confirmEndArrived, followEnd, isLiveFollowActive, onIsAtEndChange, revealWaitingPage, scheduleShowScrollButton]);
+    }, [applyIsAtEnd, confirmEndArrived, followEnd, isLiveFollowActive, revealWaitingPage, scheduleShowScrollButton]);
 
     // The streaming tail grows inside one row without changing the entries
     // array, so data-change callbacks are silent for the entire stream. The
