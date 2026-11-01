@@ -164,6 +164,7 @@ const installedGuestSchema = z.object({
   entrySize: z.number().int().positive().optional(),
   backgroundEntry: z.string().trim().min(1).optional(),
   version: z.string().trim().min(1).max(64).optional(),
+  revision: z.number().int().positive().optional(),
   attach: z.union([z.boolean(), z.enum(['panel', 'dialog'])]).optional(),
   attachEntry: z.string().trim().min(1).optional(),
   pageEntry: z.string().trim().min(1).optional(),

@@ -144,6 +144,13 @@ type SourceControlProvidersChangedEvent = { type: 'source-control-providers-chan
 type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
 
 /**
+ * The extension catalog changed: an extension was installed, updated, approved,
+ * paused, enabled or removed, or a folder install's files changed. Carries
+ * nothing; listeners re-read the catalog.
+ */
+type GuestsChangedEvent = { type: 'guests-changed' };
+
+/**
  * A usage limit stopped a session and the server moved on: the provider to
  * its next account (for every session), or this session to the fallback model.
  */
@@ -267,6 +274,7 @@ type OpenChamberEvent =
   | BrowserProviderResetEvent
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
+  | GuestsChangedEvent
   | LimitFailoverEvent
   | ProjectContextChangedEvent
   | SessionFoldersChangedEvent
@@ -567,6 +575,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:tracker-providers-changed') {
     for (const listener of listeners) listener({ type: 'tracker-providers-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:guests-changed') {
+    for (const listener of listeners) listener({ type: 'guests-changed' });
     return;
   }
 

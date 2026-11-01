@@ -12,6 +12,7 @@ import {
   serviceProvides,
 } from '@openchamber/sdk';
 
+import { isGuestPackageUnloaded } from './catalog.js';
 import { hostCallbackUrl } from './host-callback.js';
 import { readExtensionStore, updateExtensionStore } from './persist.js';
 import { readBoundedResponseText } from './response-body.js';
@@ -671,6 +672,10 @@ export const openGuestServiceRequest = async ({
 
   let runtime = runtimes.get(guestId);
   if (!runtime || runtime.status !== 'ready' || runtime.child.exitCode !== null || runtime.child.signalCode) {
+    // A folder mid-rebuild is listed from its last loaded manifest and grants; the new files are not what the user approved.
+    if (isGuestPackageUnloaded(packageRoot)) {
+      throw new GuestServiceError('The extension is being rebuilt; try again once its build finishes.', 'NO_SERVICE');
+    }
     runtime = await ensureGuestService({
       guestId,
       packageRoot,

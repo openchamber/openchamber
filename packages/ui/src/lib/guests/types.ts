@@ -32,6 +32,8 @@ export type InstalledGuest = {
   backgroundEntry?: string;
   /** npm package.json version when the package declared one. */
   version?: string;
+  /** Times the server saw this package's files change since it started; frames reload when it moves. Absent is 0. */
+  revision?: number;
   attach?: AttachContribution;
   /** HTML the attach dialog loads instead of `entry`; only sent for dialog-mode guests that declared one. */
   attachEntry?: string;

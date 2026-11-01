@@ -45,6 +45,8 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
   const guestId = pluginIdFromMode(mode);
   const guest = useGuestsStore((state) => state.guests.find((entry) => entry.id === guestId) ?? null);
   const active = guest !== null && isGuestActive(guest) && guest.service?.surface === true;
+  // New package files stop the service, which ends the session; a new client attaches to the next one.
+  const packageKey = `${guest?.version ?? ''}:${guest?.revision ?? 0}`;
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -120,7 +122,7 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
       frameSizeRef.current = null;
       setHasFrame(false);
     };
-  }, [active, drawFrame, guestId, setControl]);
+  }, [active, drawFrame, guestId, packageKey, setControl]);
 
   // Tell the extension how much room the panel has, so a browser or a
   // simulator can lay itself out at that size instead of being scaled.
