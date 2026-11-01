@@ -711,12 +711,14 @@ const readColumnWidth = (scroller: HTMLElement | null): number => {
     return Math.min(width, wide ? width : 768) - (width >= 1024 ? 48 : 32);
 };
 
-// A tool, reasoning or file line: 36 px where touch targets are raised
-// (mobile.css), 32 px elsewhere.
-const readToolLineHeight = (): number => {
+// A touch device: raised tap targets (mobile.css) and native scroll momentum.
+const isTouchLayout = (): boolean => {
     const root = document.documentElement;
-    return root.classList.contains('mobile-pointer') && !root.classList.contains('desktop-runtime') ? 36 : 32;
+    return root.classList.contains('mobile-pointer') && !root.classList.contains('desktop-runtime');
 };
+
+// A tool, reasoning or file line: 36 px where touch targets are raised, 32 px elsewhere.
+const readToolLineHeight = (): number => (isTouchLayout() ? 36 : 32);
 
 type TimelineListProps = {
     rows: RenderRow[];
@@ -753,6 +755,7 @@ const TimelineList = React.memo(({
 }: TimelineListProps) => {
     const listRef = React.useRef<LegendListRef | null>(null);
     const isAtEndRef = React.useRef(true);
+    const [touchLayout] = React.useState(isTouchLayout);
 
     // Each row is placed at an estimate of its own height until measured
     // (`rowSizeEstimate.ts`).
@@ -877,7 +880,10 @@ const TimelineList = React.memo(({
                 // Keep size compensation active while reading history, including
                 // when scrolling mounts older rows above the viewport. A pinned
                 // reader is held on the end by the owning hook instead.
-                maintainVisibleContentPosition={{ data: true, size: endPinningReleased }}
+                // On touch, a correction for rows measured above the reader
+                // waits until the scroll stops (the scroll documentation, "A
+                // row is placed at an estimate").
+                maintainVisibleContentPosition={{ data: true, size: endPinningReleased, deferSizeWhileScrolling: touchLayout }}
                 onScroll={handleScroll}
                 onMetricsChange={onListMetricsChange}
                 stickyHeaderIndices={stickyRowIndices}
