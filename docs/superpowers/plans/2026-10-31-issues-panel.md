@@ -1479,14 +1479,15 @@ git commit -m "feat(ui): issues tab in the project knowledge panel"
 - Consumes: nothing.
 - Produces: the `issuesPanel.*` keys used by Tasks 6 and 8, present in every locale with the same key set as `en` (the parity test enforces this).
 
-The 14 keys:
+The 15 keys:
 
 | Key | en |
 | --- | --- |
 | `issuesPanel.tab.label` | Issues |
 | `issuesPanel.filter.milestone` | Milestone |
 | `issuesPanel.filter.label` | Label |
-| `issuesPanel.filter.all` | All |
+| `issuesPanel.filter.allLabels` | All labels |
+| `issuesPanel.filter.allMilestones` | All milestones |
 | `issuesPanel.filter.stale` | Showing the last list read |
 | `issuesPanel.filter.unavailable` | Could not read the {what} list |
 | `issuesPanel.empty` | No issues match the filter |

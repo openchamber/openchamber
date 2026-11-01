@@ -6,36 +6,50 @@ import { I18nProvider } from '@/lib/i18n';
 
 // The real select renders its list in a portal only while open, so the test
 // lays the parts out inline: the select forwards a picked item to its
-// `onValueChange`, the way the real one does.
-mock.module('@/components/ui/select', () => ({
-  Select: ({ children, onValueChange, disabled }: { children: React.ReactNode; onValueChange?: (next: string) => void; disabled?: boolean }) =>
-    React.createElement(React.Fragment, null,
-      React.Children.map(children, (child) =>
-        React.isValidElement(child)
-          ? // SAFETY: the children are this mock's own trigger and content, and `onPick`/`selectDisabled` are the props the mock injects on them.
-            React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void; selectDisabled?: boolean }>, { onPick: (next: string) => onValueChange?.(next), selectDisabled: disabled })
-          : child,
+// `onValueChange`, the way the real one does. The mock's `SelectValue`
+// resolves the trigger text the way the real kit does — children first, then
+// the value, then the placeholder while the select carries no value
+// (undefined or empty) — and reads that value from the select root through
+// context, the way the kit's `Value` reads its store.
+mock.module('@/components/ui/select', () => {
+  const selectValueContext = React.createContext<string | undefined>(undefined);
+  return {
+    Select: ({ children, value, onValueChange, disabled }: { children: React.ReactNode; value?: string; onValueChange?: (next: string) => void; disabled?: boolean }) =>
+      React.createElement(selectValueContext.Provider, { value },
+        React.createElement(React.Fragment, null,
+          React.Children.map(children, (child) =>
+            React.isValidElement(child)
+              ? // SAFETY: the children are this mock's own trigger and content, and `onPick`/`selectDisabled` are the props the mock injects on them.
+                React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void; selectDisabled?: boolean }>, { onPick: (next: string) => onValueChange?.(next), selectDisabled: disabled })
+              : child,
+          ),
+        ),
       ),
-    ),
-  SelectTrigger: ({ children, selectDisabled, ...props }: { children?: React.ReactNode; selectDisabled?: boolean } & React.ComponentProps<'button'>) =>
-    React.createElement('button', { type: 'button', 'data-select-trigger': '', disabled: selectDisabled, ...props }, children),
-  SelectValue: ({ children, placeholder }: { children?: React.ReactNode; placeholder?: React.ReactNode }) =>
-    React.createElement('span', { 'data-select-value': '' }, children ?? placeholder),
-  SelectContent: ({ children, onPick }: { children?: React.ReactNode; onPick?: (next: string) => void }) =>
-    React.createElement('div', { 'data-select-content': '' },
-      React.Children.map(children, (child) =>
-        React.isValidElement(child)
-          ? // SAFETY: the children are this mock's own items, and `onPick` is the prop the mock injects on them.
-            React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void }>, { onPick })
-          : child,
+    SelectTrigger: ({ children, selectDisabled, ...props }: { children?: React.ReactNode; selectDisabled?: boolean } & React.ComponentProps<'button'>) =>
+      React.createElement('button', { type: 'button', 'data-select-trigger': '', disabled: selectDisabled, ...props }, children),
+    SelectValue: ({ children, placeholder }: { children?: React.ReactNode; placeholder?: React.ReactNode }) => {
+      const selectValue = React.useContext(selectValueContext);
+      const text = children !== undefined && children !== null
+        ? children
+        : (selectValue === undefined || selectValue === '' ? placeholder : selectValue);
+      return React.createElement('span', { 'data-select-value': '' }, text);
+    },
+    SelectContent: ({ children, onPick }: { children?: React.ReactNode; onPick?: (next: string) => void }) =>
+      React.createElement('div', { 'data-select-content': '' },
+        React.Children.map(children, (child) =>
+          React.isValidElement(child)
+            ? // SAFETY: the children are this mock's own items, and `onPick` is the prop the mock injects on them.
+              React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void }>, { onPick })
+            : child,
+        ),
       ),
-    ),
-  SelectItem: ({ children, value, onPick, selectDisabled }: { children?: React.ReactNode; value: string; onPick?: (next: string) => void; selectDisabled?: boolean }) =>
-    React.createElement('button', { type: 'button', 'data-select-item': value, disabled: selectDisabled, onClick: () => onPick?.(value) }, children),
-  SelectLabel: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-label': '' }, children),
-  SelectGroup: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-group': '' }, children),
-  SelectSeparator: () => React.createElement('hr'),
-}));
+    SelectItem: ({ children, value, onPick, selectDisabled }: { children?: React.ReactNode; value: string; onPick?: (next: string) => void; selectDisabled?: boolean }) =>
+      React.createElement('button', { type: 'button', 'data-select-item': value, disabled: selectDisabled, onClick: () => onPick?.(value) }, children),
+    SelectLabel: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-label': '' }, children),
+    SelectGroup: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-group': '' }, children),
+    SelectSeparator: () => React.createElement('hr'),
+  };
+});
 
 const { IssueFilterSelects } = await import('./IssueFilterMenu');
 import type { IssueFilterSelectsProps } from './IssueFilterMenu';
@@ -88,12 +102,14 @@ describe('IssueFilterSelects', () => {
 
   test('renders both selects when both option states are ready, with All first', async () => {
     const view = await render(base);
+    const [labelTrigger, milestoneTrigger] = view.triggers();
     expect(view.triggers()).toHaveLength(2);
+    // The ready trigger shows the translation of the selection.
+    expect(labelTrigger?.textContent).toBe('All labels');
+    expect(milestoneTrigger?.textContent).toBe('All milestones');
     const text = view.text();
     // Each select shows its All option and its items.
-    expect(text).toContain('All labels');
     expect(text).toContain('bug');
-    expect(text).toContain('All milestones');
     expect(text).toContain('v1.0');
     await view.unmount();
   });
@@ -120,13 +136,15 @@ describe('IssueFilterSelects', () => {
     await view.unmount();
   });
 
-  test('a loading state renders a disabled select', async () => {
+  test('a loading state renders a disabled select showing the loading note', async () => {
     const view = await render({ ...base, labels: { status: 'loading', items: [], stale: false, error: null } });
     const [labelTrigger, milestoneTrigger] = view.triggers();
     expect(labelTrigger?.disabled).toBe(true);
-    expect(view.text()).toContain('…');
+    // No value while the list is read: the trigger shows the loading note, not the sentinel.
+    expect(labelTrigger?.textContent).toBe('…');
     // The other dimension is untouched.
     expect(milestoneTrigger?.disabled ?? true).toBe(false);
+    expect(milestoneTrigger?.textContent).toBe('All milestones');
     await view.unmount();
   });
 
@@ -134,8 +152,10 @@ describe('IssueFilterSelects', () => {
     const view = await render({ ...base, milestones: { status: 'error', items: [], stale: false, error: 'network down' } });
     const [labelTrigger, milestoneTrigger] = view.triggers();
     expect(milestoneTrigger?.disabled).toBe(true);
-    expect(view.text()).toContain('Could not read the Milestone list');
+    // No value after a failed first read: the trigger shows the unavailable note, not the sentinel.
+    expect(milestoneTrigger?.textContent).toBe('Could not read the Milestone list');
     expect(labelTrigger?.disabled ?? true).toBe(false);
+    expect(labelTrigger?.textContent).toBe('All labels');
     expect(view.item('bug')?.disabled ?? true).toBe(false);
     await view.unmount();
   });

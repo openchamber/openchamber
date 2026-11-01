@@ -26,36 +26,50 @@ mock.module('@/components/ui/dropdown-menu', () => ({
 
 // The real select renders its list in a portal only while open, so the test
 // lays the parts out inline: the select forwards a picked item to its
-// `onValueChange`, the way the real one does.
-mock.module('@/components/ui/select', () => ({
-  Select: ({ children, onValueChange, disabled }: { children: React.ReactNode; onValueChange?: (next: string) => void; disabled?: boolean }) =>
-    React.createElement(React.Fragment, null,
-      React.Children.map(children, (child) =>
-        React.isValidElement(child)
-          ? // SAFETY: the children are this mock's own trigger and content, and `onPick`/`selectDisabled` are the props the mock injects on them.
-            React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void; selectDisabled?: boolean }>, { onPick: (next: string) => onValueChange?.(next), selectDisabled: disabled })
-          : child,
+// `onValueChange`, the way the real one does. The mock's `SelectValue`
+// resolves the trigger text the way the real kit does — children first, then
+// the value, then the placeholder while the select carries no value
+// (undefined or empty) — and reads that value from the select root through
+// context, the way the kit's `Value` reads its store.
+mock.module('@/components/ui/select', () => {
+  const selectValueContext = React.createContext<string | undefined>(undefined);
+  return {
+    Select: ({ children, value, onValueChange, disabled }: { children: React.ReactNode; value?: string; onValueChange?: (next: string) => void; disabled?: boolean }) =>
+      React.createElement(selectValueContext.Provider, { value },
+        React.createElement(React.Fragment, null,
+          React.Children.map(children, (child) =>
+            React.isValidElement(child)
+              ? // SAFETY: the children are this mock's own trigger and content, and `onPick`/`selectDisabled` are the props the mock injects on them.
+                React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void; selectDisabled?: boolean }>, { onPick: (next: string) => onValueChange?.(next), selectDisabled: disabled })
+              : child,
+          ),
+        ),
       ),
-    ),
-  SelectTrigger: ({ children, selectDisabled, ...props }: { children?: React.ReactNode; selectDisabled?: boolean } & React.ComponentProps<'button'>) =>
-    React.createElement('button', { type: 'button', 'data-select-trigger': '', disabled: selectDisabled, ...props }, children),
-  SelectValue: ({ children, placeholder }: { children?: React.ReactNode; placeholder?: React.ReactNode }) =>
-    React.createElement('span', { 'data-select-value': '' }, children ?? placeholder),
-  SelectContent: ({ children, onPick }: { children?: React.ReactNode; onPick?: (next: string) => void }) =>
-    React.createElement('div', { 'data-select-content': '' },
-      React.Children.map(children, (child) =>
-        React.isValidElement(child)
-          ? // SAFETY: the children are this mock's own items, and `onPick` is the prop the mock injects on them.
-            React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void }>, { onPick })
-          : child,
+    SelectTrigger: ({ children, selectDisabled, ...props }: { children?: React.ReactNode; selectDisabled?: boolean } & React.ComponentProps<'button'>) =>
+      React.createElement('button', { type: 'button', 'data-select-trigger': '', disabled: selectDisabled, ...props }, children),
+    SelectValue: ({ children, placeholder }: { children?: React.ReactNode; placeholder?: React.ReactNode }) => {
+      const selectValue = React.useContext(selectValueContext);
+      const text = children !== undefined && children !== null
+        ? children
+        : (selectValue === undefined || selectValue === '' ? placeholder : selectValue);
+      return React.createElement('span', { 'data-select-value': '' }, text);
+    },
+    SelectContent: ({ children, onPick }: { children?: React.ReactNode; onPick?: (next: string) => void }) =>
+      React.createElement('div', { 'data-select-content': '' },
+        React.Children.map(children, (child) =>
+          React.isValidElement(child)
+            ? // SAFETY: the children are this mock's own items, and `onPick` is the prop the mock injects on them.
+              React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void }>, { onPick })
+            : child,
+        ),
       ),
-    ),
-  SelectItem: ({ children, value, onPick, selectDisabled }: { children?: React.ReactNode; value: string; onPick?: (next: string) => void; selectDisabled?: boolean }) =>
-    React.createElement('button', { type: 'button', 'data-select-item': value, disabled: selectDisabled, onClick: () => onPick?.(value) }, children),
-  SelectLabel: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-label': '' }, children),
-  SelectGroup: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-group': '' }, children),
-  SelectSeparator: () => React.createElement('hr'),
-}));
+    SelectItem: ({ children, value, onPick, selectDisabled }: { children?: React.ReactNode; value: string; onPick?: (next: string) => void; selectDisabled?: boolean }) =>
+      React.createElement('button', { type: 'button', 'data-select-item': value, disabled: selectDisabled, onClick: () => onPick?.(value) }, children),
+    SelectLabel: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-label': '' }, children),
+    SelectGroup: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-group': '' }, children),
+    SelectSeparator: () => React.createElement('hr'),
+  };
+});
 
 const { ReferenceBrowserSearch } = await import('./ReferenceBrowser');
 import type { ReferenceFilterOptions } from './ReferenceBrowser';

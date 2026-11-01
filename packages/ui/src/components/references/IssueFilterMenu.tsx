@@ -75,23 +75,28 @@ const IssueFilterNameSelect: React.FC<{
   const { t } = useI18n();
   const name = what === 'label' ? t('issuesPanel.filter.label') : t('issuesPanel.filter.milestone');
   const allLabel = what === 'label' ? t('issuesPanel.filter.allLabels') : t('issuesPanel.filter.allMilestones');
-  const value = selected[0] ?? 'all';
   // A failed first read disables the select with its note: never an
   // empty-looking list. A failed refresh keeps the last list, marked stale.
+  const ready = options.status === 'ready';
+  // No value while the list is unread, so the trigger shows the placeholder
+  // (the loading note, then the unavailable one). The empty string — not
+  // undefined — keeps the select controlled from its first render, where the
+  // kit decides its control lifecycle.
+  const value = ready ? (selected[0] ?? 'all') : '';
   const unavailable = t('issuesPanel.filter.unavailable', { what: name });
   return (
     <Select
       value={value}
-      disabled={options.status !== 'ready'}
+      disabled={!ready}
       onValueChange={(next) => onSelect(next === 'all' ? [] : [next])}
     >
       <SelectTrigger
         aria-label={name}
-        title={options.status === 'ready' && options.stale ? t('issuesPanel.filter.stale') : undefined}
+        title={ready && options.stale ? t('issuesPanel.filter.stale') : undefined}
         className="max-w-[9rem] typography-micro"
       >
         <SelectValue placeholder={options.status === 'error' ? unavailable : '…'}>
-          {options.status === 'ready' ? (value === 'all' ? allLabel : value) : undefined}
+          {ready ? (value === 'all' ? allLabel : value) : undefined}
         </SelectValue>
       </SelectTrigger>
       <SelectContent align="start">
