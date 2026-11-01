@@ -639,8 +639,7 @@ export const ExtensionsPage: React.FC = () => {
       );
       return;
     }
-    // Open panels still run the old bundle; the next open loads the new one.
-    closeGuestTabsById(guest.id);
+    // Open panels reload with the new bundle: the update moves the catalog row's revision.
     toast.success(t('settings.extensions.toast.updated', {
       name: result.guest.name,
       version: result.guest.version ?? '',

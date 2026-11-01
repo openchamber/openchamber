@@ -14,6 +14,7 @@ import {
   stopGuestService,
 } from './service.js';
 import { setCapabilityGrants, writeExtensionStore } from './persist.js';
+import { listInstalledGuests, noteGuestPackageChanged } from './catalog.js';
 import { SERVICE_TOKEN_ENV, recordGuestService } from './service-registry.js';
 
 const writeFixture = async () => {
@@ -67,6 +68,37 @@ describe('guest service proxy', () => {
           permissions: { exec: ['docker'] },
         },
         granted: [],
+        persistPath,
+        method: 'GET',
+        path: '/ping',
+      })).rejects.toMatchObject({ code: 'NO_SERVICE' });
+      expect(getServiceStatus('docker')).toBe('stopped');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('does not start from a folder listed from its last loaded manifest', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      const manifest = { name: 'docker', version: '1.0.0', openchamber: { apiVersion: 1, contributes: {
+        panel: { id: 'docker', name: 'Docker', icon: 'window', entry: 'panel/index.html' },
+        service: { entry: 'service/main.js', runtime: 'host' },
+      } } };
+      await fs.mkdir(path.join(packageRoot, 'panel'));
+      await fs.writeFile(path.join(packageRoot, 'panel', 'index.html'), '<html></html>');
+      await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify(manifest));
+      expect((await listInstalledGuests({ persistPath })).map((guest) => guest.id)).toEqual(['docker']);
+
+      // The new manifest does not parse yet: the row and its grant are the old ones, the files on disk are not.
+      await fs.writeFile(path.join(packageRoot, 'package.json'), '{');
+      noteGuestPackageChanged(persistPath, 'docker');
+      const [row] = await listInstalledGuests({ persistPath });
+      await expect(proxyGuestServiceRequest({
+        guestId: 'docker',
+        packageRoot: row.packageRoot,
+        service: row.service,
+        granted: ['service'],
         persistPath,
         method: 'GET',
         path: '/ping',

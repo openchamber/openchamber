@@ -15,22 +15,35 @@ const alignCatalogRuntime = (runtimeKey: string): void => {
   }
 };
 
-let inFlight: { runtimeKey: string; request: Promise<void> } | null = null;
+/** Changes the server announced; a request answers only for those it started after. */
+let announcedChanges = 0;
+let inFlight: { runtimeKey: string; changes: number; request: Promise<void> } | null = null;
 
 /**
  * One request at a time per runtime: the rail, the composer, and the dialogs
  * all ask on mount. A request still running for the previous server is not
  * reused after a switch; its answer is dropped by the runtime check below,
- * and the new server gets its own request.
+ * and the new server gets its own request. A request that started before an
+ * announced change may hold the old list, so a new one runs after it.
  */
 export const loadGuestCatalog = (): Promise<void> => {
   const runtimeKey = getRuntimeKey();
-  if (inFlight && inFlight.runtimeKey === runtimeKey) return inFlight.request;
-  const request = loadGuestCatalogOnce(runtimeKey).finally(() => {
-    if (inFlight?.request === request) inFlight = null;
-  });
-  inFlight = { runtimeKey, request };
+  const running = inFlight?.runtimeKey === runtimeKey ? inFlight : null;
+  if (running && running.changes === announcedChanges) return running.request;
+  // After a switch the queued read belongs to a server the store no longer follows.
+  const after = () => (getRuntimeKey() === runtimeKey ? loadGuestCatalogOnce(runtimeKey) : undefined);
+  const request = (running ? running.request.then(after) : loadGuestCatalogOnce(runtimeKey))
+    .finally(() => {
+      if (inFlight?.request === request) inFlight = null;
+    });
+  inFlight = { runtimeKey, changes: announcedChanges, request };
   return request;
+};
+
+/** The server announced a catalog change; read it from a request that starts after now. */
+export const reloadGuestCatalog = (): Promise<void> => {
+  announcedChanges += 1;
+  return loadGuestCatalog();
 };
 
 const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {

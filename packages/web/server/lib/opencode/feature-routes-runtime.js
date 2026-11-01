@@ -713,6 +713,17 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       trustedDirectoriesConfig: createTrustedDirectoriesConfig({ gitBinary }),
     });
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
+    // A change every client reads again from the server; the event carries nothing.
+    const announceChange = (type) => {
+      const clients = getOpenChamberEventClients();
+      for (const client of clients) {
+        try {
+          writeSseEvent(client, { type, properties: {} });
+        } catch {
+          clients.delete(client);
+        }
+      }
+    };
     // Extensions that act as a Git host, kept in step with the catalog; every
     // client re-reads the provider list when the set changes.
     const extensionSourceControlProviders = createExtensionProviders({
@@ -720,16 +731,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       register: walkthroughBindingService.registerExtensionProvider,
       unregister: walkthroughBindingService.unregisterExtensionProvider,
       dropSection: (id) => sourceControlAuthStore.dropSection(id),
-      emitChanged: () => {
-        const clients = getOpenChamberEventClients();
-        for (const client of clients) {
-          try {
-            writeSseEvent(client, { type: 'openchamber:source-control-providers-changed', properties: {} });
-          } catch {
-            clients.delete(client);
-          }
-        }
-      },
+      emitChanged: () => announceChange('openchamber:source-control-providers-changed'),
     });
     // Extensions that act as a tracker, attached to the registry beside Linear
     // and kept in step with the catalog; their accounts live in their own
@@ -783,6 +785,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         const failed = results.find((result) => result.status === 'rejected');
         if (failed) throw failed.reason;
       },
+      onGuestsChanged: () => announceChange('openchamber:guests-changed'),
+      watchFolderInstalls: true,
       surfaceViewerHeaders, trackers,
     });
     // The providers extensions served before the restart, before any request reads the list.

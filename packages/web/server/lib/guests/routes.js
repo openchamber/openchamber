@@ -22,11 +22,16 @@ import {
 import {
   findInstalledGuest,
   hasGuestFrame,
+  inspectGuestPackage,
+  invalidateGuestCatalog,
   isGuestPanelId,
+  lastLoadedGuestAt,
   listInstalledGuests,
+  noteGuestPackageChanged,
   resolveGuestServedFile,
   toPublicGuest,
 } from './catalog.js';
+import { createGuestPackageWatch } from './package-watch.js';
 import { runGuestFileOperation } from './files.js';
 import { createGuestFrameGrants } from './frame-grants.js';
 import { injectGuestAssetTokens, parseGuestUrlToken } from './html-tokens.js';
@@ -231,6 +236,10 @@ export const registerGuestRoutes = (app, {
   // After a package may have gained a role: approval, enable, install or
   // replace, update. The listener reads the catalog itself.
   onGuestActivated = async () => undefined,
+  // After any change to the catalog; every client reads it again.
+  onGuestsChanged = () => undefined,
+  // Report edits to folder installs as package changes. Off in tests that write into packages.
+  watchFolderInstalls = false,
   surfaceViewerHeaders = () => null,
   // The tracker registry: a host-auth guest borrows its tracker's sign-in.
   trackers = null,
@@ -242,12 +251,21 @@ export const registerGuestRoutes = (app, {
   const installOptions = () => ({ openchamberVersion, gitBinary: resolveGitBinaryForSpawn() });
 
   // The change already happened; a listener that fails must not turn it into an error answer.
+  const announce = () => {
+    try {
+      onGuestsChanged();
+    } catch (error) {
+      console.warn('Failed to announce an extension change:', error?.message ?? error);
+    }
+    void packageWatch?.sync();
+  };
   const activated = async (guestId) => {
     try {
       await onGuestActivated({ guestId });
     } catch (error) {
       console.warn('Failed to apply an extension activation:', error?.message ?? error);
     }
+    announce();
   };
   const deactivated = async (event) => {
     try {
@@ -255,7 +273,49 @@ export const registerGuestRoutes = (app, {
     } catch (error) {
       console.warn('Failed to apply an extension deactivation:', error?.message ?? error);
     }
+    announce();
   };
+  // New files under a known id: frames key on the revision and reload, and
+  // the service starts again from the new files on its next request.
+  const packageChanged = async (guestId) => {
+    noteGuestPackageChanged(persistPath, guestId);
+    await stopGuestService(guestId);
+    await activated(guestId);
+  };
+  // A build that empties its output first leaves the package unloadable for a
+  // moment. Nothing is announced then: clients keep the running version until
+  // a later write completes the build.
+  const folderChanged = async (storedPath) => {
+    // The catalog lists a folder by its real path; the store may name it through a link.
+    const root = await fs.realpath(storedPath).catch(() => storedPath);
+    const previous = lastLoadedGuestAt(root);
+    const inspected = await inspectGuestPackage(root, { skipEngineCheck: true });
+    if (!inspected.ok) return;
+    const { id } = inspected.guest;
+    // A renamed panel id leaves the old id's service and roles behind. They go
+    // as with a pause, which keeps the old id's accounts in case the rename is undone.
+    if (previous && previous.id !== id) {
+      await stopGuestService(previous.id);
+      await deactivated({ guestId: previous.id, guestName: previous.name });
+    }
+    // An id another package already holds keeps that package listed; this folder changed nothing it serves.
+    invalidateGuestCatalog(persistPath);
+    const listed = (await listInstalledGuests({ persistPath })).find((guest) => guest.id === id);
+    if (listed?.packageRoot !== root) return;
+    await packageChanged(id);
+  };
+  const packageWatch = watchFolderInstalls
+    ? createGuestPackageWatch({
+      listFolderInstalls: async () => {
+        const stored = await readExtensionStore(persistPath);
+        return stored.paths.filter((storedPath) => (stored.sources[storedPath] ?? 'path') === 'path');
+      },
+      onChange: (root) => void folderChanged(root).catch((error) => {
+        console.warn('Failed to reload a changed extension:', error?.message ?? error);
+      }),
+    })
+    : null;
+  void packageWatch?.sync();
 
   const loadGuest = async (id) => {
     if (!isGuestPanelId(id)) {
@@ -284,7 +344,7 @@ export const registerGuestRoutes = (app, {
         return res.status(400).json({ error: hasUrl ? 'invalid-url' : 'invalid-path' });
       }
       const result = await installGuest(request, persistPath, installOptions());
-      if (result.ok) await activated(result.guest.id);
+      if (result.ok) await packageChanged(result.guest.id);
       sendInstallResult(res, result);
     } catch (error) {
       console.error('Failed to install guest:', error);
@@ -304,7 +364,7 @@ export const registerGuestRoutes = (app, {
       }
       const replace = req.query?.replace === 'true';
       const result = await installGuestFromZipBuffer(body.buffer, persistPath, { openchamberVersion, replace });
-      if (result.ok) await activated(result.guest.id);
+      if (result.ok) await packageChanged(result.guest.id);
       sendInstallResult(res, result);
     } catch (error) {
       console.error('Failed to install uploaded guest:', error);
@@ -350,7 +410,7 @@ export const registerGuestRoutes = (app, {
         }
         return res.status(400).json(body);
       }
-      await activated(guest.id);
+      await packageChanged(guest.id);
       const next = await loadGuest(guest.id);
       if (!next) {
         return res.status(404).json({ error: 'not-found' });
@@ -860,6 +920,7 @@ export const registerGuestRoutes = (app, {
         persistPath,
         parsed.data.path ?? null,
       );
+      announce();
       const next = await loadGuest(guest.id);
       if (!next) {
         return res.status(404).json({ error: 'not-found' });
