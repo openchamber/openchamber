@@ -85,6 +85,14 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     readManagedSshCredentialPresentation: dependencies.readManagedSshCredentialPresentation,
     resolveCheckoutAuxiliary: dependencies.resolveCheckoutAuxiliary,
     readTransportAccount,
+    readProviderSshUrl: async ({ provider, instance }) => {
+      try {
+        const impl = await providers.implementation(provider);
+        return (await impl?.auth?.readSshUrl?.({ instance })) ?? null;
+      } catch {
+        return null;
+      }
+    },
   });
   // Connecting an account is the moment every part of an identity is known, so
   // the identity is made there instead of being asked for again later.
@@ -165,7 +173,15 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     const impl = await providers.implementation(descriptor.id);
     const defaults = [...descriptor.instance.defaultInstances];
     const known = (await impl?.auth.listInstances?.()) ?? [];
-    return [...new Set([...defaults, ...known])];
+    const sshHosts = new Map(((await impl?.auth.listSshHosts?.()) ?? [])
+      .map((entry) => [entry.instance, entry.sshUrl]));
+    return [...new Set([...defaults, ...known])]
+      .map((instance) => {
+        const entry = { provider: descriptor.id, instance };
+        const sshUrl = sshHosts.get(instance);
+        if (sshUrl !== undefined) entry.instanceSshUrl = sshUrl;
+        return entry;
+      });
   };
   app.get('/api/source-control/providers', (_req, res) => {
     // Built-ins in priority order, then extension providers sorted by id
@@ -179,7 +195,7 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     const unavailableProviders = [];
     for (const descriptor of providers.list()) {
       try {
-        for (const instance of await instancesOf(descriptor)) instances.push({ provider: descriptor.id, instance });
+        instances.push(...await instancesOf(descriptor));
       } catch (error) {
         unavailableProviders.push(descriptor.id);
         console.warn(`Failed to list ${descriptor.label} instances:`, redactSensitiveText(error?.message));

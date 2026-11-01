@@ -11,7 +11,9 @@ import frozen from './provider-publication-freeze.json' with { type: 'json' };
  * them must publish byte for byte what it did before, so an older client
  * reads GitHub, GitLab and Gitea exactly as it always has. GitHub declares
  * discussions, which add `urls.discussion` and `features.discussions` beside
- * the fields it always had; older clients leave both unread.
+ * the fields it always had; older clients leave both unread. Gitea's optional
+ * SSH address is a second `instance-url` field with an id older clients do not
+ * look for, so it is additive for them too.
  */
 const BUILT_INS = ['github', 'gitlab', 'gitea'];
 // Gerrit came with change-based review; its own literal is held apart, so the

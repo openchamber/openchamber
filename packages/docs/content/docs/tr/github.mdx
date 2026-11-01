@@ -7,7 +7,7 @@ description: GitHub, GitLab, Gitea, Forgejo ya da Gerrit'i bağlayın ve OpenCha
 
 Projenizin bulunduğu sunucuda bir hesap bağlayın. OpenChamber o sunucunun issue'larını ve pull request'lerini listeleyebilir, birinden oturum başlatabilir, sizin yerinize pull request açabilir, inceleyebilir ve merge edebilir. Beş sunucu yerleşiktir: GitHub Enterprise dahil GitHub; self-managed GitLab dahil GitLab; Gitea; Codeberg dahil Forgejo; ve Gerrit. Bir [uzantı](/extensions/#git-sunucusu-olarak-bir-uzantı) bir tane daha ekleyebilir.
 
-OpenChamber'ın hangi sunucuyla konuşacağına projenin remote'u karar verir. `origin`'i gitlab.com'da olan bir proje; pano, branch'lerindeki pull request rozeti ve Git paneli için GitLab hesabınızı kullanır. `~/.ssh/config` içindeki bir host takma adındaki remote, örneğin `github.com-work`, hiçbir sunucuyla eşleşmez.
+OpenChamber'ın hangi sunucuyla konuşacağına projenin remote'u karar verir. `origin`'i gitlab.com'da olan bir proje; pano, branch'lerindeki pull request rozeti ve Git paneli için GitLab hesabınızı kullanır. `~/.ssh/config` içindeki bir host takma adındaki remote, örneğin `github.com-work`, hiçbir sunucuyla eşleşmez. Gitea ve Forgejo, SSH yapılandırması instance'ın web adresini gösteren takma adı eşleştirir. Instance'ın SSH klon adresini **Settings → Integrations** bölümüne girdiğinizde, o adresteki remote da eşleşir.
 
 Kullanılan sözcükler sunucuya göre değişir. GitLab merge request der, Gerrit ise change (değişiklik) der.
 

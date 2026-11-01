@@ -85,6 +85,14 @@ describe('source-control identity resolution', () => {
     expect(resolveSourceControlTarget([upstream, origin], defaults)).toBeNull();
   });
 
+  test('matches a remote on an instance\'s separate SSH address', () => {
+    const identity = { provider: 'gitea', instance: 'https://gitea.example.com', instanceSshUrl: 'ssh://giteassh.example.com:2222' } satisfies SourceControlIdentity;
+    expect(resolveSourceControlIdentity(remote('ssh://git@giteassh.example.com:2222/team/repo.git'), [identity])).toBe(identity);
+    expect(resolveSourceControlIdentity(remote('https://gitea.example.com/team/repo.git'), [identity])).toBe(identity);
+    expect(resolveSourceControlIdentity(remote('git@giteassh.example.com:team/repo.git'), [identity])).toBeNull();
+    expect(resolveSourceControlIdentity(remote('ssh://git@giteassh.example.com:2200/team/repo.git'), [identity])).toBeNull();
+  });
+
   test('matches self-managed instances by host and port', () => {
     const first = { provider: 'gitlab', instance: 'https://gitlab.example.com:8443' } satisfies SourceControlIdentity;
     const second = { provider: 'gitlab', instance: 'https://gitlab.example.com:9443' } satisfies SourceControlIdentity;
@@ -270,13 +278,21 @@ describe('proposeIdentityForHost', () => {
     // A host match wins over the default: it answers a question the default cannot.
     expect(proposeIdentityForHost([plain, github], 'github.com', 'plain')?.id).toBe('gh');
   });
+
+  test('offers an identity whose instance has a separate SSH address', () => {
+    const gitea = { id: 'gitea', account: { instance: 'https://gitea.example.com' } };
+    expect(proposeIdentityForHost([plain, gitea], 'giteassh.example.com', undefined, {
+      'https://gitea.example.com': 'ssh://giteassh.example.com',
+    })?.id).toBe('gitea');
+  });
 });
 
 describe('remoteTraits and instanceHost', () => {
   test('reads what a remote allows', () => {
     expect(remoteTraits('https://gitlab.com/team/repo.git')).toEqual({ host: 'gitlab.com', https: true, ssh: false });
-    expect(remoteTraits('git@github.com:team/repo.git')).toEqual({ host: 'github.com', https: false, ssh: true });
-    expect(remoteTraits('ssh://git@private.gitlab.example/team/repo.git')).toEqual({ host: 'private.gitlab.example', https: false, ssh: true });
+    expect(remoteTraits('git@github.com:team/repo.git')).toEqual({ host: 'github.com', https: false, ssh: true, sshPort: 22 });
+    expect(remoteTraits('ssh://git@private.gitlab.example/team/repo.git')).toEqual({ host: 'private.gitlab.example', https: false, ssh: true, sshPort: 22 });
+    expect(remoteTraits('ssh://git@private.gitlab.example:2222/team/repo.git')).toEqual({ host: 'private.gitlab.example', https: false, ssh: true, sshPort: 2222 });
     expect(remoteTraits('  ')).toEqual({ host: null, https: false, ssh: false });
   });
 

@@ -7,7 +7,7 @@ description: Connectez GitHub, GitLab, Gitea, Forgejo ou Gerrit et travaillez av
 
 Connectez un compte sur l’hébergeur de votre projet, et OpenChamber peut lister ses issues et pull requests, démarrer une session depuis l’une d’elles, et ouvrir, relire et merger des pull requests pour vous. Cinq hébergeurs sont intégrés : GitHub, y compris GitHub Enterprise ; GitLab, y compris GitLab auto-hébergé ; Gitea ; Forgejo, y compris Codeberg ; et Gerrit. Une [extension](/extensions/#an-extension-as-a-git-host) peut en ajouter un autre.
 
-Le remote du projet décide de l’hébergeur avec lequel OpenChamber communique. Un projet dont l’`origin` est sur gitlab.com utilise votre compte GitLab pour le tableau, le badge de pull request de ses branches et le panneau Git. Un remote sur un alias d’hôte de `~/.ssh/config`, comme `github.com-work`, ne correspond à aucun hébergeur.
+Le remote du projet décide de l’hébergeur avec lequel OpenChamber communique. Un projet dont l’`origin` est sur gitlab.com utilise votre compte GitLab pour le tableau, le badge de pull request de ses branches et le panneau Git. Un remote sur un alias d’hôte de `~/.ssh/config`, comme `github.com-work`, ne correspond à aucun hébergeur. Gitea et Forgejo associent un alias dont la configuration SSH pointe vers l’adresse web de l’instance, et un remote sur l’adresse de clone SSH de l’instance dès que vous saisissez cette adresse dans **Settings → Integrations**.
 
 Les termes suivent l’hébergeur. GitLab parle de merge request, et Gerrit de changement.
 

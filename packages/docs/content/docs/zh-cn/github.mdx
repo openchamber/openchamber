@@ -7,7 +7,7 @@ description: 连接 GitHub、GitLab、Gitea、Forgejo 或 Gerrit，在 OpenChamb
 
 连接项目所在托管服务上的账号，OpenChamber 就可以列出它的 issue 和拉取请求、从其中一个开始会话，并为你创建、评审和合并拉取请求。内置五个托管服务：GitHub（包括 GitHub Enterprise）、GitLab（包括自托管 GitLab）、Gitea、Forgejo（包括 Codeberg）和 Gerrit。[扩展](/zh-cn/extensions/#作为-git-托管服务的扩展) 还可以再添加一个。
 
-OpenChamber 与哪个托管服务通信，由项目的远程仓库决定。`origin` 在 gitlab.com 上的项目，看板、分支上的拉取请求徽标和 Git 面板都会使用你的 GitLab 账号。位于 `~/.ssh/config` 主机别名（例如 `github.com-work`）上的远程仓库不会匹配任何托管服务。
+OpenChamber 与哪个托管服务通信，由项目的远程仓库决定。`origin` 在 gitlab.com 上的项目，看板、分支上的拉取请求徽标和 Git 面板都会使用你的 GitLab 账号。位于 `~/.ssh/config` 主机别名（例如 `github.com-work`）上的远程仓库不会匹配任何托管服务。Gitea 和 Forgejo 会匹配 SSH 配置指向实例网页地址的别名，以及在 **Settings → Integrations** 中填写实例的 SSH 克隆地址后，位于该地址上的远程仓库。
 
 用词跟随托管服务：GitLab 上叫合并请求，Gerrit 上叫变更。
 

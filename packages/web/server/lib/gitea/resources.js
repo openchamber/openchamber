@@ -45,7 +45,7 @@ function requireMapped(value, message) {
  * in the errors a person reads.
  */
 export function createGiteaResourceService({
-  origin, client, resolveRepos = resolveGiteaReposFromDirectory, provider = 'gitea', providerLabel = 'Gitea',
+  origin, client, resolveRepos = resolveGiteaReposFromDirectory, provider = 'gitea', providerLabel = 'Gitea', sshUrl = null,
 }) {
   const identity = { provider, instance: origin };
   const mismatch = (key) => Object.assign(new Error(`${providerLabel} pull request ${key} changed`), {
@@ -59,7 +59,7 @@ export function createGiteaResourceService({
   };
 
   const resolveDirectoryRepos = async (directory, remote) => {
-    const resolved = await resolveRepos(directory, origin, remote);
+    const resolved = await resolveRepos(directory, origin, remote, { sshUrl });
     const repos = [];
     for (const candidate of resolved.repos) {
       const item = await showRepo({ owner: candidate.owner, name: candidate.name }, candidate.remoteName);

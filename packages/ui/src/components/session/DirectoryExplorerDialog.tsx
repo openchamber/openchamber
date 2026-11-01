@@ -5,6 +5,7 @@ import {
   activeIdentityFor,
   isSshRemoteUrl,
   proposeIdentityForHost,
+  instanceSshHostsFrom,
   remoteTraits,
   type RemoteTraits,
   selectableIdentities,
@@ -189,6 +190,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const openContextSurface = useUIStore((s) => s.openContextSurface);
   const mobileActions = useMobileAppActions();
   const refreshAccounts = useSourceControlAuthStore((s) => s.refreshAll);
+  const sourceControlIdentities = useSourceControlAuthStore((s) => s.identities);
+  const instanceSshHosts = React.useMemo(() => instanceSshHostsFrom(sourceControlIdentities), [sourceControlIdentities]);
   const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
   const projects = useProjectsStore((s) => s.projects);
   const addProject = useProjectsStore((s) => s.addProject);
@@ -456,15 +459,21 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const identityRemote = React.useMemo((): RemoteTraits | null => {
     if (isCloneMode) return cloneRemoteUrl.trim() ? remoteTraits(cloneRemoteUrl) : null;
     if (!existingPrimaryRemote) return null;
-    return { host: existingPrimaryRemote.host, https: existingPrimaryRemote.https, ssh: existingPrimaryRemote.ssh };
+    // The summary decides which transports the remote allows, and it counts
+    // one only while its fetch and push endpoints agree: an identity applied
+    // here writes a grant for the remote as a whole, so a key or credential
+    // that reaches just the fetch endpoint does not answer for it. The address
+    // itself — its host and SSH port — is the fetch endpoint's own.
+    const fetchTraits = remoteTraits(existingPrimaryRemote.fetch.displayUrl);
+    return { ...fetchTraits, https: existingPrimaryRemote.https, ssh: existingPrimaryRemote.ssh };
   }, [isCloneMode, cloneRemoteUrl, existingPrimaryRemote]);
   const identityHost = identityRemote?.host ?? null;
   const identityChoiceKey = `${isCloneMode ? 'clone' : 'add'}:${identityHost ?? ''}`;
   // An identity is specific to an instance and to a way of reaching it; one
   // that cannot serve this remote is shown with the reason, never proposed.
   const identityApplicabilityOf = React.useCallback((identity: GitIdentityProfile): IdentityApplicability =>
-    identityRemote ? identityApplicability(identity, identityRemote) : { applicable: true },
-  [identityRemote]);
+    identityRemote ? identityApplicability(identity, identityRemote, instanceSshHosts) : { applicable: true },
+  [identityRemote, instanceSshHosts]);
   const existingAuthor = existingRepository?.author ?? null;
   // What the repository is signed as today, shown as it is: one of the stored
   // identities when the author matches one, the machine's own author, or the
@@ -477,8 +486,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         id: 'local-config', name: author.userName, ...author, color: 'info', icon: 'user',
       }));
     }
-    return proposeIdentityForHost(applicable, identityHost, defaultGitIdentityId);
-  }, [availableGitIdentities, defaultGitIdentityId, existingAuthor, globalGitIdentity, identityApplicabilityOf, identityHost, isCloneMode]);
+    return proposeIdentityForHost(applicable, identityHost, defaultGitIdentityId, instanceSshHosts);
+  }, [availableGitIdentities, defaultGitIdentityId, existingAuthor, globalGitIdentity, identityApplicabilityOf, identityHost, instanceSshHosts, isCloneMode]);
   const identityChosen = identityChoice?.key === identityChoiceKey;
   const selectedGitIdentity = React.useMemo(() => {
     const chosen = identityChosen

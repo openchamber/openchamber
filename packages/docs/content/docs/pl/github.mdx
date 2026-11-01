@@ -7,7 +7,7 @@ description: Połącz GitHub, GitLab, Gitea, Forgejo albo Gerrit i pracuj z issu
 
 Połącz konto na hoście, na którym jest Twój projekt, a OpenChamber może wyświetlać jego issues i pull requesty, rozpocząć sesję od jednego z nich oraz otwierać, recenzować i scalać za Ciebie pull requesty. Wbudowanych jest pięć hostów: GitHub, w tym GitHub Enterprise; GitLab, w tym self-managed GitLab; Gitea; Forgejo, w tym Codeberg; oraz Gerrit. [Rozszerzenie](/pl/extensions/#rozszerzenie-jako-host-git) może dodać kolejny.
 
-To remote projektu decyduje, z którym hostem rozmawia OpenChamber. Projekt, którego `origin` jest na gitlab.com, używa Twojego konta GitLab dla tablicy, znacznika pull requesta na swoich gałęziach i panelu Git. Remote na aliasie hosta z `~/.ssh/config`, takim jak `github.com-work`, nie jest dopasowywany do żadnego hosta.
+To remote projektu decyduje, z którym hostem rozmawia OpenChamber. Projekt, którego `origin` jest na gitlab.com, używa Twojego konta GitLab dla tablicy, znacznika pull requesta na swoich gałęziach i panelu Git. Remote na aliasie hosta z `~/.ssh/config`, takim jak `github.com-work`, nie jest dopasowywany do żadnego hosta. Gitea i Forgejo dopasowują alias, którego konfiguracja SSH wskazuje na adres webowy instancji, oraz remote na adresie klonowania SSH instancji, gdy wpiszesz ten adres w **Settings → Integrations**.
 
 Słownictwo zależy od hosta. GitLab mówi merge request, a Gerrit mówi change (zmiana).
 

@@ -341,6 +341,10 @@ mock.module('@/components/ui/collapsible', () => ({
   CollapsibleTrigger: ({ children }: ElementProps) => children ?? null,
   CollapsibleContent: ({ children }: ElementProps) => children ?? null,
 }));
+// The confirm hook renders the real dialog, which this file's React stand-in cannot host.
+mock.module('@/components/ui/confirm-dialog', () => ({
+  useConfirmDialog: () => ({ confirm: async () => true, dialog: null }),
+}));
 mock.module('@/components/sections/shared/SettingsSection', () => ({
   SETTINGS_CONTROL_CLUSTER_CLASS: '',
   SETTINGS_FIELDS_STACK_CLASS: '',
