@@ -384,6 +384,22 @@ clear all projections of their session in that runtime. Projection items carry
 attachment metadata only, so `popToInput()` and `takeForSend()` asynchronously
 remove the message on the server and retrieve its complete captured payload.
 
+A queued row shows at once under an id the store made up; the server names
+the message when it stores it, and the enqueue response's `itemId` carries
+that name. Until it arrives, a take, removal or reorder of the row waits for
+it and uses the server's id. A removal also drops the row the enqueue response
+brings back, so a deleted message stays deleted on screen and on the server.
+A send-now refused with `409` means the server is already sending that
+message, so the composer shows no error for it.
+
+#### Why the store waits for the server's id and not a client-chosen one
+
+A client-chosen id accepted by the server would still let a take overtake its
+enqueue on another connection, so the store would have to wait in that case
+anyway. Waiting for the enqueue response covers both, and it works against
+servers that predate the change, which a desktop app connected to a remote
+server meets.
+
 `lib/messages/queuedMessagePreview.ts` derives the queue row from typed text,
 then attached comments/context, then the first filename. The store sends a
 bounded `contextPreview` with the captured item so server projections can show
