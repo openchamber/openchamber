@@ -752,16 +752,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       oauth: createTrackerOAuth(),
       sessionStatus: trackerSessionStatus ?? { forget: () => {} },
       persistPath: extensionsPersistPath(openchamberDataDir),
-      emitChanged: () => {
-        const clients = getOpenChamberEventClients();
-        for (const client of clients) {
-          try {
-            writeSseEvent(client, { type: 'openchamber:tracker-providers-changed', properties: {} });
-          } catch {
-            clients.delete(client);
-          }
-        }
-      },
+      emitChanged: () => announceChange('openchamber:tracker-providers-changed'),
     });
     registerGuestRoutes(app, {
       openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService,
