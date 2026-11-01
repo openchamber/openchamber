@@ -750,6 +750,11 @@ const SourceBoardBody: React.FC<{
         observer.observe(board);
         return () => observer.disconnect();
     }, []);
+    // A narrow board has no room for list and preview together; it opens on the
+    // list, so the issues are what you see first and the preview sits behind them.
+    React.useEffect(() => {
+        if (narrow) setListOpen(true);
+    }, [narrow]);
     const listDropdown = narrow && listOpen;
 
     const list = (
