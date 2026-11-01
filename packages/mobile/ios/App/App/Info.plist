@@ -54,6 +54,8 @@
 	<string>OpenChamber connects to OpenChamber servers on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>OpenChamber uses the microphone for voice dictation in the chat composer.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>OpenChamber saves images you choose to keep to your photo library.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
