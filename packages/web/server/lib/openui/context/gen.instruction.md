@@ -20,5 +20,3 @@ During streaming, the output is re-parsed on every chunk. Undefined references a
 2. $variable declarations — state ready for bindings
 3. Component definitions — fill in with data already available
 4. Data values — leaf content last
-
-Always write the root = Stack(...) statement first so the UI shell appears immediately, even before child data has streamed in.

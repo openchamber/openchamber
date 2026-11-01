@@ -159,7 +159,9 @@ depends on how the user works.
 
 Managed sessions receive the guidance assembled by
 `../openui/context/assets.js` in the separate `openchamber.openui` entry. It
-contains base, index and catalog revision; this module handles entry delivery.
+contains presentation guidance, routes, syntax and component signatures. Optional
+references are read through the tool. This module handles entry delivery;
+content assembly stays with OpenUI.
 
 OpenUI's [context-as-skill mapping](../openui/context/DOCUMENTATION.md#context-as-a-skill)
 guides what remains resident and what loads on demand.

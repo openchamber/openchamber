@@ -933,6 +933,7 @@ describe('managed agent tool runtime', () => {
     expect(tools.openchamber_openui.input.properties.parameters.properties.ui).toMatchObject({ type: 'string' });
     expect(tools.openchamber_openui.input.properties.parameters.properties.groups).toMatchObject({
       items: { enum: ['data', 'interaction', 'html', 'advanced', 'examples'] },
+      minItems: 1,
       maxItems: 5,
     });
     expect(tools).not.toHaveProperty('openchamber_render');

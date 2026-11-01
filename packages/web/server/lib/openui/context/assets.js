@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 
 import { OpenChamberControlError } from '../../openchamber-control/error.js';
 import { isString } from '../../shared/guards.js';
@@ -41,30 +40,21 @@ const readAsset = async (name) => {
 };
 
 export const readOpenUIInstructionGroups = async (groups) => {
-  if (groups !== undefined && (!Array.isArray(groups) || !groups.every(isString))) {
-    throw new OpenChamberControlError('groups must be an array of OpenUI instruction group names', 400);
+  if (!Array.isArray(groups) || groups.length === 0 || !groups.every(isString)) {
+    throw new OpenChamberControlError('groups must be a nonempty array of OpenUI instruction group names', 400);
   }
-  const requested = groups ?? [];
-  if (requested.length > MAX_GROUPS) {
+  if (groups.length > MAX_GROUPS) {
     throw new OpenChamberControlError(`groups accepts at most ${MAX_GROUPS} entries`, 400);
   }
-  const unique = [...new Set(requested)];
+  const unique = [...new Set(groups)];
   if (unique.some((group) => !GROUPS.includes(group))) {
     throw new OpenChamberControlError(`groups must use only: ${GROUPS.join(', ')}`, 400);
   }
-  if (unique.length === 0) return { groups: [], content: await readAsset('instruction.md') };
-  const bodies = await Promise.all(unique.map(async (group) => ({ group, content: await readGroup(group) })));
-  const length = bodies.reduce((total, entry) => total + entry.content.length, 0);
-  if (length > MAX_CONTENT_LENGTH) unavailable();
-  return { groups: bodies.map(({ group }) => group), content: bodies.map(({ content }) => content).join('\n\n') };
+  const content = (await Promise.all(unique.map(readGroup))).join('\n\n');
+  if (content.length > MAX_CONTENT_LENGTH) unavailable();
+  return { groups: unique, content };
 };
 
-export const readOpenUIGuidance = async () => {
-  const [resident, groups, catalog] = await Promise.all([
-    Promise.all(['instruction.md', 'gen.instruction.md', 'gen.schema.md'].map(readAsset)),
-    Promise.all(GROUPS.map(readGroup)),
-    fs.readFile(assetUrl('generated/gen.schema.json'), 'utf8').catch(unavailable),
-  ]);
-  const revision = createHash('sha256').update(JSON.stringify({ resident, groups, catalog })).digest('hex');
-  return `${resident.join('\n\n')}\n\nOpenUI catalog revision: ${revision}.`;
-};
+export const readOpenUIGuidance = async () => (
+  await Promise.all(['instruction.md', 'gen.instruction.md', 'gen.schema.md'].map(readAsset))
+).join('\n\n');

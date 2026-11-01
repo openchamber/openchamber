@@ -82,7 +82,10 @@ try {
     throw new Error('Every OpenUI component must have exactly one resident or group schema owner');
   }
   const files = {};
-  files['gen.instruction.md'] = `## Syntax Rules\n\n${baseSyntax}\n\n## Hoisting & Streaming\n\n${section('Hoisting & Streaming (CRITICAL)')}`;
+  // The ordered list already places root first; omit the repeated footer.
+  const streaming = section('Hoisting & Streaming (CRITICAL)').split('\n\nAlways write the root = Stack(...)');
+  if (streaming.length !== 2) throw new Error('Official streaming guidance changed; review deduplication');
+  files['gen.instruction.md'] = `## Syntax Rules\n\n${baseSyntax}\n\n## Hoisting & Streaming\n\n${streaming[0]}`;
   files['gen.schema.md'] = `### Components\n${lines(residents)}`;
   // The function signature already states the Each scope rule; omit its repeated footer.
   const builtins = section('Built-in Functions').split('\n\nIMPORTANT @Each rule:');
@@ -92,8 +95,12 @@ try {
   files['groups/advanced/gen.instruction.md'] = `## Expressions\n\n${advancedSyntax}\n\n${reactive.replace('all Queries and expressions', 'all expressions')}\n\n## Data functions\n\n${builtins[0]}`;
   const localActions = section('Action — Button Behavior').split('\n').filter((line) => /^- @(Set|Reset)\(/.test(line));
   if (localActions.length !== 2) throw new Error('Official local actions changed');
+  // The last clause recommends an unavailable component; the local group owns horizontal bars.
+  const chartSelection = selectRule(openuiChatAdditionalRules, 'Charts:').split('; prefer HorizontalBarChart');
+  if (chartSelection.length !== 2) throw new Error('Official chart selection changed; review supported components');
   files['groups/data/gen.instruction.md'] = [
     '# Data',
+    `${chartSelection[0]}.`,
     selectRule(openuiChatAdditionalRules, 'For large chart values,'),
     '## Official examples\n\nDemonstration data.',
     example('Example 1 — Table (column-oriented):'),
@@ -102,6 +109,7 @@ try {
   files['groups/interaction/gen.instruction.md'] = [
     '# Interaction',
     ...['For forms, define one FormControl', 'For forms, always provide', 'Never nest Form'].map((prefix) => selectRule(openuiAdditionalRules, prefix)),
+    selectRule(openuiChatAdditionalRules, 'Validation rules ('),
     '## Local state actions\n\n' + localActions.join('\n'),
     '## Official example\n\nDemonstration form.',
     example('Example 3 — Form with validation:'),

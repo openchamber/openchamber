@@ -6,6 +6,8 @@ For forms, always provide the second Form argument with Buttons(...) actions: Fo
 
 Never nest Form inside Form.
 
+Validation rules ({ required: true, email: true, minLength: 8, ... }) are enforced with inline errors — use them for genuinely essential fields, but never require a free-text field where leaving it blank is meaningful.
+
 ## Local state actions
 
 - @Set(variable: $variable, value: any) — Set a $variable to a specific value

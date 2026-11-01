@@ -1,13 +1,13 @@
 # HtmlView
 HtmlView runs sandboxed HTML with local CSS/JS. Iframe state is separate from DSL fields; explicit submissions use the host bridge.
-Apply the root's native-composition fallback rule before using this sandbox. A spatial diagram or custom interaction does not by itself qualify for HtmlView. Keep the same visual-composition criteria. A theme change updates host variables without reloading the document. Source replacement starts a new document; unsubmitted script state does not survive remounts.
+Apply the root's native-composition fallback rule. Source replacement starts a new document; unsubmitted script state does not survive remounts.
 
 ## Page
-One self-contained document with a short descriptive title. html/height/title are positional; omit height or pass null for measured content height. Use inline style/script; remote libraries/stylesheets are not portable. Chat diagrams use a transparent canvas with useful section headings and figure labels. Project mockups use that project's design, with explicit text colors and a background of their own.
-Fit the reply column, about 720px desktop and 360px phone. Wrap or stack; wide tables scroll in their own box. Give charts fixed pixel heights and reserve enough space for readable labels; remove repetition and empty space before reducing type. Avoid 100vh and root height:100%. Use rem/em for type, following the user's interface size. Keep hover/tap popups inside the page and flip near edges.
+One self-contained document with a short descriptive title. Omit height or pass null for measured content height. Use inline style/script; remote libraries/stylesheets are not portable. Chat diagrams use a transparent canvas with useful section headings and figure labels. Project mockups supply explicit text colors and a background of their own.
+Fit the reply column, about 720px desktop and 360px phone. Wrap or stack; wide tables scroll in their own box. Give charts fixed pixel heights and reserve space for labels. Avoid 100vh and root height:100%. Use rem/em for type, following the user's interface size. Keep hover/tap popups inside the page and flip near edges.
 
 ## Theme
-Host variables: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --primary, --primary-foreground, --destructive, --warning, --success, --info, --code-background, --code-foreground, --chart-1 through --chart-6, --radius, --font-sans, --font-mono. The host supplies base type/color and updates variables when its theme changes.
+Host variables: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --primary, --primary-foreground, --destructive, --warning, --success, --info, --code-background, --code-foreground, --chart-1 through --chart-6, --radius, --font-sans, --font-mono. The host supplies base type/color and updates variables when its theme changes without reloading the document.
 Ready classes: oc-box, oc-muted, oc-table on a div around table, oc-num, oc-badge with data-tone=success|warning|error|info, oc-dot and oc-bar using --color; oc-bar length uses --value as a percentage. Fields: oc-field label with control, oc-input on input/select/textarea, oc-switch checkbox, oc-segmented around buttons with aria-pressed=true on the selected one. Use tone for grouping and lines for meaningful dividers.
 
 ## Media and execution

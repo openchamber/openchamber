@@ -10,17 +10,16 @@ it actually shows.
 
 ### Choose a rendering path
 
-Use resident layout components and icons for static diagrams; read groups for other
-native capabilities. Use native composition whenever it meets the required visual
-or interaction. Read html and use HtmlView only after assessing available native
+Use resident layout components and icons for static diagrams. Use native composition
+whenever it meets the required visual or interaction. Use HtmlView only after assessing available native
 combinations and identifying a required effect they cannot achieve; convenience
 or styling preference does not qualify. Static diagrams need no controls or submission.
 
 Read each group before using its features with openchamber_openui,
 action="openui.read", parameters.groups=[group names]. Combine needed groups; reuse
-same-version references and reread when missing or stale. Omit groups for root guidance.
+references already in context. Reread when their content is missing or needs refreshing.
 
-- data: Tables and charts for trends, category comparisons, proportions and exact values; options and examples.
+- data: Tables and charts; selection, options and examples.
 - interaction: Forms, fields, selections, buttons and actions; validation and submission.
 - advanced: Expressions, reactive derived values, filtering and Each; no new components.
 - examples: Read when composing staged explanations with notes or relationship comparisons with state changes; two distinct native layout patterns.
@@ -30,28 +29,22 @@ same-version references and reread when missing or stale. Omit groups for root g
 
 Deliver explanatory diagrams and locally interactive views inline as complete,
 independent triple-backtick openui-lang blocks; never patch earlier blocks. Mark code
-examples openui-lang literal. Use openchamber_openui with action="openui.prompt" only for input needed to continue:
-pass one complete program in parameters.ui, without fences, at most 200000 characters, with a
-terminal submit action. It waits for the user; accept chat answers too.
+examples openui-lang literal. Use openui.prompt only for input needed to continue;
+accept chat answers too. Reuse known information. Ask conversationally for one missing
+detail; use forms for useful grouped answers. Controls need a working effect.
 
 ### Structure and representation
 
 Lead with conclusions, then reasoning and detail. Group through spacing, alignment
 and headings; keep nesting shallow. Keep deciding comparisons visible; tabs,
-accordions and carousels hold alternatives or secondary detail. Pair visuals with
-explanations, each serving a distinct purpose. Keep related items close and use
+accordions and carousels hold alternatives or secondary detail. Keep related items close and use
 consistent spacing for equivalent elements. Size groups to content; share dimensions
 for comparison. Align arrows with their endpoints and label unclear relationships.
 
 - Prose explains reasoning; lists organize items or steps; tables align exact attributes;
   cards group self-contained units.
-- Charts: bars compare categories, lines show trends, scatter plots show relationships,
-  proportions show composition. Match the data's mathematics and distributions;
-  label values, units, scales and uncertainty without exaggeration.
-- Diagrams: use alignment, containment and connections for structure, dependencies,
-  flow or state. Keep the main relationship clear and details near their objects;
-  use familiar conventions, reading order and manageable detail. Preserve identity
-  across stages and distinguish changed from retained parts. Vectors suit geometry.
+- Diagrams: use familiar conventions and reading order. Preserve identity across
+  stages and distinguish changed from retained parts. Vectors suit geometry.
 - Images: show the exact subject when appearance matters; keep crops, aspect ratios,
   detail and labels suitable for comparison in single images or galleries.
 - Maps: show location, proximity, coverage or routes; preserve place identity, route
@@ -74,17 +67,6 @@ demo values, distinguish observations, estimates, assumptions and recommendation
 and keep missing data distinct from zero. Preserve qualifiers. Geometry and styling
 must not imply unsupported quantities, relationships or certainty.
 
-### Interaction and input
-
-Controls need working effects: exploration, adjustment, navigation or required input.
-Ask conversationally for one missing detail; use forms for useful grouped answers.
-Reuse known information, minimize fields, require only necessary answers, and provide
-clear labels and a direct completion path.
-
-Update related results together; label fixed-scope metrics. Distinguish local edits,
-assistant requests and external completion. Acceptance confirms receipt; completion
-requires the external result.
-
 Project mockups follow the project's design. Before delivery, check diagram
 coverage against the key relationships explained. Add missing visual explanations
 and correct ambiguous connections, mappings or state changes. Check labels and controls.
@@ -93,11 +75,9 @@ and correct ambiguous connections, mappings or state changes. Check labels and c
 
 Declare state as `$variable = defaultValue`; only $binding parameters support two-way
 updates. Field names and defaultValue do not declare state. Use null to skip optional
-middle arguments; documentation types are not declarations. Display definitions must
-be reachable from root; variables are block-local.
+middle arguments; documentation types are not declarations. Variables are block-local.
 
 Native DSL has no arbitrary JavaScript, Query/Mutation/Run or remote execution.
-HtmlView scripts submit only through explicit clicks and cannot select a session or tool call.
 
 ### Component behavior
 

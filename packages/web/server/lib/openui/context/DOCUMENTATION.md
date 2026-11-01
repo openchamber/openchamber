@@ -4,8 +4,8 @@
 
 This directory owns OpenUI prompt sources, tool descriptions, context assembly,
 generated contracts. `assets.js` assembles root-level
-instructions, schema and revision for the session instruction entry and reads requested
-groups for `openchamber_openui`. The surrounding modules handle delivery.
+instructions and schema for the resident session instruction entry and reads
+requested groups for `openchamber_openui`. The surrounding modules handle delivery.
 
 ### Context as a skill
 
@@ -22,8 +22,8 @@ groups for `openchamber_openui`. The surrounding modules handle delivery.
 
 ### Content sources
 
-Root `instruction.md` owns resident host rules and routes. Group `instruction.md`
-files contain local behavior only, except for the two composition patterns in
+Root `instruction.md` owns resident presentation policy, host rules and routes.
+Group `instruction.md` files contain local behavior only, except for the two composition patterns in
 `examples`. Advanced has no handwritten file. Markdown changes are read immediately
 without regeneration. `tools.js`
 owns the tool/action descriptions, parameter schemas and group whitelist.
@@ -43,7 +43,8 @@ Run `bun run openui:generate` after changing the catalog or official library.
   It is never rewritten by generation.
 
 The upstream selection is explicit in `generate.mjs`. Syntax rules 1–7 and string
-escaping stay resident; rules 9–16 go to advanced, renumbered. Rule 8 permits undeclared
+escaping stay resident; rules 9–16 go to advanced, renumbered. The streaming section
+keeps its ordered list and omits the repeated root-first footer. Rule 8 permits undeclared
 state and is excluded because the host requires declarations. The upstream opening
 requires an all-DSL answer and is excluded. Component-signature sections already
 exist as catalog contracts and contain unsupported component guidance, an incorrect
@@ -65,10 +66,11 @@ No icon-name directory is delivered in context.
 
 `assets.js` assembles local instruction.md first, followed by required official
 instructions and catalog contracts. Each group declares its exact required files;
-a group can consist entirely of generated references. Missing declared files fail with 503. Requested groups retain their
-order and deduplicate. The version hashes all assembled groups, the routing index
-and catalog at read time, so edits to optional guidance also invalidate old context.
-No generated copy or build-time revision of handwritten Markdown is maintained.
+a group can consist entirely of generated references. Missing declared files fail
+with 503. Reads require a nonempty group array, retain request order and deduplicate
+within the call. Responses contain only the selected `groups` and their `content`.
+Resident assembly reads only resident files. No generated copy of handwritten
+Markdown is maintained.
 
 The selected catalog contains 48 components with exactly one signature owner:
 19 resident display components, 7 in data, 21 in interaction and 1 in html.
@@ -100,7 +102,8 @@ Interaction points to advanced for expressions and derived values.
 - Resident assets live at the context root, outside the group API. Read matching
   task and capability groups directly.
   Disclose specialized details when needed, allow
-  related groups to be fetched together and reuse same-version context.
+  related groups to be fetched together and reuse loaded references. Explicit
+  rereads remain available after tool-result context is lost or needs refreshing.
 - Keep examples complete enough to teach their visual organization, retain
   source attribution in maintenance documentation and label demonstration data. Programs must pass the
   parser and host checks.
@@ -146,7 +149,7 @@ Tables/charts and interaction are disclosed as complete capability groups;
 the prior base/content/inputs/charts split repeated signatures and hid common layout.
 Resident files are outside groups. The retired base, content, inputs, charts,
 forms, media and diagrams names are rejected by the same fixed-group validation as other
-unknown names; the updated instruction revision and tool schema expose current routes.
+unknown names; resident routing and the tool schema expose current routes.
 
 ### Why composition examples are read on demand
 
@@ -154,7 +157,7 @@ The `examples` group contains two distinct patterns: staged explanation with pai
 notes, and relationship comparison with state changes. Root routes these tasks to
 the examples without carrying both programs on every request. The group contains
 only handwritten instructions using resident components, with no generated contract
-files. Its content participates in the instruction revision like every other group.
+files.
 Transfer to other tasks still requires production evaluation.
 
 ### Why image internals and icon directories are omitted
@@ -169,9 +172,11 @@ unaffected by this reference change.
 ### Why capability guidance is generated from selected official sources
 
 Data includes the unmodified programs from `openuiExamples` 1 and 2, for Table and
-BarChart. Interaction includes example 3, for a validated Form, plus the three
-ordinary-library form rules. Data also selects the Chat rule about scaling chart
-values and labeling units. Selection uses unique prefixes and fails when a source
+BarChart. Interaction includes example 3, for a validated Form, the three
+ordinary-library form rules and the Chat validation rule. Data selects the Chat
+rules about chart selection and scaling chart values with labeled units. The
+selection rule omits its unsupported HorizontalBarChart clause; local guidance
+owns the horizontal BarChart option. Selection uses unique prefixes and fails when a source
 is absent or ambiguous. Every selected program must pass the current catalog and
 host inspector before generated files are published.
 
@@ -194,6 +199,19 @@ The model chooses between an inline response and a blocking input request before
 reading optional references. Resident delivery guidance owns that decision; the
 waiting tool description names the required-input purpose at the point of use.
 Local controls work inline and do not require a waiting call.
+
+### Why references are read explicitly
+
+OpenCode retains the root through compaction, revert and fork, so the read action
+accepts only selected groups. Available references are reused; an explicit read
+loads current content when needed. Reference version tracking has no demonstrated
+need and adds hashing, injection state and model instructions. Optional edits do
+not change the resident entry.
+
+The tool description owns the direct-call location, action descriptions identify
+their purpose, and parameter descriptions own input format and limits. Resident
+guidance owns delivery choice and reference reuse. Capability-specific chart and
+form rules stay in their groups; generated syntax owns reference reachability.
 
 ### Why deliver context through managed tools
 
