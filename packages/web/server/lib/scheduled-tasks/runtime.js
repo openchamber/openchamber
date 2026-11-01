@@ -1,6 +1,7 @@
 import { OpenCode } from '@opencode/client';
 import { DateTime } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
+import { directoryHeaderForOpenCode } from '../opencode/directory-header.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
@@ -303,7 +304,7 @@ export const createScheduledTasksRuntime = (deps) => {
     baseUrl: openCodeOrigin(),
     headers: {
       ...getOpenCodeAuthHeaders(),
-      ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
+      ...(directory ? { 'x-opencode-directory': encodeURIComponent(directoryHeaderForOpenCode(directory)) } : {}),
     },
     fetch: async (...args) => {
       const response = await fetch(...args);
@@ -778,7 +779,7 @@ export const createScheduledTasksRuntime = (deps) => {
     try {
       const session = await client.session.create({
         title,
-        location: { directory: runDirectory },
+        location: { directory: directoryHeaderForOpenCode(runDirectory) },
         // Marks a run of a task, so it stays out of In work: nobody sent it.
         metadata: { openchamber: { kind: 'scheduled' } },
         // No model or agent at all: OpenCode picks its own default.

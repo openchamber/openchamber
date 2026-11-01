@@ -18,6 +18,7 @@ import { diagnosticApiRoute, diagnosticErrorMessage } from '../diagnostics/vocab
 import { withUnreadBaseline } from '../openchamber-sessions/unread-baseline.js';
 import { OPENCODE_TRUST_ROUTE, isGlobalRead, readMoveDestination, sessionMoveOf } from '../opencode-trust/index.js';
 import { createSessionDirectoryResolver } from '../opencode-trust/session-directory.js';
+import { directoryHeaderForOpenCode, wireForwardedDirectoryHeaders } from './directory-header.js';
 
 /**
  * The abort signal for one upstream read.
@@ -734,9 +735,9 @@ export const registerOpenCodeProxy = (app, deps) => {
         ? req.originalUrl
         : (typeof req.url === 'string' ? req.url : '');
       const upstreamPath = requestUrl;
-      const headers = normalizeForwardedDirectoryHeaders(
+      const headers = wireForwardedDirectoryHeaders(normalizeForwardedDirectoryHeaders(
         collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders())
-      );
+      ));
       headers.accept ??= 'text/event-stream';
       headers['cache-control'] ??= 'no-cache';
 
@@ -903,7 +904,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   const fetchSessionListPayload = async (upstreamPath, { req = null, signal = null, timeoutMs = SESSION_UPSTREAM_TIMEOUT_MS } = {}) => {
     const headers = req
       ? {
-          ...normalizeForwardedDirectoryHeaders(collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders())),
+          ...wireForwardedDirectoryHeaders(normalizeForwardedDirectoryHeaders(collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()))),
           accept: 'application/json',
           'accept-encoding': 'identity',
         }
@@ -1325,16 +1326,14 @@ export const registerOpenCodeProxy = (app, deps) => {
           proxyReq.setHeader('Authorization', authHeaders.Authorization);
         }
 
-        if (req.headers?.['x-opencode-directory-encoding'] === 'uri') {
-          const rawDirectory = req.headers['x-opencode-directory'];
-          if (typeof rawDirectory === 'string') {
-            try {
-              proxyReq.setHeader('x-opencode-directory', decodeURIComponent(rawDirectory));
-            } catch {
-              proxyReq.setHeader('x-opencode-directory', rawDirectory);
-            }
+        const rawDirectory = req.headers?.['x-opencode-directory'];
+        if (typeof rawDirectory === 'string') {
+          const marked = req.headers?.['x-opencode-directory-encoding'] === 'uri';
+          const wired = directoryHeaderForOpenCode(rawDirectory, marked);
+          if (wired !== rawDirectory || marked) {
+            proxyReq.setHeader('x-opencode-directory', wired);
           }
-          proxyReq.removeHeader?.('x-opencode-directory-encoding');
+          if (marked) proxyReq.removeHeader?.('x-opencode-directory-encoding');
         }
 
         // Defensive: request identity encoding from upstream OpenCode.

@@ -1,4 +1,5 @@
 import { OpenCode } from '@opencode/client';
+import { directoryHeaderForOpenCode } from '../opencode/directory-header.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 
 /**
@@ -10,7 +11,7 @@ import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
  */
 const buildDirectoryHeaders = (directory) => {
   const headers = {};
-  if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
+  if (directory) headers['x-opencode-directory'] = encodeURIComponent(directoryHeaderForOpenCode(directory));
   return headers;
 };
 
