@@ -35,6 +35,16 @@ export const seriesColor = (index: number) => `var(--oc-series-${(index % SERIES
 
 const TONES = ['success', 'warning', 'error', 'info'] as const;
 
+/**
+ * The tone steps of the app's flat tiles (`--oc-tile-*` in
+ * styles/design-system.css), for a page, which has no app stylesheet. Dark
+ * steps are smaller: near black the same mix reads stronger.
+ */
+export const TILE_TONES = {
+    dark: { '--oc-tile-tone': '3%', '--oc-tile-inset-tone': '4.5%', '--oc-tile-hover-tone': '5.5%' },
+    light: { '--oc-tile-tone': '4%', '--oc-tile-inset-tone': '6%', '--oc-tile-hover-tone': '7%' },
+} as const;
+
 /** The variables the shared CSS reads: series colours, and each tone with text that stays readable on its own tint. */
 export function kitVariables(theme: Theme) {
     const readable = getReadableThemeColors(theme);
@@ -49,6 +59,7 @@ export function kitVariables(theme: Theme) {
         '--oc-warning-text': readable.tinted.warning,
         '--oc-error-text': readable.tinted.error,
         '--oc-info-text': readable.tinted.info,
+        ...TILE_TONES[theme.metadata.variant],
     };
 }
 
@@ -62,8 +73,8 @@ const rem = (amount: number) => `calc(var(--oc-rem,1rem) * ${amount})`;
  * in; `.oc-bar` is a whole bar on its track, as long as --value, coloured by
  * --color.
  */
-export const KIT_SHARED_CSS = `.oc-box{box-sizing:border-box;padding:${rem(0.625)} ${rem(0.75)};border-radius:${rem(0.75)};background-color:color-mix(in srgb,var(--foreground) 4%,transparent)}`
-    + '.oc-box .oc-box{background-color:color-mix(in srgb,var(--foreground) 6%,transparent)}'
+export const KIT_SHARED_CSS = `.oc-box{box-sizing:border-box;padding:${rem(0.625)} ${rem(0.75)};border-radius:${rem(0.75)};background-color:color-mix(in srgb,var(--foreground) var(--oc-tile-tone),transparent)}`
+    + '.oc-box .oc-box{background-color:color-mix(in srgb,var(--foreground) var(--oc-tile-inset-tone),transparent)}'
     + '.oc-badge{display:inline-flex;align-items:center;padding:.0625em .5em;border-radius:999px;background-color:color-mix(in srgb,var(--foreground) 6%,transparent);color:var(--muted-foreground);font-size:.8125em;font-weight:500;line-height:1.45;white-space:nowrap}'
     + '.oc-badge[data-tone]{background-color:color-mix(in srgb,var(--oc-tone) 15%,transparent);color:var(--oc-tone-text)}'
     + TONES.map((tone) => `.oc-badge[data-tone=${tone}]{--oc-tone:var(--oc-tone-${tone});--oc-tone-text:var(--oc-${tone}-text)}`).join('')

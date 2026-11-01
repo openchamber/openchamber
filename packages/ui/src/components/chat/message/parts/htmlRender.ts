@@ -187,8 +187,8 @@ const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repe
     // Option cards are the app's flat tiles (`.oc-tile`, `.oc-tile-hover` in
     // styles/design-system.css): no border, set off by tone, a tone step more
     // on hover, and the selection fill once chosen, like a pressed chip.
-    + '.oc-option{display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start;gap:4px;box-sizing:border-box;width:100%;padding:16px;border:0;border-radius:var(--radius);background-color:color-mix(in srgb,var(--foreground) 4%,transparent);color:var(--foreground);font:inherit;text-align:start;cursor:pointer;transition:background-color .15s,color .15s}'
-    + '.oc-option:hover,.oc-option:focus-visible{background-color:color-mix(in srgb,var(--foreground) 7%,transparent)}'
+    + '.oc-option{display:flex;flex-direction:column;justify-content:flex-start;align-items:flex-start;gap:4px;box-sizing:border-box;width:100%;padding:16px;border:0;border-radius:var(--radius);background-color:color-mix(in srgb,var(--foreground) var(--oc-tile-tone),transparent);color:var(--foreground);font:inherit;text-align:start;cursor:pointer;transition:background-color .15s,color .15s}'
+    + '.oc-option:hover,.oc-option:focus-visible{background-color:color-mix(in srgb,var(--foreground) var(--oc-tile-hover-tone),transparent)}'
     + '.oc-option[aria-pressed=true]{background-color:var(--oc-selection);color:var(--oc-selection-foreground)}'
     // Sized in the app's rem like its Button (h-8 px-3 rounded-md, the UI
     // label size), so it follows the interface size setting.
