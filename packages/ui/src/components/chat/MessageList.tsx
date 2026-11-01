@@ -15,7 +15,7 @@ import { useTurnFoldContexts } from './components/useTurnFold';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './components/liveActivityContext';
 import { MessageSliceContext } from './message/messageSliceContext';
 import { PendingWorkflowApprovals } from './workflows/PendingWorkflowApprovals';
-import { getTurnsWithLaterAssistant } from './lib/turns/liveActivity';
+import { getShownPages, getTurnsWithLaterAssistant, isActivityPart } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { buildHistoryEntries, findFirstVisibleMessageId, type TimelineEntry } from './lib/turns/timelineEntries';
@@ -31,7 +31,7 @@ import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/
 import { streamPerfCount, streamPerfMark, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useSessionPartsForMessages } from '@/sync/sync-context';
+import { useDirectoryStore, useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 import { resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
 import { onNavigationRelease } from './lib/scroll/timelineScrollIntent';
@@ -463,7 +463,7 @@ const TurnRow = React.memo(({
                 finalMessageId={row.finalMessageId} onToggle={handleToggleActivity} renderMessage={renderMessage} />
         );
     } else if (row.kind === 'turn-pages') {
-        content = <TurnPagesRow turn={turn} />;
+        content = <TurnPagesRow turn={turn} hasLaterAssistant={hasLaterAssistant} expanded={isActivityExpanded} renderMessage={renderMessage} />;
     } else {
         const message = turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
         if (message) {
@@ -1029,16 +1029,48 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
 
+    const directoryStore = useDirectoryStore(directory);
+    const liveTurn = trailingStreamingEntry?.kind === 'turn' ? trailingStreamingEntry.turn : undefined;
+    // Only the page's message boundary affects row order. Streaming changes
+    // within that boundary do not rebuild the timeline's row array.
+    const readLastPageMessage = React.useCallback(() => {
+        if (!liveTurn) return undefined;
+        const parts = directoryStore.getState().part;
+        for (let index = liveTurn.assistantMessages.length - 1; index >= 0; index--) {
+            const message = liveTurn.assistantMessages[index];
+            const live = parts[message.info.id];
+            if (getShownPages([{ ...message, parts: live?.length ? live : message.parts }]).length > 0) return message.info.id;
+        }
+        return undefined;
+    }, [directoryStore, liveTurn]);
+    const subscribeLastPageMessage = React.useCallback((notify: () => void) => {
+        if (!liveTurn) return () => {};
+        return directoryStore.subscribe((state, previous) => {
+            if (liveTurn.assistantMessageIds.some((id) => state.part[id] !== previous.part[id])) notify();
+        });
+    }, [directoryStore, liveTurn]);
+    const lastLivePageMessage = React.useSyncExternalStore(subscribeLastPageMessage, readLastPageMessage, readLastPageMessage);
+    const readLiveHasActivity = React.useCallback(() => {
+        if (!liveTurn) return false;
+        const parts = directoryStore.getState().part;
+        return liveTurn.assistantMessages.some((message) => {
+            const live = parts[message.info.id];
+            return (live?.length ? live : message.parts).some((part) => isActivityPart(part, showReasoningTraces));
+        });
+    }, [directoryStore, liveTurn, showReasoningTraces]);
+    const liveHasActivity = React.useSyncExternalStore(subscribeLastPageMessage, readLiveHasActivity, readLiveHasActivity);
+
     const previousRowsRef = React.useRef<RenderRow[]>([]);
     const rows = React.useMemo(() => streamPerfMeasure('ui.message_list.render_rows_ms', () => {
         const next = buildTimelineRows(allEntries, {
             collapsedActivity: !defaultActivityExpanded,
             expandedTurns: turnExpansion,
             showReasoningTraces,
+            livePages: liveTurn ? { turnId: liveTurn.turnId, lastMessageId: lastLivePageMessage, hasActivity: liveHasActivity } : undefined,
         }, previousRowsRef.current);
         previousRowsRef.current = next;
         return next;
-    }), [allEntries, defaultActivityExpanded, showReasoningTraces, turnExpansion]);
+    }), [allEntries, defaultActivityExpanded, showReasoningTraces, turnExpansion, liveTurn, lastLivePageMessage, liveHasActivity]);
 
     // The prompt rows the list keeps on top while their turn scrolls under them.
     const stickyRowIndices = React.useMemo(() => {

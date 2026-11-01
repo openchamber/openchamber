@@ -64,6 +64,7 @@ export type TimelineRowsOptions = {
     collapsedActivity: boolean;
     expandedTurns: ReadonlyMap<string, boolean>;
     showReasoningTraces: boolean;
+    livePages?: { turnId: string; lastMessageId: string | undefined; hasActivity?: boolean };
 };
 
 const isMessageCompleted = (message: ChatMessageEntry): boolean => (
@@ -101,7 +102,8 @@ const sliceKey = (cut: TextCut) => `${cut.partId}:${cut.offset}`;
 
 const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[] => {
     const { turn } = entry;
-    const underFold = options.collapsedActivity && hasLiveActivity(turn, options.showReasoningTraces);
+    const underFold = options.collapsedActivity && (options.livePages?.turnId === turn.turnId && options.livePages.hasActivity !== undefined
+        ? options.livePages.hasActivity : hasLiveActivity(turn, options.showReasoningTraces));
     const finalMessage = underFold ? getLiveFinalMessage(turn.assistantMessages) : undefined;
     const fields = { entry, underFold, finalMessageId: finalMessage?.info.id, gapBelow: false };
     const rows: TimelineRow[] = [{ kind: 'turn-head', key: entry.key, ...fields }];
@@ -131,18 +133,23 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
         // The rows LiveTurnActivity drew inside one turn row, in the same order.
         const activityMessages = finalMessage ? turn.assistantMessages.filter((message) => message !== finalMessage) : turn.assistantMessages;
         // Folded, the fold row itself draws what stays in view: a working
-        // turn's latest steps, the pages and the steps after them. Opened,
-        // every step is a row of its own.
+        // turn's latest steps around the pages row. Opened, every step is a
+        // row of its own; the pages row keeps its key in both states.
         rows.push({ kind: 'turn-fold', key: `fold:${turn.turnId}`, ...fields });
         const pages = finalMessage ? [] : getShownPages(turn.assistantMessages);
+        // The live part store can show a card before this record receives it.
+        // Reserve its row so the live tail can render that card immediately.
+        const hasPagesRow = !finalMessage && (pages.length > 0 || options.livePages?.turnId === turn.turnId);
         if (options.expandedTurns.get(turn.turnId) === true) {
             // A working turn draws what came after its last page below it.
-            const lastPageMessageId = pages[pages.length - 1]?.messageID;
+            const lastPageMessageId = options.livePages?.turnId === turn.turnId
+                ? options.livePages.lastMessageId
+                : pages[pages.length - 1]?.messageID;
             const split = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) + 1 : 0;
             activityMessages.slice(0, split > 0 ? split : activityMessages.length).forEach((message) => addMessage(message));
-            if (pages.length > 0) rows.push({ kind: 'turn-pages', key: `pages:${turn.turnId}`, ...fields });
+            if (hasPagesRow) rows.push({ kind: 'turn-pages', key: `pages:${turn.turnId}`, ...fields });
             if (split > 0) activityMessages.slice(split).forEach((message) => addMessage(message));
-        } else if (entry.hasLaterAssistant && pages.length > 0) {
+        } else if (hasPagesRow) {
             rows.push({ kind: 'turn-pages', key: `pages:${turn.turnId}`, ...fields });
         }
         if (finalMessage) addMessage(finalMessage, true);

@@ -50,6 +50,38 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); globalThis.fetch = originalFetch; });
 
 describe('React-owned Markdown media', () => {
+  test('loads protected native images as authenticated data URLs', async () => {
+    const reader = Object.getOwnPropertyDescriptor(globalThis, 'FileReader');
+    Object.defineProperty(globalThis, 'FileReader', { configurable: true, value: class {
+      result: string | null = null;
+      onload: (() => void) | null = null;
+      readAsDataURL(blob: Blob) {
+        void blob.arrayBuffer().then((bytes) => {
+          this.result = `data:${blob.type};base64,${Buffer.from(bytes).toString('base64')}`;
+          this.onload?.();
+        });
+      }
+    } });
+    Object.assign(window, { Capacitor: { isNativePlatform: () => true } });
+    await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime.test', runtimeKey: 'protected-media', requestHeaders: { 'X-Proxy': 'fixture' } }));
+    let header: string | null = null;
+    const fetcher = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+      if (String(input).includes('/api/fs/raw')) header = new Headers(init?.headers).get('X-Proxy');
+      return fetcher(input, init);
+    };
+    const { MarkdownMediaOwner } = await import('./markdown-media-context');
+    const owner = new MarkdownMediaOwner({ mode: 'assistant', directory: '/repo', sessionId: 'protected', messageId: 'protected' });
+    owner.register('protected.png');
+    try {
+      expect(await owner.resolve('protected.png')).toBe(`data:image/png;base64,${Buffer.from(png).toString('base64')}`);
+      expect(header).toBe('fixture');
+    } finally {
+      owner.dispose();
+      if (reader) Object.defineProperty(globalThis, 'FileReader', reader); else Reflect.deleteProperty(globalThis, 'FileReader');
+      await act(async () => switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime.test', runtimeKey: 'default', requestHeaders: {} }));
+    }
+  });
   test('keeps remote chat images as links and badges as labels without issuing image requests', async () => {
     await act(async () => root.render(<Chat><MarkdownImage src="https://remote.test/a.png" alt="A" /><a href="https://target.test"><MarkdownMediaLinkContext.Provider value><MarkdownImage src="https://remote.test/b.png" alt="badge" /></MarkdownMediaLinkContext.Provider></a></Chat>));
     expect(host.querySelector('img')).toBeNull();

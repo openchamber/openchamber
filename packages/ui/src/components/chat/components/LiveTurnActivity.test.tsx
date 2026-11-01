@@ -4,7 +4,7 @@ import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { createRoot, type Root } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 import type { Part, AssistantMessage, ToolPart } from '@/lib/opencode/model';
@@ -135,7 +135,7 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
                 return <TurnFold key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded}
                     finalMessageId={row.finalMessageId} onToggle={onToggle} renderMessage={renderMessage} />;
             }
-            if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} />;
+            if (row.kind === 'turn-pages') return <TurnPagesRow key={row.key} turn={record} hasLaterAssistant={retired} expanded={expanded} renderMessage={renderMessage} />;
             if (row.kind !== 'turn-message') return null;
             const message = record.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
             if (!message) return null;
@@ -240,7 +240,7 @@ describe('live Activity with the real message body', () => {
         };
         container = document.createElement('div');
         document.body.append(container);
-        root = createRoot(container);
+        root = (await import('react-dom/client')).createRoot(container);
         useUIStore.setState({ collapsibleThinkingBlocks: false, showSplitAssistantMessageActions: false, agentRenderToolEnabled: true });
         useDirectoryStore.setState({ currentDirectory: '/project' });
         useI18nStore.getState().setLocale('en');
@@ -306,6 +306,51 @@ describe('live Activity with the real message body', () => {
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(0);
         await act(async () => root.render(draw([], 'other')));
         expect(container.querySelectorAll('[data-component="workflow-run"]')).toHaveLength(0);
+    });
+
+    test('shows live waiting cards before the message snapshot catches up', async () => {
+        const geometry = spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new window.DOMRect(0, 0, 720, 600));
+        try {
+            const { default: MessageList } = await import('../MessageList');
+            const liveSdk = OpenCode.make({ baseUrl: 'http://workflow.test', fetch: () => new Promise<Response>(() => {}) });
+            useUIStore.setState({ activityRenderMode: 'collapsed' });
+            const step = assistant('live-step', [text('progress', 'Preparing')]);
+            const record = turn([step]);
+            const later = assistant('later-step', [text('later-text', 'Later work')]);
+            let messages = [record.userMessage, step, later];
+            const draw = () => <RuntimeAPIContext.Provider value={runtimeApis}>
+                <ThemeSystemContext.Provider value={themeContext}><SyncProvider sdk={liveSdk} directory="/project"><I18nProvider>
+                    <ChatColumnSessionContext.Provider value={{ sessionId: 'session', directory: '/project' }}>
+                        <MessageList sessionKey="session" directory="/project" messages={messages} sessionIsWorking activeStreamingMessageId="later-step" activeStreamingPhase="streaming" isLoadingOlder={false} />
+                    </ChatColumnSessionContext.Provider>
+                </I18nProvider></SyncProvider></ThemeSystemContext.Provider>
+            </RuntimeAPIContext.Provider>;
+            await act(async () => root.render(draw()));
+            const store = getSyncChildStores().getChild('/project');
+            if (!store) throw new Error('Expected mounted directory store');
+            const secret: Part = { type: 'tool', tool: 'openchamber_secret', id: 'secret', callID: 'secret', sessionID: 'session', messageID: 'live-step', state: { status: 'running', input: { label: 'API key', reason: 'Connect' }, time: { start: 1 } } };
+            const page: Part = { type: 'tool', tool: 'openchamber_openui', id: 'page', callID: 'page', sessionID: 'session', messageID: 'live-step', state: { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([HtmlView("<p>pick</p>", null, "Pick a layout")])' }, time: { start: 1 } } };
+            await act(async () => store.setState({ part: { 'live-step': [...step.parts, secret, page] } }));
+            expect(container.querySelectorAll('[data-secret-request-status="waiting"]')).toHaveLength(1);
+            await waitForFrames(container, 1);
+            const frame = container.querySelector('iframe');
+            const input = container.querySelector<HTMLInputElement>('input[type="password"]');
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+            await act(async () => { setter?.call(input, 'typed secret'); input?.dispatchEvent(new window.Event('input', { bubbles: true })); });
+            expect(input?.closest('form')?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false);
+            messages = [record.userMessage, { ...step, parts: [...step.parts, secret, page] }, later];
+            await act(async () => root.render(draw()));
+            expect(container.querySelector('iframe') === frame).toBe(true);
+            expect(container.querySelector('input[type="password"]') === input).toBe(true);
+            expect(input?.value).toBe('typed secret');
+            for (const expanded of [true, false]) {
+                await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+                expect(container.querySelector('iframe') === frame).toBe(true);
+                expect(container.querySelector('input[type="password"]') === input).toBe(true);
+                expect(input?.value).toBe('typed secret');
+                expect(container.querySelector<HTMLButtonElement>('button[aria-controls]')?.getAttribute('aria-expanded')).toBe(String(expanded));
+            }
+        } finally { geometry.mockRestore(); }
     });
 
     test('the real live row and footer share workflow call parts while the message snapshot stays stale', async () => {
@@ -439,6 +484,38 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).toContain('Drawing');
         expect(frames()).toEqual(['First page', 'Second page']);
         expect(container.querySelector('iframe')).toBe(firstFrame);
+    });
+
+    test('keeps a live waiting secret and HtmlView intact while Activity opens and closes', async () => {
+        const secret: Part = {
+            type: 'tool', tool: 'openchamber_secret', id: 'secret', callID: 'secret', sessionID: 'session', messageID: 'progress',
+            state: { status: 'running', input: { label: 'API key', reason: 'Connect' }, time: { start: 1 } },
+        };
+        const page: Part = {
+            type: 'tool', tool: 'openchamber_openui', id: 'page', callID: 'page', sessionID: 'session', messageID: 'progress',
+            state: { status: 'running', input: { action: 'openui.prompt', ui: 'root = Stack([HtmlView("<p>pick</p>", null, "Pick a layout")])' }, time: { start: 1 } },
+        };
+        const record = turn([
+            assistant('progress', [text('progress-text', 'Asking'), readPart, secret, page], 'tool-calls'),
+            assistant('continued', [text('continued-text', 'Work after the page')], 'tool-calls'),
+        ]);
+        await act(async () => root.render(<Harness record={record} />));
+        await waitForFrames(container, 1);
+        const frame = container.querySelector('iframe');
+        const input = container.querySelector<HTMLInputElement>('input[type="password"]');
+        expect(input).not.toBeNull();
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        await act(async () => { setter?.call(input, 'typed secret'); input?.dispatchEvent(new window.Event('input', { bubbles: true })); });
+        expect(input?.value).toBe('typed secret');
+        expect(input?.closest('form')?.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false);
+        for (const expanded of [true, false]) {
+            await act(async () => container.querySelector<HTMLButtonElement>('button[aria-controls]')?.click());
+            expect(container.querySelector('iframe') === frame).toBe(true);
+            expect(container.querySelector('input[type="password"]') === input).toBe(true);
+            expect(input?.value).toBe('typed secret');
+            expect(container.innerHTML.indexOf('Work after the page')).toBeGreaterThan(container.innerHTML.indexOf('title="Pick a layout"'));
+            expect(container.querySelector<HTMLButtonElement>('button[aria-controls]')?.getAttribute('aria-expanded')).toBe(String(expanded));
+        }
     });
 
     test('keeps a waiting HtmlView outside folded Activity without duplicate mounts', async () => {

@@ -66,6 +66,12 @@ describe('answerChunkCuts', () => {
 });
 
 describe('buildTimelineRows', () => {
+    test('places a live page before later steps while its record is stale', () => {
+        const entry = turnEntry([assistant('step', [readPart]), assistant('later', [textPart('later', 'Later work')])]);
+        const options = { ...collapsed, expandedTurns: new Map([['user', true]]), livePages: { turnId: 'user', lastMessageId: 'step' } };
+        expect(buildTimelineRows([entry], options, []).map((row) => row.key))
+            .toEqual(['turn:user', 'fold:user', 'step:step', 'pages:user', 'step:later']);
+    });
     test('draws a turn as its prompt row and a row per step', () => {
         const rows = buildTimelineRows([turnEntry([
             assistant('step', [readPart, textPart('note', 'Reading')], 'tool-calls'),

@@ -8,7 +8,7 @@ import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { isFilePathWithinDirectory } from '@/lib/path-utils';
 import { isMarkdownDocumentReference, resolveMarkdownDocumentReference } from '@/components/views/files/previews/useMarkdownLocalAssets';
-import { getPreparedMarkdownImageUrl, isLocalMarkdownImageSource, loadMessageImageBlob, loadPreparedImageAsDataUrl, prepareLocalMarkdownImages, resolveMarkdownImageSource, resolveWorkspaceMarkdownImageSource, type PreparedMarkdownImage } from './markdownImageAssets';
+import { getPreparedMarkdownImageUrl, isLocalMarkdownImageSource, loadMessageImageBlob, loadPreparedImageAsDataUrl, MAX_MARKDOWN_IMAGE_BYTES, prepareLocalMarkdownImages, resolveMarkdownImageSource, resolveWorkspaceMarkdownImageSource, type PreparedMarkdownImage } from './markdownImageAssets';
 
 export type MarkdownDocumentAssets = {
   filePath: string;
@@ -128,9 +128,10 @@ export class MarkdownMediaOwner {
     this.check(signal);
     if (prepared?.status !== 'ready') throw new Error('Image is unavailable');
     if (!video && runtimeAssetsNeedHeaders()) {
-      const url = await loadPreparedImageAsDataUrl(prepared, directory, signal);
+      const image = await loadPreparedImageAsDataUrl(prepared, directory, signal, MAX_MARKDOWN_IMAGE_BYTES);
       this.check(signal);
-      return url;
+      if (!image) throw new Error('Image is too large');
+      return image.url;
     }
     await refreshRuntimeUrlAuthToken();
     this.check(signal);

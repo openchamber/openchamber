@@ -1,5 +1,5 @@
 import { isInvisibleText } from '@/lib/invisibleText';
-import { getLastConversationRecord, type ToolPart } from '@/lib/opencode/model';
+import { getLastConversationRecord, type Part, type ToolPart } from '@/lib/opencode/model';
 import { generatedImagePaths, openuiPrompt, proposedWorkflowRunId, requestedSecret } from '@/lib/opencode/tools';
 import { isSessionNoticePart } from '@/lib/opencode/session-notices';
 import { isStandaloneTool } from '../../message/parts/toolRenderUtils';
@@ -34,10 +34,12 @@ export function getLiveFinalMessage(messages: readonly ChatMessageEntry[]): Chat
  * notice shows it above the answer.
  */
 export function hasLiveActivity(turn: TurnRecord, showReasoning: boolean): boolean {
-    return turn.activityParts.some((activity) => (
-        (activity.part.type === 'tool' && !isStandaloneTool(activity.part.tool) && !isSessionNoticePart(activity.part))
-        || (showReasoning && activity.kind === 'reasoning')
-    ));
+    return turn.activityParts.some((activity) => isActivityPart(activity.part, showReasoning));
+}
+
+export function isActivityPart(part: Part, showReasoning: boolean): boolean {
+    return (part.type === 'tool' && !isStandaloneTool(part.tool) && !isSessionNoticePart(part))
+        || (showReasoning && part.type === 'reasoning' && !isInvisibleText(part.text));
 }
 
 /** Workflow proposals, generated images and waiting prompts outside Activity, in call order. */

@@ -244,8 +244,8 @@ export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, r
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
     [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, secrets, workflows, directTools }),
-    ...(openui === undefined ? {} : { [KNOWLEDGE_ENTRY_KEYS.openui]: openui }),
   };
+  if (openui !== undefined) entries[KNOWLEDGE_ENTRY_KEYS.openui] = openui;
   if (responseStyleInstruction !== undefined) {
     entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();
   }

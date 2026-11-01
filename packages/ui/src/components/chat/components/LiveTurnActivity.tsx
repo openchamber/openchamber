@@ -18,9 +18,6 @@ import { useActivityRowGlide } from './useActivityRowGlide';
 import { foldContentId, finalActivityContentId, useTurnFold } from './useTurnFold';
 import { dispatchRowExpand } from '../lib/scroll/timelineScrollIntent';
 
-const NO_MESSAGES: ChatMessageEntry[] = [];
-
-
 interface TurnFoldProps {
     turn: TurnRecord;
     hasLaterAssistant: boolean;
@@ -32,7 +29,7 @@ interface TurnFoldProps {
 
 /**
  * The fold's header. Folded, it also draws what stays in view: a working
- * turn's latest steps, then the pages it showed and the steps after them.
+ * turn's latest steps before the pages it showed.
  */
 export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, onToggle, renderMessage }: TurnFoldProps) {
     const { t } = useI18n();
@@ -63,13 +60,13 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
     // steps, the reply it is still writing) is drawn below the page, in the
     // order it happened.
     const lastPageMessageId = !finalMessage && pages.length > 0 ? pages[pages.length - 1]?.messageID : undefined;
-    const [messagesAbovePages, messagesBelowPages] = React.useMemo(() => {
+    const messagesAbovePages = React.useMemo(() => {
         const pageIndex = lastPageMessageId ? activityMessages.findIndex((message) => message.info.id === lastPageMessageId) : -1;
-        if (pageIndex < 0) return [shownMessages, NO_MESSAGES];
+        if (pageIndex < 0) return shownMessages;
         // The fold shows the tail of the turn, so the page's message may
         // already be trimmed away; everything still shown then came after it.
         const split = Math.max(0, pageIndex + 1 - (activityMessages.length - shownMessages.length));
-        return [shownMessages.slice(0, split), shownMessages.slice(split)];
+        return shownMessages.slice(0, split);
     }, [activityMessages, lastPageMessageId, shownMessages]);
     // No diff parsing at token frequency. The report is only shown once the
     // turn settles; later authoritative tool metadata can refine it.
@@ -135,14 +132,6 @@ export function TurnFold({ turn, hasLaterAssistant, expanded, finalMessageId, on
                             </ActivityRowSkipContext.Provider>
                         </div>
                     </LiveActivityCollapse>
-                    {!finalMessage && !hasLaterAssistant && pages.length > 0 ? <TurnPages pages={pages} /> : null}
-                    {messagesBelowPages.length > 0 ? (
-                        <ActivityRowSkipContext.Provider value={rowSkip}>
-                            {messagesBelowPages.map((message) => (
-                                <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>
-                            ))}
-                        </ActivityRowSkipContext.Provider>
-                    ) : null}
                 </>
             )}
         </div>
@@ -158,8 +147,21 @@ function TurnPages({ pages }: { pages: ReturnType<typeof getShownPages> }) {
     );
 }
 
-/** The pages row of an opened fold. */
-export function TurnPagesRow({ turn }: { turn: TurnRecord }) {
+/** A stable pages row, with the closed live preview that follows it. */
+export function TurnPagesRow({ turn, hasLaterAssistant, expanded, renderMessage }: Pick<TurnFoldProps, 'turn' | 'hasLaterAssistant' | 'expanded' | 'renderMessage'>) {
     const pages = React.useMemo(() => getShownPages(turn.assistantMessages), [turn.assistantMessages]);
-    return pages.length > 0 ? <TurnPages pages={pages} /> : null;
+    const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    if (pages.length === 0) return null;
+    const lastPageMessageId = pages[pages.length - 1]?.messageID;
+    const pageIndex = turn.assistantMessages.findIndex((message) => message.info.id === lastPageMessageId);
+    const trim = planActivityTrim(turn.assistantMessages.map((message) => activityRowParts(message.parts, showReasoningTraces).length), LIVE_ACTIVITY_VISIBLE_ROWS);
+    const shown = turn.assistantMessages.slice(trim.hiddenMessages);
+    const split = pageIndex < 0 ? shown.length : Math.max(0, pageIndex + 1 - trim.hiddenMessages);
+    const rowSkip = trim.skipRows > 0 && shown[0] ? { messageId: shown[0].info.id, rows: trim.skipRows } : null;
+    return <>
+        <TurnPages pages={pages} />
+        {!expanded && !hasLaterAssistant ? <ActivityRowSkipContext.Provider value={rowSkip}>
+            {shown.slice(split).map((message) => <React.Fragment key={message.info.id}>{renderMessage(message)}</React.Fragment>)}
+        </ActivityRowSkipContext.Provider> : null}
+    </>;
 }

@@ -4,7 +4,7 @@ import { getRuntimeUrlResolver, type RuntimeUrlResolver } from '@/lib/runtime-ur
 import { isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { z } from 'zod';
 
-const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_MARKDOWN_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 const VIDEO_EXTENSION_RE = /\.(?:mp4|m4v|mov|webm)$/i;
 const MAX_PREPARE_CACHE_ENTRIES = 1024;

@@ -61,7 +61,7 @@ describe('Streamdown maps display nodes to canonical OpenUI fences', () => {
     }
     for (const range of [{ start: 0, end: prefix.length }, { start: prefix.length }]) {
       const row = full.slice(range.start, range.end);
-      const source = createOpenUIDocument({ displayed: row, canonical: row, fullSource: full, range, owner, currentSource: () => current });
+      const source = createOpenUIDocument({ displayed: createOpenUIDisplay(row), canonical: row, fullSource: full, range, owner, currentSource: () => current });
       renderToStaticMarkup(<OpenUIDocumentContext.Provider value={source.document}>
         <Streamdown {...getMarkdownProcessingOptions(false, false)} mode="static" components={{ code: Capture }}
           parseMarkdownIntoBlocksFn={source.split} BlockComponent={SourceBlock} parseIncompleteMarkdown={false}>{row}</Streamdown>
