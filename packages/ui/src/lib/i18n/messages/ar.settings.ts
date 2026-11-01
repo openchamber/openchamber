@@ -1386,7 +1386,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'التركيز على حقل الإدخال',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'فتح الإعدادات',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'إظهار/إخفاء لوحة الطرفية',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'توسيع/تصغير الطرفية',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': 'توسيع اللوحة أو تصغيرها',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'إضافة التحديد إلى المحادثة',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'إظهار/إخفاء الشريط الجانبي',
   'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': 'التبديل بين علامات تبويب الجلسات',

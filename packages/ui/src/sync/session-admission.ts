@@ -1,9 +1,10 @@
-import { requestOpenCodeTrust, subscribeOpenCodeTrustAnswers } from '@/lib/opencodeTrust';
+import { requestOpenCodeTrust } from '@/lib/opencodeTrust';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionUIStore } from './session-ui-store';
+import { getAdmissionNavigationRevision, useSessionUIStore } from './session-ui-store';
+import { subscribeGlobalSessionMoves } from './session-moves';
 import { isSessionDirectoryAdmitted } from './session-admission-rule';
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -11,6 +12,18 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 export const isSessionAdmitted = (directory: string | null | undefined): boolean => isSessionDirectoryAdmitted(
   directory, useProjectsStore.getState().projects, useSessionUIStore.getState().availableWorktreesByProject,
 );
+
+const ADMISSION_WAIT_MS = 10_000;
+
+const waitUntilAdmitted = (directory: string): Promise<void> => new Promise((resolve) => {
+  const finish = () => { clearTimeout(timer); stopProjects(); stopTopology(); resolve(); };
+  const check = () => { if (isSessionAdmitted(directory)) finish(); };
+  const timer = setTimeout(finish, ADMISSION_WAIT_MS);
+  const stopProjects = useProjectsStore.subscribe((state, previous) => { if (state.projects !== previous.projects) check(); });
+  const stopTopology = useSessionUIStore.subscribe((state, previous) => {
+    if (state.availableWorktreesByProject !== previous.availableWorktreesByProject) check();
+  });
+});
 
 const pending = new Map<string, { sessionIds: Map<string, boolean>; request: Promise<boolean> }>();
 let generation = 0;
@@ -46,7 +59,13 @@ const tryAdmitSession = (sessionId: string, directory: string, deliberate = fals
     const currentId = currentSession();
     if (!currentId) return false;
     if (isSessionAdmitted(normalized)) return true;
-    return useProjectsStore.getState().adoptSessionProject(currentId, normalized, () => currentSession() !== null);
+    if (!await useProjectsStore.getState().adoptSessionProject(currentId, normalized, () => currentSession() !== null)) return false;
+    // A linked worktree joins its repository's project without a new entry and
+    // is admitted once the worktree list (owned by the sidebar) picks it up on
+    // the server's worktree-changed event. An open waits for that, bounded; it
+    // never repeats the registration.
+    if (!isSessionAdmitted(normalized)) await waitUntilAdmitted(normalized);
+    return isSessionAdmitted(normalized);
   })().finally(() => { if (pending.get(key)?.request === request) pending.delete(key); });
   pending.set(key, { sessionIds, request });
   return request;
@@ -62,7 +81,12 @@ export const admitSession = (sessionId: string, directory: string, deliberate = 
 const RETRY_DELAYS = [1000, 2000, 4000];
 type AdmissionAttempt = { sessionId: string; retries: number; timer: ReturnType<typeof setTimeout> | null };
 
-/** Keep raw records complete; admission affects navigation and projections only. */
+/**
+ * Keep raw records complete; admission affects navigation and projections only.
+ * Only a move this client sees, out of an admitted folder, registers its
+ * destination on its own. Sessions already in unknown folders (OpenCode's
+ * whole history, a removed project) stay hidden until the user opens one.
+ */
 export const subscribeSessionAdmission = (): (() => void) => {
   let disposed = false;
   const runtimeKey = getRuntimeKey();
@@ -74,59 +98,67 @@ export const subscribeSessionAdmission = (): (() => void) => {
     if (attempt && attempt.timer !== null) clearTimeout(attempt.timer);
     attempted.delete(directory);
   };
-  const clearAttempts = () => { for (const directory of attempted.keys()) forgetAttempt(directory); };
   const check = (directory: string, attempt: AdmissionAttempt) => {
     if (!current() || attempted.get(directory) !== attempt) return;
-    void tryAdmitSession(attempt.sessionId, directory).catch((error) => {
+    void tryAdmitSession(attempt.sessionId, directory).then(() => {
+      if (attempted.get(directory) === attempt) attempted.delete(directory);
+      gateSelection();
+    }, (error) => {
       if (!current() || attempted.get(directory) !== attempt) return;
       console.warn('[session-admission] Could not register the session project:', error);
       const delay = RETRY_DELAYS[attempt.retries++];
-      if (delay === undefined) return;
+      if (delay === undefined) { attempted.delete(directory); return; }
       attempt.timer = setTimeout(() => { attempt.timer = null; check(directory, attempt); }, delay);
     });
   };
-  const scan = () => {
+  const stopMoves = subscribeGlobalSessionMoves(({ sessionId, from, to }) => {
+    // VS Code projects are the user's workspace folders: only a deliberate
+    // open may add one there.
+    if (!current() || isVSCodeRuntime() || !isSessionAdmitted(from) || isSessionAdmitted(to)) return;
+    forgetAttempt(to);
+    const attempt: AdmissionAttempt = { sessionId, retries: 0, timer: null };
+    attempted.set(to, attempt);
+    check(to, attempt);
+  });
+  // The viewed session, put aside while its folder is not admitted. It comes
+  // back once a live move admits the folder; re-opening it here would count as
+  // the user's choice and register any folder, a removed project included.
+  let parked: { id: string; revision: number } | null = null;
+  const gateSelection = () => {
     if (!current()) return;
-    const directories = new Map<string, string>();
-    const sessions = useGlobalSessionsStore.getState();
-    for (const [directory, ids] of sessions.structure.activeIdsByDirectory) {
-      if (ids[0] && !isSessionAdmitted(directory)) directories.set(directory, ids[0]);
-    }
-    for (const session of sessions.archivedSessions) {
-      const directory = normalizePath(resolveGlobalSessionDirectory(session));
-      if (directory && !directories.has(directory) && !isSessionAdmitted(directory)) directories.set(directory, session.id);
-    }
-    for (const directory of attempted.keys()) if (!directories.has(directory)) forgetAttempt(directory);
-    for (const [directory, sessionId] of directories) {
-      if (attempted.get(directory)?.sessionId === sessionId) continue;
-      forgetAttempt(directory);
-      const attempt: AdmissionAttempt = { sessionId, retries: 0, timer: null };
-      attempted.set(directory, attempt);
-      check(directory, attempt);
-    }
     const ui = useSessionUIStore.getState();
-    const selectedRecord = ui.currentSessionId ? useGlobalSessionsStore.getState().entityById.get(ui.currentSessionId) : null;
+    const records = useGlobalSessionsStore.getState().entityById;
+    if (parked) {
+      const record = records.get(parked.id);
+      const directory = record ? resolveGlobalSessionDirectory(record) : null;
+      // Any navigation since, a draft included, replaces the parked session.
+      if (ui.currentSessionId || parked.revision !== getAdmissionNavigationRevision() || !directory) parked = null;
+      else if (isSessionAdmitted(directory)) {
+        const { id } = parked;
+        parked = null;
+        void ui.setCurrentSession(id, directory);
+        return;
+      }
+    }
+    const selectedRecord = ui.currentSessionId ? records.get(ui.currentSessionId) : null;
     const selectedDirectory = selectedRecord ? resolveGlobalSessionDirectory(selectedRecord) : ui.currentSessionDirectory;
     if (ui.currentSessionId && selectedDirectory && !isSessionAdmitted(selectedDirectory)) {
-      // A move of the viewed session must stop mounting its destination before
-      // a trust answer; the raw record remains available for the prompt.
       const id = ui.currentSessionId;
-      const directory = selectedDirectory;
       ui.setCurrentSession(null);
-      void ui.setCurrentSession(id, directory);
+      parked = { id, revision: getAdmissionNavigationRevision() };
     }
   };
   const stopSessions = useGlobalSessionsStore.subscribe((state, previous) => {
-    if (state.structure.activeIdsByDirectory !== previous.structure.activeIdsByDirectory || state.archivedSessions !== previous.archivedSessions || state.status !== previous.status) {
-      if (state.status === 'ready' && previous.status !== 'ready') clearAttempts();
-      scan();
-    }
+    if (state.entityById !== previous.entityById) gateSelection();
   });
-  const stopProjects = useProjectsStore.subscribe((state, previous) => { if (state.projects !== previous.projects) scan(); });
+  const stopProjects = useProjectsStore.subscribe((state, previous) => { if (state.projects !== previous.projects) gateSelection(); });
   const stopUI = useSessionUIStore.subscribe((state, previous) => {
-    if (state.currentSessionDirectory !== previous.currentSessionDirectory || state.availableWorktreesByProject !== previous.availableWorktreesByProject) scan();
+    if (state.currentSessionId !== previous.currentSessionId || state.currentSessionDirectory !== previous.currentSessionDirectory || state.availableWorktreesByProject !== previous.availableWorktreesByProject) gateSelection();
   });
-  const stopAnswers = subscribeOpenCodeTrustAnswers(() => { clearAttempts(); scan(); });
-  scan();
-  return () => { disposed = true; clearAttempts(); stopSessions(); stopProjects(); stopUI(); stopAnswers(); };
+  gateSelection();
+  return () => {
+    disposed = true;
+    for (const directory of attempted.keys()) forgetAttempt(directory);
+    stopMoves(); stopSessions(); stopProjects(); stopUI();
+  };
 };

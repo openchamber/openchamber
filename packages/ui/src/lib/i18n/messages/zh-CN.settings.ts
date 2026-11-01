@@ -1354,7 +1354,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '聚焦输入框',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '打开设置',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': '切换终端停靠区',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': '切换终端展开',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': '展开或收起面板',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '将选中内容添加到聊天',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': '切换侧边栏',
     'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': '切换会话标签页',

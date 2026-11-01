@@ -51,7 +51,7 @@ export interface PluginDraft {
   content: string;
 }
 
-export type PluginMutationResult = {
+type PluginMutationResult = {
   ok: boolean;
   reloadFailed?: boolean;
   message?: string;

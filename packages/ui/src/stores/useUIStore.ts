@@ -901,6 +901,11 @@ interface UIStore {
       every surface the zone shows, so neither switching folders nor
       switching surfaces moves the zone's edge; unset opens at the default. */
   contextZoneSizes: Partial<Record<ContextZone, number>>;
+  /** Expanded, a zone leaves the chat this many px (the bottom zone: of
+      height), as the user resized it there; unset leaves the default column.
+      Kept apart from `contextZoneSizes`, so the docked and the expanded zone
+      each keep the size the user gave them. */
+  contextZoneExpandedChatSizes: Partial<Record<ContextZone, number>>;
   /** Expanded collapsible sections of the in-chat work-status panel, by id. */
   workStatusExpandedSections: Record<string, boolean>;
   /**
@@ -1160,8 +1165,8 @@ interface UIStore {
   /** The permission mode the server writes onto each new top-level session. */
   permissionDefaultMode: PermissionMode;
   /**
-   * Whether this build has agent memory at all. Server-owned and not
-   * persisted: an unreleased feature must not come back from a stale cache.
+   * Whether an OpenChamber server backs agent memory here; false in VS Code.
+   * Server-owned and not persisted.
    */
   agentMemoryFeatureAvailable: boolean;
   /**
@@ -1269,6 +1274,7 @@ interface UIStore {
   toggleContextPanelExpanded: (directory: string, zone?: ContextZone) => void;
   /** Width for a side zone, height for the bottom one; shared by its surfaces and folders. */
   setContextZoneSize: (zone: ContextZone, size: number) => void;
+  setContextZoneExpandedChatSize: (zone: ContextZone, size: number) => void;
   /**
    * Places a surface in a zone for every project on this device. Where it is
    * on screen it goes along: the zone it left closes and the new one opens on it.
@@ -1541,6 +1547,7 @@ export const useUIStore = create<UIStore>()(
         contextEditorVisible: true,
         contextEditorTreeWidth: 240,
         contextZoneSizes: {},
+        contextZoneExpandedChatSizes: {},
         workStatusExpandedSections: {},
         messageQueueExpanded: false,
         workStatusScrollTop: 0,
@@ -2302,6 +2309,11 @@ export const useUIStore = create<UIStore>()(
 
         setContextZoneSize: (zone, size) => {
           set((state) => ({ contextZoneSizes: { ...state.contextZoneSizes, [zone]: clampContextZoneSize(zone, size) } }));
+        },
+
+        setContextZoneExpandedChatSize: (zone, size) => {
+          if (!Number.isFinite(size)) return;
+          set((state) => ({ contextZoneExpandedChatSizes: { ...state.contextZoneExpandedChatSizes, [zone]: Math.max(0, Math.round(size)) } }));
         },
 
         moveContextSurfaceToZone: (mode, zone) => {
@@ -3812,6 +3824,7 @@ export const useUIStore = create<UIStore>()(
           contextEditorVisible: state.contextEditorVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
           contextZoneSizes: state.contextZoneSizes,
+          contextZoneExpandedChatSizes: state.contextZoneExpandedChatSizes,
           workStatusExpandedSections: state.workStatusExpandedSections,
           messageQueueExpanded: state.messageQueueExpanded,
           workStatusScrollTop: state.workStatusScrollTop,

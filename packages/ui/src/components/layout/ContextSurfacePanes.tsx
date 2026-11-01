@@ -35,7 +35,6 @@ import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { getSessionIDFromDedupeKey } from './contextPanelSessionTitles';
 import { MovablePane } from './MovablePane';
 import { SidebarFilesTree } from './SidebarFilesTree';
-import { closeZoneOnEscape } from './zoneEscape';
 import { startZoneDragGesture } from './zoneDrag';
 import { ZoneSurfaceDragContext } from './zoneSurfaceDragContext';
 import { useZoneHostsStore } from './zoneHosts';
@@ -229,32 +228,21 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
   );
 };
 
-/**
- * A keep-alive pane: portalled into its zone's body, with the zone's Escape.
- * Its React events do not pass through the zone frame, so it closes the zone
- * itself.
- */
+/** A keep-alive pane, portalled into its zone's body. */
 const ZonePane: React.FC<{
   zone: ContextZone;
   isOpen: boolean;
   interactive: boolean;
   /** The zone's frame is inert at opacity 0 (`contentHidden`). */
   hidden: boolean;
-  directoryKey: string;
   className?: string;
   children: React.ReactNode;
-}> = ({ zone, isOpen, interactive, hidden, directoryKey, className, children }) => {
-  const closeContextZone = useUIStore((state) => state.closeContextZone);
-  const handleKeyDownCapture = React.useCallback((event: React.KeyboardEvent<HTMLElement>) => {
-    closeZoneOnEscape(event, isOpen, () => {
-      if (directoryKey) closeContextZone(directoryKey, zone);
-    }, event.currentTarget.closest('[data-context-zone]'));
-  }, [closeContextZone, directoryKey, isOpen, zone]);
+}> = ({ zone, isOpen, interactive, hidden, className, children }) => {
   // A closed zone keeps its panes mounted at opacity 0; their spinners,
   // blinks and counters stand still until it opens again.
   return (
     <MovablePane zone={zone}>
-      <div className={className} onKeyDownCapture={handleKeyDownCapture}>
+      <div className={className}>
         <DockedPanelSurfaceContext.Provider value>
           <ZoneInteractiveContext.Provider value={interactive}>
             <PauseClock paused={!isOpen || hidden}>{children}</PauseClock>
@@ -598,7 +586,6 @@ export const ContextSurfacePanes: React.FC = () => {
           interactive={interactive[fileZone.zone]}
           isOpen={fileZone.isOpen}
           hidden={contentHidden(fileZone.zone)}
-          directoryKey={directoryKey}
           className={cn('absolute inset-0 flex', fileTreeSide === 'left' && 'flex-row-reverse', isFileTabActive ? 'flex' : 'hidden')}
         >
           {spacePreparing ? (
@@ -624,7 +611,7 @@ export const ContextSurfacePanes: React.FC = () => {
         // The chat renders in this app, pinned to its session: it shares
         // the app's connection, stores and theme, and opens like a session
         // switch instead of booting a second app.
-        <ZonePane key={chatActiveTab.id} zone={chatZone.zone} interactive={interactive[chatZone.zone]} isOpen={chatZone.isOpen} hidden={contentHidden(chatZone.zone)} directoryKey={directoryKey} className="absolute inset-0 bg-background">
+        <ZonePane key={chatActiveTab.id} zone={chatZone.zone} interactive={interactive[chatZone.zone]} isOpen={chatZone.isOpen} hidden={contentHidden(chatZone.zone)} className="absolute inset-0 bg-background">
           <section
             aria-label={t('contextPanel.iframe.sessionChatTitle', { sessionID: activeChatSessionID })}
             className="h-full"
@@ -652,7 +639,6 @@ export const ContextSurfacePanes: React.FC = () => {
             interactive={interactive[browserZone.zone]}
             isOpen={browserZone.isOpen}
             hidden={contentHidden(browserZone.zone)}
-            directoryKey={directoryKey}
             // Invisible rather than display:none, so a background tab the agent
             // is working keeps its layout and its snapshots read a real page.
             className={cn('absolute inset-0', !shown && 'invisible pointer-events-none')}
@@ -685,7 +671,6 @@ export const ContextSurfacePanes: React.FC = () => {
             interactive={interactive[diffZone.zone]}
             isOpen={diffZone.isOpen}
             hidden={contentHidden(diffZone.zone)}
-            directoryKey={directoryKey}
             className={cn('absolute inset-0', !active && 'hidden')}
           >
             <React.Suspense fallback={null}>
@@ -713,7 +698,6 @@ export const ContextSurfacePanes: React.FC = () => {
           interactive={interactive[terminalZone.zone]}
           isOpen={terminalZone.isOpen}
           hidden={contentHidden(terminalZone.zone)}
-          directoryKey={directoryKey}
           className={cn('absolute inset-0', terminalZone.activeTab?.mode === 'terminal' ? 'block' : 'hidden')}
         >
           <ContextPanelHeaderSlotProvider value={headerSlotFor(terminalZone.zone, terminalZone.activeTab?.mode === 'terminal')}>
@@ -733,7 +717,6 @@ export const ContextSurfacePanes: React.FC = () => {
           interactive={interactive[walkthroughZone.zone]}
           isOpen={walkthroughZone.isOpen}
           hidden={contentHidden(walkthroughZone.zone)}
-          directoryKey={directoryKey}
           className={cn('absolute inset-0', walkthroughZone.activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}
         >
           <React.Suspense fallback={null}>
@@ -764,7 +747,6 @@ export const ContextSurfacePanes: React.FC = () => {
             interactive={interactive[pluginZone.zone]}
             isOpen={pluginZone.isOpen}
             hidden={contentHidden(pluginZone.zone)}
-            directoryKey={directoryKey}
             className={cn('absolute inset-0', shown ? 'block' : 'hidden')}
           >
             <React.Suspense fallback={null}>

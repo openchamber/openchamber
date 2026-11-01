@@ -1359,7 +1359,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Girdi alanına odaklan',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Ayarları aç',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Terminal dock\'unu aç/kapat',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Terminali genişlet/daralt',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': 'Paneli genişlet/daralt',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'Seçimi sohbete ekle',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'Kenar çubuğunu aç/kapat',
   'settings.openchamber.keyboardShortcuts.action.switch_context_surface.label': 'Bağlam paneli yüzeyini değiştir',

@@ -361,9 +361,13 @@ the task title (the branch description,
 `WorktreeMetadata.title`; a worktree made for a pull request or an issue
 starts with that item's title, the agent's until replaced), until it has one
 the branch (see Task titles below for the branch-first option); the tooltip
-always names the branch. At the end sits the PR or the issue its sessions follow as a mark in its state's
-colour without its number (one line has no room for it; the mark's tooltip names it and a click
-opens it). It shows no date and no session
+always names the branch. A worktree's PR shows only as its branch mark's
+tint, with the PR in the row's tooltip, whose link opens it: a PR mark at the
+end repeated the same colour (maintainer decision 2026-10-31). A space's mark
+takes no tint, so a space keeps the PR mark at the end. Without a PR the end
+holds the issue its sessions follow, as a mark in its state's colour without
+its number (one line has no room for it; the mark's tooltip names it and a
+click opens it). It shows no date and no session
 count, like the rows around it: the room goes to the title. Every icon before a one-line title
 moves the hover mask in by its width (`--oc-actions-inset`), or the title's
 tail shows through the hover actions. A click opens the latest
@@ -594,8 +598,9 @@ never counts. `list/SessionProjectCollection.tsx` orders the works by the first 
 their sessions in the shared lifecycle order (`orderInWorkWorks` in
 `works/sidebarWorks.ts`) and passes `workEntries` to the row model. In work
 spans registered projects. A session whose destination has no registered project
-stays out of In work, Pinned and search until `sync/session-admission.ts` checks
-its OpenCode configuration and registers its folder. Pins and work state cannot
+stays out of In work, Pinned and search until its folder is registered: by the
+user opening the session, or by `sync/session-admission.ts` after a move out of
+a registered project. Pins and work state cannot
 admit a destination, including in the tray. The raw global cache retains these
 sessions for cleanup and lineage. A work In work lists leaves its project
 or folder (`movedSessionIds`, `movedGroupKeys`) unless "Also show in work

@@ -1,6 +1,7 @@
 /**
  * Width animations of the columns beside the chat: the session sidebar and
- * the right slot (context panel and work-status card).
+ * the context zones (with the work-status card), and the drags that resize
+ * them.
  *
  * While one runs, the chat column changes width on every frame and the
  * transcript re-wraps. Work that measures layout to follow a width (markdown
@@ -32,10 +33,13 @@ const ROOT_ATTRIBUTE = 'data-panel-animating';
 
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 let settleFrame: number | null = null;
+let holds = 0;
+let widthHolds = 0;
 const pending = new Set<() => void>();
 const startListeners = new Set<() => void>();
+const widthDragListeners = new Set<() => void>();
 
-export const isLayoutAnimating = (): boolean => settleTimer !== null || settleFrame !== null;
+export const isLayoutAnimating = (): boolean => holds > 0 || settleTimer !== null || settleFrame !== null;
 
 /** Readers who asked for reduced motion get no width animation at all. */
 export const prefersReducedMotion = (): boolean =>
@@ -44,6 +48,7 @@ export const prefersReducedMotion = (): boolean =>
 const settle = () => {
   settleTimer = null;
   settleFrame = null;
+  if (holds > 0) return;
   globalThis.document?.documentElement.removeAttribute(ROOT_ATTRIBUTE);
   const tasks = [...pending];
   pending.clear();
@@ -75,6 +80,48 @@ export const beginLayoutAnimation = (durationMs: number = LAYOUT_ANIMATION_MS): 
     }, delay);
   });
   if (starting) startListeners.forEach((listener) => listener());
+};
+
+/**
+ * Marks a side column the user drags to a new size (`axis`: the chat's width,
+ * or the height of the zone under it): the columns move on every pointer
+ * frame just as in an animation, for as long as the drag lasts.
+ * Ends one frame after the returned release, so work waiting for the end runs
+ * once at the width the drag left. Without it every observer that follows a
+ * width (markdown tables, the composer's controls, scroll shadows, the
+ * active-turn spy) ran on each pointer frame, and the drag dropped frames in
+ * proportion to what the chat and the panel showed.
+ */
+export const holdLayoutAnimation = (axis: 'width' | 'height' = 'width'): (() => void) => {
+  if (!globalThis.document) return () => {};
+  const starting = !isLayoutAnimating();
+  const widthStarting = axis === 'width' && widthHolds === 0;
+  holds += 1;
+  if (axis === 'width') widthHolds += 1;
+  document.documentElement.setAttribute(ROOT_ATTRIBUTE, '');
+  if (starting) startListeners.forEach((listener) => listener());
+  if (widthStarting) widthDragListeners.forEach((listener) => listener());
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    holds -= 1;
+    if (axis === 'width') widthHolds -= 1;
+    if (holds > 0 || settleTimer !== null || settleFrame !== null) return;
+    settleFrame = requestAnimationFrame(settle);
+  };
+};
+
+/**
+ * Called when a drag of a column's width starts, also inside a running
+ * animation (a toggle's 240 ms), where `onLayoutAnimationStart` stays quiet.
+ * The drag's end is the layout settling (`runWhenLayoutSettled`).
+ */
+export const onWidthDragStart = (listener: () => void): (() => void) => {
+  widthDragListeners.add(listener);
+  return () => {
+    widthDragListeners.delete(listener);
+  };
 };
 
 /**

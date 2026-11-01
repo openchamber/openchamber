@@ -24,7 +24,7 @@ Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycl
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
 - `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
 - `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration. OpenCode 2 watches these files, so a write is live as soon as it lands and the route answers plain success.
-- `packages/web/server/lib/opencode/websearch-config.js`: writes OpenCode's `websearch` choice (`PUT /api/config/websearch` in `routes.js`; body `{ selection: false | null | "random" | "<provider id>" }`, `null` removes the key, so OpenCode falls back to the answer given in its chat consent form, which it keeps in its own store) to `OPENCODE_CONFIG` when set, else the user config. `GET /api/config/websearch` returns `{ projectPath }`: the project config whose `websearch` overrides that write (see the load order below), so Settings disables the choice and names the file instead of letting it snap back; `findWebSearchProjectOverride` in `config-v2.js` holds the rule. The pure transform is `writeWebSearchSelection` in `config-v2.js`, shared with the VS Code bridge (`api:config/websearch`). The same file writes OpenCode's compaction settings (`PUT /api/config/compaction`; body `{ auto?, buffer?, keepTokens?, background? }`, token counts or `null` to remove the key and booleans written as they are, so `false` also overrides a `true` in a lower config layer; they set `compaction.auto`, `compaction.buffer`, `compaction.keep.tokens` and `experimental.background_compaction`) to the same target; `compactionUpdateSchema` and `writeCompactionSettings` in `config-v2.js` are shared with the bridge (`api:config/compaction`). Settings reads the global values back from OpenCode's config, not from the file. A project config can still set any of these for itself; Settings says so in one line and does not look for project overrides, since whoever wrote one knows it is there.
+- `packages/web/server/lib/opencode/websearch-config.js`: writes OpenCode's `websearch` choice (`PUT /api/config/websearch` in `routes.js`; body `{ selection: false | null | "random" | "<provider id>" }`, `null` removes the key, so OpenCode falls back to the answer given in its chat consent form, which it keeps in its own store) to `OPENCODE_CONFIG` when set, else the user config. `GET /api/config/websearch` returns `{ projectPath }`: the project config whose `websearch` overrides that write (see the load order below), so Settings disables the choice and names the file instead of letting it snap back; `findWebSearchProjectOverride` in `config-v2.js` holds the rule. The pure transform is `writeWebSearchSelection` in `config-v2.js`, shared with the VS Code bridge (`api:config/websearch`). The same file writes OpenCode's compaction settings (`PUT /api/config/compaction`; body `{ auto?, buffer?, keepTokens?, background? }`, token counts (for `buffer` also a share of the window such as `"20%"`, the form Settings writes, which needs OpenCode 2.2.4) or `null` to remove the key and booleans written as they are, so `false` also overrides a `true` in a lower config layer; they set `compaction.auto`, `compaction.buffer`, `compaction.keep.tokens` and `experimental.background_compaction`) to the same target; `compactionUpdateSchema` and `writeCompactionSettings` in `config-v2.js` are shared with the bridge (`api:config/compaction`). Settings reads the global values back from OpenCode's config, not from the file. A project config can still set any of these for itself; Settings says so in one line and does not look for project overrides, since whoever wrote one knows it is there.
 
 OpenCode 2 loads the user config, then `OPENCODE_CONFIG`, then project `opencode.json[c]` files from the filesystem root down, then `.opencode/opencode.json[c]` files the same way (`getFolderConfigPaths` in `shared.js`); the last file that sets a key wins, so a project file beats `OPENCODE_CONFIG` too. `findWebSearchProjectOverride` follows that order.
 - `packages/web/server/lib/opencode/config-mutation-response.js`: shared response builders for applied config mutations and external manual-restart guidance.
@@ -45,7 +45,7 @@ OpenCode 2 loads the user config, then `OPENCODE_CONFIG`, then project `opencode
 - `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, same-machine authentication (loopback, or the bound address for a concrete bind), and fixed CLI action dispatch.
 - `packages/web/server/lib/opencode/managed-plugin-config.js`: the `OPENCODE_CONFIG_CONTENT` merge used only on the fallback path, when the user's own environment owns `OPENCODE_CONFIG`.
 - `packages/web/server/lib/opencode/managed-config-file.js`: the managed OpenCode config layer — materializes the enabled OpenChamber plugins (agent tools, the limit failover reporter from `../limit-failover/` while a fallback model or an account switch is set, and the session title prompt, always) and publishes them in a file OpenCode watches.
-- `packages/web/server/lib/opencode/session-title-plugin.js`: the plugin that gives OpenCode's hidden `title` agent OpenChamber's title style. See "Session title prompt" below.
+- `packages/web/server/lib/opencode/session-title-plugin.js`: the plugin that gives OpenCode's hidden `title` agent OpenChamber's title style and names a session started with attached context alone from that context. See "Session title prompt" below.
 - `packages/web/server/lib/opencode/instance-dir.js`: this server's own folder under `<data-dir>/run/instances/<pid>/` for the files its managed OpenCode reads, and removal of folders left by servers that are gone.
 
 ### Managed plugins on OpenCode 2.x
@@ -1163,7 +1163,7 @@ setting; VS Code's separate extension bridge does not.
 - Session archive state: on OpenCode's record (`PATCH /api/session/{id}` with `archived`) through `lib/openchamber-sessions/session-archive.js`. Since 2.2 that PATCH writes the record without building the session's location, so it works for a session whose directory is gone and starts no MCP servers. `sessions-archive.json` under the OpenChamber data dir only drains: it holds entries written before 2.1, and for sessions of deleted directories before 2.2, until the migration after OpenCode starts pushes them; archiving or restoring a session drops its entry.
 - Unread baseline: `sessions-unread.json` (`{ since }`) under the OpenChamber data dir, created once on the first start that reads it and never replaced; an unreadable file is left alone and the proxy serves records as they are. The VS Code extension reads and creates the same file.
 - Turn length: `lib/openchamber-sessions/turn-duration.js` watches the translated event stream and, when a top-level session's turn ends, writes `openchamber.turn = { endedAt, durationMs }` into its metadata, both in OpenCode's event time. Only a turn seen from its first busy event is recorded; starts are in memory and a stream reconnect forgets them, since it may have hidden an end. The UI shows the length while the session is unread.
-- Session metadata (goal progress, the assist recap, the obligatory-context cursor, pinned notes) lives on the OpenCode session record, written with `PATCH /api/session/{id}`. OpenCode 2.0.15 added metadata writes through this API; `compatibility.js` enforces a minimum of 2.2.0. OpenCode replaces the whole object, so `sessionMetadataStore.setSessionMetadata` reads the record, applies the JSON Merge Patch and writes the result, one write per session at a time; a record that cannot be read stops the write. Since 2.2 the write also works for a session whose folder is gone. Every reader and writer (routes, goal loop, session assist, session knowledge, obligatory context, notifications) goes through `sessionMetadataStore.get` / `setSessionMetadata`. Older OpenChamber versions kept this state in `sessions-metadata.json` under the data dir. Its entries are the newest metadata their sessions have: the proxy lays them over OpenCode's records, a session's next write pushes its entry, and a sweep after OpenCode starts pushes the rest (a session OpenCode no longer knows is dropped, any other failure waits for the next write or start). The emptied file is renamed to `sessions-metadata.json.migrated`. Archive changes run one at a time per session, so the migration sweep cannot overwrite a user's newer archive or unarchive.
+- Session metadata (goal progress, the assist recap, the obligatory-context cursor, pinned notes) lives on the OpenCode session record, written with `PATCH /api/session/{id}`. OpenCode 2.0.15 added metadata writes through this API; `compatibility.js` enforces a minimum of 2.2.4. OpenCode replaces the whole object, so `sessionMetadataStore.setSessionMetadata` reads the record, applies the JSON Merge Patch and writes the result, one write per session at a time; a record that cannot be read stops the write. Since 2.2 the write also works for a session whose folder is gone. Every reader and writer (routes, goal loop, session assist, session knowledge, obligatory context, notifications) goes through `sessionMetadataStore.get` / `setSessionMetadata`. Older OpenChamber versions kept this state in `sessions-metadata.json` under the data dir. Its entries are the newest metadata their sessions have: the proxy lays them over OpenCode's records, a session's next write pushes its entry, and a sweep after OpenCode starts pushes the rest (a session OpenCode no longer knows is dropped, any other failure waits for the next write or start). The emptied file is renamed to `sessions-metadata.json.migrated`. Archive changes run one at a time per session, so the migration sweep cannot overwrite a user's newer archive or unarchive.
 - User config: `<config dir>/opencode.json(c)` where the config dir is `OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. The v1 `config.json` is not read.
 - Project config: `<workingDirectory>/.opencode/opencode.json(c)` first, else `<workingDirectory>/opencode.json(c)`.
 - Custom config: `OPENCODE_CONFIG` env var path.
@@ -1247,14 +1247,36 @@ the folder-label style the UI's own regeneration uses
   agent file, still wins. OpenCode activates configured plugins after its
   built-in agents and before its config agents, so the config writes the
   prompt after this plugin.
+- OpenCode titles from the first user message's text only. Context the user
+  attached (a file comment, a browser annotation, PR checks) is admitted as
+  synthetic messages right before that message (`sendMessage` in
+  `packages/ui/src/lib/opencode/client.ts`), so a session started with context
+  and no words was titled "Empty message". The plugin's `title` hook reads the
+  session context, and when the first user message is shorter than 20
+  characters it adds the synthetic messages admitted before it, at most 2000
+  characters, as a second text part of the title request's user message. A
+  first message that already names the topic gets the request unchanged. A
+  failed context read leaves the request as OpenCode built it.
 
-#### Why an agent transform and not the `session.title` hook
+#### Why an agent transform and not the `session.title` hook for the prompt
 
 The hook runs on every title request, after config is applied, so it would
 overwrite a user's own `agents.title.system`, and telling the user's prompt
 apart from OpenCode's inside the hook means comparing prompt text. The agent
 transform takes OpenCode's own plugin order and leaves the user's choice on top
-with no check at all.
+with no check at all. The hook only adds input, which no config replaces.
+
+#### Why the attached context goes to the title model and not into `result`
+
+The hook could set `result` and skip the model, for example by naming the
+session after the comment's file. The model names the topic in the user's
+language and the folder-label style the prompt sets; a title built from the
+context's first line would read like a path or a quote. The context joins the
+same user message as a text part, because some providers reject two user
+messages in a row. The part only says the context came with the first message
+and gives no naming instruction: OpenCode's regeneration of a titled session
+sends the original request with the recent conversation, and an instruction to
+name the session after the context pulled that title back to the old topic.
 
 #### Why the prompt pins the title language and carries a non-English example
 
@@ -1264,6 +1286,23 @@ one Ukrainian, and a Chinese first message still produced English titles (drift
 varied per request on the same input). The prompt now states that only the
 user's message decides the language and adds a Chinese example, the same
 pinning idiom `packages/ui/src/lib/smallModel.ts` uses for its notes.
+
+#### Why the prompt is short and every example fits four words
+
+The title runs on a small model that imitates the example shape more than a
+rule buried in a long prompt. A five-word Ukrainian example modelled the wrong
+length, and "Статус бага режиму плану OpenChamber" came back at five words
+even though the prompt said two to four. Its fifth word was the name of the
+project the session worked in, which the session list already shows, so the
+prompt tells the model to leave that name out. The prompt is now a short rule
+list, every example output fits the limit, one example drops the project name
+from a long question, and the last line aims at two or three words. The
+title model usually runs without reasoning and writes the title in one pass, so
+the prompt never asks it to count or trim what it wrote.
+
+The small model still sometimes returns five words on a long first message; the
+word limit is a prompt instruction, not a code cap. Only a post-processing cap
+or a stronger title model would make it exact, and both are product decisions.
 
 The embedded server controller exposes `getManagedOpenCodePreflight()` for
 desktop bootstrap. It shares the lifecycle's current CLI validation promise,

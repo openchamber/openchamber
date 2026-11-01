@@ -1739,10 +1739,15 @@ onCommand('addFileAttachments', (payload) => {
     return;
   }
 
-  import('@/sync/input-store').then(({ useInputStore }) => {
+  Promise.all([import('@/sync/input-store'), import('@/components/ui')]).then(([{ useInputStore }, { toast }]) => {
     const inputStore = useInputStore.getState();
     for (const file of files) {
-      inputStore.addVSCodeFileAttachment(file.filePath, file.fileName, file.fileSize);
+      try {
+        inputStore.addVSCodeFileAttachment(file.filePath, file.fileName, file.fileSize);
+      } catch (error) {
+        // The store names the cause (a file too large to send).
+        if (error instanceof Error) toast.error(error.message);
+      }
     }
   });
 });

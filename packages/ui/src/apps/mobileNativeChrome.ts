@@ -280,10 +280,31 @@ export const useNativeMobileChrome = (): void => {
       };
 
       const showHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
-        clearSettle();
-        dropRevealRoom();
         observeNativeKeyboardHeight(info.keyboardHeight);
         const inShell = document.activeElement?.closest('.oc-mobile-app-shell') != null;
+        // Focus moved to another field on the same side with the keyboard up
+        // and landed (the comment composer handing back to the composer): iOS
+        // announces the keyboard again, but the layout already takes it in.
+        // Sliding the movers would lift them a second keyboard height until
+        // the settle cleared them. Only a changed height is applied, in place.
+        // A slide still in flight (its settle pending) takes the full path
+        // below; the reveal room already reserved stays for the new field.
+        if (keyboardOpen && layoutApplied && settleTimer === null && inShell === keyboardInShell) {
+          if (Math.abs(info.keyboardHeight - keyboardHeight) >= 1) {
+            keyboardHeight = info.keyboardHeight;
+            setInset(keyboardHeight);
+            setVar('--oc-kb-surface', keyboardHeight);
+            if (keyboardInShell) {
+              setVar('--oc-kb-layout', keyboardHeight);
+              setVar('--oc-kb-scroll-inset', Math.max(0, keyboardHeight - safeBottomPx));
+            }
+            dispatchKb('oc:keyboard-settled', { open: true });
+          }
+          revealFocusedField('landed');
+          return;
+        }
+        clearSettle();
+        dropRevealRoom();
         // Focus moved between the shell and a surface over it with the
         // keyboard up: the shell gives back what it took for the old field,
         // its movers first (they are found under the old owner).

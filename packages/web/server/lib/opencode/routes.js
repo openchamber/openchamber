@@ -534,7 +534,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   app.put('/api/config/compaction', (req, res) => {
     const parsed = compactionUpdateSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res.status(400).json({ error: 'buffer and keepTokens must be token counts or null, auto and background booleans' });
+      return res.status(400).json({ error: 'buffer must be a token count, a share such as "20%" or null, keepTokens a token count or null, auto and background booleans' });
     }
     try {
       const result = setCompactionSettings(parsed.data);

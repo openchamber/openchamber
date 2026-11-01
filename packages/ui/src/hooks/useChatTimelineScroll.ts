@@ -2,7 +2,7 @@ import React from 'react';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
-import { cancelWhenLayoutSettled, isLayoutAnimating, onLayoutAnimationStart, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { cancelWhenLayoutSettled, isLayoutAnimating, onLayoutAnimationStart, onWidthDragStart, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { createKeyboardFollowGlide, type KeyboardFollowGlide } from '@/components/chat/lib/scroll/keyboardFollowGlide';
 import { retireScrollContent } from '@/components/chat/lib/scroll/retireScrollContent';
 import {
@@ -137,7 +137,7 @@ interface UseChatTimelineScrollResult {
     isPinned: boolean;
     registerList: (list: TimelineListHandle | null, sessionKey?: string) => void;
     onIsAtEndChange: (isAtEnd: boolean) => void;
-    onListMetricsChange: (metrics: { readonly footerSize: number }) => void;
+    onListMetricsChange: (metrics: { readonly headerSize: number; readonly footerSize: number }) => void;
     onManualNavigation: () => void;
     onTimelineDataChange: () => void;
     showScrollButton: boolean;
@@ -359,10 +359,10 @@ export const useChatTimelineScroll = ({
     // reader pinned at the end (see the pinned-end section).
     const pinnedThroughAnimationRef = React.useRef(false);
     // Where a reader on the end sits relative to the list's own measured end
-    // when a side-column animation starts: on the document's end, that is a
-    // few px below (8 in a typical transcript). The animation holds the end
-    // from the list's measurements, since the document's lags a re-wrap;
-    // without this the pinned text hopped by that much at every toggle.
+    // when a side-column animation starts: zero once the list is measured,
+    // off by what its estimates still miss otherwise. The animation holds the
+    // end from the list's measurements, since the document's lags a re-wrap,
+    // and keeps that offset so the pinned text does not hop.
     const animationEndCorrectionRef = React.useRef(0);
     // Incremented by every real user gesture. Automatic movement is only valid
     // while `liveFollowGenerationRef` still equals it.
@@ -418,10 +418,13 @@ export const useChatTimelineScroll = ({
             followStopEligibilityRef.current.set(stop.element, false);
         }
     };
-    // Size of the list footer, reported by the list as it is measured; the
-    // real content end sits below the last row by this much.
+    // Sizes of the list header and footer, reported by the list as it is
+    // measured: row positions start below the header, and the real content
+    // end sits below the last row by the footer.
+    const listHeaderSizeRef = React.useRef(0);
     const listFooterSizeRef = React.useRef(0);
-    const onListMetricsChange = React.useCallback((metrics: { readonly footerSize: number }) => {
+    const onListMetricsChange = React.useCallback((metrics: { readonly headerSize: number; readonly footerSize: number }) => {
+        listHeaderSizeRef.current = Number.isFinite(metrics.headerSize) ? metrics.headerSize : 0;
         listFooterSizeRef.current = Number.isFinite(metrics.footerSize) ? metrics.footerSize : 0;
     }, []);
     const currentSessionKeyRef = React.useRef(currentSessionKey);
@@ -944,7 +947,7 @@ export const useChatTimelineScroll = ({
                 const offset = state
                     ? resolveRealContentEndOffset({
                         state,
-                        composerOverlayHeight: composerOverlayHeightRef.current,
+                        headerSize: listHeaderSizeRef.current,
                         footerSize: listFooterSizeRef.current,
                     })
                     : null;
@@ -1155,7 +1158,7 @@ export const useChatTimelineScroll = ({
                 if (lastBottom !== null && state.scroll > lastBottom) {
                     const offset = resolveRealContentEndOffset({
                         state,
-                        composerOverlayHeight: composerOverlayHeightRef.current,
+                        headerSize: listHeaderSizeRef.current,
                         footerSize: listFooterSizeRef.current,
                     });
                     if (offset !== null) {
@@ -1530,7 +1533,7 @@ export const useChatTimelineScroll = ({
                 const measured = state
                     ? resolveRealContentEndOffset({
                         state,
-                        composerOverlayHeight: composerOverlayHeightRef.current,
+                        headerSize: listHeaderSizeRef.current,
                         footerSize: listFooterSizeRef.current,
                     })
                     : null;
@@ -1601,7 +1604,7 @@ export const useChatTimelineScroll = ({
             const offset = state
                 ? resolveRealContentEndOffset({
                     state,
-                    composerOverlayHeight: composerOverlayHeightRef.current,
+                    headerSize: listHeaderSizeRef.current,
                     footerSize: listFooterSizeRef.current,
                 })
                 : null;
@@ -1616,7 +1619,7 @@ export const useChatTimelineScroll = ({
             const measured = state
                 ? resolveRealContentEndOffset({
                     state,
-                    composerOverlayHeight: composerOverlayHeightRef.current,
+                    headerSize: listHeaderSizeRef.current,
                     footerSize: listFooterSizeRef.current,
                 })
                 : null;
@@ -1632,6 +1635,27 @@ export const useChatTimelineScroll = ({
             release();
             cancelWhenLayoutSettled(settle);
             pinnedThroughAnimationRef.current = false;
+        };
+    }, [scrollNode]);
+
+    // While the user drags a side column's width, the transcript's off-screen
+    // messages skip layout (the `data-columns-moving` rule in index.css), so
+    // a frame re-wraps what is on screen, not every turn the list has
+    // mounted. Restored once the drag settles, where they re-wrap once at the
+    // final width. Only for a drag: with an accessibility client on, turning
+    // the skip on and off rebuilt the messages' accessibility nodes, 60 to
+    // 100 ms, more than a 240 ms toggle animation saved by it.
+    React.useEffect(() => {
+        if (!scrollNode) return;
+        const settle = () => scrollNode.removeAttribute('data-columns-moving');
+        const release = onWidthDragStart(() => {
+            scrollNode.setAttribute('data-columns-moving', '');
+            runWhenLayoutSettled(settle);
+        });
+        return () => {
+            release();
+            cancelWhenLayoutSettled(settle);
+            settle();
         };
     }, [scrollNode]);
 

@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { createRequire } from 'node:module';
 
-import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 import { isWorkflowFeatureAvailable } from '../workflows/feature-flag.js';
 import { isOverviewFeatureAvailable } from '../overview/feature-flag.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
@@ -1292,9 +1291,8 @@ export const createSettingsHelpers = (dependencies) => {
       ...sanitized,
       hasManagedRemoteTunnelToken,
       hasDesktopUiPassword,
-      // Tells the client whether agent memory exists in this build at all, so
-      // its settings row and panel tab can be absent rather than merely off.
-      agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
+      // Agent memory needs the OpenChamber server, like routing below.
+      agentMemoryFeatureAvailable: true,
       // The same for agent workflows (`OPENCHAMBER_WORKFLOWS_ENABLE`).
       agentWorkflowFeatureAvailable: isWorkflowFeatureAvailable(),
       // The overview page ships dark until `OPENCHAMBER_OVERVIEW_ENABLED` is set.

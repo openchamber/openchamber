@@ -181,17 +181,17 @@ export interface OpenCodeWarmingConfig {
   warming?: boolean | { prompt?: string; interval?: string; duration?: string };
 }
 export function writeWarmingDuration(config: OpenCodeWarmingConfig, minutes: number): boolean;
-/** A compaction settings update: a token count, `null` for OpenCode's default, or omitted to leave it. */
+/** A compaction settings update: a token count or a `"20%"` share for the buffer, `null` for OpenCode's default, or omitted to leave it. */
 export const compactionUpdateSchema: z.ZodObject<{
   auto: z.ZodOptional<z.ZodBoolean>;
-  buffer: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+  buffer: z.ZodOptional<z.ZodNullable<z.ZodUnion<[z.ZodString, z.ZodNumber]>>>;
   keepTokens: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
   background: z.ZodOptional<z.ZodBoolean>;
 }>;
 export type CompactionUpdate = z.infer<typeof compactionUpdateSchema>;
 /** The keys of an OpenCode config file a compaction update edits. */
 export interface OpenCodeCompactionConfig {
-  compaction?: { auto?: boolean; buffer?: number; keep?: { tokens?: number } };
+  compaction?: { auto?: boolean; buffer?: string | number; keep?: { tokens?: number } };
   experimental?: { background_compaction?: boolean };
 }
 export function writeCompactionSettings(config: OpenCodeCompactionConfig, update: CompactionUpdate): boolean;

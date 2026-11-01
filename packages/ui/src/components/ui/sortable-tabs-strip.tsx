@@ -279,29 +279,20 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   }, [activeId, isSamePillRect, usesIndicator]);
 
   const updateOverflow = React.useCallback(() => {
-    if (!isScrollable) {
-      setOverflow({ start: false, end: false });
-      return;
-    }
-
-    const element = scrollRef.current;
-    if (!element) {
-      setOverflow({ start: false, end: false });
-      return;
-    }
-
+    const element = isScrollable ? scrollRef.current : null;
     // scrollLeft runs from 0 at the start of the strip: positive toward the end
     // in LTR, negative in RTL, so its magnitude is the distance from the start.
-    const fromStart = Math.abs(element.scrollLeft);
-    setOverflow({
-      start: fromStart > 2,
-      end: fromStart + element.clientWidth < element.scrollWidth - 2,
-    });
+    const fromStart = element ? Math.abs(element.scrollLeft) : 0;
+    const start = element ? fromStart > 2 : false;
+    const end = element ? fromStart + element.clientWidth < element.scrollWidth - 2 : false;
+    // The observer reports every width change of a strip being resized; an
+    // unchanged answer keeps the state, so the strip does not re-render.
+    setOverflow((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
   }, [isScrollable]);
 
   React.useEffect(() => {
     if (!isScrollable) {
-      setOverflow({ start: false, end: false });
+      updateOverflow();
       return;
     }
 

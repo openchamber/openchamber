@@ -54,7 +54,6 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * @param {object|null} [dependencies.agentToolRuntime]
  * @param {object|null} [dependencies.limitFailoverRuntime] `../limit-failover/runtime.js`; its plugin calls back through the agent tool's address
  * @param {() => Promise<object|null>} dependencies.readSettings
- * @param {() => boolean} dependencies.isAgentMemoryAvailable
  * @param {() => boolean} [dependencies.isWorkflowAvailable] whether workflows ship in this build (`../workflows/feature-flag.js`)
  */
 export const createManagedConfigRuntime = ({
@@ -65,7 +64,6 @@ export const createManagedConfigRuntime = ({
   agentToolRuntime = null,
   limitFailoverRuntime = null,
   readSettings,
-  isAgentMemoryAvailable,
   isWorkflowAvailable = () => false,
 }) => {
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
@@ -100,7 +98,7 @@ export const createManagedConfigRuntime = ({
     const includeControl = settings?.agentControlToolEnabled !== false;
     const includeSchedule = settings?.agentScheduleToolEnabled !== false;
     const includeWeb = settings?.agentWebToolEnabled !== false;
-    const includeMemory = isAgentMemoryAvailable() && settings?.agentMemoryToolEnabled === true;
+    const includeMemory = settings?.agentMemoryToolEnabled === true;
     const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
     const includeNotify = settings?.agentNotifyToolEnabled === true;
     const includeRender = settings?.agentRenderToolEnabled !== false;

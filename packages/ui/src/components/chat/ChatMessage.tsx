@@ -616,7 +616,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 className={cn(
                     'group w-full',
                     isUser ? (isMobile ? 'pt-2' : 'pt-4') : 'pt-0',
-                    isUser ? 'pb-0' : (isFollowedByAssistant || nextIsHiddenUserMessage) ? 'pb-0' : 'pb-2'
+                    // In the transcript the gap under an answer is the
+                    // turn's (TurnItem gapBelow); only ungrouped lists (BTW) keep it here.
+                    isUser || hasTurnGrouping || isFollowedByAssistant || nextIsHiddenUserMessage ? 'pb-0' : 'pb-2'
                 )}
                 id={`message-${message.info.id}`}
                 data-message-id={message.info.id}

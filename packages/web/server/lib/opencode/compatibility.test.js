@@ -6,8 +6,8 @@ const cli = (output, code = 0) => ({ binary: process.execPath, args: ['-e', `con
 describe('OpenCode compatibility', () => {
   it('recognizes both CLI version formats before launching a server', async () => {
     expect(await readOpenCodeCliVersion(cli('1.18.32'))).toBe('1.18.32');
-    expect(await requireOpenCodeV2(cli('opencode v2.2.0'))).toBe('2.2.0');
-    await expect(requireOpenCodeV2(cli('2.1.4'))).rejects.toBeInstanceOf(UnsupportedOpenCodeVersionError);
+    expect(await requireOpenCodeV2(cli('opencode v2.2.4'))).toBe('2.2.4');
+    await expect(requireOpenCodeV2(cli('2.2.3'))).rejects.toBeInstanceOf(UnsupportedOpenCodeVersionError);
     await expect(requireOpenCodeV2(cli('1.18.32'))).rejects.toBeInstanceOf(UnsupportedOpenCodeVersionError);
     await expect(readOpenCodeCliVersion(cli('2.0.19', 1))).rejects.toThrow();
     await expect(readOpenCodeCliVersion(cli('error, requires 2.0.19'))).rejects.toThrow();
@@ -48,13 +48,13 @@ describe('OpenCode compatibility', () => {
   });
 
   it('accepts 2.x from the minimum on and nothing older or of another major', () => {
-    for (const version of ['2.2.0', '2.2.3', '2.3.0', '2.2.0-beta.1']) {
+    for (const version of ['2.2.4', '2.2.5', '2.3.0', '2.2.4-beta.1']) {
       expect(describeOpenCodeCompatibility(version, 'managed', true).state).toBe('compatible');
     }
-    for (const version of ['1.18.32', '2.0.32', '2.1.4', '3.0.0']) {
+    for (const version of ['1.18.32', '2.0.32', '2.1.4', '2.2.3', '3.0.0']) {
       expect(describeOpenCodeCompatibility(version, 'managed', true).state).toBe('incompatible');
     }
-    expect(describeOpenCodeCompatibility('2.1.4', 'managed', true).minimumVersion).toBe('2.2.0');
+    expect(describeOpenCodeCompatibility('2.1.4', 'managed', true).minimumVersion).toBe('2.2.4');
   });
 
   it('reports which local CLI was checked', () => {
@@ -68,7 +68,7 @@ describe('OpenCode compatibility', () => {
     for (const installation of ['external', 'bundled']) {
       expect(describeOpenCodeCompatibility('1.18.32', installation, true).canInstall).toBe(false);
     }
-    for (const version of [null, '2.2.0', '3.0.0']) {
+    for (const version of [null, '2.2.4', '3.0.0']) {
       expect(describeOpenCodeCompatibility(version, 'managed', true).canInstall).toBe(false);
     }
   });

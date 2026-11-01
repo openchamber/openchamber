@@ -1328,7 +1328,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Eingabe fokussieren',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Einstellungen öffnen',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Terminal-Dock umschalten',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Terminal erweitert umschalten',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': 'Panel aus- oder einklappen',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'Auswahl zum Chat hinzufügen',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'Seitenleiste umschalten',
     'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': 'Sitzungs-Tab wechseln',

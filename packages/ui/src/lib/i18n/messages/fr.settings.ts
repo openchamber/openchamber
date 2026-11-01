@@ -1257,7 +1257,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Placer le focus dans la saisie',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Ouvrir les paramètres',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Afficher/masquer le panneau du terminal',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Développer/réduire le terminal',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': 'Agrandir ou réduire le panneau',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'Ajouter la sélection au chat',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'Afficher/masquer la barre latérale',
     'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': 'Basculer l’onglet de session',

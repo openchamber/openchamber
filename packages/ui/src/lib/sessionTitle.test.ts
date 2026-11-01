@@ -257,6 +257,8 @@ describe('generation lifecycle', () => {
       expect(prompt.startsWith('**Current title:** Original\n\n---\n\n**User**')).toBe(true);
       const { system } = z.object({ system: z.string() }).parse(body);
       expect(system).toContain('only the user message decides the language');
+      expect(system).toContain('Most titles are two or three words');
+      expect(system).toContain('Leave out the name of the project');
       expect(system).toContain('检查项目的 git 记录和未完成的计划 → 项目进度检查');
       calls += 1;
       return calls === 1 ? Response.json({ text: 'A useful title' }) : new Response('Unavailable', { status: 503 });

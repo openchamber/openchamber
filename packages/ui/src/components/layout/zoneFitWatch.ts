@@ -1,5 +1,5 @@
 import { planZoneFit } from '@/lib/workspace/zoneFit';
-import { CONTEXT_ZONE_DEFAULT_WIDTH, CONTEXT_ZONES, getZoneView, isZoneShown, resolveZoneActiveTab } from '@/lib/workspace/zones';
+import { canZoneExpand, CONTEXT_ZONE_DEFAULT_WIDTH, CONTEXT_ZONES, getZoneView, isZoneShown, resolveZoneActiveTab } from '@/lib/workspace/zones';
 import { useUIStore } from '@/stores/useUIStore';
 
 type Side = 'left' | 'right';
@@ -37,20 +37,11 @@ export const watchZoneFit = ({ directoryKey, folded, readRowWidth }: ZoneFitWatc
     if (!tab) return 0;
     return state.contextZoneSizes[side] ?? CONTEXT_ZONE_DEFAULT_WIDTH;
   };
-  // A zone shown expanded, as ContextPanel draws it: a side zone showing
-  // only the file tree does not expand.
+  // A zone shown expanded, as ContextPanel draws it.
   const anyZoneExpanded = (state: UIState): boolean => {
     const panel = state.contextPanelByDirectory[directoryKey];
     if (!panel) return false;
-    const editorShown = panel.tabs.some((tab) => tab.mode === 'file' && tab.targetPath)
-      && (state.contextEditorVisible || !state.contextEditorTreeVisible);
-    return CONTEXT_ZONES.some((zone) => {
-      if (!getZoneView(panel, zone).expanded) return false;
-      const tab = isZoneShown(panel, state.contextSurfaceZones, zone)
-        ? resolveZoneActiveTab(panel, state.contextSurfaceZones, zone)
-        : null;
-      return Boolean(tab) && (zone === 'bottom' || tab?.mode !== 'file' || editorShown);
-    });
+    return CONTEXT_ZONES.some((zone) => getZoneView(panel, zone).expanded && canZoneExpand(panel, state, zone));
   };
 
   let displaced: { side: Side; by: Side; tabId: string } | null = null;

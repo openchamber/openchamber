@@ -89,6 +89,13 @@ describe('save', () => {
     expect((await runtime.read({ scope: 'global' })).entries).toHaveLength(0);
   });
 
+  test('an over-limit title is a clear 400, not a title cut mid-word', async () => {
+    await expect(actions.execute('memory.save', {
+      scope: 'global', title: 't'.repeat(61), body: 'b',
+    }, DIRECTORY)).rejects.toThrow('title holds at most 60 characters');
+    expect((await runtime.read({ scope: 'global' })).entries).toHaveLength(0);
+  });
+
   test('reports a correction as replaced so the agent does not claim a second memory', async () => {
     await actions.execute('memory.save', {
       scope: 'global',

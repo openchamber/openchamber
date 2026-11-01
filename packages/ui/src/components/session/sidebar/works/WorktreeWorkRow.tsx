@@ -294,8 +294,10 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   // state's colour, named by its tooltip; a click opens it.
   // The second line of a detailed row has room for its number too, which
   // stays neutral: the mark alone carries the state.
+  // A worktree's PR shows only as the tint of its branch mark, with the PR
+  // itself in the tooltip; a space's mark takes no tint, so it keeps the PR mark.
   const refMark = refs.prSummary
-    ? { icon: 'git-pull-request' as const, color: refs.prColor, label: refs.prLabel ?? refs.prReference, text: refs.prReference, url: refs.prSummary.url }
+    ? space ? { icon: 'git-pull-request' as const, color: refs.prColor, label: refs.prLabel ?? refs.prReference, text: refs.prReference, url: refs.prSummary.url } : null
     : refs.primaryIssue
       ? { icon: refs.primaryIssue.icon, color: refs.primaryIssue.color, label: refs.issueItems.map((item) => item.text).join(', '), text: refs.primaryIssue.label, url: refs.primaryIssue.url }
       : null;

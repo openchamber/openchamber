@@ -403,6 +403,37 @@ a margin on the viewport is clipped by that scroller and an image would start
 loading only once already visible. Read files stay until the preview closes:
 releasing one far away would collapse its height and move the text being read.
 
+The Markdown preview renders the file a block at a time (`windowed` on
+`SimpleMarkdownRenderer`, `chat/markdown/markdownWindow.ts`): Streamdown
+splits it into top-level blocks as it splits a streamed reply, and only the
+blocks within a viewport of the visible part mount; the rest stand as empty
+boxes of the height and edge margins they had when they left, or an estimate
+from their source until first drawn. A file with footnotes or link
+definitions is one block and renders whole. What reads the whole rendered
+document mounts every block while it does: the find bar while it is open, a
+heading link while it looks for its heading, and a selection that crosses a
+block not mounted (select-all, a shift-click far away) until it collapses. A
+selection keeps the blocks it reached mounted, so its ends stay in the DOM
+while it autoscrolls, and a block whose disclosure the reader toggled, or
+that plays a video, stays mounted. The remembered scroll place of a Markdown
+preview is the block at the viewport's top and the offset into it
+(`useFilePreviewScrollPosition`); that block stays mounted while it is
+restored, held until two frames in a row find it in place, since the blocks
+around it draw only after the jump.
+
+### Why a Markdown preview is virtualized
+
+Rendered whole, a 340 KB changelog (1,000 blocks, 220,000 px) cost 470 ms to
+open, mostly the Markdown parse, and while the panel was resized it laid out
+the whole document on every frame: 80 % of the main thread, and with an
+accessibility client on 1.1 s of serialization and 96 dropped frames per
+gesture. Skipping the layout of blocks off screen in CSS (`content-visibility`)
+left the parse and the accessibility nodes, and changed spacing wherever a
+block's children's margins collapse through it. Mounted a window at a time,
+the changelog opens without a task over 10 ms, and a resize costs what it
+costs with a short file. The blocks render as they do in a streamed reply,
+pixel for pixel the same as the whole document.
+
 ### Why document assets resolve before node updates
 
 Media and link components own their resources and cleanup. Rewriting the

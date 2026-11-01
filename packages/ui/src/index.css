@@ -928,6 +928,30 @@ html:not(.dark) .chat-scroll {
   background: transparent !important;
 }
 
+/* While the user drags a column beside the chat to a new width
+   (`holdLayoutAnimation`, lib/layoutAnimation.ts) the transcript re-wraps on
+   every pointer frame, and a row
+   is a whole turn, so most of the text it lays out is off screen. The
+   timeline marks itself `data-columns-moving` meanwhile (useChatTimelineScroll),
+   and the messages outside the viewport skip layout at the size they last
+   had: `contain-intrinsic-size: auto` records it at rest, so turning the skip
+   on changes no height. With an accessibility client on, re-wrapping that
+   text also rebuilt its accessibility nodes on every frame.
+   The selector ends in the attribute the skipped elements carry, so the flag
+   restyles only them: ending in `*`, flipping it restyled the whole
+   transcript (80,000 elements, 60 to 90 ms) on every sidebar and panel
+   toggle. Only whole messages skip: a skipped element is contained, so its
+   children's margins stop collapsing through it, and markdown blocks grew
+   as the flag turned on (21 px for a code block, 28 for display math). A
+   message's text already sits in a layout-contained root (MessageBody). */
+[data-scrollbar="chat"] [data-message-id] {
+  contain-intrinsic-size: auto 120px;
+}
+
+[data-scrollbar="chat"][data-columns-moving] [data-message-id] {
+  content-visibility: auto;
+}
+
 /* Hide native scrollbars for overlay targets (all browsers) */
 .overlay-scrollbar-target {
   scrollbar-width: none !important;

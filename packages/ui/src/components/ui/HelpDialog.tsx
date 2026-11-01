@@ -179,9 +179,9 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          id: 'toggle_terminal_expanded',
-          descriptionKey: 'helpDialog.item.toggleTerminalExpanded',
-          icon: "window",
+          id: 'toggle_context_panel_expanded',
+          descriptionKey: 'helpDialog.item.toggleContextPanelExpanded',
+          icon: "layout-right",
           keys: '',
         },
         {

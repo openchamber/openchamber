@@ -1386,7 +1386,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'מיקוד בשדה הקלט',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'פתח הגדרות',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'הצג/הסתר את המסוף',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'הרחב/כווץ את המסוף',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': 'הרחבה או כיווץ של החלונית',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'הוסף את הבחירה לצ\'אט',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'הצג/הסתר את סרגל הצד',
   'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': 'מעבר בין כרטיסיות הפעלה',

@@ -66,11 +66,11 @@ const placeholderBranchGuidance = (branch) => `Its name \`${branch}\` is a place
   + ' A placeholder made for an issue (`issue-180-merry-salamander`) keeps the issue number: work.name puts `180-` in front of'
   + " your name's last segment (`fix/180-login-timeout`) unless your name already has it.";
 
-const renderMemorySection = (entries) => entries
+/** Newest first: when the index outgrows its budget, the oldest titles drop. */
+const memoryTitleLines = (entries) => entries
   .slice()
-  .sort((a, b) => a.createdAt - b.createdAt)
-  .map((entry) => `- [${entry.type}] ${entry.title}`)
-  .join('\n');
+  .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
+  .map((entry) => `- ${entry.title}`);
 
 /**
  * When to save, stated in every session where memory is on, and only here. The
@@ -82,7 +82,9 @@ const MEMORY_SAVE_GUIDANCE = 'The openchamber_memory tool keeps memory across se
   + ' preference, confirms a non-obvious approach worked, or you learn a project fact'
   + ' that took real effort to find. A project fact an agent would learn from the code,'
   + ' docs and skills, including why and whether it may change, needs no entry; the'
-  + ' user\'s corrections and preferences always do. Save before your final reply and'
+  + ' user\'s corrections and preferences always do. A decision is saved once it is made,'
+  + ' never while it is still being discussed, and what the current task\'s own code or'
+  + ' commit records needs no entry. Save before your final reply and'
   + ' mention the save there briefly: the app shows only the text after a turn\'s last'
   + ' tool call as the reply.';
 
@@ -142,12 +144,14 @@ export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws a chart, 
 /**
  * Titles only for memory, never bodies: an index carrying full text grows
  * without bound until it crowds out the conversation it was meant to inform.
+ *
+ * A full project store's titles alone outgrow the entry budget, so the index
+ * is fitted to it whole lines at a time, newest first per scope, and says how
+ * many titles were left out. Cutting the rendered text instead dropped the
+ * newest entries, the ones most likely to matter, mid-title and unannounced.
  */
 const buildMemoryBlock = ({ global, project, enabled = false, complete = false }) => {
-  const sections = [];
-  if (global.length > 0) sections.push(`### About the user\n\n${renderMemorySection(global)}`);
-  if (project.length > 0) sections.push(`### About this project\n\n${renderMemorySection(project)}`);
-  if (sections.length === 0) {
+  if (global.length === 0 && project.length === 0) {
     if (!enabled) return '';
     // "Empty" only when both scopes loaded: a failed read is not an empty store.
     return complete
@@ -155,15 +159,43 @@ const buildMemoryBlock = ({ global, project, enabled = false, complete = false }
       : MEMORY_SAVE_GUIDANCE;
   }
 
-  return [
+  const preamble = [
     ...(enabled ? [MEMORY_SAVE_GUIDANCE] : []),
-    'Stored memory from earlier sessions, titles only. A title leaves out the'
+    'Stored memory from earlier sessions, titles only, newest first. A title leaves out the'
       + ' conditions and reasons that decide how a memory applies, a self-explanatory'
       + ' one most of all: read each entry that bears on the task with openchamber_memory'
       + ' before acting on it, once per conversation, again only after your context was'
       + ' summarized. Memory was true when written; verify the files, flags and'
       + ' commands it names.',
+  ].join('\n\n');
+  const scopes = [
+    { heading: '### About the user', lines: memoryTitleLines(global) },
+    { heading: '### About this project', lines: memoryTitleLines(project) },
+  ].filter((scope) => scope.lines.length > 0);
+
+  const OMITTED_NOTE_RESERVE = 120;
+  let budget = KNOWLEDGE_MAX_LENGTH - preamble.length - OMITTED_NOTE_RESERVE
+    - scopes.reduce((sum, scope) => sum + scope.heading.length + 4, 0);
+  let omitted = 0;
+  const sections = scopes.map((scope) => {
+    const kept = [];
+    for (const line of scope.lines) {
+      if (line.length + 1 > budget) {
+        // Everything older goes too, so a short old title never displaces a long new one.
+        budget = 0;
+        omitted += 1;
+        continue;
+      }
+      kept.push(line);
+      budget -= line.length + 1;
+    }
+    return kept.length > 0 ? `${scope.heading}\n\n${kept.join('\n')}` : '';
+  }).filter(Boolean);
+
+  return [
+    preamble,
     ...sections,
+    ...(omitted > 0 ? [`${omitted} older titles did not fit here; memory.list gives every title.`] : []),
   ].join('\n\n');
 };
 

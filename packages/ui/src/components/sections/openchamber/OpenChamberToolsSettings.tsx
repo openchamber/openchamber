@@ -85,8 +85,7 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setBrowserProvider = useUIStore((state) => state.setBrowserProvider);
   const guests = useGuestsStore((state) => state.guests);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
-  // Absent, not merely off: the feature is finished but unreleased, and a
-  // visible switch invites turning on something that was never announced.
+  // Absent where no OpenChamber server answers settings (VS Code).
   const agentMemoryAvailable = useUIStore((state) => state.agentMemoryFeatureAvailable);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
   const agentKnowledgeToolEnabled = useUIStore((state) => state.agentKnowledgeToolEnabled);
@@ -101,7 +100,7 @@ export const OpenChamberToolsSettings: React.FC = () => {
   const setAgentImageModel = useUIStore((state) => state.setAgentImageModel);
   const agentSecretToolEnabled = useUIStore((state) => state.agentSecretToolEnabled);
   const setAgentSecretToolEnabled = useUIStore((state) => state.setAgentSecretToolEnabled);
-  // Absent in builds without workflows, the way memory is.
+  // Absent in builds without workflows (`OPENCHAMBER_WORKFLOWS_ENABLE`).
   const agentWorkflowAvailable = useUIStore((state) => state.agentWorkflowFeatureAvailable);
   const agentWorkflowToolEnabled = useUIStore((state) => state.agentWorkflowToolEnabled);
   const setAgentWorkflowToolEnabled = useUIStore((state) => state.setAgentWorkflowToolEnabled);

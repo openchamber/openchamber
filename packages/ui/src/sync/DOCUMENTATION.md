@@ -351,37 +351,46 @@ reports the authoritative state.
 ### Session admission
 
 `session-admission.ts` owns admission of host sessions whose folder is outside
-the registered project and worktree topology. It observes active directory
-membership, archived records and completed global loads, rather than streamed session updates. The raw global
-cache stays complete for cleanup and lineage. Managed chats and isolated spaces
-retain their own directory ownership.
+the registered project and worktree topology. The raw global cache stays
+complete for cleanup and lineage. Managed chats and isolated spaces retain their
+own directory ownership.
 
-Discovery uses the active directory index and deduplicates archived folders. Its
-trust reads and registration writes share the background network budget; waiting
-for a trust answer holds no network slot. Queued requests recheck their runtime
-before sending, and managed-chat roots must resolve before importing folders.
+A folder is registered in two cases only: the user opens a session there
+(`setCurrentSession`), or this client sees OpenCode move
+a session out of an admitted folder into it (`subscribeGlobalSessionMoves` in
+`session-moves.ts`, which `session-event-router.ts` feeds from `session.patched`
+events that change the directory). Sessions that already sit in unknown folders, from OpenCode's whole
+history or from a project the user removed, stay hidden and are never
+registered or prompted for in the background. A move between two unknown
+folders registers nothing. VS Code registers only on a deliberate open.
 
-An unknown folder first goes through the existing OpenCode fingerprint trust
-check. Empty configurations and previously trusted fingerprints register without
-a prompt. Other configurations show `OpenCodeTrustDialog` immediately. Declining
-keeps the folder unregistered and suppresses repeated background prompts for that
-fingerprint. A deliberate open can ask again. Trust saved elsewhere in this UI
-rechecks pending admission; completed global loads discover answers from other
-clients. Failed checks and registrations preserve the raw session and retry at
-1, 2 and 4 seconds. Declines do not retry. Disposal, a vanished destination or a
-runtime switch invalidates retries; after the bounded attempts, a later completed
-global load can try again. A failed trust read stays distinct from a user's answer
-even when a refused SDK request shares the same pending check.
+The folder first goes through the existing OpenCode fingerprint trust check.
+Empty configurations and previously trusted fingerprints register without a
+prompt. Other configurations show `OpenCodeTrustDialog` immediately. Declining
+keeps the folder unregistered and suppresses repeated background prompts for
+that fingerprint. A deliberate open can ask again. Failed checks and
+registrations after a move preserve the raw session and retry at 1, 2 and 4
+seconds. Declines do not retry. Disposal, a vanished destination or a runtime
+switch invalidates retries. A failed trust read stays distinct from a user's
+answer even when a refused SDK request shares the same pending check. Trust
+reads and registration writes share the background network budget; waiting for
+a trust answer holds no network slot.
+
+Launch restore (`last-session-restore.ts`) and runtime-memory restoration do
+not reopen a session outside every project, because opening it would register
+its folder without the user choosing it.
 
 `setCurrentSession` gates unknown destinations before fetching messages,
 publishing selection or changing directories. Unknown links resolve session
 detail without starting an OpenCode location. A newer navigation or runtime
-switch invalidates the continuation. Moves of the viewed session clear selection
-before admitting their new destination, including moves seen only in the global
-stream. Runtime-memory restoration uses the same gate. Sidebar projections, the switcher and
-tray never use pins or work state as admission.
-Pinned chat columns also gate their rendered session identity and directory;
-following a move cannot mount a denied destination through a side composer.
+switch invalidates the continuation. When the viewed session's folder stops
+being admitted (a move, a removed project), `subscribeSessionAdmission` clears
+the selection and keeps the session aside; it reopens the session only once
+the folder is admitted, never through a deliberate open that would register
+it. Sidebar projections, the switcher and tray never use pins or work state as
+admission. Pinned chat columns gate their rendered session identity and
+directory and never admit: pins persist across launches, so admitting from a
+column would register folders nobody opened.
 Archive rows filter admission without changing the raw archived cache.
 
 Web, Electron, hosted mobile and Capacitor register through the active server's
@@ -390,6 +399,26 @@ the settings write boundary and serializes an append without changing navigation
 VS Code uses its existing `addWorkspaceFolder` bridge; the extension host checks
 trust again before changing the workspace. Workspace list synchronization leaves
 the active directory alone when the active project has not changed.
+
+A linked worktree lives outside its repository's folder, and a session can move
+into one before this client lists it. The server route matches the destination's
+repository against the registered projects; a worktree of a registered project
+returns that project, appends nothing, and sends `worktree-changed` so clients
+list the worktree, which then admits the session. Admission waits up to 10
+seconds for that listing and answers whether the folder is admitted. An open
+continues only on that answer, so a lost event ends the attempt instead of
+repeating registration; a later listing still admits the session, and a parked
+viewed session comes back then. The sidebar stays the only owner of the
+worktree list: admission never publishes topology itself.
+
+### Why admission reacts to moves and not to the session list
+
+The first version scanned the whole global session list and registered every
+unknown folder with a safe configuration. The global list holds every OpenCode
+session on the machine, so a launch added the home folder, `/tmp` and every
+other folder ever used, re-added projects the user had removed, and in VS Code
+filled the workspace with folders. Registering stays tied to an event that is
+about the user's own work: a move out of an admitted folder, or an open.
 
 ### Why admission leaves the global cache complete
 

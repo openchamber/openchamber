@@ -34,7 +34,7 @@ A list pinned to the field's edge can open a whole composer away from the word b
 
 ### Why the textarea host listens natively and not through the field's props
 
-Wiring it through each field's `onChange`/`onKeyDown` would touch every caller of `Textarea` and keep them in step forever. Native listeners on the element see input and caret changes just as well. Keys are read on the window in the capture phase, filtered to the field, which runs before every React handler, capture ones included. So with a list open, Enter does not also send a reply, and Escape does not close the panel around the field (the context panel closes on Escape from its capture phase).
+Wiring it through each field's `onChange`/`onKeyDown` would touch every caller of `Textarea` and keep them in step forever. Native listeners on the element see input and caret changes just as well. Keys are read on the window in the capture phase, filtered to the field, which runs before every React handler, capture ones included. So with a list open, Enter does not also send a reply, and Escape does not reach a surface around the field that closes on it.
 
 ### Why the choice is typed with `execCommand('insertText')`
 

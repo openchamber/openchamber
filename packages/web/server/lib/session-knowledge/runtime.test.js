@@ -567,6 +567,21 @@ describe('size', () => {
     expect(entries[PINNED].length).toBeLessThan(8_100);
     expect(entries[PINNED]).toContain('(truncated)');
   });
+
+  test('a memory index over budget keeps the newest whole titles and counts the rest', () => {
+    const entry = (index) => ({ title: `Project decision number ${index} about something`, type: 'fact', createdAt: index, updatedAt: index });
+    const project = Array.from({ length: 300 }, (_, index) => entry(index));
+    const memory = buildKnowledgeEntries({
+      notes: [], plans: [], memory: { global: [], project, enabled: true, complete: true },
+    })[MEMORY];
+
+    expect(memory.length).toBeLessThanOrEqual(8_000);
+    expect(memory).not.toContain('(truncated)');
+    expect(memory).toContain('- Project decision number 299 about something');
+    expect(memory).not.toContain('- Project decision number 0 about something');
+    const shown = memory.split('\n').filter((line) => line.startsWith('- Project decision')).length;
+    expect(memory).toContain(`${300 - shown} older titles did not fit here; memory.list gives every title.`);
+  });
 });
 
 describe('response style', () => {

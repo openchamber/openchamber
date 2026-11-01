@@ -40,8 +40,8 @@ const MEMORY_VERSION = 1;
  * standing cost of memory. Short enough to keep a full store's index modest,
  * long enough to say what an entry is about.
  */
-const MEMORY_TITLE_MAX_LENGTH = 60;
-/** Shared with the action layer, which must reject an over-limit body as a 400. */
+export const MEMORY_TITLE_MAX_LENGTH = 60;
+/** Shared with the action layer, which must reject an over-limit title or body as a 400. */
 export const MEMORY_BODY_MAX_LENGTH = 2000;
 
 /** Global memory stays small on purpose: it is the highest-blast-radius store. */

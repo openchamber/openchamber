@@ -1239,7 +1239,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '聚焦輸入方塊',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '開啟設定',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': '切換終端機停靠區',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': '切換終端機展開',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': '展開或收合面板',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '將選取內容加入聊天',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': '切換側邊欄',
     'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': '切換工作階段分頁',

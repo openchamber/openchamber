@@ -877,6 +877,10 @@
       "scope": "device",
       "local": true
     },
+    "contextZoneExpandedChatSizes": {
+      "scope": "device",
+      "local": true
+    },
     "contextRailOrder": {
       "scope": "device",
       "local": true

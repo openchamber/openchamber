@@ -8,14 +8,14 @@ const infoSchema = z.object({ version: versionSchema });
 const legacyHealthSchema = z.object({ version: versionSchema, healthy: z.boolean() });
 
 /**
- * Oldest OpenCode OpenChamber runs against. 2.2.0 moved text generation to
- * `POST /api/experimental/generate/text`, the path the pinned client calls;
- * an older OpenCode answers it 404, so commit messages, PR descriptions and
- * titles would fail. (2.1.0 before it added `archived` to
- * `PATCH /api/session/{id}`, 2.0.20 `GET /api/credential`, 2.0.15
- * `PATCH /api/session` metadata.)
+ * Oldest OpenCode OpenChamber runs against. 2.2.4 accepts a share such as
+ * `"20%"` in `compaction.buffer`, the form Settings writes; an older OpenCode
+ * rejects the whole config file holding it. (2.2.0 before it moved text
+ * generation to `POST /api/experimental/generate/text`, 2.1.0 added
+ * `archived` to `PATCH /api/session/{id}`, 2.0.20 `GET /api/credential`,
+ * 2.0.15 `PATCH /api/session` metadata.)
  */
-const MINIMUM_OPENCODE_VERSION = '2.2.0';
+const MINIMUM_OPENCODE_VERSION = '2.2.4';
 
 const releaseParts = (version) => version.split(/[-+]/, 1)[0].split('.').map(Number);
 

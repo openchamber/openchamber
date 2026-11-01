@@ -4897,6 +4897,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                       frontmatter="properties"
                       enableFileReferences={false}
                       allowRawHtml
+                      windowed
                     />
                   </div>
                 </ErrorBoundary>
@@ -5184,6 +5185,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     frontmatter="properties"
                     enableFileReferences={false}
                     allowRawHtml
+                    windowed
                   />
                 </div>
               </ErrorBoundary>

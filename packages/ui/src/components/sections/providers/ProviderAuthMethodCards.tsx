@@ -202,6 +202,7 @@ export const ProviderAuthMethodCards: React.FC<ProviderAuthMethodCardsProps> = (
             logo={<Icon name={METHOD_ICON[kind]} className="size-5 text-foreground" />}
             name={nameOf(kind)}
             description={descriptionOf(kind)}
+            keepDescriptionWhenNarrow
             status={status.label}
             statusTone={status.tone}
             open={openKinds.has(kind)}

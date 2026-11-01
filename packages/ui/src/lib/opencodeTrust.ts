@@ -58,11 +58,6 @@ type PendingOpenCodeTrustRequest = {
 
 let pendingRequest: PendingOpenCodeTrustRequest | null = null;
 const listeners = new Set<() => void>();
-const answerListeners = new Set<() => void>();
-export const subscribeOpenCodeTrustAnswers = (listener: () => void): (() => void) => {
-  answerListeners.add(listener);
-  return () => { answerListeners.delete(listener); };
-};
 const inFlight = new Map<string, Promise<boolean>>();
 const declined = new Set<string>();
 let promptQueue: Promise<unknown> = Promise.resolve();
@@ -167,7 +162,6 @@ const askForTrust = (assessment: OpenCodeTrustAssessment, generation: number): P
         pendingRequest = null;
         emitChange();
         resolve(true);
-        for (const listener of answerListeners) listener();
         return 'saved';
       },
     };

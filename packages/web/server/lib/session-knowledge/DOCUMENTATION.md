@@ -87,6 +87,11 @@ rather than indexed as empty, which would teach the agent to store again what it
 already has.
 
 Each of the pinned and memory entries is cut at 8,000 characters, and says so.
+The memory index is fitted to that budget before it is cut: whole titles, newest
+first per scope, then a count of the older ones left out and a pointer to
+`memory.list`. A full project store's titles outgrow the budget on their own, and
+cutting the rendered text dropped the newest entries mid-title. Titles carry no
+type tag for the same reason: it cost a sixth of the index and decided nothing.
 The response style keeps the full custom text allowed by settings, up to 50,000
 characters. It has no knowledge-entry truncation budget.
 
@@ -203,13 +208,12 @@ the attempt from the only person able to judge it.
 Patterns, not a model — this runs on every index build. That buys the blunt
 cases only, which is the honest expectation.
 
-## Shipping dark
+## The memory switch
 
-Agent memory is complete but unreleased. `OPENCHAMBER_MEMORY_ENABLE` decides
-whether it exists in a given process at all: unset, there is no tool, no routes,
-no session index, no settings row and no panel tab — absent rather than switched
-off, which would invite turning on something never announced. The setting itself
-also defaults to off, so setting the variable does not enable memory by itself.
+`agentMemoryToolEnabled` decides whether memory exists for this server: off,
+there is no tool, the routes answer "disabled", sessions get no index, and the
+panel has no tab. It defaults to off, so nobody gets a store written about them
+without turning it on.
 
 Pinned notes and plans are unaffected by the memory switch and remain scoped to
 the session that pinned them.

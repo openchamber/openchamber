@@ -6,7 +6,8 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
-import { getZoneView, resolveZoneActiveTabId, shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
+import { getZoneView, resolveZoneActiveTabId } from '@/lib/workspace/zones';
+import { toggleExpandedContextZone } from '@/lib/workspace/toggleExpandedZone';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -73,7 +74,7 @@ type MenuAction =
   | 'open-right-sidebar-git'
   | 'open-right-sidebar-files'
   | 'toggle-terminal'
-  | 'toggle-terminal-expanded'
+  | 'toggle-context-panel-expanded'
   | 'copy'
   | 'add-selection-to-chat'
   | 'theme-light'
@@ -241,18 +242,9 @@ export const useMenuActions = (
           break;
         }
 
-        case 'toggle-terminal-expanded': {
-          const directory = useDirectoryStore.getState().currentDirectory;
-          if (!directory) break;
-          const key = normalizeContextPanelDirectoryKey(directory);
-          const uiState = useUIStore.getState();
-          const panel = uiState.contextPanelByDirectory[key];
-          if (!shownContextModes(panel, uiState.contextSurfaceZones).has('terminal')) {
-            uiState.openContextSurface(key, 'terminal');
-          }
-          uiState.toggleContextPanelExpanded(key, zoneOfMode(uiState.contextSurfaceZones, 'terminal'));
+        case 'toggle-context-panel-expanded':
+          toggleExpandedContextZone(useDirectoryStore.getState().currentDirectory);
           break;
-        }
 
         case 'copy': {
           const copyEvent = new Event('openchamber:copy', { cancelable: true });

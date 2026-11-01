@@ -6,7 +6,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { formatCompactNumber } from '@/lib/numberFormat';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { Config } from '@/lib/opencode/model';
@@ -15,12 +15,16 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 /** OpenCode's `compaction.keep.tokens` when the config leaves it unset. */
 const OPENCODE_DEFAULT_KEEP_TOKENS = 15_000;
-const BUFFER_STEPS = [32_000, 64_000, 128_000, 256_000, 512_000];
+/** Shares of the model's window kept free, written as OpenCode's `"20%"` form. 15% is OpenCode's default. */
+const BUFFER_PERCENT_STEPS = [5, 10, 20, 25, 30, 40, 50];
 const KEEP_STEPS = [5_000, 10_000, 30_000, 50_000, 100_000];
 const DEFAULT_OPTION = 'default';
 
+/** `compaction.buffer`: a share such as `"20%"`, or a token count from a hand-written config. */
+type CompactionBuffer = string | number;
+
 /** The compaction keys Settings edits; `null` leaves OpenCode's default. */
-type CompactionValues = { auto: boolean; buffer: number | null; keepTokens: number | null; background: boolean };
+type CompactionValues = { auto: boolean; buffer: CompactionBuffer | null; keepTokens: number | null; background: boolean };
 
 const readCompaction = (config: Config): CompactionValues => ({
   auto: config.compaction?.auto !== false,
@@ -57,6 +61,46 @@ const TokenCountSelect: React.FC<{
         <SelectItem value={DEFAULT_OPTION}>{defaultLabel}</SelectItem>
         {options.map((count) => (
           <SelectItem key={count} value={String(count)}>{label(count)}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+};
+
+const BufferSelect: React.FC<{
+  value: CompactionBuffer | null;
+  disabled: boolean;
+  onChange: (next: CompactionBuffer | null) => void;
+}> = ({ value, disabled, onChange }) => {
+  const { t } = useI18n();
+  const steps: CompactionBuffer[] = BUFFER_PERCENT_STEPS.map((percent) => `${percent}%`);
+  // A hand-written value outside the steps, a token count included, stays on the list, so it reads as chosen.
+  const options = value === null || steps.includes(value) ? steps : [...steps, value];
+  const percentFormat = new Intl.NumberFormat(getCurrentIntlLocale(), { style: 'percent', maximumFractionDigits: 1 });
+  // Labels read the option's select value: a share ends in "%", anything else is a token count.
+  const label = (option: CompactionBuffer) => {
+    const key = String(option);
+    return key.endsWith('%')
+      ? percentFormat.format(Number.parseFloat(key) / 100)
+      : t('settings.openchamber.defaults.compaction.tokens', { count: formatCompactNumber(Number(key)) });
+  };
+  const defaultLabel = t('settings.openchamber.defaults.compaction.bufferDefault');
+  return (
+    <Select
+      value={value === null ? DEFAULT_OPTION : String(value)}
+      onValueChange={(next) => {
+        const picked = next === DEFAULT_OPTION ? null : next.endsWith('%') ? next : Number(next);
+        if (picked !== value) onChange(picked);
+      }}
+      disabled={disabled}
+    >
+      <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={t('settings.openchamber.defaults.compaction.buffer')}>
+        <SelectValue>{value === null ? defaultLabel : label(value)}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={DEFAULT_OPTION}>{defaultLabel}</SelectItem>
+        {options.map((option) => (
+          <SelectItem key={option} value={String(option)}>{label(option)}</SelectItem>
         ))}
       </SelectContent>
     </Select>
@@ -162,11 +206,8 @@ export const CompactionSettings: React.FC = () => {
           label={t('settings.openchamber.defaults.compaction.buffer')}
           info={t('settings.openchamber.defaults.compaction.bufferInfo')}
         >
-          <TokenCountSelect
+          <BufferSelect
             value={values?.buffer ?? null}
-            steps={BUFFER_STEPS}
-            defaultLabel={t('settings.openchamber.defaults.compaction.bufferDefault')}
-            ariaLabel={t('settings.openchamber.defaults.compaction.buffer')}
             disabled={loading || autoOff}
             onChange={(buffer) => void save('buffer', buffer)}
           />

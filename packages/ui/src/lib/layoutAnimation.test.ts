@@ -45,7 +45,7 @@ afterEach(() => {
   descriptors.clear();
 });
 
-const { beginLayoutAnimation, cancelWhenLayoutSettled, isLayoutAnimating, onLayoutAnimationStart, runWhenLayoutSettled } = await import('./layoutAnimation');
+const { beginLayoutAnimation, cancelWhenLayoutSettled, holdLayoutAnimation, isLayoutAnimating, onLayoutAnimationStart, onWidthDragStart, runWhenLayoutSettled } = await import('./layoutAnimation');
 
 describe('layoutAnimation', () => {
   test('runs a task at once when nothing animates', () => {
@@ -132,6 +132,51 @@ describe('layoutAnimation', () => {
     runFrame();
     await wait(5);
     runFrame();
+  });
+
+  test('a drag holds tasks until a frame after its release, through any animation inside it', async () => {
+    let runs = 0;
+    let starts = 0;
+    const stop = onLayoutAnimationStart(() => { starts += 1; });
+    const release = holdLayoutAnimation();
+    expect(starts).toBe(1);
+    runWhenLayoutSettled(() => { runs += 1; });
+    // An animation that starts and ends during the drag does not settle it.
+    beginLayoutAnimation(1);
+    runFrame();
+    await wait(5);
+    runFrame();
+    expect(runs).toBe(0);
+    expect(isLayoutAnimating()).toBe(true);
+
+    release();
+    release();
+    expect(runs).toBe(0);
+    runFrame();
+    expect(runs).toBe(1);
+    expect(isLayoutAnimating()).toBe(false);
+    expect(attributes.has('data-panel-animating')).toBe(false);
+    stop();
+  });
+
+  test('a width drag is announced also inside a running animation, a height drag never', async () => {
+    let drags = 0;
+    const stop = onWidthDragStart(() => { drags += 1; });
+    beginLayoutAnimation(1);
+    const width = holdLayoutAnimation();
+    expect(drags).toBe(1);
+    const height = holdLayoutAnimation('height');
+    expect(drags).toBe(1);
+    width();
+    height();
+    const again = holdLayoutAnimation();
+    expect(drags).toBe(2);
+    again();
+    stop();
+    runFrame();
+    await wait(5);
+    runFrame();
+    expect(isLayoutAnimating()).toBe(false);
   });
 
   test('a cancelled task does not run', async () => {

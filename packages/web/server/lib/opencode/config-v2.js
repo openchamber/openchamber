@@ -801,18 +801,21 @@ function writeWarmingDuration(config, minutes) {
 
 // ============== COMPACTION ==============
 
-const compactionTokens = z.number().int().min(0).max(10_000_000).nullable().optional();
+const tokenCount = z.number().int().min(0).max(10_000_000);
+const compactionTokens = tokenCount.nullable().optional();
+/** OpenCode's `Config.Compaction.Percent`: a share of the window from "1%" up to but not including "100%". */
+const compactionPercent = z.string().regex(/^([1-9]\d?(\.\d+)?)%$/u);
 
 /**
  * A `PUT /api/config/compaction` body: `auto` sets `compaction.auto`,
- * `buffer` and `keepTokens` set `compaction.buffer` and
- * `compaction.keep.tokens` (`null` removes the key, so OpenCode's default
- * applies), `background` sets `experimental.background_compaction`. An
- * omitted field is left as it is.
+ * `buffer` and `keepTokens` set `compaction.buffer` (a share such as `"20%"`
+ * or a token count) and `compaction.keep.tokens` (`null` removes the key, so
+ * OpenCode's default applies), `background` sets
+ * `experimental.background_compaction`. An omitted field is left as it is.
  */
 const compactionUpdateSchema = z.object({
   auto: z.boolean().optional(),
-  buffer: compactionTokens,
+  buffer: z.union([compactionPercent, tokenCount]).nullable().optional(),
   keepTokens: compactionTokens,
   background: z.boolean().optional(),
 }).strict();

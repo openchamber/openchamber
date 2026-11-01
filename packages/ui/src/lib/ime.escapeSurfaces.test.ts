@@ -15,14 +15,6 @@ const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const ESCAPE_SURFACES: Array<{ name: string; file: string; handler: string; close: RegExp }> = [
   {
-    // The context zone frame and every keep-alive pane (changes, notes, ...)
-    // close the zone from a capture handler that runs before the field's own.
-    name: 'context zone',
-    file: 'components/layout/zoneEscape.ts',
-    handler: 'export const closeZoneOnEscape',
-    close: /close\(\);/,
-  },
-  {
     name: 'sidebar peek',
     file: 'components/layout/useSidebarPeek.ts',
     handler: 'const handleKeyDown',

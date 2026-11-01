@@ -44,6 +44,15 @@ export const TitlebarLeftControls: React.FC = () => {
     useUIStore.getState().closeMainSurfaces();
     useSessionUIStore.getState().openNewSessionDraft();
   }, []);
+  // With header tabs on screen their "+" starts a session, in the folder the
+  // tabs belong to; the button here would be a second one that starts it in
+  // the project root. A full-page surface hides the tabs, so it comes back.
+  const tabsShown = useUIStore((state) => state.sessionTabsEnabled && !(
+    state.isScheduledTasksDialogOpen || state.isArchivePageOpen || state.isIntegrationsCatalogOpen
+    || state.isUsageStatsPageOpen || state.isSourceBoardOpen || state.isOverviewOpen
+    || state.worktreesPageProjectId !== null || (state.isolatedSpacesEnabled && state.spacesPageProjectId !== null)
+    || state.runOverviewKey !== null || state.openGuestPageId !== null
+  ));
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -148,7 +157,7 @@ export const TitlebarLeftControls: React.FC = () => {
 
         {/* Labelled while the sidebar is open; collapses to an icon with a
             tooltip so the cluster stays compact over the header otherwise. */}
-        {isSidebarOpen ? (
+        {tabsShown ? null : isSidebarOpen ? (
           <button
             type="button"
             onClick={handleNewSession}

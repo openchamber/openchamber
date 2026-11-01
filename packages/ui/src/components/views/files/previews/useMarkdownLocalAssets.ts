@@ -1,6 +1,7 @@
 import React from 'react';
 import type { MarkdownDocumentAssets } from '@/components/chat/markdown/MarkdownMediaContext';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
+import { holdMarkdownBlocks } from '@/components/chat/markdown/markdownWindow';
 
 export const isMarkdownDocumentReference = (value: string): boolean => (
   Boolean(value.trim()) && !value.startsWith('#') && !value.startsWith('//')
@@ -27,6 +28,9 @@ export const openMarkdownDocumentLink = (
     event.stopPropagation();
     const wanted = decodeReference(href.slice(1)).toLowerCase();
     const container = event.currentTarget.closest('[data-markdown-content]');
+    // A long document mounts only its blocks near the view: every heading is
+    // mounted to look for the target, and let go once it is in view.
+    const releaseBlocks = container ? holdMarkdownBlocks(container, { sync: true }) : null;
     for (const heading of container?.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6') ?? []) {
       const slug = (heading.textContent ?? '').trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-');
       if (wanted && (heading.id === wanted || slug === wanted)) {
@@ -34,6 +38,7 @@ export const openMarkdownDocumentLink = (
         break;
       }
     }
+    releaseBlocks?.();
     return true;
   }
   if (!isMarkdownDocumentReference(href)) return false;

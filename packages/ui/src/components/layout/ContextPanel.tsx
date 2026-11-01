@@ -43,7 +43,7 @@ import { GuestIcon } from './GuestRailIcon';
 import { useGuestsStore } from '@/lib/guests/store';
 import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
-import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { beginLayoutAnimation, cancelWhenLayoutSettled, holdLayoutAnimation, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
 import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
@@ -51,7 +51,6 @@ import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { CLOSED_ZONE_VIEW, CONTEXT_ZONE_DEFAULT_WIDTH, getZoneView, isZoneShown, resolveZoneActiveTab, sideZoneWidth, type ContextZone } from '@/lib/workspace/zones';
-import { closeZoneOnEscape } from './zoneEscape';
 import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { beginZoneDrag, cancelZoneDrag, finishZoneDrag, startZoneDragGesture, updateZoneDrag } from './zoneDrag';
@@ -66,7 +65,6 @@ const CONTEXT_PANEL_MIN_WIDTH = 320;
 // want it nearly full-width (side-by-side diffs with the chat open). The
 // only limit during a drag is leaving the chat column this much width.
 const CONTEXT_CHAT_MIN_WIDTH = 320;
-const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 
@@ -428,6 +426,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextZoneSize = useUIStore((state) => state.setContextZoneSize);
+  const setContextZoneExpandedChatSize = useUIStore((state) => state.setContextZoneExpandedChatSize);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
@@ -484,11 +483,17 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     isVertical ? clampHeight(next, maxPanelHeight(available)) : clampWidth(next, maxPanelWidth(available))
   ), [isVertical]);
   const chatMinimum = isVertical ? CONTEXT_CHAT_MIN_HEIGHT : CONTEXT_CHAT_MIN_WIDTH;
-  // Expanded, the zone takes everything but a chat column about as wide as
-  // the session sidebar it folds away (ZoneFitArbiter), never under the
-  // minimum, so the chat stays on screen beside it.
+  // Expanded, the zone takes everything but a chat column: the one the user
+  // resized it to while expanded, else about as wide as the session sidebar
+  // it folds away (ZoneFitArbiter), never under the minimum, so the chat
+  // stays on screen beside it. The chat's size is kept, not the zone's, so a
+  // window resize goes to the zone the user expanded.
   const sidebarWidth = useUIStore((state) => (isVertical ? 0 : state.sidebarWidth));
-  const expandedChatSize = isVertical ? CONTEXT_CHAT_MIN_HEIGHT : Math.max(CONTEXT_CHAT_MIN_WIDTH, sidebarWidth);
+  const expandedChatManual = useUIStore((state) => state.contextZoneExpandedChatSizes[zone]);
+  const expandedChatSize = Math.max(
+    chatMinimum,
+    expandedChatManual ?? (isVertical ? CONTEXT_CHAT_MIN_HEIGHT : sidebarWidth),
+  );
 
   // The area the zone shares with the chat, as state only while it decides
   // something: the zone is expanded across it, or the ceiling binds (the zone
@@ -633,28 +638,49 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     return () => window.cancelAnimationFrame(frame);
   }, [isOpen]);
 
-  // Deferred resize: reflowing the chat column and the active surface (xterm,
-  // editor, embedded chat iframes) on every drag frame is unavoidably janky,
-  // so the zone follows the pointer lazily: the real size is re-applied at
-  // most every RESIZE_FOLLOW_INTERVAL_MS and the size transition smooths each
-  // step, VS Code-style.
+  // The zone follows the pointer exactly: the size is written once per frame,
+  // with the size transition off, and the drag holds the layout animation
+  // (`holdLayoutAnimation`) so the work that follows a width waits for the
+  // release. Applied every 100 ms through the 240 ms size transition, the
+  // edge trailed the pointer by 60 to 90 px and the chat and the surface
+  // re-laid out on every frame of a transition that never ended.
   const resizeAvailableSizeRef = React.useRef<number | null>(null);
-  const resizeFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resizeFrameRef = React.useRef<number | null>(null);
+  const releaseResizeHoldRef = React.useRef<(() => void) | null>(null);
+  const dragShieldRef = React.useRef<HTMLDivElement | null>(null);
+  // The stored size changed because a drag ended there (see the animation key).
+  const sizeFromDragRef = React.useRef(false);
 
-  const applyFollowSize = React.useCallback(() => {
-    resizeFollowTimerRef.current = null;
+  // The drag writes the slot's and the card's own size, never the size
+  // variable: a custom property inherits, and setting it on the slot
+  // restyled everything the surface shows (3400 elements for a file tree
+  // beside an editor) on every frame. The variable and the React-owned sizes
+  // come back on release, in one restyle.
+  const cardRef = React.useRef<HTMLDivElement | null>(null);
+  const besidePanelRef = React.useRef(false);
+  const writeDragSize = React.useCallback((next: number) => {
     const panel = panelRef.current;
+    const card = cardRef.current;
+    if (!panel || !card) return;
+    const property = isVertical ? 'height' : 'width';
+    panel.style[property] = besidePanelRef.current ? `${next + WORK_STATUS_COLUMN_WIDTH}px` : `min(${next}px, 100%)`;
+    card.style[property] = `calc(${next}px - ${geometry.gutterSize})`;
+  }, [geometry.gutterSize, isVertical]);
+
+  const applyResizeSize = React.useCallback(() => {
+    resizeFrameRef.current = null;
     const next = resizingSizeRef.current;
-    if (!panel || next === null) {
-      return;
-    }
-    panel.style.setProperty(geometry.sizeVariable, `${next}px`);
-  }, [geometry.sizeVariable]);
+    if (next !== null) writeDragSize(next);
+  }, [writeDragSize]);
 
   React.useEffect(() => () => {
-    if (resizeFollowTimerRef.current !== null) {
-      clearTimeout(resizeFollowTimerRef.current);
+    if (resizeFrameRef.current !== null) {
+      cancelAnimationFrame(resizeFrameRef.current);
     }
+    releaseResizeHoldRef.current?.();
+    releaseResizeHoldRef.current = null;
+    dragShieldRef.current?.remove();
+    dragShieldRef.current = null;
   }, []);
 
   const clampSizeForDrag = React.useCallback((nextSize: number) => {
@@ -664,7 +690,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   }, [clampSize, isTreeOnly]);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
-    if (!isOpen || isExpanded || !directoryKey) {
+    if (!isOpen || !directoryKey) {
       return;
     }
 
@@ -683,29 +709,58 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       : (panelRef.current?.closest<HTMLElement>('[data-workspace-row]')?.clientWidth ?? 0) - otherSideRef.current
         - (cardBesidePanel ? WORK_STATUS_COLUMN_WIDTH : 0);
     resizeAvailableSizeRef.current = available && available > 0 ? available : null;
-    document.documentElement.style.cursor = isVertical ? 'row-resize' : 'col-resize';
+    // The drag's cursor comes from a layer over the window, which also keeps
+    // the pointer from an embedded page (the browser surface, a guest panel)
+    // that would swallow its moves. On the document root the inherited
+    // cursor restyled the whole document as the drag began and again as it
+    // ended, 40 to 65 ms each.
+    dragShieldRef.current?.remove();
+    const shield = document.createElement('div');
+    shield.style.cssText = `position:fixed;inset:0;z-index:2147483647;cursor:${isVertical ? 'row-resize' : 'col-resize'}`;
+    document.body.appendChild(shield);
+    dragShieldRef.current = shield;
+    releaseResizeHoldRef.current?.();
+    releaseResizeHoldRef.current = holdLayoutAnimation(isVertical ? 'height' : 'width');
     event.preventDefault();
-  }, [cardBesidePanel, directoryKey, isExpanded, isOpen, isVertical, size]);
+  }, [cardBesidePanel, directoryKey, isOpen, isVertical, size]);
 
   const finishResize = React.useCallback(() => {
-    // Apply the final size once, letting the size transition carry the zone
-    // to the release position.
     const finalSize = clampSizeForDrag(resizingSizeRef.current ?? size);
+    const available = resizeAvailableSizeRef.current;
+    if (resizeFrameRef.current !== null) {
+      cancelAnimationFrame(resizeFrameRef.current);
+      resizeFrameRef.current = null;
+    }
+    // The size the pointer left, in this frame, before the store commits it:
+    // the variable takes it and the sizes React owns read it again.
+    const panel = panelRef.current;
+    const card = cardRef.current;
+    if (panel && card) {
+      const property = isVertical ? 'height' : 'width';
+      panel.style.setProperty(geometry.sizeVariable, `${finalSize}px`);
+      panel.style[property] = slotSizeRef.current;
+      card.style[property] = cardSizeRef.current;
+    }
     resizingSizeRef.current = null;
     resizeAvailableSizeRef.current = null;
-    if (resizeFollowTimerRef.current !== null) {
-      clearTimeout(resizeFollowTimerRef.current);
-      resizeFollowTimerRef.current = null;
-    }
-    document.documentElement.style.cursor = '';
+    sizeFromDragRef.current = true;
+    dragShieldRef.current?.remove();
+    dragShieldRef.current = null;
     if (isTreeOnly) {
       setContextEditorTreeWidth(finalSize);
+    } else if (isExpanded) {
+      // Expanded, the drag sets what the chat keeps; the docked size stays.
+      if (available !== null) setContextZoneExpandedChatSize(zone, available - finalSize);
     } else {
       setContextZoneSize(zone, finalSize);
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-  }, [clampSizeForDrag, isTreeOnly, setContextEditorTreeWidth, setContextZoneSize, size, zone]);
+    // Released after the size is stored, so the work that waited for the end
+    // of the drag runs once, at the size it was left at.
+    releaseResizeHoldRef.current?.();
+    releaseResizeHoldRef.current = null;
+  }, [clampSizeForDrag, geometry.sizeVariable, isExpanded, isTreeOnly, isVertical, setContextEditorTreeWidth, setContextZoneExpandedChatSize, setContextZoneSize, size, zone]);
 
   // Window-level drag listeners: tracking the pointer via the thin handle and
   // pointer capture is unreliable (capture can fail over iframes and a missed
@@ -731,8 +786,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         return;
       }
       resizingSizeRef.current = nextSize;
-      if (resizeFollowTimerRef.current === null) {
-        resizeFollowTimerRef.current = setTimeout(applyFollowSize, RESIZE_FOLLOW_INTERVAL_MS);
+      if (resizeFrameRef.current === null) {
+        resizeFrameRef.current = requestAnimationFrame(applyResizeSize);
       }
     };
 
@@ -757,12 +812,13 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       window.removeEventListener('pointercancel', handleUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [applyFollowSize, clampSizeForDrag, finishResize, isResizing, isRtl, isVertical, zone]);
+  }, [applyResizeSize, clampSizeForDrag, finishResize, isResizing, isRtl, isVertical, zone]);
 
   React.useEffect(() => {
     if (!isResizing) {
       resizingSizeRef.current = null;
-      document.documentElement.style.cursor = '';
+      dragShieldRef.current?.remove();
+      dragShieldRef.current = null;
     }
   }, [isResizing]);
 
@@ -779,10 +835,6 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     }
     toggleContextPanelExpanded(directoryKey, zone);
   }, [directoryKey, toggleContextPanelExpanded, zone]);
-
-  const handlePanelKeyDownCapture = React.useCallback((event: React.KeyboardEvent<HTMLElement>) => {
-    closeZoneOnEscape(event, isOpen, handleClose);
-  }, [handleClose, isOpen]);
 
   // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
@@ -1069,7 +1121,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
             {isExpanded ? <Icon name="fullscreen-exit" className="h-3.5 w-3.5" /> : <Icon name="fullscreen" className="h-3.5 w-3.5" />}
           </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')} shortcut={activeTab?.mode === 'terminal' ? formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_terminal_expanded', shortcutOverrides), '') : undefined} /></TooltipContent>
+          <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')} shortcut={formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_context_panel_expanded', shortcutOverrides), '')} /></TooltipContent>
           </Tooltip>
         ) : null}
         <Button
@@ -1100,6 +1152,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       ? `calc(var(${geometry.sizeVariable}) + ${WORK_STATUS_COLUMN_WIDTH}px)`
       : `min(var(${geometry.sizeVariable}), 100%)`;
   const panelOffset = cardBesidePanel ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px';
+  besidePanelRef.current = cardBesidePanel;
 
   // The bottom card spans the chat column. Next to a card on either side it
   // gives up its own gutter on that side, so neighbours stand one gutter apart.
@@ -1123,8 +1176,15 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   React.useLayoutEffect(() => {
     if (animationKeyRef.current === animationKey) return;
     animationKeyRef.current = animationKey;
-    if (!coverChanged) beginLayoutAnimation(layoutAnimationMs);
+    // A drag already put the zone at its stored size: nothing moves.
+    const draggedSize = sizeFromDragRef.current;
+    if (!coverChanged && !draggedSize) beginLayoutAnimation(layoutAnimationMs);
   }, [animationKey, coverChanged, layoutAnimationMs]);
+  // Only the commit that stores a drag's size counts as one: a drag released
+  // where it started stores nothing, and the next change must still animate.
+  React.useLayoutEffect(() => {
+    sizeFromDragRef.current = false;
+  });
 
   // The zone's content becomes inert and unclickable only once the animation
   // has settled, and for most surfaces stops being so only then too
@@ -1146,12 +1206,16 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     ...(isVertical
       ? { height: slotSize, maxHeight: '100%' }
       : { width: slotSize, maxWidth: '100%' }),
-    transitionDuration: coverChanged ? '0ms' : `${layoutAnimationMs}ms`,
+    transitionDuration: coverChanged || isResizing ? '0ms' : `${layoutAnimationMs}ms`,
     transitionTimingFunction: LAYOUT_ANIMATION_EASING,
   };
 
   // Less the gutters the aside reserves for the card.
   const cardSize = `calc(var(${geometry.sizeVariable}) - ${geometry.gutterSize})`;
+  const slotSizeRef = React.useRef(slotSize);
+  slotSizeRef.current = slotSize;
+  const cardSizeRef = React.useRef(cardSize);
+  cardSizeRef.current = cardSize;
 
   return (
     <aside
@@ -1182,7 +1246,6 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         isVertical ? 'transition-[height]' : 'transition-[width]',
         'motion-reduce:transition-none',
       )}
-      onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}
     >
       {/* Where focus goes as the zone opens (see the open effect). Outside
@@ -1196,7 +1259,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {zone === 'right' ? (
         <div ref={setWorkStatusHost} className={cn('absolute inset-y-0 z-0 flex', cardBesidePanel ? 'inset-s-0' : 'inset-e-0', chatCovered && 'invisible')} />
       ) : null}
-      {isOpen && !isExpanded && (
+      {isOpen && (
         // In the gutter facing the chat, along the card's edge. Nothing paints
         // on hover or drag: the cursor says it is draggable, and the card edge
         // itself moves on release.
@@ -1210,6 +1273,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         />
       )}
       <div
+        ref={cardRef}
         data-zone-card=""
         className={cn(
           'relative z-10 flex min-h-0 shrink-0 flex-col motion-reduce:transition-none',
@@ -1239,7 +1303,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
             : { width: cardSize }),
           // Past the card's column beside it, in addition to the gutter's ms-2.
           ...(zone === 'right' ? { marginInlineStart: `calc(0.5rem + ${panelOffset})` } : null),
-          transitionDuration: `${layoutAnimationMs}ms`,
+          transitionDuration: isResizing ? '0ms' : `${layoutAnimationMs}ms`,
           transitionTimingFunction: LAYOUT_ANIMATION_EASING,
         }}
         // inert alone: it already takes the subtree out of the accessibility
@@ -1250,7 +1314,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
       {header}
       {/* Keep-alive surfaces (ContextSurfacePanes) are portalled in here and
           take the docked surface from their own pane (ZonePane). */}
-      <div ref={registerBody} className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
+      <div ref={registerBody} className="relative min-h-0 flex-1 overflow-hidden">
         {activeTab && isRemountedSurface(activeTab.mode) ? activeNonChatContent : null}
       </div>
       </DockedPanelSurfaceContext.Provider>

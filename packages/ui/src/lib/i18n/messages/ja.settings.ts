@@ -1387,7 +1387,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '入力をフォーカス',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '設定を開く',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'ターミナルドックの切替',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'ターミナル拡大の切替',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': 'パネルの展開を切り替え',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': '選択範囲をチャットに追加',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'サイドバーの切替',
     'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': 'セッションタブを切り替え',

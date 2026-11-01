@@ -54,6 +54,8 @@ import { createMarkdownCodePlugin } from './markdown/streamdownCode';
 import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
+import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow';
+import { WindowedMarkdownBlock } from './markdown/WindowedMarkdownBlock';
 import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { isBareVideoUrl, markdownMediaCopySource, markdownMediaFilename } from './markdown/markdownVideo';
 
@@ -279,6 +281,8 @@ export interface MarkdownContentProps {
   codeReferences?: { directory: string } | null;
   /** `:tada:` reads as 🎉 with these names (`useEmojiShortcodes`); text keeps its shortcodes without them. */
   emojiShortcodes?: EmojiShortcodes | null;
+  /** A long document read in its own scroller: only the blocks near the view mount (`markdownWindow`). */
+  windowed?: boolean;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -308,6 +312,7 @@ export function MarkdownContent({
   repositoryLinks,
   codeReferences = null,
   emojiShortcodes,
+  windowed = false,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
   const theme = themeSystem?.currentTheme ?? getDefaultTheme(
@@ -331,6 +336,17 @@ export function MarkdownContent({
     const nativeRoot = container.current?.firstElementChild;
     committedBlockCount.current = nativeRoot?.childElementCount ?? 0;
   }, [content]);
+
+  const blockWindow = React.useMemo(() => (windowed ? new MarkdownWindow() : null), [windowed]);
+  React.useLayoutEffect(() => {
+    const element = container.current;
+    if (!blockWindow || !element) return;
+    blockWindow.attach(element);
+    return () => blockWindow.detach();
+  }, [blockWindow]);
+  React.useLayoutEffect(() => {
+    blockWindow?.update();
+  }, [blockWindow, content]);
 
   React.useEffect(() => {
     const element = container.current;
@@ -431,10 +447,12 @@ export function MarkdownContent({
       data-oc-streamdown=""
       components={components}
       plugins={plugins}
-      mode={mode}
+      // A windowed document is split into blocks as a streamed reply is; the
+      // split renders it whole when it has footnotes or link definitions.
+      mode={windowed ? 'streaming' : mode}
       isAnimating={isStreaming}
-      BlockComponent={MarkdownArrivalBlock}
-      parseMarkdownIntoBlocksFn={mode === 'static' ? wholeDocument : undefined}
+      BlockComponent={windowed ? WindowedMarkdownBlock : MarkdownArrivalBlock}
+      parseMarkdownIntoBlocksFn={mode === 'static' && !windowed ? wholeDocument : undefined}
       parseIncompleteMarkdown={isStreaming}
       normalizeHtmlIndentation={false}
       animated={false}
@@ -494,7 +512,9 @@ export function MarkdownContent({
     >
       <MarkdownPresentationContext.Provider value={presentation}>
         <BlockArrivalContext.Provider value={arrival}>
-          <MarkdownErrorBoundary content={content}>{body}</MarkdownErrorBoundary>
+          <MarkdownWindowContext.Provider value={blockWindow}>
+            <MarkdownErrorBoundary content={content}>{body}</MarkdownErrorBoundary>
+          </MarkdownWindowContext.Provider>
         </BlockArrivalContext.Provider>
       </MarkdownPresentationContext.Provider>
     </div>

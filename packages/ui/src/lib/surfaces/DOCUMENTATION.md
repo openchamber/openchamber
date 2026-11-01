@@ -47,6 +47,19 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   Navigation) and stays aligned there at its saved width during the panel's
   collapse transition. The header's two layout icons keep their places and
   toggle whichever column stands on their side.
+- A zone's resize follows the pointer exactly, whatever the zone shows. Once
+  per frame the drag writes the size of the zone's slot and card, with their
+  size transition off, and stores the size on release. It writes neither the
+  size variable (a custom property inherits, and on the slot it restyled
+  every element of the surface on every frame) nor a cursor on the document
+  (an inherited `cursor` restyled the whole document as the drag began and
+  ended): a layer over the window carries the cursor and keeps an embedded
+  page from taking the pointer's moves. The drag holds the layout animation
+  (`holdLayoutAnimation` in `lib/layoutAnimation.ts`), so the work that
+  follows a width (markdown tables, scroll shadows, the active-turn spy)
+  waits for the release, and the chat skips laying out its off-screen
+  messages meanwhile (`components/chat/lib/scroll/DOCUMENTATION.md`). The
+  session sidebar's drag holds it too.
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
   registry's default order and appends any missing surfaces.
@@ -101,12 +114,20 @@ keep the full height). The chat is always the centre and cannot move.
 - In a narrow window the chat keeps 320 px: a side zone that opens without
   room folds the session sidebar, then closes the other side zone, and both
   come back when it closes (`ZoneFitArbiter`, `lib/workspace/zoneFit.ts`).
-- Expanding a zone never covers the chat. The zone stays in the layout at
-  the largest size that leaves the chat a column as wide as the session
-  sidebar and at least 320 px (200 px of height beside the bottom zone; a
-  row under 640 px wide leaves less, since a zone keeps 320 px), and
-  the session sidebar folds while it is expanded so that column is where the
-  sidebar was. Collapsing gives the sidebar back unless the user toggled it
+- Expanding a zone never covers the chat. The zone stays in the layout and
+  leaves the chat a column: the one the user resized it to while expanded
+  (`useUIStore.contextZoneExpandedChatSizes`, px per zone), else as wide as
+  the session sidebar; at least 320 px either way (200 px of height beside
+  the bottom zone; a row under 640 px wide leaves less, since a zone keeps
+  320 px). The expanded zone keeps its resize handle; a drag there sets what
+  the chat keeps and leaves the docked size alone, so the docked and the
+  expanded zone each keep the size the user gave them. The chat's size is
+  stored, not the zone's, so a wider window goes to the zone. `Mod+Shift+F`
+  (`toggle_context_panel_expanded`, also the desktop View menu) expands the
+  zone holding focus, else the first one on screen, else opens the right one
+  expanded, and collapses an expanded one (`lib/workspace/toggleExpandedZone.ts`).
+  The session sidebar folds while a zone is expanded, so the chat column
+  takes the sidebar's place. Collapsing gives the sidebar back unless the user toggled it
   in between (`ZoneFitArbiter`). The zone takes the row as it will be once
   the sidebar has folded, so it grows in one move with it.
 - Another window's move is adopted through the `storage` event
@@ -120,6 +141,16 @@ a diff or a page next to the agent's work and still want to write to it.
 The float existed because collapsing straight back into the layout squeezed
 the chat to nothing and the transcript measured its rows at that width; with
 the chat column never below its minimum that cannot happen.
+
+### Why the drag is not deferred
+
+The zone used to apply its size at most every 100 ms and let its 240 ms size
+transition carry each step, so a reflow of the chat and the surface would not
+run on every pointer move. The edge trailed the pointer by 60 to 90 px, and
+the transition re-laid out the chat and the surface on every frame anyway.
+Following the pointer each frame costs about a fifth of the main thread with
+a 120-turn session and an open editor, once the work that reacts to widths
+waits for the release.
 
 ## Adding a surface
 
@@ -256,11 +287,9 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   Surfaces rendered by the zone (git, the Tracker, notes, context) remount on
   every switch, the Tracker on every switch between its tabs too. These
   surfaces must restore their state from stores or snapshots.
-- Portalled menus and dialogs handle their own Escape key. The panel's capture
-  handler ignores their events so dismissing an overlay does not close the panel.
-  Escape closes the zone it was pressed in: the frame and each keep-alive pane
-  run the same handler (`zoneEscape.ts`), since a pane's React events do not
-  pass through its frame.
+- Escape never closes a zone. It belongs to what has focus inside (a menu, a
+  field, the editor, the terminal), and a stray press while dismissing one of
+  those used to take the whole panel with it.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.
   Trackers have no rail surface: their items list on the issues and PRs board

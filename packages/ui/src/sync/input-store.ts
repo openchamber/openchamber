@@ -19,6 +19,9 @@ const FILE_URI_PREFIX = "file://"
 // Past this a file is not read into the prompt: base64 makes it a third
 // larger, and the send fails long before 100 MB.
 const MAX_INLINE_ATTACHMENT_BYTES = 10 * 1024 * 1024
+// OpenCode refuses any attachment past this, by path or by @-mention, so a
+// larger file would fail every send it rides along with.
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
 const pendingVSCodeSelectionKeys = new Set<string>()
 let attachmentReadGeneration = 0
@@ -402,6 +405,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
   ),
 
   addAttachedFile: async (file: File, target?: ChatDraftIdentity | null) => {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.overSendLimit', {
+        name: file.name,
+        size: formatFileSize(MAX_ATTACHMENT_BYTES),
+      }))
+    }
     if (file.size > MAX_INLINE_ATTACHMENT_BYTES) {
       // Read whole into the prompt, a file this size fails the send. On the
       // desktop the OpenCode server shares the disk, so the file goes by its
@@ -474,6 +483,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
   clearAttachedFiles: (target) => get().setAttachedFiles([], target),
 
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => {
+    if (fileSize !== null && fileSize > MAX_ATTACHMENT_BYTES) {
+      throw new Error(formatMessage(useI18nStore.getState().dictionary, 'chat.fileAttachment.toast.overSendLimit', {
+        name,
+        size: formatFileSize(MAX_ATTACHMENT_BYTES),
+      }))
+    }
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const isDuplicate = get().attachedFiles.some(
       (f) => f.source === 'vscode' && f.vscodeSource === 'file' && (f.vscodePath || '') === path
@@ -537,7 +552,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addRestoredAttachment: ({ url, mimeType, filename }, target) => {
     const id = `restored-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const basename = attachmentBasename(filename)
-    // Use "local" source so the file renders in AttachedFilesList.
     // Set serverPath to the URL so ImagePreview can use it as the img src
     // when dataUrl is not a data: URL. sanitizeAttachmentsForSend leaves
     // dataUrl alone for non-server sources, so the URL stays intact on send.

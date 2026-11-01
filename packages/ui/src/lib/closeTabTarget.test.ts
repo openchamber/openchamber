@@ -59,4 +59,26 @@ describe('close tab target', () => {
     releaseBrowser();
     releaseEditor();
   });
+
+  test('a target on the whole page takes the clicks outside the zones and leaves the zones theirs', () => {
+    const rightZone = element(document.body, 'right');
+    const terminal = element(rightZone);
+    const notes = element(element(document.body, 'left'));
+    const chat = element();
+    const closed: string[] = [];
+    const releaseSessions = registerCloseTabTarget(() => closed.push('session'), { current: document.body });
+    const releaseTerminal = registerCloseTabTarget(() => closed.push('terminal'), { current: terminal });
+
+    chat.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    closeTab();
+    terminal.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    closeTab();
+    // A zone with no tabs of its own counts for the sessions.
+    notes.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    closeTab();
+
+    expect(closed).toEqual(['session', 'terminal', 'session']);
+    releaseSessions();
+    releaseTerminal();
+  });
 });

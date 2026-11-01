@@ -7,7 +7,7 @@ import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
-import { shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
+import { toggleExpandedContextZone } from '@/lib/workspace/toggleExpandedZone';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { useKeybinds } from '@/hooks/useKeybind';
@@ -132,17 +132,6 @@ export const useKeyboardShortcuts = () => {
   const toggleTerminalSurface = () => {
     if (!currentDirectory) return;
     useUIStore.getState().openContextSurface(normalizeContextPanelDirectoryKey(currentDirectory), 'terminal');
-  };
-
-  const toggleTerminalSurfaceExpanded = () => {
-    if (!currentDirectory) return;
-    const key = normalizeContextPanelDirectoryKey(currentDirectory);
-    const state = useUIStore.getState();
-    const panel = state.contextPanelByDirectory[key];
-    if (!shownContextModes(panel, state.contextSurfaceZones).has('terminal')) {
-      state.openContextSurface(key, 'terminal');
-    }
-    state.toggleContextPanelExpanded(key, zoneOfMode(state.contextSurfaceZones, 'terminal'));
   };
 
   useKeybinds({
@@ -290,9 +279,9 @@ export const useKeyboardShortcuts = () => {
       if (useUIStore.getState().isMobile) return false;
       return toggleTerminalSurface();
     },
-    toggle_terminal_expanded: () => {
-      if (useUIStore.getState().isMobile) return false;
-      return toggleTerminalSurfaceExpanded();
+    toggle_context_panel_expanded: () => {
+      if (useUIStore.getState().isMobile || !currentDirectory) return false;
+      toggleExpandedContextZone(currentDirectory);
     },
     open_model_selector: () => {
       if (hasActiveBtwComposer()) return false;
@@ -382,7 +371,7 @@ export const useKeyboardShortcuts = () => {
         useUIStore.getState().shortcutOverrides,
       );
       const actionId = eventMatchesShortcut(event, getBinding('toggle_terminal')) ? 'toggle_terminal'
-        : eventMatchesShortcut(event, getBinding('toggle_terminal_expanded')) ? 'toggle_terminal_expanded' : null;
+        : eventMatchesShortcut(event, getBinding('toggle_context_panel_expanded')) ? 'toggle_context_panel_expanded' : null;
       if (actionId && invokeRegistered(actionId, event)) {
         event.preventDefault();
         event.stopPropagation();

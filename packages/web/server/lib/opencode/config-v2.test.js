@@ -587,8 +587,20 @@ describe('compaction settings', () => {
     expect(config).toEqual({ experimental: { background_compaction: true } });
   });
 
-  it('accepts token counts, null and a boolean, nothing else', () => {
+  it('writes a buffer share as OpenCode reads it', () => {
+    const config = {};
+    expect(writeCompactionSettings(config, { buffer: '20%' })).toBe(true);
+    expect(config).toEqual({ compaction: { buffer: '20%' } });
+  });
+
+  it('accepts token counts, buffer shares from 1% to 99%, null and a boolean, nothing else', () => {
     expect(compactionUpdateSchema.safeParse({ buffer: 64_000, keepTokens: null, background: true }).success).toBe(true);
+    expect(compactionUpdateSchema.safeParse({ buffer: '20%' }).success).toBe(true);
+    expect(compactionUpdateSchema.safeParse({ buffer: '12.5%' }).success).toBe(true);
+    expect(compactionUpdateSchema.safeParse({ buffer: '0%' }).success).toBe(false);
+    expect(compactionUpdateSchema.safeParse({ buffer: '100%' }).success).toBe(false);
+    expect(compactionUpdateSchema.safeParse({ buffer: '20' }).success).toBe(false);
+    expect(compactionUpdateSchema.safeParse({ keepTokens: '20%' }).success).toBe(false);
     expect(compactionUpdateSchema.safeParse({}).success).toBe(true);
     expect(compactionUpdateSchema.safeParse({ buffer: -1 }).success).toBe(false);
     expect(compactionUpdateSchema.safeParse({ buffer: 1.5 }).success).toBe(false);

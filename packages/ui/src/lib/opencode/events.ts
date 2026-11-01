@@ -911,6 +911,10 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "pty.exited":
     case "persistent-pty.added":
     case "persistent-pty.removed":
+    case "persistent-pty.updated":
+      return []
+    // Experimental artifacts (`experimental.artifacts`) have no OpenChamber view.
+    case "artifact.updated":
       return []
     // Never framed onto the public stream in 2.0.8, so they cannot reach here
     // and are not listed above: `session.message.content.updated` (replay-only

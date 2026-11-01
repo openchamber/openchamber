@@ -96,7 +96,13 @@ trust before appending. Empty configurations and already trusted fingerprints
 need no new answer. Untrusted code answers 403 `opencode_trust_required`; a
 changed destination answers 409; failed writes answer 503. It creates no folder,
 runs no project code, and never changes active-project or directory pointers.
-Web, desktop and both mobile surfaces use the active server. VS Code registers
+A destination inside a registered project returns that project. A linked
+worktree whose repository (the trust assessment's `repositoryKey`) matches a
+registered project's also returns that project, appends nothing, and emits
+`openchamber:worktree-changed` so clients list the worktree. That match
+assesses each registered project inside the settings write queue, so a project
+whose assessment takes over 2 seconds (a hung mount) counts as no match instead
+of holding the queue. Web, desktop and both mobile surfaces use the active server. VS Code registers
 through its workspace-folder bridge instead.
 
 ### Why registration uses the settings write queue

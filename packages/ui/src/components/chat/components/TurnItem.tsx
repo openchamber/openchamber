@@ -11,6 +11,8 @@ interface TurnItemProps {
     turn: Turn;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
     assistantContent?: React.ReactNode;
+    /** Keeps the gap between this turn's answer and the row after it. */
+    gapBelow?: boolean;
 }
 
 /**
@@ -38,7 +40,7 @@ const stickyHeaderBackground = (fadeRem: string): React.CSSProperties => ({
 const STICKY_HEADER_BACKGROUND_DESKTOP = stickyHeaderBackground('2.25rem');
 const STICKY_HEADER_BACKGROUND_MOBILE = stickyHeaderBackground('0.75rem');
 
-const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, assistantContent }) => {
+const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, assistantContent, gapBelow = false }) => {
     const { isMobile } = useDeviceInfo();
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     // A hidden prompt has nothing to pin, and a turn opened by anything but
@@ -55,7 +57,7 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, assistantConte
         <section
             // On mobile the header ends right at its actions row, so the reply
             // keeps its distance below it and scrolls away with the reply.
-            className={cn('relative w-full', headerSticks && isMobile && '[&>[data-turn-sticky-header]+*]:mt-4')}
+            className={cn('relative w-full', gapBelow && 'pb-2', headerSticks && isMobile && '[&>[data-turn-sticky-header]+*]:mt-4')}
             id={`turn-${turn.turnId}`}
             data-turn-id={turn.turnId}
             data-scroll-spy-id={turn.turnId}

@@ -693,6 +693,8 @@ export const getRememberedSessionDirectory = (sessionId: string): {
  */
 let guessedSelectionSessionId: string | null = null
 let admissionNavigationRevision = 0
+/** Bumped by every selection and user-opened draft; a pending continuation compares it to know it was overtaken. */
+export const getAdmissionNavigationRevision = (): number => admissionNavigationRevision
 
 const collectSessionDirectorySources = (
   sessionId: string,
@@ -1710,7 +1712,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (!restoredSessionId && restoredDraft.open && restoredDraft.worktreeStartDirectory?.directory === null) {
         applyDraftTargetSelectionDefaults(restoredDraft, availableWorktreesByProject, undefined, restoredDraft)
       }
-      if (restoredSessionId) get().setCurrentSession(restoredSessionId, restoredDirectory)
+      // Opening a session admits its folder; a runtime switch is not the
+      // user's choice, so a session outside every project is not reopened.
+      const record = restoredSessionId ? useGlobalSessionsStore.getState().entityById.get(restoredSessionId) : null
+      const directory = (record ? resolveGlobalSessionDirectory(record) : null) ?? restoredDirectory
+      if (restoredSessionId && isSessionAdmitted(directory)) get().setCurrentSession(restoredSessionId, directory)
     }
   },
 

@@ -72,9 +72,13 @@ describe('issue #4075 header tab-strip whitespace stays draggable', () => {
     expect(tabItem).toContain(NO_DRAG);
   });
 
-  test('the draft pill is a no-drag slot', () => {
-    const draftPill = lineWith(stripSource, 'draft pill', 'bg-interactive-selection px-2');
-    expect(draftPill).toContain(NO_DRAG);
+  test('the draft and pending pills and the new-session button are no-drag', () => {
+    const pills = stripSource.split('\n').filter((line) => line.includes('bg-interactive-selection px-2'));
+    expect(pills.length).toBe(2);
+    for (const pill of pills) expect(pill).toContain(NO_DRAG);
+    expect(lineWith(stripSource, 'new-session button', 'onClick={openNewSessionHere}')).toBeDefined();
+    const plusButton = stripSource.slice(stripSource.indexOf('onClick={openNewSessionHere}'));
+    expect(plusButton.split('\n').slice(0, 4).join('\n')).toContain(NO_DRAG);
   });
 
   // The JS fallback drag handler relies on the same class to decide what not

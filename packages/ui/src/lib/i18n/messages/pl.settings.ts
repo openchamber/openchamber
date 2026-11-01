@@ -933,7 +933,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'Dodaj zaznaczenie do czatu',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'Przełącz pasek boczny',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Przełącz dokowanie terminala',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Przełącz rozszerzony terminal',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': 'Rozwiń lub zwiń panel',
   'settings.openchamber.keyboardShortcuts.actions.overwrite': 'Nadpisz',
   'settings.openchamber.keyboardShortcuts.actions.resetAll': 'Zresetuj wszystko',
   'settings.openchamber.keyboardShortcuts.error.captureFirst': 'Najpierw przechwyć skrót.',

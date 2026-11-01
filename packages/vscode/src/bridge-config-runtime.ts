@@ -418,7 +418,7 @@ export async function handleConfigBridgeMessage(
     case 'api:config/compaction': {
       const parsed = compactionUpdateSchema.safeParse(payload ?? {});
       if (!parsed.success) {
-        return { id, type, success: false, error: 'buffer and keepTokens must be token counts or null, auto and background booleans' };
+        return { id, type, success: false, error: 'buffer must be a token count, a share such as "20%" or null, keepTokens a token count or null, auto and background booleans' };
       }
       const result = setCompactionSettings(parsed.data);
       return { id, type, success: true, data: { success: true, changed: result.changed } };

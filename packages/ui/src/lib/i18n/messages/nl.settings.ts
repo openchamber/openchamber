@@ -1387,7 +1387,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': 'Focus op invoer',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': 'Instellingen openen',
   'settings.openchamber.keyboardShortcuts.action.toggle_terminal.label': 'Terminaldock in-/uitschakelen',
-  'settings.openchamber.keyboardShortcuts.action.toggle_terminal_expanded.label': 'Uitgeklapte terminal in-/uitschakelen',
+  'settings.openchamber.keyboardShortcuts.action.toggle_context_panel_expanded.label': 'Paneel uit- of inklappen',
   'settings.openchamber.keyboardShortcuts.action.add_selection_to_chat.label': 'Selectie aan chat toevoegen',
   'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label': 'Zijbalk in-/uitschakelen',
     'settings.openchamber.keyboardShortcuts.action.switch_session_tab.label': 'Sessietabblad wisselen',

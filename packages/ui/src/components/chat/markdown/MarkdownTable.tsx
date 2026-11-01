@@ -132,8 +132,13 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
   const columns = widths?.map((width, index) => (
     <col key={index} style={{ width }} />
   ));
+  // Which columns are narrower than their content. Widths change on every
+  // frame of a chat resize, these flags rarely do.
+  const cappedColumns = widths && measured
+    ? widths.map((width, index) => (measured.natural[index] > width ? '1' : '0')).join('')
+    : '';
   // A new map re-renders every cell, so it changes only with the table's
-  // content or its column widths.
+  // content or which columns are capped.
   const cellWrap = React.useMemo(() => {
     const result = new Map<Element, boolean>();
     for (const section of node?.children ?? []) {
@@ -141,11 +146,11 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
       for (const row of section.children) {
         if (row.type !== 'element' || row.tagName !== 'tr') continue;
         const cells = row.children.filter((cell): cell is Element => cell.type === 'element');
-        cells.forEach((cell, index) => result.set(cell, Boolean(widths && measured && measured.natural[index] > widths[index])));
+        cells.forEach((cell, index) => result.set(cell, cappedColumns[index] === '1'));
       }
     }
     return result;
-  }, [node, widths, measured]);
+  }, [node, cappedColumns]);
   const [copied, setCopied] = React.useState(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const { t } = useI18n();

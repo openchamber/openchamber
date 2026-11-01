@@ -11,7 +11,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true, workflowAvailable = false } = {}) => {
+const createHarness = async ({ settings = {}, env = {}, workflowAvailable = false } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
   temporaryDirectories.push(dataDir);
   const agentToolRuntime = {
@@ -35,7 +35,6 @@ const createHarness = async ({ settings = {}, env = {}, memoryAvailable = true, 
     env,
     agentToolRuntime,
     readSettings: () => current.settings,
-    isAgentMemoryAvailable: () => memoryAvailable,
     isWorkflowAvailable: () => workflowAvailable,
   });
   const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
@@ -83,7 +82,6 @@ describe('managed OpenCode config file', () => {
       agentToolRuntime: { materializePlugin: vi.fn(), createChildEnv: () => ({}) },
       limitFailoverRuntime: { materializePlugin: vi.fn(async () => failoverDirectory) },
       readSettings: () => current.settings,
-      isAgentMemoryAvailable: () => false,
     });
     const readConfig = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
 
@@ -273,16 +271,15 @@ describe('managed OpenCode config file', () => {
     expect(entries).toContain(MANAGED_CONFIG_FILE_NAME);
   });
 
-  it('ignores the memory tool while the feature is unavailable', async () => {
-    const { runtime, agentToolRuntime, readConfigFile, titleDirectory } = await createHarness({
-      settings: { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false, agentSecretToolEnabled: false, agentMemoryToolEnabled: true },
-      memoryAvailable: false,
-    });
+  it('injects the memory tool only once the user turns it on', async () => {
+    const toolsOff = { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false, agentSecretToolEnabled: false };
+    const unset = await createHarness({ settings: toolsOff });
+    await unset.runtime.buildManagedChildEnv();
+    expect(unset.agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
 
-    await runtime.buildManagedChildEnv();
-
-    expect(agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
-    expect(await readConfigFile()).toEqual({ plugins: ['-opencode.browser', titleDirectory] });
+    const on = await createHarness({ settings: { ...toolsOff, agentMemoryToolEnabled: true } });
+    await on.runtime.buildManagedChildEnv();
+    expect(on.agentToolRuntime.materializePlugin).toHaveBeenCalledWith(expect.objectContaining({ includeMemory: true }));
   });
 
   it('injects the workflow tool by default only in a build that has workflows', async () => {
