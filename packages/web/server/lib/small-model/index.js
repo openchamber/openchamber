@@ -114,13 +114,16 @@ const OUTPUT_RESERVE_TOKENS = 4_000;
  * to leave for the answer. The reserve must match the output budget the caller
  * will actually request, or the two disagree and the model overruns its context.
  */
-export const getModelInputCharBudget = ({ modelInfo, outputReserveTokens }) => {
+export const getModelInputCharBudget = ({ modelInfo, outputReserveTokens, charsPerToken = 4 }) => {
   const context = Number(modelInfo?.limit?.context);
   const known = context > 0;
   const contextTokens = known ? context : DEFAULT_CONTEXT_TOKENS;
-  const reserve = Number(outputReserveTokens) > 0 ? Number(outputReserveTokens) : OUTPUT_RESERVE_TOKENS;
-  const inputBudgetTokens = Math.max(1_000, contextTokens - reserve);
-  return { maxChars: inputBudgetTokens * 4, contextTokens, contextKnown: known };
+  const outputLimit = Number(modelInfo?.limit?.output);
+  const requestedReserve = Number(outputReserveTokens) > 0 ? Number(outputReserveTokens) : OUTPUT_RESERVE_TOKENS;
+  const reserve = outputLimit > 0 ? Math.min(requestedReserve, outputLimit) : requestedReserve;
+  const inputLimit = Number(modelInfo?.limit?.input);
+  const inputBudgetTokens = Math.max(0, Math.min(contextTokens - reserve, inputLimit > 0 ? inputLimit : Infinity));
+  return { maxChars: inputBudgetTokens * charsPerToken, contextTokens, contextKnown: known };
 };
 
 /**
@@ -141,8 +144,13 @@ const resolveOutputTokens = ({ modelInfo, maxOutputTokens }) => {
 // `truncate` keeps the historical behavior for callers whose prompt losing its
 // tail is survivable (summaries, commit messages). `error` is for callers whose
 // output would be quietly wrong on a clipped input — they need the failure.
-const clampPromptToModelLimit = ({ prompt, modelInfo, providerID, modelID, onOverflow, outputReserveTokens }) => {
-  const { maxChars } = getModelInputCharBudget({ modelInfo, outputReserveTokens });
+const clampPromptToModelLimit = ({ prompt, modelInfo, providerID, modelID, onOverflow, outputReserveTokens, charsPerToken }) => {
+  const { maxChars } = getModelInputCharBudget({ modelInfo, outputReserveTokens, charsPerToken });
+  if (maxChars === 0) {
+    throw Object.assign(new Error(`No input budget remains for ${providerID}/${modelID}`), {
+      statusCode: 413, code: 'context-too-small', providerID, modelID, requiredChars: prompt.length, availableChars: 0,
+    });
+  }
   if (prompt.length <= maxChars) {
     return { prompt, truncated: false };
   }
@@ -360,7 +368,7 @@ const requestOptions = ({ timeoutMs, promptChars, signal }) => {
  * Generates text with the user's small model through the running OpenCode.
  * Credentials stay inside OpenCode; this server only sends a prompt.
  */
-export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, variant: requestVariant, directory, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
+export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, variant: requestVariant, directory, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate', charsPerToken }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
@@ -392,21 +400,24 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
 
   const outputTokens = resolveOutputTokens({ modelInfo, maxOutputTokens });
 
+  const sections = [];
+  if (typeof system === 'string' && system.trim()) sections.push(system.trim());
+  const promptIndex = sections.length;
+  sections.push(prompt.trim());
+  if (responseSchema) sections.push(buildSchemaInstruction(responseSchema));
   const clamped = clampPromptToModelLimit({
-    prompt: prompt.trim(),
+    prompt: onOverflow === 'error' ? sections.join('\n\n') : prompt.trim(),
     modelInfo,
     providerID: resolved.providerID,
     modelID: resolved.modelID,
     onOverflow,
     outputReserveTokens: outputTokens,
+    charsPerToken,
   });
 
   // `/api/experimental/generate/text` takes a single prompt, so the system instructions lead it.
-  const sections = [];
-  if (typeof system === 'string' && system.trim()) sections.push(system.trim());
-  sections.push(clamped.prompt);
-  if (responseSchema) sections.push(buildSchemaInstruction(responseSchema));
-  const fullPrompt = sections.join('\n\n');
+  sections[promptIndex] = clamped.prompt;
+  const fullPrompt = onOverflow === 'error' ? clamped.prompt : sections.join('\n\n');
 
   const generationOptions = requestOptions({ timeoutMs, promptChars: fullPrompt.length, signal });
   const unavailableMessage = `Model unavailable: ${resolved.providerID}/${resolved.modelID}`;
@@ -539,7 +550,7 @@ const resolveReserveTokens = (outputReserveTokens, limits) => (
  * must read `null` as "try it", which is exactly right here — the verdict
  * comes from the reply, not from a capability flag.
  */
-export async function describeSmallModel({ directory, preferredProviderID, preferredModelID, outputReserveTokens, overrideModel, overrideVariant } = {}) {
+export async function describeSmallModel({ directory, preferredProviderID, preferredModelID, outputReserveTokens, overrideModel, overrideVariant, charsPerToken } = {}) {
   const client = getSmallModelClient(directory);
   if (!client) return null;
 
@@ -565,7 +576,7 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
   // reserve function needs before it can answer.
   const { contextTokens, contextKnown } = getModelInputCharBudget({ modelInfo });
   const reserveTokens = resolveReserveTokens(outputReserveTokens, { contextTokens, outputTokenLimit });
-  const { maxChars } = getModelInputCharBudget({ modelInfo, outputReserveTokens: reserveTokens });
+  const { maxChars } = getModelInputCharBudget({ modelInfo, outputReserveTokens: reserveTokens, charsPerToken });
 
   // An override can name a model OpenCode has no credential for. It reports
   // that as a disabled model, and readiness refuses before the user pays for

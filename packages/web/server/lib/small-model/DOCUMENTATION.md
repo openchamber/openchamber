@@ -171,7 +171,11 @@ normal family order.
 prompt, separated by a blank line.
 
 Input clamp: the prompt is measured against the resolved model's `limit.context`
-as OpenCode reports it, minus an output reserve, at ~4 chars/token. A model
+as OpenCode reports it, minus an output reserve and capped by `limit.input` when
+present. The default estimate is ~4 chars/token. Walkthroughs use 3 because diff
+and JSON content tend to use more tokens per character. This is an estimate, not
+a guarantee for every tokenizer. The default output reserve is capped by the
+model's output limit, and an exhausted input allowance is refused. A model
 OpenCode does not list gets a conservative 64k default. `onOverflow` decides
 what an oversized prompt means:
 
@@ -180,7 +184,8 @@ what an oversized prompt means:
 - `error` throws a `413` with `code: 'context-too-small'` plus
   `requiredChars`/`availableChars`. Correct for callers whose output would be
   quietly wrong on a clipped input, so they can ask the user for a roomier
-  model instead of returning confident nonsense.
+  model instead of returning confident nonsense. This check measures the full
+  prompt, including system instructions and the response schema.
 
 Output budget: `maxOutputTokens` is capped at the model's `limit.output`, and
 the **same number** is reserved from the input allowance. `/api/experimental/generate/text` takes

@@ -200,6 +200,11 @@ so the user can pick a roomier model. A walkthrough written against a silently
 clipped diff is confidently wrong in a way no reader can detect, which is worse
 than no walkthrough.
 
+Readiness and generation use a conservative estimate of 3 characters per token,
+and respect a model's input limit as well as the output reserve. The estimate
+cannot guarantee a fit for every tokenizer. Generation measures the full prompt
+including the schema and any previous narrative.
+
 ## Generated files
 
 `generated.js` excludes tool-produced files — lockfiles, minified bundles,

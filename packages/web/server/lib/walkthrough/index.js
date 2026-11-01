@@ -4,7 +4,7 @@ import { describeSmallModel, generateSmallModelText } from '../small-model/index
 import { buildDigest } from './digest.js';
 import { indexHunks } from './hunks.js';
 import { normalizeLanguage } from './languages.js';
-import { buildPrompt, JSON_SHAPE_INSTRUCTION } from './prompt.js';
+import { buildPrompt, JSON_SHAPE_INSTRUCTION as JSON_RESPONSE_INSTRUCTION } from './prompt.js';
 import { normalizeWalkthrough, parseModelJson, responseSchema } from './schema.js';
 import {
   buildCacheKey,
@@ -62,6 +62,7 @@ const MIN_OUTPUT_TOKENS = 24_000;
 // third of a million tokens of context reserving them, and no walkthrough needs
 // that much thinking.
 const MAX_OUTPUT_TOKENS = 96_000;
+const CHARS_PER_TOKEN = 3;
 // Above this share of the context, the reserve starts costing more diff than
 // the extra room is worth.
 const OUTPUT_CONTEXT_SHARE = 0.25;
@@ -228,6 +229,7 @@ const resolveModel = (directory, explicitModel, providerID, modelID) => {
   return describeSmallModel({
     directory,
     outputReserveTokens: walkthroughOutputTokens,
+    charsPerToken: CHARS_PER_TOKEN,
     overrideModel,
     overrideVariant: overrideModel && overrideModel === savedModel ? readWalkthroughModelVariant() : undefined,
     preferredProviderID: providerID || undefined,
@@ -293,6 +295,14 @@ const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) 
   patch: hunk.patch,
 })));
 
+const previousNarrative = (entry, cacheKey, model, language) => (
+  entry && model && entry.cacheKey !== cacheKey
+  && entry.model?.providerID === model.providerID
+  && entry.model?.modelID === model.modelID
+  && normalizeLanguage(entry.language) === language
+    ? entry.walkthrough : null
+);
+
 /**
  * Read the last walkthrough for a source, resolved against the current diff.
  * Never generates and never spends tokens.
@@ -317,17 +327,6 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   ]);
   const { files } = built;
   const hunkIndex = indexHunks(files);
-  const readiness = computeReadiness({ ...built, model, source, language, instructions });
-
-  const base = {
-    source,
-    hunks: serializeHunks(files),
-    hunkCount: hunkIndex.size,
-    readiness,
-    generating: isGenerating(repoRoot, key, readContext),
-  };
-  addReadContext(base, readContext);
-
   // Ask the cache for *this* request before falling back to the pointer.
   //
   // The pointer only knows which walkthrough was generated here last, which
@@ -349,7 +348,18 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
     : null;
 
   const requested = requestedKey ? readCachedWalkthrough(requestedKey) : null;
-  const entry = requested ?? (pointer ? readCachedWalkthrough(pointer.cacheKey) : null);
+  const previousEntry = pointer ? readCachedWalkthrough(pointer.cacheKey) : null;
+  const entry = requested ?? previousEntry;
+  const readiness = computeReadiness({ ...built, model, source, language, instructions,
+    previousWalkthrough: previousNarrative(requested ?? previousEntry, requestedKey, model, language) });
+  const base = {
+    source,
+    hunks: serializeHunks(files),
+    hunkCount: hunkIndex.size,
+    readiness,
+    generating: isGenerating(repoRoot, key, readContext),
+  };
+  addReadContext(base, readContext);
   if (!entry) {
     // No pointer, or the pointer outlived its entry (eviction, manual cleanup).
     // "No walkthrough" is the truthful answer either way; the pointer is left
@@ -390,7 +400,7 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
  * answers need the same diff, and computing it twice doubled the git work on
  * every panel open.
  */
-function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language, instructions }) {
+function computeReadiness({ model, digest, files, fileCount, hunkCount, generatedFileCount, source, language, instructions, previousWalkthrough }) {
   if (!model) return { ready: false, reason: 'no-model' };
 
   if (hunkCount === 0) {
@@ -411,8 +421,11 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
   // Built with the same language the generation would use: the instruction is
   // part of the prompt, so a readiness answer computed without it would be
   // measuring a request nobody is going to send.
-  const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, language, instructions });
-  const requiredChars = prompt.length + system.length;
+  const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, language, instructions, previousWalkthrough });
+  const schemaInstruction = `Reply with JSON matching this schema and nothing else: ${JSON.stringify(responseSchema)}`;
+  const requiredChars = schemaRefusedBy.has(modelKey(model))
+    ? [`${system}\n${JSON_RESPONSE_INSTRUCTION}`.trim(), prompt.trim()].join('\n\n').length
+    : [system.trim(), prompt.trim(), schemaInstruction].join('\n\n').length;
 
   if (model.structuredOutput === false) {
     return { ready: false, reason: 'structured-output-unsupported', model, requiredChars };
@@ -527,20 +540,9 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   // review asked of another model or language is a fresh one, and handing it
   // the last entry would have it copy that entry while the prompt claims the
   // code moved on.
-  let previousWalkthrough = null;
   const pointer = readPointer(repoRoot, key, readContext);
-  if (pointer) {
-    const previousEntry = readCachedWalkthrough(pointer.cacheKey);
-    if (
-      previousEntry
-      && previousEntry.cacheKey !== cacheKey
-      && previousEntry.model?.providerID === model.providerID
-      && previousEntry.model?.modelID === model.modelID
-      && normalizeLanguage(previousEntry.language) === language
-    ) {
-      previousWalkthrough = previousEntry.walkthrough;
-    }
-  }
+  const previousEntry = pointer ? readCachedWalkthrough(pointer.cacheKey) : null;
+  const previousWalkthrough = previousNarrative(previousEntry, cacheKey, model, language);
 
   const instructions = await readInstructions(directory, deps);
   const { prompt, system } = buildPrompt({ digest, fileCount, hunkCount, source, previousWalkthrough, language, instructions });
@@ -562,6 +564,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     variant: model.variant,
     responseSchema: options.responseSchema,
     onOverflow: 'error',
+    charsPerToken: CHARS_PER_TOKEN,
     timeoutMs: generationTimeoutMs(hunkCount),
     // The number the input budget was already reduced by, not a fresh guess.
     maxOutputTokens: model.outputTokens ?? MIN_OUTPUT_TOKENS,
@@ -575,11 +578,27 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
   const withSchema = () => run({ prompt, system, responseSchema });
   const withoutSchema = () => run({
     prompt,
-    system: `${system}\n${JSON_SHAPE_INSTRUCTION}`,
+    system: `${system}\n${JSON_RESPONSE_INSTRUCTION}`,
     responseSchema: undefined,
   });
 
   const asRequestFailure = (error) => {
+    if (error?._tag === 'ProviderRequestError' && error.reason === 'invalid_request') {
+      const match = isString(error.message)
+        ? error.message.match(/maximum context length is\s+([\d,]+)\s+tokens[\s\S]*?requested\s+([\d,]+)\s+tokens/i)
+        : null;
+      const limit = Number(match?.[1]?.replaceAll(',', ''));
+      const requested = Number(match?.[2]?.replaceAll(',', ''));
+      if (limit > 0 && requested > limit) {
+        const requiredChars = schemaRefusedBy.has(modelKey(model))
+          ? [`${system}\n${JSON_RESPONSE_INSTRUCTION}`.trim(), prompt.trim()].join('\n\n').length
+          : [system.trim(), prompt.trim(), `Reply with JSON matching this schema and nothing else: ${JSON.stringify(responseSchema)}`].join('\n\n').length;
+        return fail(`${modelLabel(model)} rejected the prompt because it exceeds the context limit`, 409, {
+          code: 'context-too-small', model, requiredChars,
+          availableChars: Math.floor(requiredChars * limit / requested),
+        });
+      }
+    }
     if (error?.code === 'context-too-small') {
       return fail(error.message, 409, {
         code: 'context-too-small',

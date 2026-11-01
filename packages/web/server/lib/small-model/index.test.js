@@ -635,6 +635,48 @@ describe('oversized input', () => {
   // 8k context leaves 4k input tokens after the default output reserve → 16k chars.
   const huge = (overrides = {}) => ({ prompt: 'x'.repeat(20_000), directory: '/proj', ...overrides });
 
+  it('preserves the provider context error from OpenCode', async () => {
+    state.generateErrors = [{ _tag: 'ProviderRequestError', providerID: 'anthropic', reason: 'invalid_request', status: 400,
+      message: "This model's maximum context length is 1000 tokens. However, you requested 1200 tokens." }];
+    await expect(generateSmallModelText({ prompt: 'test', directory: '/proj' })).rejects.toMatchObject({
+      _tag: 'ProviderRequestError', reason: 'invalid_request', status: 400,
+    });
+  });
+
+  it('refuses a walkthrough-sized prompt beyond the model input limit before generation', async () => {
+    state.models = [MODEL({ limit: { context: 1_050_000, input: 922_000, output: 128_000 } })];
+    state.defaultModel = state.models[0];
+    await expect(generateSmallModelText({
+      prompt: 'x'.repeat(3_400_000), directory: '/proj', maxOutputTokens: 96_000,
+      onOverflow: 'error', charsPerToken: 3,
+    })).rejects.toMatchObject({ code: 'context-too-small', availableChars: 2_766_000 });
+    expect(lastGenerate()).toBeUndefined();
+  });
+
+  it('counts system and schema text before a non-truncating send', async () => {
+    await expect(generateSmallModelText({
+      prompt: 'x'.repeat(15_950), system: 'y'.repeat(100), responseSchema: { type: 'object' },
+      directory: '/proj', onOverflow: 'error',
+    })).rejects.toMatchObject({ code: 'context-too-small', availableChars: 16_000 });
+    expect(lastGenerate()).toBeUndefined();
+  });
+
+  it('refuses when the output reserve leaves no input budget', async () => {
+    state.models = [MODEL({ limit: { context: 4_000, output: 4_000 } })];
+    state.defaultModel = state.models[0];
+    await expect(generateSmallModelText({ prompt: 'meaningful input', directory: '/proj' }))
+      .rejects.toMatchObject({ code: 'context-too-small', availableChars: 0 });
+    expect(lastGenerate()).toBeUndefined();
+  });
+
+  it('caps the default reserve at the model output limit', async () => {
+    state.models = [MODEL({ limit: { context: 4_000, output: 512 } })];
+    state.defaultModel = state.models[0];
+    await expect(generateSmallModelText({ prompt: 'meaningful input', directory: '/proj' }))
+      .resolves.toMatchObject({ text: 'generated' });
+    expect(lastGenerate().body.prompt).toBe('meaningful input');
+  });
+
   it('truncates and flags the response by default', async () => {
     const result = await generateSmallModelText(huge());
 

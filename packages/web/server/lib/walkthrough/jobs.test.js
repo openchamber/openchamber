@@ -102,6 +102,16 @@ describe('generation jobs', () => {
     expect(describeSmallModel.mock.calls.at(-1)[0]).toMatchObject({ directory: '/repo', preferredProviderID: 'anthropic', preferredModelID: 'claude-opus-5' });
   });
 
+  it('reports a provider context overflow without retrying as a schema error', async () => {
+    generateSmallModelText.mockRejectedValue({
+      _tag: 'ProviderRequestError', reason: 'invalid_request', status: 400,
+      message: "This model's maximum context length is 1048576 tokens. However, you requested 1088253 tokens.",
+    });
+    await expect(generateWalkthrough({ directory: '/repo', source: SOURCE }))
+      .rejects.toMatchObject({ code: 'context-too-small', statusCode: 409 });
+    expect(generateSmallModelText).toHaveBeenCalledTimes(1);
+  });
+
   it('runs the saved walkthrough model at its saved thinking level, and a model picked for one review at its own', async () => {
     const settingsFile = path.join(TEMP_DATA_DIR, 'settings.json');
     fs.writeFileSync(settingsFile, JSON.stringify({
@@ -241,6 +251,34 @@ describe('generation jobs', () => {
     ));
     await generateWalkthrough({ directory: '/repo', source: SOURCE, language: 'uk' });
     expect(sentPrompts.at(-1)).toContain('A previous walkthrough');
+  });
+
+  it('includes the previous narrative in readiness after the diff changes', async () => {
+    getDiff.mockImplementation(async (_dir, options) => (
+      options?.staged ? '' : PATCH.replace('const added = true;', 'const added = false;')
+    ));
+    const withoutPrevious = await getWalkthrough({ directory: '/repo', source: SOURCE });
+    getDiff.mockImplementation(async (_dir, options) => (options?.staged ? '' : PATCH));
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    getDiff.mockImplementation(async (_dir, options) => (
+      options?.staged ? '' : PATCH.replace('const added = true;', 'const added = false;')
+    ));
+    const withPrevious = await getWalkthrough({ directory: '/repo', source: SOURCE });
+    expect(withPrevious.readiness.requiredChars).toBeGreaterThan(withoutPrevious.readiness.requiredChars);
+  });
+
+  it('does not count another narrative when returning to a cached diff', async () => {
+    const original = await getWalkthrough({ directory: '/repo', source: SOURCE });
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    getDiff.mockImplementation(async (_dir, options) => (
+      options?.staged ? '' : PATCH.replace('const added = true;', 'const added = false;')
+    ));
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    getDiff.mockImplementation(async (_dir, options) => (options?.staged ? '' : PATCH));
+    const returned = await getWalkthrough({ directory: '/repo', source: SOURCE });
+    expect(returned.readiness.requiredChars).toBe(original.readiness.requiredChars);
   });
 
   it('sends the reader preferences from the walkthrough prompt override', async () => {
@@ -448,5 +486,21 @@ describe('schema refusal memory', () => {
     await generateWalkthrough({ directory: '/repo', source: SOURCE });
 
     expect(sentSchema).toEqual([true, false, false]);
+  });
+
+  it('measures the fallback prompt in readiness after a schema refusal', async () => {
+    let sent;
+    generateSmallModelText.mockImplementation(async (options) => {
+      if (options.responseSchema) throw Object.assign(new Error('bad request'), { status: 400 });
+      sent = options;
+      return { text: RESPONSE };
+    });
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    getDiff.mockImplementation(async (_dir, options) => (
+      options?.staged ? '' : PATCH.replace('const added = true;', 'const added = false;')
+    ));
+    const read = await getWalkthrough({ directory: '/repo', source: SOURCE });
+    await generateWalkthrough({ directory: '/repo', source: SOURCE });
+    expect(read.readiness.requiredChars).toBe([sent.system.trim(), sent.prompt.trim()].join('\n\n').length);
   });
 });
