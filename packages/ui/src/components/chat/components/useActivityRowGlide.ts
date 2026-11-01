@@ -54,3 +54,45 @@ export const useActivityRowGlide = (
         );
     });
 };
+
+/**
+ * While a working turn shows only its latest rows (above and below the pages
+ * it showed), each new row pushes the oldest out at the top, and rows differ
+ * in height (a one-line text, a tool row): the window grew and shrank by a
+ * row's difference with every step.
+ * A reader following the end glided down for the growth and was pulled back
+ * up when the next step shrank it, every step. While the turn works the
+ * window keeps the tallest height it has had, so the end only ever moves
+ * down. Its rows stay right under the header; the space it keeps falls below
+ * the newest row, where the next step lands (kept above the rows, it read as
+ * a hole under the header). A grown row raises it before the frame is drawn
+ * (a resize observer runs between layout and paint). A change of width is
+ * no step: the rows re-wrap, and the floor follows their new height, so a
+ * chat that narrowed and widened again leaves no space behind.
+ */
+export const useLiveRowsFloor = (
+    floorRef: React.RefObject<HTMLElement | null>,
+    contentRef: React.RefObject<HTMLElement | null>,
+    active: boolean,
+): void => {
+    React.useLayoutEffect(() => {
+        const floor = floorRef.current;
+        const rows = contentRef.current;
+        if (!floor || !rows) return;
+        if (!active) {
+            floor.style.minHeight = '';
+            return;
+        }
+        let width = rows.offsetWidth;
+        const raise = () => {
+            const height = rows.offsetHeight;
+            const resized = rows.offsetWidth !== width;
+            width = rows.offsetWidth;
+            if (resized || height > (parseFloat(floor.style.minHeight) || 0)) floor.style.minHeight = `${height}px`;
+        };
+        raise();
+        const observer = new ResizeObserver(raise);
+        observer.observe(rows);
+        return () => observer.disconnect();
+    }, [active, floorRef, contentRef]);
+};

@@ -417,8 +417,17 @@ the cut and tells the message it cuts into, through
 `ActivityRowSkipContext`, how many of its first rows `MessageBody` skips; both
 count with the same rule. When the cut moves down, `useActivityRowGlide`
 replays the jump as a 220 ms glide of the rows (FLIP, `transform` only, skipped
-with reduced motion). The trim stays while the settled fold closes and lifts
-when the reader opens it.
+with reduced motion). While the turn works what stays in view (the rows
+above and below its pages) never shrinks (`useLiveRowsFloor`): it keeps the
+tallest height it has had, its rows right under the header and the space it
+keeps below the newest row, where the next step lands (kept above the rows, it
+read as a hole under the header). Rows differ in height (a one-line text, a tool row), so a step that
+pushed a tall row out for a short one shrank the window, and a reader following
+the end glided down for one step and was pulled back up by the next. A change of
+width is no step: the rows re-wrap and the floor takes their new height, or a
+chat narrowed and widened again (a panel opened and closed) kept the narrow
+height as empty space above the rows until the fold was opened. The trim
+stays while the settled fold closes and lifts when the reader opens it.
 
 A long turn, in either mode, is several list rows: a row per step once the
 fold is open, a step that ran dozens of calls cut every 24 parts, and a long
