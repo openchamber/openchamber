@@ -12,7 +12,7 @@ import {
     type MessageViewportAnchor,
     type ViewportAnchorAlignment,
 } from '@/components/chat/lib/scroll/messageViewportAnchor';
-import { readSessionScrollPosition, rememberSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
+import { readSessionScrollPosition, rememberOutgoingSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
 import {
     peekMessageFocus,
     releaseMessageFocusOutside,
@@ -523,9 +523,15 @@ export const useChatTimelineScroll = ({
         const state = list?.getState();
         // A hidden container measures nothing; keep what was recorded before.
         if (!state || state.scrollLength <= 0) return;
+        // An unknown at-end answer is not "at the end": missing measurements
+        // must not clear the record either (#6045).
         const atEnd = (modeRef.current === 'following-end' && isAtEndRef.current)
-            || resolveTimelineIsAtEnd(state) !== false;
-        rememberSessionScrollPosition(sessionKey, atEnd ? null : captureMessageViewportAnchor(node));
+            || resolveTimelineIsAtEnd(state) === true;
+        rememberOutgoingSessionScrollPosition(
+            sessionKey,
+            atEnd,
+            atEnd ? null : captureMessageViewportAnchor(node),
+        );
     }, []);
 
     // ── scroll commands ─────────────────────────────────────────────────────
