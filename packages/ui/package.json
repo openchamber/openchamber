@@ -51,7 +51,7 @@
     "@opencode/client": "2.2.5",
     "@opencode/schema": "2.2.5",
     "@openuidev/lang-core": "1.0.2",
-    "@pierre/diffs": "1.6.1",
+    "@pierre/diffs": "1.6.2",
     "@pierre/highlights": "0.2.0",
     "@replit/codemirror-vim": "^6.4.0",
     "@simplewebauthn/browser": "13.3.0",
