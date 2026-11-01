@@ -98,6 +98,8 @@ For type-only shared contracts, validate compile-time consumers. Add runtime ser
 
 A test is proof when it is deterministic and fails without the change: a pure function, a page script, a reducer. Behavior that lives in a runtime is proven by running that runtime and watching the scenario; a test there that only mirrors the implementation through mocks or races real timers adds upkeep and flakes, and the run already shows more.
 
+Pick the scenarios before counting them. First run the plain path a user takes, end to end in the running app; then break it the ordinary ways it breaks: a credential the server stops accepting, a server that is down, a sign-in the user cancels or that fails, an empty or slow answer. Look at what the user sees each time. These ordinary breaks are where shipped bugs sit, so they come before rare races and exotic inputs, which earn coverage only with a concrete reason. Tests then pin what the runs found.
+
 ## Where to run it
 
 Run the scenario in the runtime that executes the changed code. Every route below starts its own instance on free ports, beside the user's own app and dev servers.
