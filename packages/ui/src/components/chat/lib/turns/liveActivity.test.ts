@@ -310,4 +310,16 @@ describe('getShownPages', () => {
         const answer = assistant('answer', [text('```openui-lang\nroot = Stack([])\n```')], { finish: 'stop' });
         expect(getShownPages([step, answer], answer)).toEqual([block]);
     });
+
+    test('a form stays in view while it waits and folds with Activity once it settles; a page that only shows stays', () => {
+        const form = { action: 'render.page', parameters: { ui: 'root = Stack([])', title: 'Scope', awaitAnswer: true } };
+        const page = { action: 'render.page', parameters: { html: '<p>a</p>', title: 'Mockup' } };
+        const waiting = tool('waiting', 'openchamber_render', { status: 'running', input: form });
+        const answered = tool('answered', 'openchamber_render', { input: form, metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Minimal', data: {} } } } });
+        const inChat = tool('in-chat', 'openchamber_render', { input: form, metadata: { openchamber: { ok: true, answer: { answered: false } } } });
+        const stopped = tool('stopped', 'openchamber_render', { status: 'error', input: form, error: 'aborted' });
+        const shown = tool('shown', 'openchamber_render', { input: page, metadata: { openchamber: { ok: true } } });
+        const step = assistant('step', [waiting, answered, inChat, stopped, shown], { finish: 'tool-calls' });
+        expect(getShownPages([step]).map((part) => part.id)).toEqual(['waiting', 'shown']);
+    });
 });

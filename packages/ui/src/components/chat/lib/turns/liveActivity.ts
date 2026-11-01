@@ -1,6 +1,6 @@
 import { isInvisibleText } from '@/lib/invisibleText';
 import { getLastConversationRecord, type TextPart, type ToolPart } from '@/lib/opencode/model';
-import { isShownInPlace } from '@/lib/opencode/tools';
+import { isShownInPlace, openChamberToolCall } from '@/lib/opencode/tools';
 import { isSessionNoticePart } from '@/lib/opencode/session-notices';
 import { isStandaloneTool } from '../../message/parts/toolRenderUtils';
 import type { ChatMessageEntry, TurnRecord } from './types';
@@ -47,15 +47,25 @@ export type ShownPart = ToolPart | TextPart;
 const UI_BLOCK_FENCE = /^ {0,3}(`{3,}|~{3,})openui-lang[ \t]*$/m;
 
 /**
+ * A form or secret card that asked the user and no longer waits: answered,
+ * answered in the chat instead, or stopped. Like the question tool's card it
+ * is a step from then on, so a collapsed Activity folds it.
+ */
+const isSettledAsk = (part: ToolPart): boolean => (
+    part.state.status !== 'running' && part.state.status !== 'pending'
+    && openChamberToolCall(part.tool, part.state.input)?.awaitsAnswer === true
+);
+
+/**
  * What a turn showed the user, in the order it happened: the pages of
- * `openchamber_render` calls, waiting ones included, the workflow runs
- * `workflow.run` calls proposed, and text with a UI block that the agent
+ * `openchamber_render` calls, and forms only while they wait, the workflow
+ * runs `workflow.run` calls proposed, and text with a UI block that the agent
  * wrote before a later step. The final answer's own text is the answer, so
  * it is never hoisted.
  */
 export function getShownPages(messages: readonly ChatMessageEntry[], finalMessage?: ChatMessageEntry): ShownPart[] {
     return messages.flatMap((message) => message.parts.filter((part): part is ShownPart => (
-        (part.type === 'tool' && isShownInPlace(part.tool, part.state))
+        (part.type === 'tool' && isShownInPlace(part.tool, part.state) && !isSettledAsk(part))
         || (part.type === 'text' && message !== finalMessage && UI_BLOCK_FENCE.test(part.text))
     )));
 }

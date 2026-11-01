@@ -577,7 +577,8 @@ export function generatedImagePaths(toolName: ToolName, state: ToolState): strin
  * from `openchamber_render`, the run a `workflow.run` call proposed, the
  * images `image.generate` made, or a secret card from `openchamber_secret`.
  * The user is meant to see all of them, so they are hoisted to the answer when
- * Activity is collapsed.
+ * Activity is collapsed; one that asked the user, only while it waits
+ * (`getShownPages`).
  */
 export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean => (
   renderedPage(toolName, state) !== null
