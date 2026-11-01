@@ -96,6 +96,25 @@ export const publicNotificationsSchema = z.object({
   }),
 });
 
+// The tracker a `tracker` service provides, as the approval dialog and the
+// account card show it. A malformed slice drops the field, never the row.
+const publicTrackerInstancesSchema = z.union([
+  z.object({ kind: z.literal('fixed'), origin: z.string().trim().min(1).max(2_048) }),
+  z.object({ kind: z.literal('user'), label: z.string().trim().min(1).max(64), placeholder: z.string().trim().max(256).optional() }),
+]);
+const publicTrackerSchema = z.object({
+  label: z.string().trim().min(1).max(64),
+  instances: publicTrackerInstancesSchema,
+  authMethods: z.array(z.enum(['oauth', 'token'])).max(2),
+  token: z.object({
+    scheme: z.enum(['bearer', 'token', 'basic', 'none']),
+    username: z.boolean(),
+    scopes: z.array(z.string().trim().min(1).max(64)).max(32),
+    createPath: z.string().trim().min(1).max(256).optional(),
+  }).optional(),
+  oauth: z.object({ scopes: z.array(z.string().trim().min(1).max(64)).max(32) }).optional(),
+});
+
 const guestActionSchema = z.object({
   id: z.string().regex(PANEL_ID),
   label: z.string().trim().min(1),
@@ -165,6 +184,7 @@ const installedGuestSchema = z.object({
   sourceControl: publicSourceControlSchema.optional().catch(undefined),
   sessionEvents: publicSessionEventsSchema.optional().catch(undefined),
   notifications: publicNotificationsSchema.optional().catch(undefined),
+  tracker: publicTrackerSchema.optional().catch(undefined),
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),

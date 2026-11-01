@@ -75,6 +75,18 @@ Wstrzymanie rozszerzenia zabiera host, dopóki go z powrotem nie włączysz, a T
 
 SDK OpenChamber ma działający przykład, `examples/source-control-provider`, od którego można zacząć własny. Zobacz [Zbuduj rozszerzenie](/pl/sdk/).
 
+## Rozszerzenie jako tracker
+
+Rozszerzenie może dodać tracker elementów pracy obok Linear: YouTrack, Jira, Plane albo własny. Jego okno uprawnień ma wtedy wiersz, który zaczyna się od **Działa jako tracker** i podaje jego nazwę. Ten wiersz mówi też, co OpenChamber mu wysyła: Twoje wyszukiwania i elementy, które otwierasz, oraz że prosi go o zmianę ich stanu i publikowanie komentarzy sesji w Twoim imieniu.
+
+Gdy na to pozwolisz, tracker dostaje własną kartę w **Ustawienia → Integracje** w sekcji **Konta rozszerzeń**. Połącz tam konto: tokenem albo logowaniem w przeglądarce po wpisaniu client id aplikacji, którą zarejestrowałeś w trackerze, a najpierw adresem serwera, jeśli karta o niego prosi. Od tej chwili jego elementy są tam, gdzie elementy Linear: w menu **+** czatu i w oknie wyboru, w New Worktree, wśród powiązanych elementów sesji i w stanach na żywo elementów, które śledzisz. Wklejony link do jednego z jego elementów jest rozpoznawany tak samo. Co robi każda z tych rzeczy, opisuje strona [Linear](/pl/integrations/#linear).
+
+Twoje tokeny zostają w OpenChamber. Rozszerzenie prosi OpenChamber, by wywołał tracker w jego imieniu, a OpenChamber dodaje dane logowania do każdego wywołania, tylko dla serwera, który połączyłeś. Rozszerzenie nigdy ich nie dostaje, a pisać tam mogą tylko jego wywołania zmiany stanu i komentarzy.
+
+Wstrzymanie rozszerzenia zabiera tracker, dopóki go z powrotem nie włączysz, a Twoje konta zostają. Usunięcie rozszerzenia je zapomina. VS Code nie pokazuje trackerów; na telefonie elementy trackera są widoczne, a konta łączy się z aplikacji webowej albo desktopowej.
+
+SDK OpenChamber ma działający przykład, `examples/tracker-provider`, z udawanym trackerem do uruchomienia obok. Zobacz [Zbuduj rozszerzenie](/pl/sdk/).
+
 ## Połącz jego konto
 
 Rozszerzenie, które rozmawia z usługą, dostaje kartę w **Ustawienia → Integracje** w sekcji **Konta rozszerzeń**. Zależnie od usługi karta prosi o token API, nazwę użytkownika i token albo client id do logowania. Wybierz **Połącz**; **Rozłącz** zapomina zapisany token. Dodatkowe pola zadeklarowane przez rozszerzenie zapisują się same, gdy je opuszczasz.

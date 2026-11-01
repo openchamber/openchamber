@@ -678,7 +678,7 @@ export const openGuestServiceRequest = async ({
       socketBindings,
       socketOverrides,
       // A role that sends outbound through the callback listener learns its address; no other service does.
-      hostCallback: serviceProvides(service, 'source-control') || serviceProvides(service, 'notifications'),
+      hostCallback: serviceProvides(service, 'source-control') || serviceProvides(service, 'notifications') || serviceProvides(service, 'tracker'),
       epoch,
       lifecycle,
     });

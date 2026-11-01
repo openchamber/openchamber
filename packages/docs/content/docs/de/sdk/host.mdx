@@ -257,6 +257,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 In welchen Raum oder Kanal ein Projekt geht, entscheidet deine Erweiterung selbst: Die Benachrichtigung trägt `directory` und `sessionName`. Im Enterprise-Modus trägt sie nur den allgemeinen Titel, wie das Telefon. Das Beispiel `notification-webhook` ist ein vollständiger Kanal mit einem Empfänger zum Ausprobieren.
 
+## Tracker
+
+Ein Dienst kann neben Linear ein Tracker für Arbeitselemente sein: Deklariere `provides: ["tracker"]` und beschreibe den Tracker in `contributes.tracker`. OpenChamber listet ihn dann überall neben Linear, wo Tracker auftauchen, allein aus dem Manifest, bevor der Dienst je läuft.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+Der Nutzer verbindet Konten auf der Karte des Trackers unter Erweiterungskonten: mit einem Token oder per Anmeldung im Browser, wenn du `auth.oauth` deklarierst (OpenChamber führt die Anmeldung mit der Client-ID durch, die der Nutzer eingibt, und behält die Tokens). Dein Dienst sieht nie Zugangsdaten. `urls.item` sind Vorlagen für die Adresse eines Elements, mit `{id}` für den Bezeichner (auch als `?name={id}`, wenn er in der Query reist); OpenChamber kompiliert sie, damit eingefügte Links zu verknüpften Elementen werden. `identifier` sagt, wie der Schlüssel aussieht: `key-number` (`PROJ-42`), `number` oder `short-code`.
+
+OpenChamber leitet neun Aufrufe an `POST /tracker` weiter: `auth.probe` und `auth.verify`, die Lesezugriffe `items.list`, `items.get`, `items.liveSummaries`, `states.list` und `containers.list` sowie die Schreibzugriffe `items.updateState` und `comments.create`. Lies jeden mit `readTrackerProviderRequest`, antworte in den neutralen Elementformen und erreiche den Server des Trackers nur über den Outbound-Helfer, der deine Anfrage mit dem Handle des Aufrufs an OpenChamber schickt; OpenChamber fügt die Zugangsdaten hinzu und hält die Anfrage auf dem Server des Kontos. Das Handle eines Lesezugriffs sendet nur `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Schaltet der Nutzer Sitzungskommentare ein, ruft OpenChamber `comments.create` mit "session started", "completed" oder "failed" und einem Link zur Sitzung auf, je einmal; der Kommentar trägt nichts weiter. Das Beispiel `tracker-provider` ist ein vollständiger Tracker mit einem Fake-Server zum Ausprobieren.
+
 ## Dateien
 
 Ein relativer Pfad liegt innerhalb des offenen Projekts und braucht die Berechtigung `files`. Ein Pfad, der mit `/` oder `~/` beginnt, muss zu einem deklarierten `contributes.filesystem`-Muster passen und braucht die Berechtigung `filesystem`. Die Regeln stehen unter [Eine Erweiterung bauen](/sdk/#dateien).

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { browserProviderResultSchema, notificationsProviderSchemasV1, sourceControlProviderSchemasV1 } from './service-provider-schemas.ts';
+import { browserProviderResultSchema, notificationsProviderSchemasV1, sourceControlProviderSchemasV1, trackerProviderSchemasV1 } from './service-provider-schemas.ts';
 import {
   BROWSER_CONTROL_ACTIONS,
   GUEST_NOTIFICATION_KINDS,
@@ -21,6 +21,15 @@ import {
   readBrowserProviderRequest,
   readSourceControlProviderRequest,
   sourceControlProviderTimeoutMs,
+  TRACKER_OUTBOUND_PATH,
+  TRACKER_PROVIDER_METHODS,
+  TRACKER_PROVIDER_WRITE_METHODS,
+  TrackerOutboundError,
+  createTrackerOutbound,
+  isTrackerProviderMethod,
+  isTrackerProviderWriteMethod,
+  readTrackerProviderRequest,
+  trackerProviderTimeoutMs,
 } from './service-providers.ts';
 
 describe('browser provider contract', () => {
@@ -301,6 +310,106 @@ describe('notifications provider contract', () => {
     expect(schemas.data.notify.safeParse({ delivered: false }).success).toBe(false);
     expect(schemas.data.notify.safeParse({ delivered: true, echo: notification }).success).toBe(false);
     expect(schemas.envelope.safeParse({ ok: false, error: { message: 'channel_not_found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
+    expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
+  });
+});
+
+describe('tracker provider contract', () => {
+  const session = { instance: 'https://youtrack.example.com', handle: 'h-1', account: { id: 'u-1', login: 'mona' } };
+  const call = <T,>(patch?: T) => JSON.stringify({
+    v: 1, requestId: 'req-1', method: 'items.get', provider: 'ext-youtrack', session, input: { id: 'i-1' }, ...patch,
+  });
+
+  test('reads the body the host posts and refuses anything else', () => {
+    expect(readTrackerProviderRequest(call())).toEqual({
+      v: 1, requestId: 'req-1', method: 'items.get', provider: 'ext-youtrack', session, input: { id: 'i-1' },
+    });
+    expect(readTrackerProviderRequest(call({ method: 'auth.probe', session: { ...session, account: null }, input: {} }))?.session.account).toBeNull();
+    expect(readTrackerProviderRequest(call({ session: { ...session, account: { id: 'u-1', login: null } } }))?.session.account).toEqual({ id: 'u-1', login: null });
+
+    expect(readTrackerProviderRequest('not json')).toBeNull();
+    expect(readTrackerProviderRequest(call({ v: 2 }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ method: 'notify' }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ provider: '' }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ session: null }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ session: { ...session, handle: '' } }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ session: { ...session, account: { id: 7, login: 'mona' } } }))).toBeNull();
+    expect(readTrackerProviderRequest(call({ input: [] }))).toBeNull();
+  });
+
+  test('the nine methods, the two writes and their deadlines', () => {
+    expect(TRACKER_PROVIDER_METHODS).toEqual([
+      'auth.probe', 'auth.verify', 'items.list', 'items.get', 'items.updateState', 'items.liveSummaries', 'states.list', 'containers.list', 'comments.create',
+    ]);
+    expect(TRACKER_PROVIDER_WRITE_METHODS).toEqual(['items.updateState', 'comments.create']);
+    expect(isTrackerProviderMethod('items.list')).toBe(true);
+    expect(isTrackerProviderMethod('listIssues')).toBe(false);
+    expect(isTrackerProviderWriteMethod('comments.create')).toBe(true);
+    expect(isTrackerProviderWriteMethod('items.get')).toBe(false);
+    expect(trackerProviderTimeoutMs('auth.verify')).toBe(15_000);
+    expect(trackerProviderTimeoutMs('items.list')).toBe(20_000);
+    expect(trackerProviderTimeoutMs('items.updateState')).toBe(30_000);
+  });
+
+  test('the outbound helper posts to its own callback route with the handle', async () => {
+    const seen: Array<{ url: string; authorization: string | null }> = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      async fetch(request) {
+        seen.push({ url: new URL(request.url).pathname, authorization: request.headers.get('authorization') });
+        if (request.headers.get('authorization') === 'Bearer read-only') {
+          return Response.json({ error: { message: 'This call may not send POST to the tracker', code: 'METHOD_NOT_ALLOWED' } }, { status: 403 });
+        }
+        return Response.json({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"issues":[]}' });
+      },
+    });
+    try {
+      expect(() => createTrackerOutbound({ env: {} })).toThrow(OPENCHAMBER_HOST_CALLBACK_URL);
+      const outbound = createTrackerOutbound({ env: { [OPENCHAMBER_HOST_CALLBACK_URL]: `http://127.0.0.1:${server.port}` } });
+      const answer = await outbound.request('h-1', { method: 'GET', path: '/api/issues', query: { query: 'PROJ-1' } });
+      expect(answer).toEqual({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"issues":[]}' });
+      expect(seen[0]).toEqual({ url: TRACKER_OUTBOUND_PATH, authorization: 'Bearer h-1' });
+      const refused = await outbound.request('read-only', { method: 'POST', path: '/api/issues/1/comments', body: '{}' }).catch((error: Error) => error);
+      expect(refused).toBeInstanceOf(TrackerOutboundError);
+      expect(refused).toMatchObject({ code: 'METHOD_NOT_ALLOWED', status: 403 });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test('the host checks every answer in the neutral shapes, bounded', () => {
+    const schemas = trackerProviderSchemasV1;
+    const summary = {
+      id: 'i-1', identifier: 'PROJ-42', title: 'Broken login', url: 'https://youtrack.example.com/issue/PROJ-42',
+      state: { id: 's-1', name: 'Open', category: 'todo' }, priority: 'high',
+      labels: [{ id: 'l-1', name: 'bug', color: '#ff0000' }], assignee: { name: 'Mona', avatarUrl: null },
+      container: { id: 'p-1', key: 'PROJ', name: 'Project' }, parent: null, progress: { total: 3, done: 1, more: false }, updatedAt: '2026-10-31T00:00:00Z',
+    };
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: 'u-1', login: 'mona', name: 'Mona' } }).success).toBe(true);
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: 'u-1', login: null } }).success).toBe(true);
+    expect(schemas.data['auth.verify'].safeParse({ account: { id: '', login: 'mona' } }).success).toBe(false);
+    expect(schemas.data['auth.probe'].safeParse({ supported: false, message: 'Not a YouTrack server' }).success).toBe(true);
+    expect(schemas.data['items.list'].safeParse({ items: [summary], cursor: null, hasMore: false }).success).toBe(true);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, provider: 'ext-youtrack' }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, url: 'javascript:alert(1)' }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.get'].safeParse({ item: { ...summary, url: '/issue/PROJ-42' } }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, parent: summary }], cursor: null, hasMore: false }).success).toBe(true);
+    // A parent of a parent is not carried: related items are one level deep.
+    expect(schemas.data['items.list'].safeParse({ items: [{ ...summary, parent: { ...summary, parent: summary } }], cursor: null, hasMore: false }).success).toBe(false);
+    expect(schemas.data['items.list'].safeParse({ items: Array.from({ length: 101 }, () => summary), cursor: null, hasMore: true }).success).toBe(false);
+    expect(schemas.data['items.get'].safeParse({ item: null }).success).toBe(true);
+    expect(schemas.data['items.get'].safeParse({ item: { ...summary, description: 'Steps', comments: [{ id: 'c-1', body: 'Hi', createdAt: null, author: null }], children: [summary], childrenMore: false } }).success).toBe(true);
+    expect(schemas.data['items.updateState'].safeParse({ item: summary }).success).toBe(true);
+    expect(schemas.data['states.list'].safeParse({ states: [{ id: 's-1', name: 'Open', category: 'todo', position: 0 }] }).success).toBe(true);
+    expect(schemas.data['states.list'].safeParse({ states: [{ id: 's-1', name: 'Open', category: 'later', position: 0 }] }).success).toBe(false);
+    expect(schemas.data['items.liveSummaries'].safeParse({ items: [{ identifier: 'PROJ-42', title: 'Broken login', state: { name: 'Done', category: 'done' } }] }).success).toBe(true);
+    expect(schemas.data['items.liveSummaries'].safeParse({ items: [{ identifier: 'PROJ-42', title: 'Broken login', state: { name: 'Done', category: null } }] }).success).toBe(false);
+    expect(schemas.data['containers.list'].safeParse({ containers: [{ id: 'p-1', key: 'PROJ', name: 'Project' }] }).success).toBe(true);
+    expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9' } }).success).toBe(true);
+    expect(schemas.data['comments.create'].safeParse({ comment: null }).success).toBe(true);
+    expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9', body: 'echo' } }).success).toBe(false);
+    expect(schemas.envelope.safeParse({ ok: false, error: { message: 'Not found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
     expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
   });
 });

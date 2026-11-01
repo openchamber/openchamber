@@ -499,3 +499,10 @@ export const clearGuestPendingForTests = () => {
   pendingByState.clear();
   pendingByGuestId.clear();
 };
+
+/**
+ * The token exchange and the refresh request, for the tracker role's own
+ * PKCE flow (`../trackers/extension-oauth.js`): the same wire as a guest
+ * integration's, so the two cannot drift in how they talk to a token endpoint.
+ */
+export { exchangeAuthorizationCode, postForm as postTokenForm };

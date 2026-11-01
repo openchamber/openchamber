@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LINEAR_TRACKER_DESCRIPTOR } from '../linear/tracker.js';
 import { createTrackerRegistry } from './registry.js';
+import { TrackerRouteError } from './route-error.js';
 import { registerTrackerRoutes } from './routes.js';
 
 const descriptorFor = (id, capabilities = {}) => {
@@ -65,6 +66,18 @@ describe('tracker routes', () => {
     vi.restoreAllMocks();
   });
 
+  it('answers 500 for an error that carries a status and a code without being the route layer\'s own, as the legacy Linear routes do', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Linear's token failures carry both (`linear/oauth.js`); the upstream's status is not the client's to see.
+    tracker.auth.start.mockRejectedValueOnce(Object.assign(new Error('Linear token request failed (401)'), { status: 401, code: 'LINEAR_TOKEN_FAILED' }));
+    const upstream = await request(app).post('/api/tracker/fake/auth/start').send({ origin: 'web' }).expect(500);
+    expect(upstream.body).toEqual({ error: 'Linear token request failed (401)' });
+    expect(logged).toHaveBeenCalledTimes(1);
+    tracker.auth.start.mockRejectedValueOnce(new TrackerRouteError(503, 'TRACKER_UNAVAILABLE', 'Not now'));
+    await request(app).post('/api/tracker/fake/auth/start').send({ origin: 'web' }).expect(503, { error: 'Not now', code: 'TRACKER_UNAVAILABLE' });
+    expect(logged).toHaveBeenCalledTimes(1);
+  });
+
   it('lists provider descriptors as plain JSON', async () => {
     const response = await request(app).get('/api/tracker/providers').expect(200);
     expect(response.body).toEqual({ providers: [descriptorFor('fake')] });
@@ -102,9 +115,9 @@ describe('tracker routes', () => {
 
     const start = await request(app).post('/api/tracker/fake/auth/start').send({ origin: 'desktop' }).expect(200);
     expect(start.body).toEqual({ authorizationUrl: 'https://fake.test/authorize', expiresIn: 600 });
-    expect(tracker.auth.start).toHaveBeenCalledWith({ origin: 'desktop' });
+    expect(tracker.auth.start).toHaveBeenCalledWith(expect.objectContaining({ origin: 'desktop' }));
     await request(app).post('/api/tracker/fake/auth/start').send({ origin: 'elsewhere' }).expect(200);
-    expect(tracker.auth.start).toHaveBeenLastCalledWith({ origin: 'web' });
+    expect(tracker.auth.start).toHaveBeenLastCalledWith(expect.objectContaining({ origin: 'web' }));
 
     await request(app).post('/api/tracker/fake/auth/activate').send({}).expect(400);
     const missing = await request(app).post('/api/tracker/fake/auth/activate').send({ accountId: 'other' }).expect(404);
@@ -294,5 +307,107 @@ describe('tracker routes over the built-in Linear tracker', () => {
     expect((await request(app).get('/api/tracker/linear/mapping').expect(200)).body).toEqual({ connected: false });
     expect((await request(app).get('/api/tracker/linear/preferences').expect(200)).body).toEqual({ sessionComments: false });
     expect((await request(app).post('/api/tracker/linear/auth/activate').send({ accountId: 'org-1' }).expect(404)).body.code).toBe('ACCOUNT_NOT_FOUND');
+  });
+});
+
+describe('tracker routes over an extension tracker', () => {
+  const view = { instance: 'https://yt.example.com', accounts: [{ id: 'u-1', login: 'mona', connectedAt: 1, status: 'valid', method: 'token' }], activeAccountId: 'u-1', hasClient: false };
+  const extensionTracker = () => ({
+    ...fakeTracker(),
+    auth: {
+      ...fakeTracker().auth,
+      connectToken: vi.fn(async () => view),
+      setOAuthClient: vi.fn(async () => ({ ...view, hasClient: true })),
+      completeAuthorization: vi.fn(async () => view),
+    },
+  });
+  /** An extension tracker attaches to a running registry; it is never a built-in entry. */
+  const createExtensionApp = (descriptor, implementation) => {
+    const registry = createTrackerRegistry([], { foreignIds: [] });
+    registry.attachExtension({ descriptor, load: async () => implementation });
+    const extensionApp = express();
+    registerTrackerRoutes(extensionApp, { registry });
+    extensionApp.use((_req, res) => res.status(599).end());
+    return extensionApp;
+  };
+  let tracker;
+  let app;
+
+  beforeEach(() => {
+    tracker = extensionTracker();
+    app = createExtensionApp({ ...descriptorFor('ext-yt'), authMethods: ['oauth', 'token'] }, tracker);
+  });
+
+  it('hands the request origin to status and start, so the card learns where the sign-in returns', async () => {
+    await request(app).get('/api/tracker/ext-yt/auth/status').set('Host', 'app.example.com').expect(200);
+    expect(tracker.auth.status).toHaveBeenCalledWith({ origin: 'http://app.example.com' });
+    await request(app).post('/api/tracker/ext-yt/auth/start').set('Host', 'app.example.com').send({ origin: 'desktop', instance: 'https://yt.example.com' }).expect(200);
+    expect(tracker.auth.start).toHaveBeenCalledWith({ origin: 'desktop', callbackOrigin: 'http://app.example.com', instance: 'https://yt.example.com' });
+  });
+
+  it('connects a token and saves the OAuth client through the implementation, and answers its own status and code on failure', async () => {
+    const connected = await request(app).post('/api/tracker/ext-yt/auth/token').send({ token: 'secret', instance: ' https://yt.example.com ', username: '' }).expect(200);
+    expect(connected.body).toEqual(view);
+    expect(tracker.auth.connectToken).toHaveBeenCalledWith({ instance: 'https://yt.example.com', token: 'secret', username: undefined });
+    tracker.auth.connectToken.mockRejectedValueOnce(new TrackerRouteError(401, 'TOKEN_REFUSED', 'YouTrack refused this credential.'));
+    const refused = await request(app).post('/api/tracker/ext-yt/auth/token').send({ token: 'bad' }).expect(401);
+    expect(refused.body).toEqual({ error: 'YouTrack refused this credential.', code: 'TOKEN_REFUSED' });
+
+    const client = await request(app).put('/api/tracker/ext-yt/auth/oauth-client').send({ clientId: 'c-1', clientSecret: 's' }).expect(200);
+    expect(client.body.hasClient).toBe(true);
+    expect(tracker.auth.setOAuthClient).toHaveBeenCalledWith({ instance: undefined, clientId: 'c-1', clientSecret: 's' });
+  });
+
+  it('refuses an over-long token, username, address, client or mapping path before the implementation is asked', async () => {
+    const long = (length) => 'x'.repeat(length);
+    const cases = [
+      ['post', '/api/tracker/ext-yt/auth/token', { token: long(4_097) }, 'token'],
+      ['post', '/api/tracker/ext-yt/auth/token', { token: 't', username: long(257) }, 'username'],
+      ['post', '/api/tracker/ext-yt/auth/token', { token: 't', instance: `https://${long(2_048)}.example.com` }, 'instance'],
+      ['post', '/api/tracker/ext-yt/auth/start', { instance: `https://${long(2_048)}.example.com` }, 'instance'],
+      ['put', '/api/tracker/ext-yt/auth/oauth-client', { clientId: long(513) }, 'clientId'],
+      ['put', '/api/tracker/ext-yt/auth/oauth-client', { clientId: 'c', clientSecret: long(4_097) }, 'clientSecret'],
+      ['put', '/api/tracker/ext-yt/mapping', { defaultProjectPath: `/${long(4_096)}` }, 'defaultProjectPath'],
+      ['put', '/api/tracker/ext-yt/mapping', { containerProjectPaths: { [long(257)]: '/repo' } }, 'container id'],
+      ['put', '/api/tracker/ext-yt/mapping', { containerProjectPaths: { 'p-1': `/${long(4_096)}` } }, 'project path'],
+      ['put', '/api/tracker/ext-yt/mapping', { containerProjectPaths: 'nope' }, 'containerProjectPaths'],
+      ['post', '/api/tracker/ext-yt/session-status', { kind: 'started', sessionId: 'ses_1', identifier: long(129) }, 'identifier'],
+    ];
+    for (const [method, route, body, field] of cases) {
+      const response = await request(app)[method](route).send(body).expect(400);
+      expect(response.body.code, field).toBe('INVALID');
+      expect(response.body.error, field).toContain(field);
+    }
+    expect(tracker.auth.connectToken).not.toHaveBeenCalled();
+    expect(tracker.auth.start).not.toHaveBeenCalled();
+    expect(tracker.auth.setOAuthClient).not.toHaveBeenCalled();
+    expect(tracker.mapping.set).not.toHaveBeenCalled();
+    expect(tracker.sessionStatus.post).not.toHaveBeenCalled();
+    // At the bound, the value goes through.
+    await request(app).post('/api/tracker/ext-yt/auth/token').send({ token: long(4_096) }).expect(200);
+    expect(tracker.auth.connectToken).toHaveBeenCalledWith({ instance: undefined, token: long(4_096), username: undefined });
+  });
+
+  it('answers 404 UNSUPPORTED for a way in the tracker does not offer', async () => {
+    const oauthOnly = createExtensionApp({ ...descriptorFor('ext-yt'), authMethods: ['oauth'] }, tracker);
+    await request(oauthOnly).post('/api/tracker/ext-yt/auth/token').send({ token: 'x' }).expect(404, { error: 'This tracker does not support this action', code: 'UNSUPPORTED' });
+    const builtIn = createApp([{ descriptor: descriptorFor('linear-like'), load: async () => fakeTracker() }]);
+    await request(builtIn).put('/api/tracker/linear-like/auth/oauth-client').send({ clientId: 'c' }).expect(404);
+    await request(builtIn).get('/api/tracker/linear-like/oauth/callback?code=1&state=2').expect(404);
+  });
+
+  it('finishes the browser sign-in on a public page and says what went wrong', async () => {
+    const done = await request(app).get('/api/tracker/ext-yt/oauth/callback?code=code-1&state=st').expect(200);
+    expect(done.type).toBe('text/html');
+    expect(done.text).toContain('Connected');
+    expect(tracker.auth.completeAuthorization).toHaveBeenCalledWith({ code: 'code-1', state: 'st', error: '', errorDescription: '' });
+    tracker.auth.completeAuthorization.mockRejectedValueOnce(new TrackerRouteError(400, 'STATE_MISMATCH', 'Authorization state was missing or expired.'));
+    const failed = await request(app).get('/api/tracker/ext-yt/oauth/callback?code=x&state=y').expect(400);
+    expect(failed.text).toContain('Authorization state was missing or expired.');
+    tracker.auth.completeAuthorization.mockRejectedValueOnce(new Error('boom'));
+    const broken = await request(app).get('/api/tracker/ext-yt/oauth/callback?code=x&state=y').expect(500);
+    expect(broken.text).not.toContain('boom');
+    expect(broken.text).toContain('The authorization callback failed.');
+    await request(app).get('/api/tracker/nope/oauth/callback?code=1&state=2').expect(404);
   });
 });

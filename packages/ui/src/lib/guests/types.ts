@@ -10,6 +10,7 @@ import type {
   PublicGuestCapabilities,
   PublicIntegration,
   PublicNotifications,
+  PublicTracker,
   PublicSessionEvents,
   PublicSourceControl,
 } from '@openchamber/sdk';
@@ -60,6 +61,8 @@ export type InstalledGuest = {
   sessionEvents?: PublicSessionEvents;
   /** The notification channel from `contributes.notifications`, when the service provides `notifications`. */
   notifications?: PublicNotifications;
+  /** The tracker from `contributes.tracker`, when the service provides `tracker`. */
+  tracker?: PublicTracker;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
   /** Declared `contributes.commands`; the composer routes them only for an active guest. */

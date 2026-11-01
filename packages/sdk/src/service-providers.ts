@@ -336,8 +336,8 @@ export const sourceControlProviderTimeoutMs = (method: SourceControlProviderMeth
 /**
  * Environment variable with the base URL of OpenChamber's callback listener
  * (`http://127.0.0.1:<port>`). Set only for a service that provides
- * `source-control` or `notifications`; `createSourceControlForge` and
- * `createNotificationsOutbound` read it.
+ * `source-control`, `notifications` or `tracker`; `createSourceControlForge`,
+ * `createNotificationsOutbound` and `createTrackerOutbound` read it.
  */
 export const OPENCHAMBER_HOST_CALLBACK_URL = 'OPENCHAMBER_HOST_CALLBACK_URL';
 /** Route on the callback listener a service sends a forge request to. */
@@ -888,5 +888,291 @@ export const createNotificationsOutbound = ({ env }: { env: Record<string, strin
   return {
     request: (handle, request) => postOutbound(url, handle, request, NOTIFICATIONS_OUTBOUND_TIMEOUT_MS,
       (message, code, status) => new NotificationsOutboundError(message, code, status)),
+  };
+};
+
+/*
+ * Tracker: a service with `provides: ["tracker"]` is the work item tracker
+ * `contributes.tracker` describes, next to Linear. OpenChamber keeps the
+ * accounts and their tokens (pasted or minted through OAuth), the project
+ * mapping, the session comment preference and the session records; it
+ * forwards the reads and the two writes to the service at
+ * `TRACKER_PROVIDER_PATH`. The service never sees a token: it reaches the
+ * tracker's server through OpenChamber's outbound proxy
+ * (`createTrackerOutbound`), which pins the instance origin and adds the
+ * account's credential itself. Every item answered goes to the UI in the
+ * neutral tracker shapes, so the picker, the composer, New Worktree, linked
+ * items and tracked items draw it as they draw a Linear issue.
+ */
+
+/** Route on the service loopback OpenChamber posts every tracker call to. */
+export const TRACKER_PROVIDER_PATH = '/tracker';
+/** The `v` of every request; a service answers a version it does not know with HTTP 400. */
+export const TRACKER_PROVIDER_WIRE_VERSION = 1;
+
+/**
+ * Every call OpenChamber forwards. `auth.probe` asks whether an instance is
+ * this tracker's server, `auth.verify` who a credential belongs to (the handle
+ * carries a pasted token or an OAuth access token); the reads answer in the
+ * neutral shapes; `items.updateState` and `comments.create` are the two
+ * writes, the only calls whose handle may send anything but `GET`.
+ */
+export const TRACKER_PROVIDER_METHODS = [
+  'auth.probe',
+  'auth.verify',
+  'items.list',
+  'items.get',
+  'items.updateState',
+  'items.liveSummaries',
+  'states.list',
+  'containers.list',
+  'comments.create',
+] as const;
+export type TrackerProviderMethod = (typeof TRACKER_PROVIDER_METHODS)[number];
+/** The calls that change something on the tracker. */
+export const TRACKER_PROVIDER_WRITE_METHODS = ['items.updateState', 'comments.create'] as const satisfies readonly TrackerProviderMethod[];
+
+export const TRACKER_PROVIDER_AUTH_TIMEOUT_MS = 15_000;
+export const TRACKER_PROVIDER_READ_TIMEOUT_MS = 20_000;
+export const TRACKER_PROVIDER_WRITE_TIMEOUT_MS = 30_000;
+/** Bytes of an answer OpenChamber reads: a page of items with their labels and people. */
+export const TRACKER_PROVIDER_RESPONSE_MAX = 2_000_000;
+/** Characters of `error.message` OpenChamber reads. */
+export const TRACKER_PROVIDER_ERROR_MESSAGE_MAX = 2_000;
+/** No call for this long stops the service; the next call starts it again. */
+export const TRACKER_PROVIDER_IDLE_MS = 10 * 60_000;
+/** Items in one `items.list` page, children or comments of one item, states of one container. */
+export const TRACKER_PROVIDER_LIST_MAX = 100;
+/** Identifiers in one `items.liveSummaries` call. */
+export const TRACKER_PROVIDER_LIVE_SUMMARIES_MAX = 50;
+/** Containers in one `containers.list` answer. */
+export const TRACKER_PROVIDER_CONTAINERS_MAX = 500;
+/** Route on the callback listener a service sends the tracker's requests to. */
+export const TRACKER_OUTBOUND_PATH = '/tracker/outbound';
+/** One outbound request may take this long; the call's own deadline may end it sooner. */
+export const TRACKER_OUTBOUND_TIMEOUT_MS = 20_000;
+
+export const isTrackerProviderWriteMethod = (method: TrackerProviderMethod): boolean => (
+  TRACKER_PROVIDER_WRITE_METHODS.some((write) => write === method)
+);
+
+/** How long OpenChamber waits for the service to answer `method`. */
+export const trackerProviderTimeoutMs = (method: TrackerProviderMethod): number => {
+  if (method === 'auth.probe' || method === 'auth.verify') return TRACKER_PROVIDER_AUTH_TIMEOUT_MS;
+  if (isTrackerProviderWriteMethod(method)) return TRACKER_PROVIDER_WRITE_TIMEOUT_MS;
+  return TRACKER_PROVIDER_READ_TIMEOUT_MS;
+};
+
+/*
+ * The neutral shapes a tracker answers in. They are the UI's tracker contract
+ * (`packages/web/server/lib/trackers/tracker-contract.d.ts`) without the
+ * `provider` field, which OpenChamber adds: a service never names a provider id.
+ */
+
+export type TrackerProviderStateCategory = 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done' | 'canceled';
+export type TrackerProviderPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low';
+export type TrackerProviderPerson = { name: string | null; avatarUrl: string | null };
+export type TrackerProviderItemState = { id: string | null; name: string; category: TrackerProviderStateCategory | null };
+export type TrackerProviderContainer = { id: string; key: string | null; name: string };
+export type TrackerProviderLabel = { id: string; name: string; color: string | null };
+/** Only the first few children are counted; `more` says there are others. */
+export type TrackerProviderProgress = { total: number; done: number; more: boolean };
+
+/** One item in a list, or a related item (a parent, a child), which carries no labels or progress of its own. */
+export type TrackerProviderItemSummary = {
+  /** The tracker's stable id; what `items.get` and `items.updateState` take. */
+  id: string;
+  /** Human key (`PROJ-42`), the shape `contributes.tracker.identifier` declares; compared case-insensitively. */
+  identifier: string;
+  title: string;
+  url: string;
+  state: TrackerProviderItemState | null;
+  priority?: TrackerProviderPriority | null;
+  labels?: TrackerProviderLabel[];
+  assignee?: TrackerProviderPerson | null;
+  container?: TrackerProviderContainer | null;
+  parent?: TrackerProviderItemSummary | null;
+  progress?: TrackerProviderProgress | null;
+  /** ISO 8601. */
+  updatedAt?: string | null;
+};
+
+export type TrackerProviderComment = { id: string; body: string; createdAt: string | null; author: TrackerProviderPerson | null };
+
+export type TrackerProviderItem = TrackerProviderItemSummary & {
+  description?: string | null;
+  comments?: TrackerProviderComment[];
+  /** The first page of children in the tracker's order; `childrenMore` says there are others. */
+  children?: TrackerProviderItemSummary[];
+  childrenMore?: boolean;
+};
+
+export type TrackerProviderWorkflowState = { id: string; name: string; category: TrackerProviderStateCategory | null; position: number };
+export type TrackerProviderLiveSummary = { identifier: string; title: string; state: { name: string; category: TrackerProviderStateCategory } };
+
+/** The connected account a call acts as; `null` in `auth.verify` and `auth.probe`, before one exists. */
+export type TrackerProviderAccount = { id: string; login: string | null };
+
+/**
+ * Who a call is for. `instance` is the account's origin (the tracker's one
+ * address, or the server the user typed). `handle` is the capability for this
+ * one call: pass it to `createTrackerOutbound(...).request`. It stops working
+ * when the call ends; never store it.
+ */
+export type TrackerProviderSession = {
+  instance: string;
+  handle: string;
+  account: TrackerProviderAccount | null;
+};
+
+/** What each method's `input` holds. OpenChamber built and checked every field. */
+export type TrackerProviderInputs = {
+  'auth.probe': Record<string, never>;
+  'auth.verify': Record<string, never>;
+  'items.list': {
+    query?: string;
+    cursor?: string;
+    /** One of the manifest's `stateFilters`. */
+    state: string;
+    people: 'any' | 'me' | 'created';
+    priority: 'all' | TrackerProviderPriority;
+    containerId: string | null;
+  };
+  'items.get': { id: string };
+  'items.updateState': { id: string; stateId: string };
+  'items.liveSummaries': { identifiers: string[] };
+  'states.list': { containerId: string };
+  'containers.list': Record<string, never>;
+  /** `body` is Markdown OpenChamber wrote: "OpenChamber session completed" with a link to the session. */
+  'comments.create': { identifier: string; body: string };
+};
+
+/**
+ * One call, as OpenChamber posts it. `provider` is the id OpenChamber gave
+ * this tracker (`ext-<panel.id>`). `input` was built by OpenChamber; its shape
+ * per method is `TrackerProviderInputs`.
+ */
+export type TrackerProviderRequest = {
+  v: typeof TRACKER_PROVIDER_WIRE_VERSION;
+  requestId: string;
+  method: TrackerProviderMethod;
+  provider: string;
+  session: TrackerProviderSession;
+  input: SourceControlJsonObject;
+};
+
+/** Who the credential belongs to; OpenChamber stores the account under `id` and shows `name`. */
+export type TrackerProviderAccountData = { account: { id: string; login: string | null; name?: string; avatarUrl?: string } };
+export type TrackerProviderProbeData = { supported: boolean; message?: string };
+export type TrackerProviderListData = { items: TrackerProviderItemSummary[]; cursor: string | null; hasMore: boolean };
+/** `item` is null when the tracker has no such item. */
+export type TrackerProviderItemData = { item: TrackerProviderItem | null };
+export type TrackerProviderStatesData = { states: TrackerProviderWorkflowState[] };
+/** Identifiers the tracker does not know are left out. */
+export type TrackerProviderLiveSummariesData = { items: TrackerProviderLiveSummary[] };
+export type TrackerProviderContainersData = { containers: TrackerProviderContainer[] };
+/** `comment` is null when the item was not found. */
+export type TrackerProviderCommentData = { comment: { id: string } | null };
+
+/** What each method answers in `data`. */
+export type TrackerProviderDataByMethod = {
+  'auth.probe': TrackerProviderProbeData;
+  'auth.verify': TrackerProviderAccountData;
+  'items.list': TrackerProviderListData;
+  'items.get': TrackerProviderItemData;
+  'items.updateState': TrackerProviderItemData;
+  'items.liveSummaries': TrackerProviderLiveSummariesData;
+  'states.list': TrackerProviderStatesData;
+  'containers.list': TrackerProviderContainersData;
+  'comments.create': TrackerProviderCommentData;
+};
+
+/**
+ * An answer. `error.status` is the HTTP status OpenChamber should treat the
+ * failure as; a 401 writes the account off only when OpenChamber's proxy saw
+ * the tracker's server answer 401 itself. `error.code` is `[A-Z_]{1,64}`.
+ */
+export type TrackerProviderError = SourceControlProviderError;
+export type TrackerProviderResult =
+  | { ok: true; data: SourceControlJson }
+  | { ok: false; error: TrackerProviderError };
+
+export const isTrackerProviderMethod = (value: string): value is TrackerProviderMethod => (
+  TRACKER_PROVIDER_METHODS.some((method) => method === value)
+);
+
+type WireTrackerRequest = {
+  v?: unknown; requestId?: unknown; method?: unknown; provider?: unknown; session?: WireNotificationsSession | null; input?: unknown;
+};
+
+/**
+ * A service's read of the body OpenChamber posted to `TRACKER_PROVIDER_PATH`.
+ * OpenChamber built `input`, so this checks the envelope, not every field, and
+ * the service bundle needs no schema library. `null` is a body that is not a
+ * tracker call of this wire version; answer it with HTTP 400.
+ */
+export const readTrackerProviderRequest = (body: string): TrackerProviderRequest | null => {
+  let wire: WireTrackerRequest;
+  try {
+    const parsed: WireTrackerRequest | null = JSON.parse(body);
+    if (Object(parsed) !== parsed || parsed === null) return null;
+    wire = parsed;
+  } catch {
+    return null;
+  }
+  const { v, requestId, method, provider, session, input } = wire;
+  if (v !== TRACKER_PROVIDER_WIRE_VERSION) return null;
+  if (String(requestId) !== requestId || requestId.length === 0) return null;
+  if (String(provider) !== provider || provider.length === 0) return null;
+  if (String(method) !== method || !isTrackerProviderMethod(method)) return null;
+  if (Object(input) !== input || Array.isArray(input)) return null;
+  if (Object(session) !== session || session === null || session === undefined) return null;
+  const { instance, handle } = session;
+  if (String(instance) !== instance || instance.length === 0 || String(handle) !== handle || handle.length === 0) return null;
+  // The account shape is the notification channel's: `{ id, login | null }` or null.
+  const account = readNotificationsAccount(session.account);
+  if (account === undefined) return null;
+  // SAFETY: `input` is a plain object parsed from JSON, so every value in it is JSON.
+  return { v: TRACKER_PROVIDER_WIRE_VERSION, requestId, method, provider, session: { instance, handle, account }, input: input as SourceControlJsonObject };
+};
+
+/**
+ * OpenChamber refused the request (an expired handle, a path off the
+ * instance, a body too large, a write through a read's handle), could not
+ * reach the tracker's server, or did not answer. `status` is the callback
+ * listener's HTTP status, `0` when it gave none; `code` is its error code
+ * (`HOST_UNAVAILABLE` when there was no usable answer).
+ */
+export class TrackerOutboundError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = 'TrackerOutboundError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export type TrackerOutbound = {
+  /** Sends `request` to the server of the account `handle` belongs to, with the stored credential when the call has one. */
+  request(handle: string, request: SourceControlOutboundRequest): Promise<SourceControlOutboundResponse>;
+};
+
+/**
+ * The service's way to the tracker's server: OpenChamber's callback listener
+ * (`OPENCHAMBER_HOST_CALLBACK_URL`), which checks the handle, keeps the
+ * request on the account's origin and adds the credential. Plain `fetch`, no
+ * dependencies. Throws `TrackerOutboundError` when OpenChamber refuses the
+ * request; an answer of any status from the server resolves. A read's handle
+ * sends `GET` only; `items.updateState` and `comments.create` may send writes.
+ */
+export const createTrackerOutbound = ({ env }: { env: Record<string, string | undefined> }): TrackerOutbound => {
+  const base = env[OPENCHAMBER_HOST_CALLBACK_URL];
+  if (!base) throw new Error(`${OPENCHAMBER_HOST_CALLBACK_URL} is not set: only a service that provides "tracker" can reach a tracker's server.`);
+  const url = `${base.replace(/\/+$/, '')}${TRACKER_OUTBOUND_PATH}`;
+  return {
+    request: (handle, request) => postOutbound(url, handle, request, TRACKER_OUTBOUND_TIMEOUT_MS,
+      (message, code, status) => new TrackerOutboundError(message, code, status)),
   };
 };

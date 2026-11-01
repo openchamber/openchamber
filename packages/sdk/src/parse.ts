@@ -47,6 +47,13 @@ import {
   SOURCE_CONTROL_URL_TEMPLATE_MAX,
   SOURCE_CONTROL_URL_TOKENS,
   type SourceControlContribution,
+  TRACKER_BASE_STATE_FILTERS,
+  TRACKER_GUEST_ID_MAX,
+  TRACKER_IDENTIFIER_KINDS,
+  TRACKER_STATE_FILTERS_MAX,
+  TRACKER_URL_TEMPLATES_MAX,
+  TRACKER_URL_TOKENS,
+  isTrackerUrlTemplate,
 } from './manifest.ts';
 import { isGuestRequestPath } from './contract.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
@@ -426,6 +433,69 @@ const uniqueBy = <T,>(items: T[], key: (item: T) => string): boolean => (
   new Set(items.map(key)).size === items.length
 );
 
+// A state filter id: the neutral categories and a tracker's own (`inReview`).
+const TRACKER_STATE_FILTER = /^[a-z][a-zA-Z0-9-]{0,31}$/;
+
+const trackerTokenSchema = notificationsTokenSchema;
+
+// An OAuth endpoint: an https URL, or a path on the instance the user names.
+const trackerOauthEndpointSchema = z.string().trim().min(1).max(2_048).refine(
+  (value) => isHttpsUrl(value) || isSafeApiPath(value),
+  { message: 'must be an https URL, or a path on the instance starting with "/"' },
+);
+
+const trackerSchema = z.object({
+  wire: z.literal(1),
+  label: literalSchema,
+  instances: z.union([
+    z.object({
+      kind: z.literal('fixed'),
+      origin: z.string().trim().refine(isHttpsOrigin, { message: 'must be an https origin with no path, like https://tracker.example.com' }),
+    }).strict(),
+    z.object({
+      kind: z.literal('user'),
+      label: literalSchema,
+      placeholder: z.string().trim().max(256).optional(),
+    }).strict(),
+  ]),
+  auth: z.object({
+    token: trackerTokenSchema.optional(),
+    oauth: z.object({
+      authorizeUrl: trackerOauthEndpointSchema,
+      tokenUrl: trackerOauthEndpointSchema,
+      scopes: z.array(z.string().trim().min(1).max(64)).max(32).optional(),
+    }).strict().optional(),
+  }).strict().refine((auth) => auth.token !== undefined || auth.oauth !== undefined, { message: 'declare token, oauth or both' }),
+  capabilities: z.object({
+    multipleAccounts: z.boolean().default(false),
+    stateUpdate: z.boolean().default(false),
+    children: z.boolean().default(false),
+    labels: z.boolean().default(false),
+    priority: z.boolean().default(false),
+    filters: z.object({ people: z.boolean().default(false), priority: z.boolean().default(false) }).strict().default({ people: false, priority: false }),
+    projectMapping: z.boolean().default(false),
+    sessionComments: z.boolean().default(false),
+  }).strict(),
+  stateFilters: z.array(z.string().trim().regex(TRACKER_STATE_FILTER)).min(TRACKER_BASE_STATE_FILTERS.length).max(TRACKER_STATE_FILTERS_MAX)
+    .refine((filters) => new Set(filters).size === filters.length, { message: 'state filters must be unique' })
+    .refine((filters) => TRACKER_BASE_STATE_FILTERS.every((filter, index) => filters[index] === filter), {
+      message: `state filters start with ${TRACKER_BASE_STATE_FILTERS.map((filter) => `"${filter}"`).join(', ')}`,
+    }),
+  identifier: z.enum(TRACKER_IDENTIFIER_KINDS),
+  urls: z.object({
+    item: z.array(z.string().trim().min(1)).min(1).max(TRACKER_URL_TEMPLATES_MAX)
+      .refine((templates) => new Set(templates).size === templates.length, { message: 'link templates must be unique' }),
+  }).strict(),
+}).strict().superRefine((value, ctx) => {
+  value.urls.item.forEach((template, index) => {
+    if (isTrackerUrlTemplate(template)) return;
+    ctx.addIssue({
+      code: 'custom', path: ['urls', 'item', index],
+      message: `templates start with "/" and use literal segments and ${TRACKER_URL_TOKENS.join(', ')}, with {id} once, in the path or as "?name={id}".`,
+    });
+  });
+});
+
 // `roles` only means something on a message action and `payload` only on a
 // session action; a dead field is a misconfiguration and fails closed.
 const actionSchema = z.object({
@@ -519,6 +589,7 @@ const contributesSchema = z.object({
     content: z.literal(true).optional(),
   }).strict().optional(),
   notifications: notificationsSchema.optional(),
+  tracker: trackerSchema.optional(),
 });
 
 /**
@@ -588,6 +659,31 @@ export const openChamberManifestSchema = z.object({
       ctx.addIssue({
         code: 'custom', path: ['service', 'provides'],
         message: `A notifications extension's panel.id is at most ${NOTIFICATIONS_GUEST_ID_MAX} characters: OpenChamber names its channel "ext-<panel.id>".`,
+      });
+      return;
+    }
+    // The tracker and the role that serves it come together, named `ext-<panel.id>` as well.
+    const providesTracker = contributes.service?.provides?.includes('tracker') === true;
+    if (providesTracker !== (contributes.tracker !== undefined)) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: 'service.provides "tracker" and contributes.tracker come together: declare both or neither.',
+      });
+      return;
+    }
+    if (providesTracker && contributes.panel.id.length > TRACKER_GUEST_ID_MAX) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: `A tracker extension's panel.id is at most ${TRACKER_GUEST_ID_MAX} characters: OpenChamber names its tracker "ext-<panel.id>".`,
+      });
+      return;
+    }
+    // Tracker and Git host ids share one namespace (tracked items, the read
+    // cache, session links), and both would be `ext-<panel.id>`.
+    if (providesTracker && providesSourceControl) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: 'An extension is a Git host ("source-control") or a tracker ("tracker"), never both: the two roles would share the id "ext-<panel.id>".',
       });
       return;
     }
@@ -816,10 +912,16 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       ? `${field}: ${issue.message}`
       : `${field} is invalid: see "contributes.notifications" in GUEST_SERVICES.md for every field.`);
   }
+  if (path.startsWith('contributes.tracker')) {
+    const field = fieldPath(issue.path);
+    return fail('invalid-service', issue.code === 'custom'
+      ? `${field}: ${issue.message}`
+      : `${field} is invalid: see "contributes.tracker" in GUEST_SERVICES.md for every field.`);
+  }
   if (path.startsWith('contributes.service')) {
     return fail('invalid-service', issue.code === 'custom'
       ? issue.message
-      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control", "notifications"), and optional surface (true).');
+      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control", "notifications", "tracker"), and optional surface (true).');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };

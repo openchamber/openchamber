@@ -137,7 +137,7 @@ const queryValue = (req, key) => {
   return typeof value === 'string' ? value.trim() : '';
 };
 
-const requestOrigin = (req) => {
+export const requestOrigin = (req) => {
   const forwarded = req.headers['x-forwarded-proto'];
   const proto = typeof forwarded === 'string' && forwarded.split(',')[0]
     ? forwarded.split(',')[0].trim()
@@ -159,7 +159,7 @@ const escapeHtml = (value) => String(value)
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&#39;');
 
-const renderOauthCallbackPage = ({ title, message }) => `<!doctype html>
+export const renderOauthCallbackPage = ({ title, message }) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">

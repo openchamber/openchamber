@@ -220,6 +220,10 @@ export const createLegacyLinearTrackerAPI = (fetch: TrackerFetch): Omit<TrackerA
       'Failed to start Linear auth',
     ),
 
+    // An older server serves no extension tracker, so neither of its ways in exists there.
+    authConnectToken: async () => ({ ok: false, code: 'UNSUPPORTED', message: null }),
+    authSaveOAuthClient: async () => ({ ok: false, code: 'UNSUPPORTED', message: null }),
+
     authDisconnect: (provider) => call(provider, '/auth', { method: 'DELETE' }, z.object({ removed: z.boolean().catch(false) }), 'Failed to disconnect Linear')
       .then(({ removed }) => ({ removed })),
 

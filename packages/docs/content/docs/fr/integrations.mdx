@@ -97,6 +97,12 @@ Une [extension](/fr/extensions/) peut transmettre tes notifications vers Slack, 
 
 Si le serveur refuse le jeton plus tard, la carte indique que le compte a besoin d'attention ; reconnecte-le avec un nouveau jeton. Déconnecte pour arrêter les envois sans retirer l'extension, ou mets l'extension en pause. Retirer l'extension oublie le compte.
 
+## Outils de suivi des extensions
+
+Une [extension](/fr/extensions/) peut ajouter un outil de suivi des tâches à côté de Linear. Une fois que tu l'as autorisée dans **Settings → Extensions**, elle reçoit une carte sous **Extension accounts** sur cette page. Saisis l'adresse du serveur quand la carte la demande, puis connecte un compte : colle un jeton, ou enregistre le client id de l'application que tu as enregistrée auprès de l'outil et connecte-toi dans le navigateur. Quand l'outil gère plusieurs comptes, **Add account** en connecte un autre et **Switch to** change celui en usage. L'association de projets et les commentaires de session apparaissent sur la carte quand l'outil les propose, comme pour Linear.
+
+Ses éléments apparaissent alors dans le sélecteur, le menu **+** du chat, New Worktree, les éléments liés d'une session et les états en direct des éléments que tu suis. Les jetons restent dans OpenChamber ; le service de l'extension atteint l'outil via OpenChamber et ne les voit jamais. Si l'outil refuse un identifiant plus tard, la carte indique que le compte a besoin d'attention ; reconnecte-le. Mettre l'extension en pause retire l'outil de tous les endroits où il apparaît et garde les comptes ; la retirer les oublie.
+
 ## Claude Code
 
 Claude Code utilise ton plan Claude Pro ou Max via la CLI Claude Code installée sur ta machine — sans clés API.

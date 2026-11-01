@@ -75,6 +75,18 @@ Mettre l'extension en pause retire l'hébergeur jusqu'à ce que tu la réactives
 
 Le SDK OpenChamber contient un exemple fonctionnel, `examples/source-control-provider`, comme point de départ pour en créer un. Voir [Créer une extension](/sdk/).
 
+## Une extension comme outil de suivi
+
+Une extension peut ajouter un outil de suivi des tâches à côté de Linear : YouTrack, Jira, Plane ou un outil à elle. Sa boîte de dialogue d'autorisations contient alors une ligne qui commence par **Sert d'outil de suivi** et le nomme. La ligne dit aussi ce qu'OpenChamber lui envoie : tes recherches et les éléments que tu ouvres, et qu'on lui demande d'en changer l'état et de publier des commentaires de session pour toi.
+
+Une fois autorisé, l'outil de suivi a sa propre carte dans **Paramètres → Intégrations** sous **Comptes d’extensions**. Connecte un compte là : avec un jeton, ou en te connectant dans le navigateur après avoir saisi le client id de l'application que tu as enregistrée auprès de l'outil, et d'abord l'adresse du serveur si la carte la demande. Ensuite, ses éléments sont partout où sont ceux de Linear : le menu **+** du chat et le sélecteur, New Worktree, les éléments liés d'une session et les états en direct des éléments que tu suis. Un lien collé vers l'un de ses éléments est reconnu de la même façon. Voir [Linear](/integrations/#linear) pour ce que fait chacun de ces éléments.
+
+Tes jetons restent dans OpenChamber. L'extension demande à OpenChamber d'appeler l'outil de suivi pour elle, et OpenChamber ajoute les identifiants de connexion à chaque appel, uniquement pour le serveur que tu as connecté. L'extension ne les reçoit jamais, et seuls ses appels de changement d'état et de commentaire peuvent y écrire quelque chose.
+
+Mettre l'extension en pause retire l'outil de suivi jusqu'à ce que tu la réactives, et tes comptes restent. Retirer l'extension les oublie. VS Code n'affiche pas d'outils de suivi ; sur le téléphone, les éléments de l'outil s'affichent, et les comptes se connectent depuis l'application web ou de bureau.
+
+Le SDK OpenChamber contient un exemple fonctionnel, `examples/tracker-provider`, avec un faux outil de suivi à faire tourner à côté. Voir [Créer une extension](/sdk/).
+
 ## Connecter son compte
 
 Une extension qui parle à un service reçoit une carte dans **Paramètres → Intégrations** sous **Comptes d’extensions**. Selon le service, la carte demande un jeton d'API, un nom d'utilisateur et un jeton, ou un client id pour une connexion. Choisis **Connecter** ; **Déconnecter** oublie le jeton enregistré. Les champs supplémentaires que l'extension déclare s'enregistrent tout seuls quand tu les quittes.

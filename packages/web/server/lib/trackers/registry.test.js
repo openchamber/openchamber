@@ -86,3 +86,51 @@ describe('createTrackerRegistry', () => {
     expect(linear.hostAccess.apiOrigin).toBe('https://api.linear.app');
   });
 });
+
+describe('extension trackers attach and detach while the server runs', () => {
+  const extEntry = (id, load = async () => ({ id })) => ({ descriptor: descriptorFor(id), load });
+
+  it('attaches an ext- tracker after the built-ins, serves it like one, and detaches it again', async () => {
+    const registry = createTrackerRegistry([entryFor('jira')], { foreignIds: [] });
+    expect(registry.attachExtension).toBeInstanceOf(Function);
+    registry.attachExtension(extEntry('ext-youtrack'));
+    expect(registry.list()).toEqual(['jira', 'ext-youtrack']);
+    expect(registry.has('ext-youtrack')).toBe(true);
+    expect(registry.descriptor('ext-youtrack')).toMatchObject({ id: 'ext-youtrack' });
+    expect(registry.descriptors().map((descriptor) => descriptor.id)).toEqual(['jira', 'ext-youtrack']);
+    expect(await registry.implementation('ext-youtrack')).toEqual({ id: 'ext-youtrack' });
+
+    expect(registry.detachExtension('ext-youtrack')).toBe(true);
+    expect(registry.detachExtension('ext-youtrack')).toBe(false);
+    expect(registry.list()).toEqual(['jira']);
+    expect(registry.has('ext-youtrack')).toBe(false);
+    expect(registry.descriptor('ext-youtrack')).toBeNull();
+    expect(await registry.implementation('ext-youtrack')).toBeNull();
+  });
+
+  it('attaching an id again replaces its descriptor and drops the loaded implementation', async () => {
+    const registry = createTrackerRegistry([], { foreignIds: [] });
+    const first = vi.fn(async () => ({ version: 1 }));
+    registry.attachExtension(extEntry('ext-youtrack', first));
+    expect(await registry.implementation('ext-youtrack')).toEqual({ version: 1 });
+    registry.attachExtension({ descriptor: { ...descriptorFor('ext-youtrack'), name: 'YouTrack 2' }, load: async () => ({ version: 2 }) });
+    expect(registry.list()).toEqual(['ext-youtrack']);
+    expect(registry.descriptor('ext-youtrack')?.name).toBe('YouTrack 2');
+    expect(await registry.implementation('ext-youtrack')).toEqual({ version: 2 });
+    expect(first).toHaveBeenCalledTimes(1);
+  });
+
+  it('attaches only ext- ids that are not a source-control provider, and never detaches a built-in', () => {
+    const registry = createTrackerRegistry([entryFor('jira')], { foreignIds: ['ext-forge'] });
+    expect(() => registry.attachExtension(extEntry('youtrack'))).toThrow(/ext-<guestId>/);
+    expect(() => registry.attachExtension(extEntry('ext-'))).toThrow(/ext-<guestId>/);
+    expect(() => registry.attachExtension(extEntry('ext-forge'))).toThrow(/source-control/);
+    expect(() => registry.attachExtension({ descriptor: descriptorFor('ext-youtrack') })).toThrow(/loader/);
+    expect(registry.detachExtension('jira')).toBe(false);
+    expect(registry.list()).toEqual(['jira']);
+  });
+
+  it('a built-in may still not take an ext- id', () => {
+    expect(() => createTrackerRegistry([entryFor('ext-youtrack')], { foreignIds: [] })).toThrow(/source-control/);
+  });
+});

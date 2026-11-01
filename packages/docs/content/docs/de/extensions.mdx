@@ -75,6 +75,18 @@ Pausierst du die Erweiterung, verschwindet der Host, bis du sie wieder einschalt
 
 Das OpenChamber SDK hat ein funktionierendes Beispiel, `examples/source-control-provider`, als Ausgangspunkt für einen eigenen Host. Siehe [Eine Erweiterung bauen](/sdk/).
 
+## Eine Erweiterung als Tracker
+
+Eine Erweiterung kann neben Linear einen Tracker für Arbeitselemente hinzufügen: YouTrack, Jira, Plane oder einen eigenen. Ihr Berechtigungsdialog hat dann eine Zeile, die mit **Dient als Tracker** beginnt und ihn nennt. Die Zeile sagt auch, was OpenChamber an ihn sendet: deine Suchanfragen und die Elemente, die du öffnest, und dass er in deinem Namen deren Status ändern und Sitzungskommentare posten soll.
+
+Sobald du sie erlaubst, bekommt der Tracker eine eigene Karte unter **Einstellungen → Integrationen** im Abschnitt **Erweiterungskonten**. Verbinde dort ein Konto: mit einem Token oder per Anmeldung im Browser, nachdem du die Client-ID der App eingegeben hast, die du beim Tracker registriert hast, und davor die Adresse des Servers, falls die Karte danach fragt. Danach stehen seine Elemente überall dort, wo die von Linear stehen: im Menü **+** des Chats und in der Auswahl, in New Worktree, bei den verknüpften Elementen einer Sitzung und in den Live-Status der Elemente, denen du folgst. Ein eingefügter Link zu einem seiner Elemente wird genauso erkannt. Was jede dieser Funktionen tut, steht unter [Linear](/integrations/#linear).
+
+Deine Tokens bleiben in OpenChamber. Die Erweiterung bittet OpenChamber, den Tracker für sie aufzurufen, und OpenChamber fügt die Zugangsdaten jedem Aufruf hinzu, nur für den Server, den du verbunden hast. Die Erweiterung bekommt sie nie, und nur ihre Aufrufe für Statusänderungen und Kommentare dürfen dort etwas schreiben.
+
+Pausierst du die Erweiterung, verschwindet der Tracker, bis du sie wieder einschaltest, und deine Konten bleiben. Entfernst du die Erweiterung, werden sie vergessen. VS Code zeigt keine Tracker; auf dem Telefon werden die Elemente des Trackers angezeigt, Konten verbindest du in der Web- oder Desktop-App.
+
+Das OpenChamber SDK hat ein funktionierendes Beispiel, `examples/tracker-provider`, mit einem Fake-Tracker, den du daneben laufen lassen kannst. Siehe [Eine Erweiterung bauen](/sdk/).
+
 ## Ihr Konto verbinden
 
 Eine Erweiterung, die mit einem Dienst spricht, bekommt eine Karte unter **Einstellungen → Integrationen** im Abschnitt **Erweiterungskonten**. Je nach Dienst fragt die Karte nach einem API-Token, nach Benutzername und Token oder nach einer Client-ID für einen Anmeldeablauf. Wähle **Verbinden**; **Trennen** vergisst den gespeicherten Token. Zusätzliche Felder, die die Erweiterung deklariert, speichern sich von selbst, sobald du sie verlässt.
