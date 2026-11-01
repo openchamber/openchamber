@@ -52,6 +52,10 @@ import {
 const PR_CONTEXT_CACHE_TTL_MS = 30_000;
 const PR_CONTEXT_CACHE_MAX_ENTRIES = 50;
 const GITHUB_COM = 'github.com';
+// GitHub answers the same 403 for a non-collaborator on every status read.
+// Remembering that refusal per host/account/repository keeps the log quiet and
+// saves a round trip per poll (#5954).
+const CAN_MERGE_REFUSAL_TTL_MS = 5 * 60_000;
 
 /** An error the shell answers with exactly this status and body. */
 export const responseError = (status, body) => Object.assign(new Error(body.error), { sourceControlResponse: { status, body } });
@@ -120,6 +124,9 @@ export function createGitHubResources({
   // replayed onto) the github.com account's memo, and a changed credential
   // resolves its own login.
   const authLoginByCredential = new Map();
+  // Refusals live with the runtime's other read memos: one server process
+  // shares its own map, never another instance's.
+  const canMergeRefusals = new Map();
 
   const identityOf = (session) => ({ provider: 'github', instance: session.instance });
 
@@ -258,8 +265,25 @@ export function createGitHubResources({
         username = await loginPromise;
       }
       if (!username) return false;
-      const permission = await octokit.rest.repos.getCollaboratorPermissionLevel({ owner: repo.owner, repo: repo.repo, username });
-      return ['admin', 'maintain', 'write'].includes(permission?.data?.permission);
+      // A refusal is stable for a host, account and repository: remember it
+      // for a while so the status route stops asking GitHub and the log stops
+      // filling up (#5954). Only a 403 is remembered, and not every 403: a
+      // rate limit surfaces as a 403 too and lifts within minutes, so it asks
+      // again on the next poll like any other transient failure.
+      const refusalKey = JSON.stringify([loginHost, session.accountId, session.credentialRevision, repo.owner, repo.repo]);
+      const refusedUntil = canMergeRefusals.get(refusalKey);
+      if (refusedUntil !== undefined && Date.now() < refusedUntil) return false;
+      try {
+        const permission = await octokit.rest.repos.getCollaboratorPermissionLevel({ owner: repo.owner, repo: repo.repo, username });
+        canMergeRefusals.delete(refusalKey);
+        return ['admin', 'maintain', 'write'].includes(permission?.data?.permission);
+      } catch (error) {
+        const { rateLimit } = await load();
+        if ((error?.status ?? error?.response?.status) === 403 && !rateLimit.isGitHubRateLimitError(error)) {
+          canMergeRefusals.set(refusalKey, Date.now() + CAN_MERGE_REFUSAL_TTL_MS);
+        }
+        throw error;
+      }
     } catch {
       return false;
     }
