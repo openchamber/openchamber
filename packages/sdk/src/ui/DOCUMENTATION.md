@@ -24,7 +24,7 @@ Every `mountX(root, props)` returns `{ update(partial), dispose() }`.
 - `spinner.ts`: `mountSpinner`. 16px ring, `role="status"`.
 - `banner.ts`: `mountBanner`. Toned box with title, body, optional `xs` outline action.
 - `separator.ts`: `mountSeparator`. Hairline, optional label.
-- `progress.ts`: `mountProgress`. `role="progressbar"`, value clamped to 0..100.
+- `progress.ts`: `mountProgress`. `role="progressbar"`, value clamped to 0..100 and rounded down, so it never shows 100% before it is done; at 100 the bar turns green and the percent takes a check, like the app's progress.
 - `menu.ts`: `mountMenu`. Button trigger plus `role="menu"` popup. Items may be `destructive`, `disabled`, or `{ separator: true }`.
 - `text.ts`: `mountText`. Plain text through `textContent`; `![alt](https://…)` becomes `img`, `[label](https://…)` becomes `a` that calls `onOpenUrl`. `splitTextMedia` is the pure splitter.
 - `popover-anchor.ts`: `mountPopoverAnchor` binds an element to a host-positioned sandboxed popover. It owns per-opening IDs, hover/focus activity, scroll/removal cleanup and anchor focus restoration. Unlike `popup.ts`, its content lives outside the source frame. Feature-gate it with `ready.features.popovers`, render the child from `ready.popover`, and dispose bindings before replacing rows. See [Anchored popovers](../../API.md#anchored-popovers) for limits and host ownership.
