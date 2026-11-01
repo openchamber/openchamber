@@ -132,6 +132,45 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(seenAuthorization).toBe('Bearer test-token');
   });
 
+  it('forwards a normalized UNC directory in the form Windows OpenCode resolves', async () => {
+    let seenDirectory = null;
+    const unc = '//wsl.localhost/Ubuntu/home/ocrunner/font5884-wsl';
+    const upstream = express();
+    upstream.get('/api/provider', (req, res) => {
+      seenDirectory = req.headers['x-opencode-directory'] ?? null;
+      res.json({ ok: true });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+      readWorktreeBootstrapStatus: async () => ({ status: 'ready', phase: 'setup-ready' }),
+      waitForWorktreeRemovalToSettle: async () => {},
+    });
+    proxyServer = await listen(app);
+
+    const response = await fetch(`http://127.0.0.1:${proxyServer.address().port}/api/provider`, {
+      headers: { 'x-opencode-directory': encodeURIComponent(unc) },
+    });
+
+    expect(response.status).toBe(200);
+    expect(seenDirectory).toBe('\\\\wsl.localhost\\Ubuntu\\home\\ocrunner\\font5884-wsl');
+  });
+
   it('closes downstream SSE when the OpenCode upstream stalls despite proxy heartbeats', async () => {
     let stallTimeoutReads = 0;
     const upstream = express();

@@ -191,6 +191,14 @@ describe("request fidelity", () => {
     expect(page.cursor).toEqual({ next: "c2" })
   })
 
+  test("a session created for a UNC directory names the form Windows OpenCode resolves", async () => {
+    responses.push(json({ data: sessionInfo }))
+    await opencodeClient.createSession(undefined, "//wsl.localhost/Ubuntu/home/project")
+    expect(requests[0].body).toMatchObject({
+      location: { directory: "\\\\wsl.localhost\\Ubuntu\\home\\project" },
+    })
+  })
+
   test("a session created on an explicit Default thinking level is created without a variant", async () => {
     responses.push(json({ data: sessionInfo }))
     await opencodeClient.createSession({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: null } }, "/repo/app")

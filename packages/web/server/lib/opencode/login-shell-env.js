@@ -7,7 +7,9 @@
  * window comes up; running it again here would block the Electron main
  * thread for as long as the user's shell startup files take, a second time.
  * A host that has a snapshot hands it over before importing the server, and
- * the server uses it instead of probing. `null` means the host probed and got
+ * the server uses it instead of probing. Knip lists this file as an entry for
+ * that reason: the desktop import is not reachable from the web package's own
+ * entry graph. `null` means the host probed and got
  * nothing: the server does not retry, because that retry would be
  * synchronous and bounded only by the probe timeout.
  *

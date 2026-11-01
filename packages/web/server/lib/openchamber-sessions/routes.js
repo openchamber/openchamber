@@ -18,6 +18,7 @@ import {
   waitForActiveWorktreeBootstrap as waitForActiveWorktreeBootstrapDefault,
 } from '../git/index.js';
 import { parseModelSelection } from '../opencode/config-v2.js';
+import { directoryHeaderForOpenCode } from '../opencode/directory-header.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
@@ -340,7 +341,7 @@ const applySessionSelection = async ({ client, sessionID, model, agent, variant 
 };
 
 const createSession = async ({ client, directory, title, titleByUser = false }) => {
-  const input = { location: { directory } };
+  const input = { location: { directory: directoryHeaderForOpenCode(directory) } };
   if (title) {
     input.title = title;
     if (titleByUser) input.metadata = { openchamber: { workTitle: { title, by: 'user' } } };

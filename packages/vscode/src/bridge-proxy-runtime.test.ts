@@ -143,6 +143,30 @@ describe('VS Code API proxy read coalescing', () => {
     }
   });
 
+  test('forwards a normalized UNC directory in the form Windows OpenCode resolves', async () => {
+    const originalFetch = globalThis.fetch;
+    const unc = '//wsl.localhost/Ubuntu/home/ocrunner/font5884-wsl';
+    let forwarded = '';
+
+    try {
+      // SAFETY: test double for the global fetch; only the directory header is read.
+      globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        forwarded = new Headers(init?.headers).get('x-opencode-directory') ?? '';
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch;
+
+      await handleProxyBridgeMessage(
+        { id: 'unc', type: 'api:proxy', payload: { method: 'GET', path: '/api/provider', headers: { 'x-opencode-directory': encodeURIComponent(unc) } } },
+        ctx,
+        deps,
+      );
+
+      assert.equal(forwarded, '\\\\wsl.localhost\\Ubuntu\\home\\ocrunner\\font5884-wsl');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('keeps reads with different auth scopes apart', async () => {
     const originalFetch = globalThis.fetch;
     let fetchCount = 0;

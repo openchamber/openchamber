@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getNormalizedParentDirectory, normalizePath } from './pathNormalization';
+import { getNormalizedParentDirectory, normalizePath, toOpenCodeDirectory } from './pathNormalization';
 import { normalizePath as normalizeMobilePath } from '../apps/mobilePaths';
 
 describe('normalizePath', () => {
@@ -105,6 +105,12 @@ describe('normalizePath', () => {
     expect(normalizePath('\\\\Server\\Share\\Project\\')).toBe('//Server/Share/Project');
     expect(normalizePath('//Server/Share/Project')).toBe('//Server/Share/Project');
     expect(normalizePath('\\\\Server\\Share\\')).toBe('//Server/Share');
+  });
+
+  test('toOpenCodeDirectory restores the backslash form Windows OpenCode resolves', () => {
+    expect(toOpenCodeDirectory('//wsl.localhost/Ubuntu/home/project')).toBe('\\\\wsl.localhost\\Ubuntu\\home\\project');
+    expect(toOpenCodeDirectory('/home/project')).toBe('/home/project');
+    expect(toOpenCodeDirectory('C:/repo')).toBe('C:/repo');
   });
 
   test('preserves verbatim Windows namespaces and literal path names', () => {

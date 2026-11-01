@@ -51,3 +51,13 @@ export const getNormalizedParentDirectory = (directory: string): string | null =
  * sidebar indicators. Empty when the value is not a usable path.
  */
 export const normalizeTerminalDirectory = (value: string): string => normalizePath(value) ?? '';
+
+/**
+ * Directory form Windows OpenCode resolves. The stored key keeps a UNC path as
+ * `//host/share/...`; that host collapses the leading pair, so a session
+ * created with it is recorded under `/host/share/...`. The backslash form is
+ * the location it keeps. Other paths are unchanged.
+ */
+export const toOpenCodeDirectory = (directory: string): string => (
+  directory.startsWith('//') ? directory.replace(/\//g, '\\') : directory
+);

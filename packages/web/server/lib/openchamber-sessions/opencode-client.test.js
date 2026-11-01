@@ -29,4 +29,16 @@ describe('server-owned OpenCode dispatch responses', () => {
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer test');
     expect(new Headers(init.headers).get('x-opencode-directory')).toBe(encodeURIComponent('/repo/app'));
   });
+
+  it('sends a UNC directory in the form Windows OpenCode resolves', async () => {
+    globalThis.fetch = vi.fn(async () => Response.json({ data: { id: 'msg_accepted' } }));
+    const sdk = createOpenCodeClient({
+      baseUrl: 'http://opencode.test',
+      headers: {},
+      directory: '//wsl.localhost/Ubuntu/home/project',
+    });
+    await sdk.session.prompt({ sessionID: 'ses_1', text: 'hello' });
+    const init = globalThis.fetch.mock.calls[0][1];
+    expect(new Headers(init.headers).get('x-opencode-directory')).toBe(encodeURIComponent('\\\\wsl.localhost\\Ubuntu\\home\\project'));
+  });
 });

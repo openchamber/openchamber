@@ -8,6 +8,7 @@ import {
   isProviderConnectRequest,
 } from '../../web/server/lib/enterprise-mode.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../../web/server/lib/git/repository-root.js';
+import { wireForwardedDirectoryHeaders } from '../../web/server/lib/opencode/directory-header.js';
 import { z } from 'zod';
 import {
   OPENCODE_TRUST_ROUTE,
@@ -420,10 +421,10 @@ export async function handleProxyBridgeMessage(
         return { id, type, success: true, data };
       }
       const targetUrl = target.toString();
-      const requestHeaders: Record<string, string> = {
+      const requestHeaders: Record<string, string> = wireForwardedDirectoryHeaders({
         ...deps.sanitizeForwardHeaders(headers),
         ...ctx?.manager?.getOpenCodeAuthHeaders(),
-      };
+      });
 
       const requestBody =
         typeof bodyBase64 === 'string' && bodyBase64.length > 0 && normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD'
@@ -512,10 +513,10 @@ export async function handleProxyBridgeMessage(
 
       const base = `${apiUrl.replace(/\/+$/, '')}/`;
       const targetUrl = new URL(normalizedPath.replace(/^\/+/, ''), base).toString();
-      const requestHeaders: Record<string, string> = {
+      const requestHeaders: Record<string, string> = wireForwardedDirectoryHeaders({
         ...deps.sanitizeForwardHeaders(headers),
         ...ctx?.manager?.getOpenCodeAuthHeaders(),
-      };
+      });
       const timeoutSignal = AbortSignal.timeout(45000);
       const abortController = new AbortController();
       proxyAbortControllers.set(id, abortController);

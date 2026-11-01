@@ -1127,6 +1127,10 @@ would keep them. Keeping only location-starting requests out leaves the
 recovery path (session list, binding reads, Download again, archive) working
 without that risk.
 
+### Why a UNC directory is forwarded with backslashes
+
+`normalizePath` stores `\\wsl.localhost\Ubuntu\...` as `//wsl.localhost/Ubuntu/...` so every runtime compares the same key. Windows OpenCode collapses that leading pair before it resolves a location, and the catalog read 404s with `LocationNotFoundError` for `/wsl.localhost/...`. The backslash form is the one that location answers. The rewrite happens only on the header about to be sent to OpenCode, in this proxy and in the VS Code bridge, so trust checks and worktree matching still see the header the client sent. A session create also names the directory in the body, and that field wins over the header: the shared client sends the backslash form there, or the new session is recorded under the collapsed path. A posix path and an unmarked literal `%20` are left as they arrived.
+
 ### Why the proxy deadline is configurable
 
 Slow gateways can exceed the default 240000 ms deadline. Operators can set
