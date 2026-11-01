@@ -1877,6 +1877,16 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().lastInitFailure).toBeNull();
   }, 10_000);
 
+  test('a project folder OpenCode cannot open does not block startup, even when our server can read it', async () => {
+    listAgentsImpl = async () => {
+      throw Object.assign(new Error('agent.list failed: Location not found: /100.64.0.1/share'), { tag: 'LocationNotFoundError' });
+    };
+    await useConfigStore.getState().initializeApp();
+
+    expect(useConfigStore.getState().isInitialized).toBe(true);
+    expect(useConfigStore.getState().lastInitFailure).toBeNull();
+  }, 10_000);
+
   test('a failed agent load records its error text, and a later success clears it', async () => {
     listAgentsImpl = async () => {
       throw new Error('agent.list failed (500): provider plugin crashed');

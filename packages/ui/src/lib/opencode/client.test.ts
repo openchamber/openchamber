@@ -191,6 +191,18 @@ describe("request fidelity", () => {
     expect(page.cursor).toEqual({ next: "c2" })
   })
 
+  test("a Windows network share reaches OpenCode with backslashes, so it stays a UNC path", async () => {
+    responses.push(json({ data: [], cursor: {} }))
+    await opencodeClient.listSessionsPage({ directory: "//100.64.0.1/share/repo" })
+    expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("\\\\100.64.0.1\\share\\repo"))
+    expect(requests[0].url.searchParams.get("directory")).toBe("\\\\100.64.0.1\\share\\repo")
+
+    responses.push(json({ data: sessionInfo }))
+    await opencodeClient.createSession({}, "//100.64.0.1/share/repo")
+    const { location } = z.object({ location: z.object({ directory: z.string() }) }).parse(requests[1].body)
+    expect(location.directory).toBe("\\\\100.64.0.1\\share\\repo")
+  })
+
   test("a session created on an explicit Default thinking level is created without a variant", async () => {
     responses.push(json({ data: sessionInfo }))
     await opencodeClient.createSession({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: null } }, "/repo/app")
