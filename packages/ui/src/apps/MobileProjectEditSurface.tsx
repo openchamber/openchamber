@@ -304,7 +304,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                     type="button"
                     onClick={() => setIcon(i.key)}
                     aria-label={i.label}
-                    title={i.label}
                     className={cn(
                       'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
                       icon === i.key ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-edge hover:border-edge',

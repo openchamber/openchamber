@@ -71,7 +71,7 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
                 className={cn(buttonClassName, menuOpen && 'text-foreground')}
                 aria-label={label}
               >
-                <ProjectActionRunIndicator run={shownRun} showIdle />
+                <ProjectActionRunIndicator run={shownRun} showIdle large />
               </button>
             </TooltipTrigger>
           </ContextMenuTrigger>
