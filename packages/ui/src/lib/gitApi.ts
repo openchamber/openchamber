@@ -901,7 +901,7 @@ export async function getGitLog(
   options: import('./api/types').GitLogOptions = {}
 ): Promise<import('./api/types').GitLogResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getGitLog(directory, options);
+  if (runtime?.getGitLog) return runtime.getGitLog(directory, options);
   return gitHttp.getGitLog(directory, options);
 }
 
@@ -910,7 +910,7 @@ export async function getCommitFiles(
   hash: string
 ): Promise<import('./api/types').GitCommitFilesResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getCommitFiles(directory, hash);
+  if (runtime?.getCommitFiles) return runtime.getCommitFiles(directory, hash);
   return gitHttp.getCommitFiles(directory, hash);
 }
 
@@ -969,7 +969,7 @@ export async function rebase(
   options: { onto: string }
 ): Promise<import('./api/types').GitRebaseResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.rebase(directory, options));
+  if (runtime?.rebase) return runtimeStatusMutation(directory, runtime.rebase(directory, options));
   return gitHttp.rebase(directory, options);
 }
 
@@ -978,7 +978,7 @@ export async function merge(
   options: { branch: string }
 ): Promise<import('./api/types').GitMergeResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.merge(directory, options));
+  if (runtime?.merge) return runtimeStatusMutation(directory, runtime.merge(directory, options));
   return gitHttp.merge(directory, options);
 }
 
@@ -987,7 +987,7 @@ export async function checkoutCommit(
   hash: string
 ): Promise<import('./api/types').CheckoutCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.checkoutCommit(directory, hash));
+  if (runtime?.checkoutCommit) return runtimeStatusMutation(directory, runtime.checkoutCommit(directory, hash));
   return gitHttp.checkoutCommit(directory, hash);
 }
 
@@ -996,7 +996,7 @@ export async function cherryPick(
   hash: string
 ): Promise<import('./api/types').CherryPickResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.cherryPick(directory, hash));
+  if (runtime?.cherryPick) return runtimeStatusMutation(directory, runtime.cherryPick(directory, hash));
   return gitHttp.cherryPick(directory, hash);
 }
 
@@ -1005,7 +1005,7 @@ export async function revertCommit(
   hash: string
 ): Promise<import('./api/types').RevertCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.revertCommit(directory, hash));
+  if (runtime?.revertCommit) return runtimeStatusMutation(directory, runtime.revertCommit(directory, hash));
   return gitHttp.revertCommit(directory, hash);
 }
 
@@ -1016,7 +1016,7 @@ export async function resetToCommit(
   force?: boolean
 ): Promise<import('./api/types').ResetToCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.resetToCommit(directory, hash, mode, force));
+  if (runtime?.resetToCommit) return runtimeStatusMutation(directory, runtime.resetToCommit(directory, hash, mode, force));
   return gitHttp.resetToCommit(directory, hash, mode, force);
 }
 

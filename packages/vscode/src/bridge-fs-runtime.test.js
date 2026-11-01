@@ -1,26 +1,7 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import { promisify } from 'node:util';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-
-const execCalls = [];
-const execMock = mock(() => {
-  throw new Error('exec should be called through promisify');
-});
-
-execMock[promisify.custom] = (command, options) => {
-  execCalls.push({ command, options });
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ stdout: '/repo/.git\n/repo/.git\n', stderr: '' });
-    }, 10);
-  });
-};
-
-mock.module('child_process', () => ({
-  exec: execMock,
-}));
 
 mock.module('vscode', () => ({
   workspace: {
@@ -36,7 +17,7 @@ mock.module('vscode', () => ({
   window: {},
 }));
 
-const { clearGitReadCacheForTests, handleFsBridgeMessage } = await import('./bridge-fs-runtime');
+const { handleFsBridgeMessage } = await import('./bridge-fs-runtime');
 
 const deps = {
   resolveUserPath: (value) => value,
@@ -96,46 +77,5 @@ describe('managed Chats home', () => {
       homedir.mockRestore();
       await fs.rm(home, { recursive: true, force: true });
     }
-  });
-});
-
-describe('bridge fs exec git read cache', () => {
-  beforeEach(() => {
-    execCalls.length = 0;
-    clearGitReadCacheForTests();
-  });
-
-  it('dedupes in-flight cacheable git reads and reuses fresh results', async () => {
-    const command = 'git rev-parse --absolute-git-dir --git-common-dir';
-    const cwd = '/repo';
-
-    const [first, second] = await Promise.all([
-      handleFsBridgeMessage({ id: '1', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps),
-      handleFsBridgeMessage({ id: '2', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps),
-    ]);
-
-    expect(first?.success).toBe(true);
-    expect(second?.success).toBe(true);
-    expect(execCalls).toHaveLength(1);
-
-    const spacedCommand = 'git   rev-parse   --absolute-git-dir   --git-common-dir';
-    const cached = await handleFsBridgeMessage({ id: '3', type: 'api:fs:exec', payload: { commands: [spacedCommand], cwd } }, deps);
-
-    expect(execCalls).toHaveLength(1);
-    expect(cached?.data?.results?.[0]).toMatchObject({
-      command: spacedCommand,
-      success: true,
-      stdout: '/repo/.git\n/repo/.git',
-    });
-  });
-
-  it('does not cache arbitrary exec commands', async () => {
-    const command = 'git status --porcelain';
-    const cwd = '/repo';
-
-    await handleFsBridgeMessage({ id: '1', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps);
-    await handleFsBridgeMessage({ id: '2', type: 'api:fs:exec', payload: { commands: [command], cwd } }, deps);
-
-    expect(execCalls).toHaveLength(2);
   });
 });

@@ -166,7 +166,10 @@ export const applyIdentityToRepository = async (
     return { status: 'failed', reason: 'runtime' };
   }
   try {
-    if (identity.id) await git.setGitIdentity(directory, identity.id);
+    if (identity.id) {
+      if (!git.setGitIdentity) throw new Error('Git identity is unavailable on this runtime');
+      await git.setGitIdentity(directory, identity.id);
+    }
   } catch {
     if (outcome.status === 'applied') outcome = { status: 'failed', reason: 'author' };
   }

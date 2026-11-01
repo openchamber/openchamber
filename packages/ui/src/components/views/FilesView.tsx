@@ -3592,6 +3592,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
     let cancelled = false;
+    if (!git.getGitFileDiff) {
+      setGitBaseline(null);
+      return;
+    }
     git.getGitFileDiff(root, { path: selectedRelativePath })
       .then((diff) => {
         if (cancelled) return;

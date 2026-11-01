@@ -646,18 +646,20 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
     React.useEffect(() => {
         let cancelled = false;
         const runtimeKey = getRuntimeKey();
-        const request: Promise<DiffData> = isImageFile(file.path)
-            ? git.getGitFileDiff(directory, { path: file.path, staged }).then((response) => ({
-                original: response.original ?? '',
-                modified: response.modified ?? '',
-                isBinary: response.isBinary,
-                submodule: response.submodule,
-                contextMode: 'full',
-            }))
-            : git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => ({
-                ...createTextDiffDataFromPatch(file.path, response.diff, 'patch'),
-                submodule: response.submodule,
-            }));
+        const request: Promise<DiffData> = !git.getGitFileDiff || !git.getGitDiff
+            ? Promise.reject(new Error(t('diffView.unavailable.missingTitle')))
+            : isImageFile(file.path)
+                ? git.getGitFileDiff(directory, { path: file.path, staged }).then((response) => ({
+                    original: response.original ?? '',
+                    modified: response.modified ?? '',
+                    isBinary: response.isBinary,
+                    submodule: response.submodule,
+                    contextMode: 'full',
+                }))
+                : git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => ({
+                    ...createTextDiffDataFromPatch(file.path, response.diff, 'patch'),
+                    submodule: response.submodule,
+                }));
         // A refetch keeps the diff on screen until its replacement arrives.
         void request.then(
             (data) => {
@@ -1135,12 +1137,14 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         let cancelled = false;
         const runtimeKey = getRuntimeKey();
         const contextLines = loadFullFiles ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
-        const displayRequest = isImageFile(file.path)
-            ? git.getGitFileDiff(directory, { path: file.path, staged })
-            : !loadFullFiles && actionPatch !== null
-                ? Promise.resolve({ diff: actionPatch, submodule: actionSubmodule })
+        const displayRequest = !git.getGitFileDiff || !git.getGitDiff
+            ? Promise.reject(new Error(t('diffView.unavailable.missingTitle')))
+            : isImageFile(file.path)
+                ? git.getGitFileDiff(directory, { path: file.path, staged })
+                : !loadFullFiles && actionPatch !== null
+                    ? Promise.resolve({ diff: actionPatch, submodule: actionSubmodule })
             : git.getGitDiff(directory, { path: file.path, staged, contextLines });
-        const canonicalRequest = hunkEligible && loadFullFiles && actionPatch === null
+        const canonicalRequest = hunkEligible && loadFullFiles && actionPatch === null && git.getGitDiff
             ? git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => response.diff)
             : Promise.resolve(actionPatch);
         const fetchPromise = Promise.all([displayRequest, canonicalRequest]);
@@ -2588,6 +2592,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 revision,
                 load: async () => {
                     if (isImageFile(nestedFile.path)) return null;
+                    if (!git.getGitDiff) return null;
                     const staged = isStagedStatusFile(nestedFile) && !isWorkingStatusFile(nestedFile);
                     const response = await git.getGitDiff(nestedDirectory, { path: nestedFile.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES });
                     const data = { ...createTextDiffDataFromPatch(nestedFile.path, response.diff, 'patch'), submodule: response.submodule };
@@ -2650,6 +2655,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return resolveFindDiff(diffDataToFileDiff(filePath, result.data), diffHideWhitespace);
         }
         if (!effectiveDirectory || isImageFile(filePath)) return null;
+        if (!git.getGitDiff) return null;
+        const getGitDiff = git.getGitDiff;
         // Search exactly the side the viewer renders. `getGitDiff` reads the
         // unstaged (index -> working tree) side when `staged` is false and the
         // staged (HEAD -> index) side when it is true, the same read the viewer
@@ -2659,13 +2666,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
         // output for the viewer's fallback and the prefetcher.
         const staged = getFileStaged(filePath);
         const contextLines = fullContext ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
-        let response: Awaited<ReturnType<typeof git.getGitDiff>>;
+        let response: Awaited<ReturnType<typeof getGitDiff>>;
         try {
             const batched = await readBatchedDiffForFind(effectiveDirectory, filePath, revision, staged, fullContext);
             if (batched && !batched.ok && batched.reason) throw new GitPathUnavailableError(batched.error, batched.reason);
             response = batched?.ok
                 ? batched.diff
-                : await git.getGitDiff(effectiveDirectory, { path: filePath, staged, contextLines });
+                : await getGitDiff(effectiveDirectory, { path: filePath, staged, contextLines });
         } catch (error) {
             if (!(error instanceof GitPathUnavailableError)) throw error;
             if (error.reason === 'nested_repository') return readNestedRepositoryForFind(filePath, getLayoutForFile(file), revision);
@@ -2771,7 +2778,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 targetLine = getFirstChangedModifiedLine(cachedDiffData.original, cachedDiffData.modified);
             }
 
-            if (targetLine === null) {
+            if (targetLine === null && git.getGitDiff) {
                 try {
                     const patchResponse = await git.getGitDiff(effectiveDirectory, {
                         path: filePath,
@@ -2785,7 +2792,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             }
 
             let diffForNavigation = cachedDiffData;
-            if (targetLine === null || !diffForNavigation) {
+            if ((targetLine === null || !diffForNavigation) && git.getGitFileDiff) {
                 const response = await git.getGitFileDiff(effectiveDirectory, { path: filePath, staged: activeDiffStaged });
                 const fetchedDiff = {
                     original: response.original ?? '',
@@ -2799,9 +2806,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 }
             }
 
-            const resolvedTargetLine = targetLine ?? ((diffForNavigation.isBinary || isImageFile(filePath))
-                ? 1
-                : getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified));
+            const resolvedTargetLine = targetLine
+            ?? (diffForNavigation && !diffForNavigation.isBinary && !isImageFile(filePath)
+              ? getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified)
+              : 1);
 
             const absolutePath = toAbsolutePath(effectiveDirectory, filePath);
             const openValidation = await validateContextFileOpen(files, absolutePath, { directory: effectiveDirectory });

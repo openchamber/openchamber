@@ -136,6 +136,9 @@ export const useKeyboardShortcuts = () => {
 
   useKeybinds({
     open_command_palette: () => {
+      // The palette renders only in the MainLayout (web and desktop); VS Code
+      // has its own command palette for these keystrokes.
+      if (isVSCodeRuntime()) return false;
       useUIStore.getState().toggleCommandPalette();
     },
     search_prompt_history: (event) => dispatchPromptHistorySearch(event),
@@ -276,7 +279,9 @@ export const useKeyboardShortcuts = () => {
       state.addRecentAgent(next);
     },
     toggle_terminal: () => {
-      if (useUIStore.getState().isMobile) return false;
+      // Desktop and web only: VS Code ships its own terminal, and no terminal
+      // surface renders in this runtime.
+      if (useUIStore.getState().isMobile || isVSCodeRuntime()) return false;
       return toggleTerminalSurface();
     },
     toggle_context_panel_expanded: () => {
