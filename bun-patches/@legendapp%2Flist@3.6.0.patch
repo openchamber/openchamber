@@ -2,7 +2,7 @@ diff --git a/node_modules/@legendapp/list/.bun-tag-d9cee12e0ece25f7 b/.bun-tag-d
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/react-native.web.js b/react-native.web.js
-index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64c6f13057 100644
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..f07048c3e75e0e1cdb2640ef521587d61bda58d5 100644
 --- a/react-native.web.js
 +++ b/react-native.web.js
 @@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
@@ -18,7 +18,25 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
-@@ -4828,11 +4832,16 @@ function calculateItemsInView(ctx, params = {}) {
+@@ -1255,7 +1259,16 @@ function getItemSize(ctx, key, index, data, useAverageSize, preferCachedSize, no
+     return size;
+   }
+   const itemType = (_b = resolved == null ? void 0 : resolved.itemType) != null ? _b : getItemType ? (_a3 = getItemType(data, index)) != null ? _a3 : "" : "";
+-  if (useAverageSize && !scrollingTo) {
++  // A per-item estimate from the caller, ahead of the per-type average: a
++  // type's average mixes items of very different sizes, and the first layout
++  // caches estimates for every item before any average exists, so each
++  // item measured later moved the content by its full error.
++  const getEstimatedItemSize = state.props.getEstimatedItemSize;
++  if (getEstimatedItemSize) {
++    const estimate = getEstimatedItemSize(data, index, itemType);
++    if (estimate !== void 0) size = roundSize(estimate) + ctx.scrollAxisGap;
++  }
++  if (size === void 0 && useAverageSize && !scrollingTo) {
+     const averageSizeForType = (_c = averageSizes[itemType]) == null ? void 0 : _c.avg;
+     if (averageSizeForType !== void 0) {
+       size = roundSize(averageSizeForType);
+@@ -4828,11 +4841,16 @@ function calculateItemsInView(ctx, params = {}) {
            allocationEnd,
            pendingRemoval,
            protectedContainerKeys,
@@ -38,7 +56,7 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64
          );
          for (const allocation of availableContainerAllocations) {
            const i = allocation.itemIndex;
-@@ -5768,7 +5777,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -5768,7 +5786,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
        size: layout
      });
    };
@@ -51,7 +69,7 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64
    if (shouldDeferWebShrinkLayoutUpdate) {
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
-@@ -6098,7 +6111,11 @@ function useDOMOrder(ref) {
+@@ -6098,7 +6120,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    React3.useEffect(() => {
      let timeoutId;
@@ -64,8 +82,24 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64
      let delay = 500;
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
+@@ -8168,6 +8194,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     estimatedListSize,
+     extraData,
+     getFixedItemSize,
++    getEstimatedItemSize,
+     getItemType,
+     horizontal,
+     rtl,
+@@ -8452,6 +8479,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     drawDistance,
+     estimatedItemSize,
+     getFixedItemSize: useWrapIfItem(getFixedItemSize),
++    getEstimatedItemSize: useWrapIfItem(getEstimatedItemSize),
+     getItemType: useWrapIfItem(getItemType),
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
 diff --git a/react-native.web.mjs b/react-native.web.mjs
-index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b77da60d4 100644
+index 9338287159778f842fa05b5a0467336bf5f50fe8..5b0c93ea41b3b8604af6050ec8b5c7df059bc94a 100644
 --- a/react-native.web.mjs
 +++ b/react-native.web.mjs
 @@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
@@ -81,7 +115,25 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
-@@ -4807,11 +4811,16 @@ function calculateItemsInView(ctx, params = {}) {
+@@ -1234,7 +1238,16 @@ function getItemSize(ctx, key, index, data, useAverageSize, preferCachedSize, no
+     return size;
+   }
+   const itemType = (_b = resolved == null ? void 0 : resolved.itemType) != null ? _b : getItemType ? (_a3 = getItemType(data, index)) != null ? _a3 : "" : "";
+-  if (useAverageSize && !scrollingTo) {
++  // A per-item estimate from the caller, ahead of the per-type average: a
++  // type's average mixes items of very different sizes, and the first layout
++  // caches estimates for every item before any average exists, so each
++  // item measured later moved the content by its full error.
++  const getEstimatedItemSize = state.props.getEstimatedItemSize;
++  if (getEstimatedItemSize) {
++    const estimate = getEstimatedItemSize(data, index, itemType);
++    if (estimate !== void 0) size = roundSize(estimate) + ctx.scrollAxisGap;
++  }
++  if (size === void 0 && useAverageSize && !scrollingTo) {
+     const averageSizeForType = (_c = averageSizes[itemType]) == null ? void 0 : _c.avg;
+     if (averageSizeForType !== void 0) {
+       size = roundSize(averageSizeForType);
+@@ -4807,11 +4820,16 @@ function calculateItemsInView(ctx, params = {}) {
            allocationEnd,
            pendingRemoval,
            protectedContainerKeys,
@@ -101,7 +153,7 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b
          );
          for (const allocation of availableContainerAllocations) {
            const i = allocation.itemIndex;
-@@ -5747,7 +5756,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -5747,7 +5765,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
        size: layout
      });
    };
@@ -114,7 +166,7 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b
    if (shouldDeferWebShrinkLayoutUpdate) {
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
-@@ -6077,7 +6090,11 @@ function useDOMOrder(ref) {
+@@ -6077,7 +6099,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    useEffect(() => {
      let timeoutId;
@@ -127,8 +179,24 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b
      let delay = 500;
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
+@@ -8147,6 +8173,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     estimatedListSize,
+     extraData,
+     getFixedItemSize,
++    getEstimatedItemSize,
+     getItemType,
+     horizontal,
+     rtl,
+@@ -8431,6 +8458,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     drawDistance,
+     estimatedItemSize,
+     getFixedItemSize: useWrapIfItem(getFixedItemSize),
++    getEstimatedItemSize: useWrapIfItem(getEstimatedItemSize),
+     getItemType: useWrapIfItem(getItemType),
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
 diff --git a/react.js b/react.js
-index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64c6f13057 100644
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..f07048c3e75e0e1cdb2640ef521587d61bda58d5 100644
 --- a/react.js
 +++ b/react.js
 @@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
@@ -144,7 +212,25 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
-@@ -4828,11 +4832,16 @@ function calculateItemsInView(ctx, params = {}) {
+@@ -1255,7 +1259,16 @@ function getItemSize(ctx, key, index, data, useAverageSize, preferCachedSize, no
+     return size;
+   }
+   const itemType = (_b = resolved == null ? void 0 : resolved.itemType) != null ? _b : getItemType ? (_a3 = getItemType(data, index)) != null ? _a3 : "" : "";
+-  if (useAverageSize && !scrollingTo) {
++  // A per-item estimate from the caller, ahead of the per-type average: a
++  // type's average mixes items of very different sizes, and the first layout
++  // caches estimates for every item before any average exists, so each
++  // item measured later moved the content by its full error.
++  const getEstimatedItemSize = state.props.getEstimatedItemSize;
++  if (getEstimatedItemSize) {
++    const estimate = getEstimatedItemSize(data, index, itemType);
++    if (estimate !== void 0) size = roundSize(estimate) + ctx.scrollAxisGap;
++  }
++  if (size === void 0 && useAverageSize && !scrollingTo) {
+     const averageSizeForType = (_c = averageSizes[itemType]) == null ? void 0 : _c.avg;
+     if (averageSizeForType !== void 0) {
+       size = roundSize(averageSizeForType);
+@@ -4828,11 +4841,16 @@ function calculateItemsInView(ctx, params = {}) {
            allocationEnd,
            pendingRemoval,
            protectedContainerKeys,
@@ -164,7 +250,7 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64
          );
          for (const allocation of availableContainerAllocations) {
            const i = allocation.itemIndex;
-@@ -5768,7 +5777,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -5768,7 +5786,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
        size: layout
      });
    };
@@ -177,7 +263,7 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64
    if (shouldDeferWebShrinkLayoutUpdate) {
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
-@@ -6098,7 +6111,11 @@ function useDOMOrder(ref) {
+@@ -6098,7 +6120,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    React3.useEffect(() => {
      let timeoutId;
@@ -190,8 +276,24 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..70282a5cd94eee201014d4f18c3c2f64
      let delay = 500;
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
+@@ -8168,6 +8194,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     estimatedListSize,
+     extraData,
+     getFixedItemSize,
++    getEstimatedItemSize,
+     getItemType,
+     horizontal,
+     rtl,
+@@ -8452,6 +8479,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     drawDistance,
+     estimatedItemSize,
+     getFixedItemSize: useWrapIfItem(getFixedItemSize),
++    getEstimatedItemSize: useWrapIfItem(getEstimatedItemSize),
+     getItemType: useWrapIfItem(getItemType),
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
 diff --git a/react.mjs b/react.mjs
-index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b77da60d4 100644
+index 9338287159778f842fa05b5a0467336bf5f50fe8..5b0c93ea41b3b8604af6050ec8b5c7df059bc94a 100644
 --- a/react.mjs
 +++ b/react.mjs
 @@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
@@ -207,7 +309,25 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
-@@ -4807,11 +4811,16 @@ function calculateItemsInView(ctx, params = {}) {
+@@ -1234,7 +1238,16 @@ function getItemSize(ctx, key, index, data, useAverageSize, preferCachedSize, no
+     return size;
+   }
+   const itemType = (_b = resolved == null ? void 0 : resolved.itemType) != null ? _b : getItemType ? (_a3 = getItemType(data, index)) != null ? _a3 : "" : "";
+-  if (useAverageSize && !scrollingTo) {
++  // A per-item estimate from the caller, ahead of the per-type average: a
++  // type's average mixes items of very different sizes, and the first layout
++  // caches estimates for every item before any average exists, so each
++  // item measured later moved the content by its full error.
++  const getEstimatedItemSize = state.props.getEstimatedItemSize;
++  if (getEstimatedItemSize) {
++    const estimate = getEstimatedItemSize(data, index, itemType);
++    if (estimate !== void 0) size = roundSize(estimate) + ctx.scrollAxisGap;
++  }
++  if (size === void 0 && useAverageSize && !scrollingTo) {
+     const averageSizeForType = (_c = averageSizes[itemType]) == null ? void 0 : _c.avg;
+     if (averageSizeForType !== void 0) {
+       size = roundSize(averageSizeForType);
+@@ -4807,11 +4820,16 @@ function calculateItemsInView(ctx, params = {}) {
            allocationEnd,
            pendingRemoval,
            protectedContainerKeys,
@@ -227,7 +347,7 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b
          );
          for (const allocation of availableContainerAllocations) {
            const i = allocation.itemIndex;
-@@ -5747,7 +5756,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -5747,7 +5765,11 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
        size: layout
      });
    };
@@ -240,7 +360,7 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b
    if (shouldDeferWebShrinkLayoutUpdate) {
      scheduleWebShrinkMeasurement(state, () => {
        var _a4;
-@@ -6077,7 +6090,11 @@ function useDOMOrder(ref) {
+@@ -6077,7 +6099,11 @@ function useDOMOrder(ref) {
    const ctx = useStateContext();
    useEffect(() => {
      let timeoutId;
@@ -253,3 +373,51 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..8b8247bd2ec7eea7794b37f5dd7ac01b
      let delay = 500;
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
+@@ -8147,6 +8173,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     estimatedListSize,
+     extraData,
+     getFixedItemSize,
++    getEstimatedItemSize,
+     getItemType,
+     horizontal,
+     rtl,
+@@ -8431,6 +8458,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     drawDistance,
+     estimatedItemSize,
+     getFixedItemSize: useWrapIfItem(getFixedItemSize),
++    getEstimatedItemSize: useWrapIfItem(getEstimatedItemSize),
+     getItemType: useWrapIfItem(getItemType),
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
+diff --git a/react.d.ts b/react.d.ts
+index c5ddddfbddc937b5d48ecc286b9fafb435f2d548..dd47ae9f9bf66aa2e7505f80adf1177dfa2a2d28 100644
+--- a/react.d.ts
++++ b/react.d.ts
+@@ -228,6 +228,11 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
+      * In case items always have a fixed size, you can provide a function to return it.
+      */
+     getFixedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
++    /**
++     * Estimated size of one item before it is measured, ahead of `estimatedItemSize` and the per-type average.
++     * Return undefined to fall back to them.
++     */
++    getEstimatedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
+     /**
+      * Returns a stable item type used for pooling and size estimation.
+      */
+diff --git a/react-native.web.d.ts b/react-native.web.d.ts
+index c5ddddfbddc937b5d48ecc286b9fafb435f2d548..dd47ae9f9bf66aa2e7505f80adf1177dfa2a2d28 100644
+--- a/react-native.web.d.ts
++++ b/react-native.web.d.ts
+@@ -228,6 +228,11 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
+      * In case items always have a fixed size, you can provide a function to return it.
+      */
+     getFixedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
++    /**
++     * Estimated size of one item before it is measured, ahead of `estimatedItemSize` and the per-type average.
++     * Return undefined to fall back to them.
++     */
++    getEstimatedItemSize?: (item: ItemT, index: number, type: TItemType) => number | undefined;
+     /**
+      * Returns a stable item type used for pooling and size estimation.
+      */
