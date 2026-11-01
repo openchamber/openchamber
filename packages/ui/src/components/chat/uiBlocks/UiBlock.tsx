@@ -11,7 +11,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { KIT_SHARED_CSS, kitVariables, seriesColor } from '../lib/visualKit';
 import { cn } from '@/lib/utils';
-import { MarkdownContent } from '../MarkdownRendererImpl';
+import { MarkdownContent } from '../MarkdownRenderer';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { axisTicks } from './axisTicks';
 import {

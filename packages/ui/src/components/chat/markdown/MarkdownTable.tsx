@@ -152,7 +152,8 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
           natural[index] = Math.max(natural[index] ?? 0, Math.ceil(cell.getBoundingClientRect().width));
         });
       }
-      const headings = Array.from(table.tHead?.rows[0]?.cells ?? []);
+      const headRow = rows.find((row) => row.parentElement?.tagName === 'THEAD');
+      const headings = headRow ? Array.from(headRow.cells) : [];
       if (bodyRows.length && headings.length && table.parentElement) {
         headingWidths(headings, table.parentElement).forEach((width, index) => {
           natural[index] = Math.max(natural[index] ?? 0, width);

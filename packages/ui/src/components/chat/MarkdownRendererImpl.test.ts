@@ -269,13 +269,17 @@ test('code rows and selection preserve intentional trailing blank lines', async 
 test('table columns preserve short content and allocate remaining width to long content', async () => {
   const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   const bounds = spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    // A heading measured at min-content is as wide as its longest word.
+    if (this.style.width === 'min-content') return new window.DOMRect(0, 0, 60, 30);
     const width = this.tagName === 'TH' || this.tagName === 'TD' ? this.textContent?.includes('long') ? 600 : 120 : 502;
     return new window.DOMRect(0, 0, width, 30);
   });
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 502 });
   try {
+    // The long heading breaks between its words, so its column stays at the
+    // narrow minimum, plus the pixel a heading keeps against subpixel wrapping.
     await render('| long heading over short values | long |\n| --- | --- |\n| `id` | `long description` |');
-    expect(Array.from(host.querySelectorAll('col'), (col) => col.style.width)).toEqual(['120px', '380px']);
+    expect(Array.from(host.querySelectorAll('col'), (col) => col.style.width)).toEqual(['121px', '379px']);
     expect(host.querySelector('td')?.style.getPropertyValue('--oc-table-code-wrap')).toBe('nowrap');
     expect(host.querySelector<HTMLElement>('td:last-child')?.style.getPropertyValue('--oc-table-code-wrap')).toBe('normal');
   } finally {
