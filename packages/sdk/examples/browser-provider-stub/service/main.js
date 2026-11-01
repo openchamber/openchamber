@@ -215,7 +215,11 @@ var readEvent = (value) => {
       return null;
     if (!isText(value.key) || !isText(value.code) || value.key.length > 64 || value.code.length > 64)
       return null;
-    return { type: "key", action: value.action, key: value.key, code: value.code, modifiers };
+    if (value.keyCode === undefined)
+      return { type: "key", action: value.action, key: value.key, code: value.code, modifiers };
+    if (!isFiniteNumber(value.keyCode) || !Number.isInteger(value.keyCode) || value.keyCode < 0 || value.keyCode > 255)
+      return null;
+    return { type: "key", action: value.action, key: value.key, code: value.code, keyCode: value.keyCode, modifiers };
   }
   return null;
 };
