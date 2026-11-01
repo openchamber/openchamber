@@ -514,10 +514,26 @@ describe('buildSessionSidebarRowModel', () => {
   test('Chats keep the tree slot', () => {
     const input = args([]);
     input.chatGroup = group(Array.from({ length: 5 }, (_, index) => node(`chat-${index}`)), { id: 'managed-chats' });
+    input.detailedZoneRows = true;
     const rows = buildSessionSidebarRowModel(input).rows;
 
     expect([...new Set(rows.flatMap((row) => (row.kind === 'session' ? [row.renderContext] : [])))]).toEqual(['tree-chat']);
-    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false });
+    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false, detailed: false });
+  });
+
+  test('the reveal control takes the column of the rows it closes', () => {
+    const nodes = Array.from({ length: 20 }, (_, index) => node(`session-${index}`));
+    const input = args([project([group(nodes)])]);
+    input.sessionBatchSize = 7;
+    const control = () => {
+      const row = buildSessionSidebarRowModel(input).rows.find((candidate) => candidate.kind === 'show-control');
+      return row?.kind === 'show-control' ? row : null;
+    };
+
+    expect(control()).toMatchObject({ detailed: false });
+
+    input.detailedZoneRows = true;
+    expect(control()).toMatchObject({ detailed: true });
   });
 
   test('Chats failure stays visible beside retained sessions', () => {
