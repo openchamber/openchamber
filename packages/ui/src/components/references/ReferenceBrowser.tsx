@@ -21,7 +21,7 @@ import type { Label, MilestoneChoice } from '@/lib/api/types';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
 import { cn } from '@/lib/utils';
 
-import { IssueFilterGroups } from './IssueFilterMenu';
+import { IssueFilterGroups, IssueFilterSelects } from './IssueFilterMenu';
 import type { ChoiceOptionsState } from './issueFilterOptions';
 import { ReferencePickerRow } from './ReferencePickerRow';
 import {
@@ -67,7 +67,7 @@ export const ReferenceBrowserTabs: React.FC<{ browser: ReferenceBrowser }> = ({ 
 };
 
 /**
- * The options behind the issues filter's name dropdowns, read per project by
+ * The options behind the issues filter's name selects, read per project by
  * the surface that renders the menu (the board view); absent where the surface
  * offers no host to read them from (the picker).
  */
@@ -75,6 +75,16 @@ export type ReferenceFilterOptions = {
     labelOptions?: ChoiceOptionsState<Label> | null;
     milestoneOptions?: ChoiceOptionsState<MilestoneChoice> | null;
 };
+
+/**
+ * Where the host's name filters apply: a repository source, not across, the
+ * issue kind, both features published, and the surface reading the options.
+ * One repository only: a list across several has no single project to ask.
+ */
+const hasNameFilters = (browser: ReferenceBrowser & ReferenceFilterOptions): boolean =>
+    browser.source === 'repository' && !browser.across && browser.repositoryKind === 'issue'
+    && browser.features.labels && browser.features.milestones
+    && browser.labelOptions !== undefined && browser.milestoneOptions !== undefined;
 
 /**
  * Which items the list shows. Picking stays in the menu, so a tracker's parts
@@ -87,12 +97,6 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser & ReferenceFilte
     const { state, people, priority } = browser.trackerFilter;
     const { filters } = trackerDescriptor.capabilities;
     const repository = browser.repositoryFilter;
-    // The shared menu takes over the repository's groups where the host offers
-    // both name dropdowns and the surface read their options; one repository
-    // only: a list across several has no single project to ask.
-    const showExtras = source === 'repository' && !browser.across && browser.repositoryKind === 'issue'
-        && browser.features.labels && browser.features.milestones
-        && browser.labelOptions !== undefined && browser.milestoneOptions !== undefined;
     const summary = source === 'repository'
         ? [
             t(REPOSITORY_STATE_LABEL_KEYS[repository.state]),
@@ -142,16 +146,12 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser & ReferenceFilte
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-                {showExtras ? (
+                {hasNameFilters(browser) ? (
                     // The shared menu renders its trigger-less groups; the outer
-                    // trigger is reused, so only the content gains the dropdowns.
+                    // trigger is reused. The name filters sit beside the trigger.
                     <IssueFilterGroups
                         filter={repository}
                         onFilterChange={(patch) => browser.selectRepositoryFilter(patch)}
-                        labels={browser.labelOptions ?? null}
-                        milestones={browser.milestoneOptions ?? null}
-                        showLabel={browser.features.labels}
-                        showMilestone={browser.features.milestones}
                     />
                 ) : source === 'repository' ? (
                     <>
@@ -200,8 +200,10 @@ export const ReferenceBrowserSearch: React.FC<{
         : discussions ? 'references.picker.search.mobile.discussions' : `references.picker.search.mobile.${term}`);
 
     return (
-        <div className={cn('flex items-center gap-2', !isMobile && 'min-w-[14rem] flex-1')}>
-            <div className="relative min-w-0 flex-1">
+        <div className={cn('flex flex-wrap items-center gap-2', !isMobile && 'min-w-[14rem] flex-1')}>
+            // On a phone the field keeps a floor so the name selects wrap onto
+            // their own line instead of squeezing the search.
+            <div className={cn('relative min-w-0 flex-1', isMobile && 'min-w-[12rem]')}>
                 <Icon name="search" className="pointer-events-none absolute inset-s-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                     ref={searchRef}
@@ -235,6 +237,16 @@ export const ReferenceBrowserSearch: React.FC<{
                     ) : null}
                 </div>
             </div>
+            {hasNameFilters(browser) ? (
+                <IssueFilterSelects
+                    filter={browser.repositoryFilter}
+                    onFilterChange={(patch) => browser.selectRepositoryFilter(patch)}
+                    labels={browser.labelOptions ?? null}
+                    milestones={browser.milestoneOptions ?? null}
+                    showLabel={browser.features.labels}
+                    showMilestone={browser.features.milestones}
+                />
+            ) : null}
             <ReferenceFilterMenu browser={browser} />
             {trailing}
         </div>

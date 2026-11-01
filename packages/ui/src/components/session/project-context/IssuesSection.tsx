@@ -22,7 +22,7 @@ import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { effectiveRepositoryBinding } from '@/lib/source-control/types';
 import { cn } from '@/lib/utils';
 
-import { IssueFilterMenu } from '../../references/IssueFilterMenu';
+import { IssueFilterMenu, IssueFilterSelects } from '../../references/IssueFilterMenu';
 import { useChoiceOptions, type ChoiceOptionsState } from '../../references/issueFilterOptions';
 import { useRepositoryReadContext, useRepositoryReferenceList, useRepositoryReferenceProvider } from '../../references/referenceSources';
 import { labelColor, referenceNumberLabel, repositoryStateLook, type IssueFilter } from '../../references/referencePickerItems';
@@ -216,9 +216,10 @@ type IssuesListProps = {
 };
 
 /**
- * The filtered issue list: the shared filter menu, the loading, failure and
- * empty states, and the rows (number, title, state dot, milestone chip).
- * The panel's scroller owns the vertical scroll.
+ * The filtered issue list: the shared filter (the label and milestone
+ * selects beside the state and people menu), the loading, failure and empty
+ * states, and the rows (number, title, state dot, milestone chip). The
+ * panel's scroller owns the vertical scroll.
  */
 const IssuesList: React.FC<IssuesListProps> = ({
   rows, listStatus, listUnavailable, listError, onRetry, openIssueNumber, onOpenIssue,
@@ -232,14 +233,18 @@ const IssuesList: React.FC<IssuesListProps> = ({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-shrink-0 items-center justify-start pb-2">
-        <IssueFilterMenu
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-start gap-2 pb-2">
+        <IssueFilterSelects
           filter={filter}
           onFilterChange={onFilterChange}
           labels={labels}
           milestones={milestones}
           showLabel={showLabel}
           showMilestone={showMilestone}
+        />
+        <IssueFilterMenu
+          filter={filter}
+          onFilterChange={onFilterChange}
         />
       </div>
 

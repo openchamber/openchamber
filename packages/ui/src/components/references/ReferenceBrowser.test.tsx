@@ -24,6 +24,39 @@ mock.module('@/components/ui/dropdown-menu', () => ({
     React.createElement('button', { type: 'button', 'data-radio-value': value, onClick: () => onPick?.(value) }, children),
 }));
 
+// The real select renders its list in a portal only while open, so the test
+// lays the parts out inline: the select forwards a picked item to its
+// `onValueChange`, the way the real one does.
+mock.module('@/components/ui/select', () => ({
+  Select: ({ children, onValueChange, disabled }: { children: React.ReactNode; onValueChange?: (next: string) => void; disabled?: boolean }) =>
+    React.createElement(React.Fragment, null,
+      React.Children.map(children, (child) =>
+        React.isValidElement(child)
+          ? // SAFETY: the children are this mock's own trigger and content, and `onPick`/`selectDisabled` are the props the mock injects on them.
+            React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void; selectDisabled?: boolean }>, { onPick: (next: string) => onValueChange?.(next), selectDisabled: disabled })
+          : child,
+      ),
+    ),
+  SelectTrigger: ({ children, selectDisabled, ...props }: { children?: React.ReactNode; selectDisabled?: boolean } & React.ComponentProps<'button'>) =>
+    React.createElement('button', { type: 'button', 'data-select-trigger': '', disabled: selectDisabled, ...props }, children),
+  SelectValue: ({ children, placeholder }: { children?: React.ReactNode; placeholder?: React.ReactNode }) =>
+    React.createElement('span', { 'data-select-value': '' }, children ?? placeholder),
+  SelectContent: ({ children, onPick }: { children?: React.ReactNode; onPick?: (next: string) => void }) =>
+    React.createElement('div', { 'data-select-content': '' },
+      React.Children.map(children, (child) =>
+        React.isValidElement(child)
+          ? // SAFETY: the children are this mock's own items, and `onPick` is the prop the mock injects on them.
+            React.cloneElement(child as React.ReactElement<{ onPick?: (next: string) => void }>, { onPick })
+          : child,
+      ),
+    ),
+  SelectItem: ({ children, value, onPick, selectDisabled }: { children?: React.ReactNode; value: string; onPick?: (next: string) => void; selectDisabled?: boolean }) =>
+    React.createElement('button', { type: 'button', 'data-select-item': value, disabled: selectDisabled, onClick: () => onPick?.(value) }, children),
+  SelectLabel: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-label': '' }, children),
+  SelectGroup: ({ children }: { children?: React.ReactNode }) => React.createElement('div', { 'data-select-group': '' }, children),
+  SelectSeparator: () => React.createElement('hr'),
+}));
+
 const { ReferenceBrowserSearch } = await import('./ReferenceBrowser');
 import type { ReferenceFilterOptions } from './ReferenceBrowser';
 import type { ReferenceBrowser } from './useReferenceBrowser';
@@ -83,53 +116,78 @@ const render = async (browser: FakeBrowser) => {
     return {
         text: () => host.textContent ?? '',
         radioItem: (value: string) => host.querySelector<HTMLButtonElement>(`[data-radio-value="${value}"]`),
+        selectTriggers: () => Array.from(host.querySelectorAll<HTMLButtonElement>('[data-select-trigger]')),
+        selectItem: (value: string) => host.querySelector<HTMLButtonElement>(`[data-select-item="${value}"]`),
+        selectItems: (value: string) => Array.from(host.querySelectorAll<HTMLButtonElement>(`[data-select-item="${value}"]`)),
         unmount: async () => { await act(async () => { root.unmount(); }); },
     };
 };
 
-describe('ReferenceBrowser filter menu', () => {
-    test('offers the label and milestone dropdowns on a host that publishes both features', async () => {
+describe('ReferenceBrowser filter', () => {
+    test('offers the label and milestone selects beside the state and people menu on a host that publishes both features', async () => {
         const view = await render(browserOf());
         const text = view.text();
         expect(text).toContain('Status');
         expect(text).toContain('People');
-        expect(text).toContain('Milestone');
-        expect(text).toContain('Label');
-        expect(view.radioItem('bug')).toBeTruthy();
-        expect(view.radioItem('v1.0')).toBeTruthy();
+        expect(view.selectTriggers()).toHaveLength(2);
+        expect(text).toContain('All labels');
+        expect(text).toContain('bug');
+        expect(text).toContain('All milestones');
+        expect(text).toContain('v1.0');
         await view.unmount();
     });
 
     test('picking a label patches the repository filter', async () => {
         patches.length = 0;
         const view = await render(browserOf());
-        const item = view.radioItem('bug');
+        const item = view.selectItem('bug');
         if (!item) throw new Error('Expected the label option bug');
         await act(async () => { item.click(); });
         expect(patches).toEqual([{ labelNames: ['bug'] }]);
         await view.unmount();
     });
 
-    test('keeps the state and people groups, without the dropdowns, on a host that publishes neither feature', async () => {
+    test('picking All milestones clears the milestone names', async () => {
+        patches.length = 0;
+        const view = await render(browserOf());
+        // The label select renders first, so the milestone All is the second `all`.
+        const alls = view.selectItems('all');
+        if (alls.length !== 2) throw new Error('Expected both All options');
+        await act(async () => { alls[1].click(); });
+        expect(patches).toEqual([{ milestoneNames: [] }]);
+        await view.unmount();
+    });
+
+    test('keeps the state and people groups, without the name selects, on a host that publishes neither feature', async () => {
         const view = await render(browserOf({ features: { labels: false, milestones: false }, labelOptions: null, milestoneOptions: null }));
         const text = view.text();
         expect(text).toContain('Status');
         expect(text).toContain('People');
-        expect(text).not.toContain('Milestone');
-        expect(text).not.toContain('Label');
+        expect(view.selectTriggers()).toHaveLength(0);
+        expect(text).not.toContain('All labels');
         expect(view.radioItem('bug')).toBeNull();
-        expect(view.radioItem('v1.0')).toBeNull();
         await view.unmount();
     });
 
     test('keeps the state and people groups where the surface reads no options', async () => {
-        // The picker's browser carries no options; the dropdowns stay out.
+        // The picker's browser carries no options; the selects stay out.
         const view = await render(browserOf({ labelOptions: undefined, milestoneOptions: undefined }));
         const text = view.text();
         expect(text).toContain('Status');
         expect(text).toContain('People');
-        expect(text).not.toContain('Milestone');
+        expect(view.selectTriggers()).toHaveLength(0);
+        expect(text).not.toContain('All labels');
         expect(view.radioItem('bug')).toBeNull();
+        await view.unmount();
+    });
+
+    test('keeps the state and people groups without the name selects on a list across repositories', async () => {
+        const view = await render(browserOf({ across: true }));
+        const text = view.text();
+        expect(text).toContain('Status');
+        expect(text).toContain('People');
+        expect(view.selectTriggers()).toHaveLength(0);
+        expect(text).not.toContain('All labels');
         await view.unmount();
     });
 });

@@ -625,7 +625,7 @@ const SourceBoardBody: React.FC<{
     // again, such as a PR just opened on the host's own site.
     const listContextValue = useRepositoryReadContext(tracker ? null : allRepositories?.[0] ?? directory);
     const listContext = listContextValue && listContextValue !== 'missing' ? listContextValue : null;
-    // The filter menu's name dropdowns: the board's project's labels and
+    // The filter's name selects: the board's project's labels and
     // milestones, read with the list's context. The reads name no project —
     // the server resolves the repository from the context's directory. A list
     // across the folder's repositories has no single context to ask, so it

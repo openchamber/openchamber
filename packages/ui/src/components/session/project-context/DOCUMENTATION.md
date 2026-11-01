@@ -222,7 +222,7 @@ are dropped on rehydrate as an unknown mode.
 
 The issues tab is a provider feature, not a panel one: it appears only when
 the project's connected provider publishes both `features.labels` and
-`features.milestones` (the two dropdowns the filter menu offers) and the
+`features.milestones` (the two name selects beside the filter menu) and the
 binding reads with an account that can. While the binding or the provider list
 loads, the tab stays out rather than flicker in and out, and a persisted
 `issues` tab falls back to `notes` the way a persisted `memory` tab does when
@@ -234,6 +234,12 @@ items, states and ordering as the board. A failed list read shows the failure
 with a retry, never an empty list that reads as "no issues". The rows carry no
 per-issue milestone, so the milestone chip and the detail's milestone come from
 the active milestone filter, which narrows the list to one.
+
+The filter row shows the label and milestone selects beside the state and
+people menu, the shared issues filter
+(`components/references`, `IssueFilterSelects` and `IssueFilterMenu`); the
+selects carry the options' loading, stale and first-failure states, and one
+failed read never disables the other select.
 
 The tab's filter and open issue are the project's, stored in
 `useIssuesPanelStore` keyed by project context id: the panel reopens on the

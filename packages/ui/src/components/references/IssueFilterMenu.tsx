@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { Label, MilestoneChoice } from '@/lib/api/types';
@@ -21,20 +22,26 @@ import type { ChoiceOptionsState } from './issueFilterOptions';
 export type IssueFilterMenuProps = {
   filter: IssueFilter;
   onFilterChange: (patch: Partial<IssueFilter>) => void;
-  /** The label options; `null` while the host is unknown. */
-  labels: ChoiceOptionsState<Label> | null;
-  milestones: ChoiceOptionsState<MilestoneChoice> | null;
-  /** Which dropdowns the host offers; both must be on for the menu to render the extras. */
-  showLabel: boolean;
-  showMilestone: boolean;
   isMobile?: boolean;
 };
 
+export type IssueFilterSelectsProps = {
+  filter: IssueFilter;
+  onFilterChange: (patch: Partial<IssueFilter>) => void;
+  /** The label options; `null` where the surface offers none. */
+  labels: ChoiceOptionsState<Label> | null;
+  milestones: ChoiceOptionsState<MilestoneChoice> | null;
+  /** Which selects the host offers. */
+  showLabel?: boolean;
+  showMilestone?: boolean;
+};
+
 /**
- * The groups and dropdowns of the issues filter, without the menu wrapper: a
- * surface that owns its own filter trigger renders them inside its content.
+ * The groups of the issues filter, without the menu wrapper: a surface that
+ * owns its own filter trigger renders them inside its content. The name
+ * filters live beside the trigger as `IssueFilterSelects`.
  */
-export const IssueFilterGroups: React.FC<Omit<IssueFilterMenuProps, 'isMobile'>> = ({ filter, onFilterChange, labels, milestones, showLabel, showMilestone }) => {
+export const IssueFilterGroups: React.FC<Pick<IssueFilterMenuProps, 'filter' | 'onFilterChange'>> = ({ filter, onFilterChange }) => {
   const { t } = useI18n();
 
   const group = <T extends string>(label: string, value: T, options: readonly T[], labelOf: (option: T) => string, onSelect: (option: T) => void) => (
@@ -49,44 +56,82 @@ export const IssueFilterGroups: React.FC<Omit<IssueFilterMenuProps, 'isMobile'>>
     </>
   );
 
-  // A name dropdown: the host's options, single-select, "All" clears it.
-  const nameDropdown = <T extends { name: string }>(what: 'label' | 'milestone', state: ChoiceOptionsState<T> | null, selected: string[], onSelect: (names: string[]) => void) => {
-    const ready = state && state.status === 'ready' ? state : null;
-    const firstFailure = state && state.status === 'error' ? state : null;
-    const loading = !ready && !firstFailure;
-    return (
-      <>
-        <DropdownMenuLabel>
-          {what === 'label' ? t('issuesPanel.filter.label') : t('issuesPanel.filter.milestone')}
-          {ready?.stale ? <span className="ms-1.5 text-muted-foreground">{t('issuesPanel.filter.stale')}</span> : null}
-        </DropdownMenuLabel>
-        {firstFailure ? (
-          <div className="px-2 py-1.5 typography-meta text-muted-foreground">{t('issuesPanel.filter.unavailable', { what: what === 'label' ? t('issuesPanel.filter.label') : t('issuesPanel.filter.milestone') })}</div>
-        ) : loading ? (
-          <div className="px-2 py-1.5 typography-meta text-muted-foreground">…</div>
-        ) : (
-          <DropdownMenuRadioGroup value={selected[0] ?? 'all'} onValueChange={(next) => onSelect(next === 'all' ? [] : [next])}>
-            <DropdownMenuRadioItem value="all">{t('issuesPanel.filter.all')}</DropdownMenuRadioItem>
-            {(ready?.items ?? []).map((item) => <DropdownMenuRadioItem key={item.name} value={item.name}>{item.name}</DropdownMenuRadioItem>)}
-          </DropdownMenuRadioGroup>
-        )}
-      </>
-    );
-  };
-
   return (
     <>
       {group(t('references.picker.filter.group.status'), filter.state, REPOSITORY_STATES.issue, (option) => t(REPOSITORY_STATE_LABEL_KEYS[option]), (option) => onFilterChange({ state: option }))}
       <DropdownMenuSeparator />
       {group(t('references.picker.filter.group.people'), filter.people, REPOSITORY_PEOPLE.issue, (option) => t(REPOSITORY_PEOPLE_LABEL_KEYS[option]), (option) => onFilterChange({ people: option }))}
-      {showMilestone ? (<><DropdownMenuSeparator />{nameDropdown('milestone', milestones, filter.milestoneNames, (names) => onFilterChange({ milestoneNames: names }))}</>) : null}
-      {showLabel ? (<><DropdownMenuSeparator />{nameDropdown('label', labels, filter.labelNames, (names) => onFilterChange({ labelNames: names }))}</>) : null}
     </>
   );
 };
 
-/** The issues filter: state and people like the board's, plus host-provided label and milestone dropdowns. */
-export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ isMobile, ...groups }) => {
+/** The one name filter as a compact select: single-select, "All" clears it. */
+const IssueFilterNameSelect: React.FC<{
+  what: 'label' | 'milestone';
+  selected: string[];
+  options: ChoiceOptionsState<{ name: string }>;
+  onSelect: (names: string[]) => void;
+}> = ({ what, selected, options, onSelect }) => {
+  const { t } = useI18n();
+  const name = what === 'label' ? t('issuesPanel.filter.label') : t('issuesPanel.filter.milestone');
+  const allLabel = what === 'label' ? t('issuesPanel.filter.allLabels') : t('issuesPanel.filter.allMilestones');
+  const value = selected[0] ?? 'all';
+  // A failed first read disables the select with its note: never an
+  // empty-looking list. A failed refresh keeps the last list, marked stale.
+  const unavailable = t('issuesPanel.filter.unavailable', { what: name });
+  return (
+    <Select
+      value={value}
+      disabled={options.status !== 'ready'}
+      onValueChange={(next) => onSelect(next === 'all' ? [] : [next])}
+    >
+      <SelectTrigger
+        aria-label={name}
+        title={options.status === 'ready' && options.stale ? t('issuesPanel.filter.stale') : undefined}
+        className="max-w-[9rem] typography-micro"
+      >
+        <SelectValue placeholder={options.status === 'error' ? unavailable : '…'}>
+          {options.status === 'ready' ? (value === 'all' ? allLabel : value) : undefined}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent align="start">
+        <SelectItem value="all">{allLabel}</SelectItem>
+        {options.items.map((item) => (
+          <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+};
+
+/**
+ * The host-provided name filters beside the issues filter menu: a compact
+ * select each, label then milestone. Each reads its own options state, so a
+ * failure in one never blocks the other.
+ */
+export const IssueFilterSelects: React.FC<IssueFilterSelectsProps> = ({ filter, onFilterChange, labels, milestones, showLabel, showMilestone }) => (
+  <>
+    {showLabel && labels ? (
+      <IssueFilterNameSelect
+        what="label"
+        selected={filter.labelNames}
+        options={labels}
+        onSelect={(names) => onFilterChange({ labelNames: names })}
+      />
+    ) : null}
+    {showMilestone && milestones ? (
+      <IssueFilterNameSelect
+        what="milestone"
+        selected={filter.milestoneNames}
+        options={milestones}
+        onSelect={(names) => onFilterChange({ milestoneNames: names })}
+      />
+    ) : null}
+  </>
+);
+
+/** The issues filter: state and people, like the board's. The name filters sit beside it (`IssueFilterSelects`). */
+export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ filter, onFilterChange, isMobile }) => {
   const { t } = useI18n();
   return (
     <DropdownMenu>
@@ -100,7 +145,7 @@ export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ isMobile, ...g
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <IssueFilterGroups {...groups} />
+        <IssueFilterGroups filter={filter} onFilterChange={onFilterChange} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

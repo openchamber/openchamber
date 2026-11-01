@@ -418,6 +418,18 @@ test('an unconfigured project still reads its options: the binding has no provid
   expect(milestoneReads).toEqual([readContext]);
 });
 
+test('the list header renders the name selects beside the state and people menu', async () => {
+  await renderSection();
+  const text = host?.textContent ?? '';
+  // Both features are published, so both selects render, ready with the
+  // host's option lists.
+  expect(host?.querySelectorAll('[data-slot="select-trigger"]').length).toBe(2);
+  expect(text).toContain('All labels');
+  expect(text).toContain('All milestones');
+  // The menu trigger stays beside them.
+  expect(host?.querySelector('button[aria-label="Filter"]')).not.toBeNull();
+});
+
 test('the open issue shows its full body, its comments, its milestone and its labels', async () => {
   list.items = [row];
   detailIssue = issue;

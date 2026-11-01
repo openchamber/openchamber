@@ -16,8 +16,8 @@ every source, the repository's provider, each tracker and each extension, as its
 | File | Owns |
 | --- | --- |
 | `useReferenceBrowser.ts` | The state both the picker and the board read: repository tab and filter, the provider's descriptor and term, search, highlight, the previewed item and its details, arrow and Ctrl+N/P keys. |
-| `ReferenceBrowser.tsx` | The parts both lay out: tabs (repository source only, the change-request tab named by the provider's term), search filling the row with the filter as one menu beside it (32 px, like the tabs), the list with its loading, failure, empty and not-connected states. The board's filter menu renders the shared issues filter's groups in its own trigger where the host offers the name dropdowns. |
-| `IssueFilterMenu.tsx` | The shared issues filter: the state and people groups plus the host-provided label and milestone dropdowns, whose options read last-good (`issueFilterOptions.ts`). `IssueFilterGroups` is the content-only variant for a surface that owns its own filter trigger. |
+| `ReferenceBrowser.tsx` | The parts both lay out: tabs (repository source only, the change-request tab named by the provider's term), search filling the row with the filter as one menu beside it (32 px, like the tabs) and the name selects beside the menu where the host offers them, the list with its loading, failure, empty and not-connected states. The board's filter menu renders the shared issues filter's groups in its own trigger. |
+| `IssueFilterMenu.tsx` | The shared issues filter: the state and people groups in the menu, plus `IssueFilterSelects`, the host-provided label and milestone selects that sit beside the trigger, whose options read last-good (`issueFilterOptions.ts`). `IssueFilterGroups` is the content-only variant for a surface that owns its own filter trigger. |
 | `ReferencePickerDialog.tsx` | The picker around them: checked items, the diff switch, Enter/Shift+Enter, confirm. Desktop shows the list and a preview side by side; mobile opens the preview in place of the list. |
 | `ReferencePickerRow.tsx`, `ReferencePreview.tsx` | What a row and the preview show. State colours are the theme's PR tokens through the sidebar's rule (`lib/source-control/prVisualState.ts`). |
 | `useReferenceImagePreview.tsx` | Opening the preview's pictures in the chat's image viewer. |
@@ -384,16 +384,18 @@ preview's footer holds actions instead of what the agent gets.
   Attach to session menu on the right: the open session (when the chat shows
   one, not a draft; the board closes and its composer takes the chip), a new
   session, or a new session in a worktree.
-- The repository's filter menu is the shared `IssueFilterMenu` where the host
+- The repository's filter is the shared `IssueFilterMenu` where the host
   publishes both `labels` and `milestones` (Gitea and Forgejo): the state and
-  people groups, plus the host's label and milestone dropdowns. The board view
-  reads their options per project with `referenceLabels` / `referenceMilestones`
+  people groups in the menu, plus the host's label and milestone selects
+  (`IssueFilterSelects`) beside the trigger. The board view reads their
+  options per project with `referenceLabels` / `referenceMilestones`
   (`useChoiceOptions`), keyed by the list's read context and the project the
-  binding names; a first failure disables a dropdown with its note, a failed
-  refresh keeps the last list with a stale hint. The name filters narrow the
-  issue list only, so the PR tab keeps its state and people filters. A host
-  that publishes neither feature, and a list across the folder's repositories
-  (no single project to ask), keep the menu's state and people groups alone.
+  binding names; a first failure disables a select with its note, a failed
+  refresh keeps the last list with a stale hint, and one failed dimension never
+  blocks the other. The name filters narrow the issue list only, so the PR tab
+  keeps its state and people filters. A host that publishes neither feature,
+  and a list across the folder's repositories (no single project to ask), keep
+  the menu's state and people groups alone, with no selects.
 - A tracker lists one container or all. An item starts in its container's
   mapped project (`resolveTrackerMappedProjectPath`), else the mapping's
   default, else the board's project; the user can pick another for that item.
