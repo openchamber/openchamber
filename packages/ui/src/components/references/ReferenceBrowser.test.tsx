@@ -204,4 +204,14 @@ describe('ReferenceBrowser filter', () => {
         expect(text).not.toContain('All labels');
         await view.unmount();
     });
+
+    test('does not render a code comment as text in the search row', async () => {
+        // A `//` line inside JSX is text content, so the row's rendered text
+        // must stay free of it; the phone floor note is the known culprit.
+        const view = await render(browserOf());
+        const text = view.text();
+        expect(text).not.toContain('//');
+        expect(text).not.toContain('On a phone');
+        await view.unmount();
+    });
 });

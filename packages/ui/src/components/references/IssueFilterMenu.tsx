@@ -144,7 +144,7 @@ export const IssueFilterMenu: React.FC<IssueFilterMenuProps> = ({ filter, onFilt
         <button type="button" aria-label={t('references.picker.filter.label')} className={cn(dropdownTriggerVariants({ size: isMobile ? 'mobile' : 'default' }), 'min-w-0 max-w-[18rem] shrink-0', isMobile && 'max-w-[45%]')}>
           <span className="flex min-w-0 items-center gap-1.5">
             <Icon name="filter-3" className="size-4" />
-            <span className="truncate">{t('issuesPanel.filter.label')}</span>
+            <span className="truncate">{t('references.picker.filter.label')}</span>
           </span>
           <Icon name="arrow-down-s" className="size-4 opacity-50" />
         </button>

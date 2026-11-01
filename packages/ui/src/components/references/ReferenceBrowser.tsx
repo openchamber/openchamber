@@ -201,8 +201,7 @@ export const ReferenceBrowserSearch: React.FC<{
 
     return (
         <div className={cn('flex flex-wrap items-center gap-2', !isMobile && 'min-w-[14rem] flex-1')}>
-            // On a phone the field keeps a floor so the name selects wrap onto
-            // their own line instead of squeezing the search.
+            {/* On a phone the field keeps a floor so the name selects wrap onto their own line instead of squeezing the search. */}
             <div className={cn('relative min-w-0 flex-1', isMobile && 'min-w-[12rem]')}>
                 <Icon name="search" className="pointer-events-none absolute inset-s-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
