@@ -42,6 +42,7 @@ const sessionRecord = (id: string, directory: string): Session => ({
   projectID: "project",
   directory,
   title: "New session",
+  agent: "build",
   model: { providerID: "provider", id: "model" },
   cost: 0,
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -63,6 +64,7 @@ const openDraft = (draftId: number): NewSessionDraftState => ({
 
 const originalClient = {
   createSession: opencodeClient.createSession,
+  getSession: opencodeClient.getSession,
   sendMessage: opencodeClient.sendMessage,
   shellSession: opencodeClient.shellSession,
   directory: opencodeClient.getDirectory(),
@@ -154,6 +156,7 @@ beforeEach(() => {
   setImperativeSessionMessageLoader(loader)
   opencodeClient.setDirectory(DIRECTORY)
   useConfigStore.setState({ isConnected: true, hasEverConnected: true })
+  opencodeClient.getSession = async (id, directory) => sessionRecord(id, directory ?? DIRECTORY)
   opencodeClient.createSession = async (params, directory) => {
     createSessionCalls.push({ id: params?.id, directory })
     await creation.promise
@@ -180,6 +183,7 @@ beforeEach(() => {
 
 afterEach(() => {
   opencodeClient.createSession = originalClient.createSession
+  opencodeClient.getSession = originalClient.getSession
   opencodeClient.sendMessage = originalClient.sendMessage
   opencodeClient.shellSession = originalClient.shellSession
   opencodeClient.setDirectory(originalClient.directory)
