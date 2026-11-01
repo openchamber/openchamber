@@ -364,7 +364,12 @@ second account must be on the same server); `token` auth shows the token form
 with the scopes and "Create token" link the contribution names, and a username
 where its scheme is `basic`; `oauth` auth shows the client id and secret form
 with the redirect URL to copy until the server holds a client (`hasClient`),
-then the browser sign-in. Each failure code the connect routes answer
+then the browser sign-in. A tracker that takes both shows one form at a time
+behind a "Browser sign-in / API token" chip group, with one Connect button.
+While an account is connected the forms stay closed: Add account (where
+`multipleAccounts` is set) opens them with a Cancel beside, or starts the
+browser sign-in at once when that is the only step left. An extension's
+account name is the person, so the card names it once. Each failure code the connect routes answer
 (`TOKEN_REQUIRED`, `TOKEN_REFUSED`, `USERNAME_REQUIRED`, `USERNAME_INVALID`,
 `INSTANCE_REQUIRED`, `INSTANCE_MISMATCH`, `UNSUPPORTED_INSTANCE`,
 `CLIENT_MISSING`, `TRACKER_UNAVAILABLE`, `CONNECT_SUPERSEDED`) has its own

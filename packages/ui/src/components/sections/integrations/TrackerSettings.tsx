@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
-import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
+import { SettingsChipGroup, SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useTrackerAuthEntry, useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 import type { TrackerAuthStatus, TrackerConnectResult, TrackerConnectTokenInput, TrackerDescriptor } from '@/lib/api/types';
@@ -115,6 +115,10 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
   const [clientId, setClientId] = React.useState('');
   const [clientSecret, setClientSecret] = React.useState('');
   const [copied, setCopied] = React.useState(false);
+  // An extension tracker that takes both ways in shows one form at a time; browser sign-in first, as the descriptor orders them.
+  const [method, setMethod] = React.useState<'oauth' | 'token'>(descriptor.authMethods.includes('oauth') ? 'oauth' : 'token');
+  // Another account's form opens on Add account; while one is connected the card stays quiet.
+  const [adding, setAdding] = React.useState(false);
   const pollTimerRef = React.useRef<number | null>(null);
 
   const stopWaiting = React.useCallback(() => {
@@ -145,7 +149,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
   const needsUsername = takesToken && tokenFormat?.username === true;
   const createTokenUrl = tokenFormat?.createPath && instanceOrigin ? `${instanceOrigin}${tokenFormat.createPath}` : null;
 
-  const failureText = (result: Extract<TrackerConnectResult, { ok: false }>): string => {
+  const failureText = React.useCallback((result: Extract<TrackerConnectResult, { ok: false }>): string => {
     switch (result.code) {
       case 'TOKEN_REQUIRED': return t('settings.integrations.tracker.toast.tokenRequired');
       case 'TOKEN_REFUSED': return t('settings.integrations.tracker.toast.tokenRefused', { provider });
@@ -159,10 +163,10 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
       case 'CONNECT_SUPERSEDED': return t('settings.integrations.tracker.toast.superseded');
       default: return result.message || t('settings.integrations.tracker.toast.connectFailed', { provider });
     }
-  };
+  }, [provider, t]);
 
   /** The instance the connect routes take: only while the card asks for one. */
-  const instanceInput = (): string | undefined => (needsInstance ? instance.trim() || undefined : undefined);
+  const instanceInput = needsInstance ? instance.trim() || undefined : undefined;
 
   const startConnect = React.useCallback(async () => {
     if (!trackers) return;
@@ -183,7 +187,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
             return;
           }
           reportSettingsSaveState('saving');
-          const saved = await trackers.authSaveOAuthClient(providerId, { instance: instanceInput(), clientId: nextClientId, clientSecret: clientSecret.trim() || undefined });
+          const saved = await trackers.authSaveOAuthClient(providerId, { instance: instanceInput, clientId: nextClientId, clientSecret: clientSecret.trim() || undefined });
           if (!saved.ok) {
             reportSettingsSaveState('error');
             toast.error(failureText(saved));
@@ -193,7 +197,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
           setClientSecret('');
         }
       }
-      const payload = await trackers.authStart(providerId, isDesktopShell() ? 'desktop' : 'web', { instance: instanceInput() });
+      const payload = await trackers.authStart(providerId, isDesktopShell() ? 'desktop' : 'web', { instance: instanceInput });
       setIsWaiting(true);
       setOpen(true);
       void openExternalUrl(payload.authorizationUrl);
@@ -210,18 +214,20 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
           if (authorizationCompleted(previous, snapshotAccounts(next))) {
             stopWaiting();
             setClientId('');
+            setAdding(false);
             toast.success(t(copy.toastConnected, { provider }));
             void focusDesktopWindow();
           }
         })();
       }, AUTHORIZATION_POLL_MS);
-    } catch {
-      toast.error(t(copy.toastStartConnectFailed, { provider }));
+    } catch (error) {
+      // An extension tracker refuses a start with its own reason (a full tracker, another server): show it.
+      toast.error(t(copy.toastStartConnectFailed, { provider }), extension && error instanceof Error && error.message ? { description: error.message } : undefined);
       stopWaiting();
     } finally {
       setIsBusy(false);
     }
-  }, [clientId, clientSecret, connect?.hasClient, copy, extension, instance, needsInstance, provider, providerId, refreshTrackerStatus, stopWaiting, t, trackers]);
+  }, [clientId, clientSecret, connect?.hasClient, copy, extension, failureText, instance, instanceInput, needsInstance, provider, providerId, refreshTrackerStatus, stopWaiting, t, trackers]);
 
   const connectToken = React.useCallback(async () => {
     if (!trackers) return;
@@ -253,13 +259,14 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
       // The server took the token: it leaves the field.
       setToken('');
       setUsername('');
+      setAdding(false);
       reportSettingsSaveState('saved');
       await refreshTrackerStatus(trackers, providerId, { force: true });
       toast.success(t(copy.toastConnected, { provider }));
     } finally {
       setIsBusy(false);
     }
-  }, [copy, instance, needsInstance, needsUsername, provider, providerId, refreshTrackerStatus, t, token, trackers, username]);
+  }, [copy, failureText, instance, needsInstance, needsUsername, provider, providerId, refreshTrackerStatus, t, token, trackers, username]);
 
   const activateAccount = React.useCallback(async (accountId: string) => {
     if (!trackers || !accountId) return;
@@ -315,6 +322,9 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
     ? (status.accounts ?? []).filter((entry) => !entry.current)
     : [];
   const displayName = user?.name?.trim() || t(copy.unknownUser);
+  // A built-in's account name is the workspace; an extension's is the person again, so it shows once.
+  const workspaceName = account?.name?.trim() && account.name.trim() !== displayName ? account.name.trim() : null;
+  const writtenOff = !connected ? storedAccounts.find((entry) => entry.status === 'invalid') ?? null : null;
   const statusLabel = isWaiting
     ? t(copy.waiting)
     : isLoading && !hasChecked
@@ -326,12 +336,26 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
           : t(copy.notConnected);
   const expanded = isWaiting || open;
   const settingsItem = `integrations.${providerId}`;
-  // Another account joins through the same forms; a tracker with one account shows them only while nobody is connected.
-  const showForms = Boolean(extension) && (!connected || capabilities.multipleAccounts);
+  // An extension tracker's forms: always while nobody is connected, and for
+  // another account once the user asks for one (a tracker with several).
+  const showForms = Boolean(extension) && (!connected || (capabilities.multipleAccounts && adding));
+  const bothMethods = takesOauth && takesToken;
+  const formMethod: 'oauth' | 'token' = !takesToken ? 'oauth' : !takesOauth ? 'token' : method;
   const fieldClass = 'h-8 min-w-0 flex-1 rounded-md px-3';
 
   const connectForms = showForms ? (
     <div className="space-y-3">
+      {bothMethods ? (
+        <SettingsChipGroup
+          aria-label={t('settings.integrations.tracker.method.label')}
+          value={formMethod}
+          onChange={setMethod}
+          options={[
+            { value: 'oauth', label: t('settings.integrations.tracker.method.oauth') },
+            { value: 'token', label: t('settings.integrations.tracker.method.token') },
+          ]}
+        />
+      ) : null}
       {needsInstance && connect?.instances.kind === 'user' ? (
         <SettingsStackedField label={connect.instances.label} controlClassName="w-full max-w-none">
           <Input
@@ -345,7 +369,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
           />
         </SettingsStackedField>
       ) : null}
-      {takesOauth && !connect?.hasClient ? (
+      {formMethod === 'oauth' && !connect?.hasClient ? (
         <>
           <SettingsStackedField label={t('settings.integrations.tracker.field.clientId')} controlClassName="w-full max-w-none">
             <Input value={clientId} onChange={(event) => setClientId(event.target.value)} autoComplete="off" spellCheck={false} className={fieldClass} disabled={isBusy || isWaiting} />
@@ -367,7 +391,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
           ) : null}
         </>
       ) : null}
-      {takesToken ? (
+      {formMethod === 'token' ? (
         <>
           {needsUsername ? (
             <SettingsStackedField label={t('settings.integrations.tracker.field.username')} controlClassName="w-full max-w-none">
@@ -401,31 +425,56 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
     </div>
   ) : null;
 
+  /** Add account: a built-in, or an extension whose only step left is the browser, signs in at once; otherwise the form opens. */
+  const addAccount = () => {
+    if (!extension || (formMethod === 'oauth' && !bothMethods && connect?.hasClient && !needsInstance)) {
+      void startConnect();
+      return;
+    }
+    setAdding(true);
+  };
+
   const connectButtons = (
     <div className="flex flex-wrap items-center gap-2">
+      {showForms ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="default"
+          onClick={() => void (formMethod === 'token' ? connectToken() : startConnect())}
+          disabled={isBusy || isWaiting || (isLoading && !hasChecked)}
+        >
+          {isBusy ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
+          {t(copy.connect, { provider })}
+        </Button>
+      ) : null}
+      {!extension && takesOauth && !connected ? (
+        <Button type="button" size="sm" variant="default" onClick={() => void startConnect()} disabled={isBusy || isWaiting || (isLoading && !hasChecked)}>
+          {isBusy ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
+          {t(copy.connect, { provider })}
+        </Button>
+      ) : null}
+      {connected && capabilities.multipleAccounts && canConnect && !showForms ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={addAccount}
+          disabled={isBusy || isWaiting}
+          data-settings-item={`${settingsItem}.add-workspace`}
+        >
+          {t(copy.addAccount, { provider })}
+        </Button>
+      ) : null}
+      {connected && showForms ? (
+        <Button type="button" size="sm" variant="ghost" onClick={() => { stopWaiting(); setAdding(false); }} disabled={isBusy}>
+          {t('settings.common.actions.cancel')}
+        </Button>
+      ) : null}
       {connected || storedAccounts.length > 0 ? (
         // Disconnect also removes a written-off account, which frees the server for another one.
         <Button type="button" size="sm" variant="destructive" onClick={() => void disconnect()} disabled={isBusy}>
           {t(copy.disconnect)}
-        </Button>
-      ) : null}
-      {takesOauth && (!connected || capabilities.multipleAccounts) ? (
-        <Button
-          type="button"
-          size="sm"
-          variant={connected ? 'outline' : 'default'}
-          onClick={() => void startConnect()}
-          disabled={isBusy || isWaiting || (isLoading && !hasChecked)}
-          data-settings-item={connected ? `${settingsItem}.add-workspace` : undefined}
-        >
-          {isBusy && !takesToken ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
-          {connected ? t(copy.addAccount, { provider }) : takesToken ? t('settings.integrations.tracker.actions.signIn') : t(copy.connect, { provider })}
-        </Button>
-      ) : null}
-      {takesToken && showForms ? (
-        <Button type="button" size="sm" variant={connected ? 'outline' : 'default'} onClick={() => void connectToken()} disabled={isBusy}>
-          {isBusy ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : null}
-          {takesOauth || connected ? t('settings.integrations.tracker.actions.connectToken') : t(copy.connect, { provider })}
         </Button>
       ) : null}
     </div>
@@ -464,7 +513,7 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
             )}
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-foreground">{displayName}</div>
-              {account?.name ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{account.name}</p> : null}
+              {workspaceName ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{workspaceName}</p> : null}
               {connect?.instance ? (
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">{t('settings.integrations.tracker.account.instance', { instance: connect.instance })}</p>
               ) : null}
@@ -476,10 +525,11 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
         {needsAttention ? (
           // A written-off account is a problem the user fixes here: it stays visible, with the server it was on.
           <div className="space-y-0.5">
-            <p className="typography-meta text-[var(--status-warning)]">{t('settings.integrations.tracker.invalid.hint', { provider })}</p>
+            {writtenOff?.name ? <div className="truncate text-sm font-medium text-foreground">{writtenOff.name}</div> : null}
             {!connected && connect?.instance ? (
               <p className="truncate text-xs text-muted-foreground">{t('settings.integrations.tracker.account.instance', { instance: connect.instance })}</p>
             ) : null}
+            <p className="typography-meta text-[var(--status-warning)]">{t('settings.integrations.tracker.invalid.hint', { provider })}</p>
           </div>
         ) : null}
 
@@ -501,7 +551,11 @@ export const TrackerSettings: React.FC<TrackerSettingsProps> = ({ descriptor, ex
                         <div className="truncate text-sm font-medium text-foreground">
                           {entry.name?.trim() || t(copy.connected)}
                         </div>
-                        {entry.user?.name ? <p className="truncate text-xs text-muted-foreground">{entry.user.name}</p> : null}
+                        {entry.status === 'invalid' ? (
+                          <p className="truncate text-xs text-[var(--status-warning)]">{t('settings.integrations.tracker.status.invalid')}</p>
+                        ) : entry.user?.name && entry.user.name !== entry.name ? (
+                          <p className="truncate text-xs text-muted-foreground">{entry.user.name}</p>
+                        ) : null}
                       </div>
                       <Button type="button" size="sm" variant="ghost" onClick={() => void activateAccount(entry.id)} disabled={isBusy || entry.status === 'invalid'}>
                         {t(copy.switchTo)}

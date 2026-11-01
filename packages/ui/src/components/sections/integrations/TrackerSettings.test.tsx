@@ -267,14 +267,18 @@ describe('TrackerSettings', () => {
     await mount(youtrack(), extensionOf(tokenAndOauth));
     expect(container.textContent).toContain('YouTrack Bridge');
     expect(container.textContent).toContain('Server address');
+    // One way in at a time: the browser sign-in first, with the client fields and the redirect URL.
+    for (const label of ['Browser sign-in', 'API token', 'Connect']) expect(buttonLabels()).toContain(label);
     expect(container.textContent).toContain('Client ID');
+    expect(container.textContent).not.toContain('The token needs:');
     expect(inputs().some((input) => input.readOnly && input.value === 'http://localhost/api/tracker/ext-youtrack/oauth/callback')).toBe(true);
-    expect(buttonLabels()).toContain('Sign in in the browser');
-    expect(buttonLabels()).toContain('Connect with token');
     expect(container.textContent).not.toContain('Update OpenChamber');
 
+    await click('API token');
+    expect(container.textContent).not.toContain('Client ID');
+    expect(container.textContent).toContain('The token needs:');
     // The token needs the server first.
-    await click('Connect with token');
+    await click('Connect');
     expect(calls.some((call) => call.startsWith('token:'))).toBe(false);
     const address = inputs().find((input) => input.placeholder === 'https://youtrack.example.com');
     if (!address) throw new Error('Missing server address field');
@@ -284,10 +288,16 @@ describe('TrackerSettings', () => {
     const tokenField = inputs().filter((entry) => entry.type === 'password').at(-1);
     if (!tokenField) throw new Error('Missing token field');
     await type(tokenField, 'secret-1');
-    await click('Connect with token');
+    await click('Connect');
     expect(calls).toContain('token:ext-youtrack:https://yt.example.com:secret-1:');
     expect(container.textContent).toContain('Acme Org');
     expect(buttonLabels()).toContain('Disconnect');
+    // Another account's form opens only on request.
+    expect(inputs().some((input) => input.type === 'password')).toBe(false);
+    await click('Add account');
+    expect(inputs().some((input) => input.type === 'password')).toBe(true);
+    await click('Cancel');
+    expect(inputs().some((input) => input.type === 'password')).toBe(false);
   });
 
   test('a refused token is said in the tracker\'s name, and a written-off account asks to connect again', async () => {
@@ -315,6 +325,7 @@ describe('TrackerSettings', () => {
     };
     await mount(youtrack({ authMethods: ['token'] }), extensionOf({ ...tokenAndOauth, authMethods: ['token'], oauth: undefined }));
     expect(container.textContent).toContain('Account needs attention');
+    expect(container.textContent).toContain('Mona');
     expect(container.textContent).toContain('YouTrack refused');
     expect(container.textContent).toContain('On https://yt.example.com');
     // Removing it frees the server for a new token; the token form stays beside it.
@@ -326,7 +337,7 @@ describe('TrackerSettings', () => {
     status = { connected: false, connect: { ...connect, instance: 'https://yt.example.com' } };
     await mount(youtrack({ authMethods: ['oauth'] }), extensionOf({ ...tokenAndOauth, authMethods: ['oauth'], token: undefined }));
     expect(buttonLabels()).toContain('Connect');
-    expect(buttonLabels()).not.toContain('Connect with token');
+    expect(buttonLabels()).not.toContain('API token');
     await click('Connect');
     // Without a client nothing starts.
     expect(calls.some((call) => call.startsWith('start:'))).toBe(false);
@@ -337,5 +348,22 @@ describe('TrackerSettings', () => {
     expect(calls).toContain('client:ext-youtrack::client-1:shh');
     expect(calls).toContain('start:ext-youtrack:web');
     expect(container.textContent).toContain('Waiting');
+  });
+
+  test('another account\'s browser sign-in stops waiting on Cancel', async () => {
+    status = { ...connectedStatus, connect: { ...connect, instance: 'https://yt.example.com' } };
+    await mount(youtrack({ authMethods: ['oauth'] }), extensionOf({ ...tokenAndOauth, authMethods: ['oauth'], token: undefined }));
+    await click('Add account');
+    // The mapping selects carry hidden inputs; the client field is the first visible text one.
+    const clientIdField = inputs().find((input) => input.type === 'text' && !input.readOnly && !input.hidden && !input.getAttribute('aria-hidden'));
+    if (!clientIdField) throw new Error('Missing client id field');
+    await type(clientIdField, 'client-1');
+    await click('Connect');
+    expect(calls).toContain('start:ext-youtrack:web');
+    expect(container.textContent).toContain('Waiting');
+    await click('Cancel');
+    expect(container.textContent).not.toContain('Waiting');
+    expect(buttonLabels()).toContain('Add account');
+    expect(pollTick).toBeNull();
   });
 });

@@ -137,11 +137,18 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                     </p>
                   ) : null}
                   {capability === 'service' && providesTracker ? (
-                    <p className="typography-meta mt-0.5 text-foreground">
-                      {t('settings.extensions.capability.service.providesTracker', {
-                        label: guest?.tracker?.label ?? guest?.name ?? '',
-                      })}
-                    </p>
+                    <div className="typography-meta mt-0.5 text-foreground">
+                      <p>
+                        {t('settings.extensions.capability.service.providesTracker', {
+                          label: guest?.tracker?.label ?? guest?.name ?? '',
+                        })}
+                      </p>
+                      <ul className="mt-0.5 list-disc space-y-0.5 ps-4">
+                        <li>{t('settings.extensions.capability.service.providesTracker.reads')}</li>
+                        <li>{t('settings.extensions.capability.service.providesTracker.writes')}</li>
+                      </ul>
+                      <p className="mt-0.5 text-muted-foreground">{t('settings.extensions.capability.service.providesTracker.tokens')}</p>
+                    </div>
                   ) : null}
                   {capability === 'service' && sessionEvents.length > 0 ? (
                     <div className="typography-meta mt-0.5 text-foreground">

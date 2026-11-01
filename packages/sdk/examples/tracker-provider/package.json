@@ -12,7 +12,7 @@
       "panel": {
         "id": "tracker-provider",
         "name": "Teaboard Tracker",
-        "icon": "task-line"
+        "icon": "task"
       },
       "service": {
         "entry": "service/main.js",
