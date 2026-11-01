@@ -9,6 +9,7 @@
     "build": "tsc -b",
     "build:ghostty-wasm": "bash scripts/build-libghostty-wasm.sh",
     "type-check": "bun check -b",
+    "ui-blocks:generate": "bun src/components/chat/uiBlocks/generate-guidance.ts",
     "lint": "oxlint -c ../../oxlint.config.ts --report-unused-disable-directives src",
     "test": "node ../../scripts/run-isolated-tests.mjs src"
   },
@@ -49,6 +50,7 @@
     "@openchamber/sdk": "workspace:*",
     "@opencode/client": "2.2.5",
     "@opencode/schema": "2.2.5",
+    "@openuidev/lang-core": "1.0.2",
     "@pierre/diffs": "1.6.1",
     "@pierre/highlights": "0.2.0",
     "@replit/codemirror-vim": "^6.4.0",

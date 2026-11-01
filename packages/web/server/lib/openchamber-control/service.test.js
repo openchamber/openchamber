@@ -760,15 +760,23 @@ describe('render.page', () => {
     expect(await named(page)).toBe('Page');
   });
 
-  it('asks for html and title in one call when html is missing', async () => {
+  it('asks for the page and its title in one call when the page is missing', async () => {
     const { service } = createService();
     await expect(service.execute('render.page', { title: 'Coverage' }, '/repo'))
-      .rejects.toMatchObject({ message: expect.stringContaining('Send html and title together in one call') });
+      .rejects.toMatchObject({ message: expect.stringContaining('Send it and title together in one call') });
+  });
+
+  it('shows a ui program the way it shows html, named by its title', async () => {
+    const { service } = createService();
+    const result = await service.execute('render.page', { ui: 'root = Stack([Text("hi")])', title: 'Pick' }, '/repo');
+    expect(result).toMatchObject({ shown: true, title: 'Pick' });
   });
 
   it.each([
-    [{ title: 'Coverage' }, 'html is required'],
-    [{ html: '   ', title: 'Coverage' }, 'html is required'],
+    [{ title: 'Coverage' }, 'html or ui is required'],
+    [{ html: '   ', title: 'Coverage' }, 'html or ui is required'],
+    [{ html: page, ui: 'root = Stack([])', title: 'Coverage' }, 'not both'],
+    [{ ui: 'x'.repeat(200_001), title: 'Coverage' }, 'ui is 200001 characters'],
     [{ html: 'x'.repeat(200_001), title: 'Coverage' }, 'the limit is 200000'],
     [{ html: page, title: 't'.repeat(121) }, 'the limit is 120'],
   ])('refuses %o with a reason the agent can act on', async (input, reason) => {
@@ -788,6 +796,18 @@ describe('render.page', () => {
     const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
     // The call starts waiting once its checks have run.
     const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('hands the agent the errors when a client cannot draw its ui', async () => {
+      const { service } = createService();
+      const pending = service.execute('render.page', { ui: 'root = Stack([Text(1)])', title: 'Pick', awaitAnswer: true }, '/repo', call);
+      await settle();
+
+      expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', notDrawn: ['Text /markdown: expects string'] })).toEqual({ answered: false });
+      const result = await pending;
+
+      expect(result).toMatchObject({ answer: { answered: false, reason: 'ui-not-drawn' } });
+      expect(result.note).toContain('Text /markdown: expects string');
+    });
 
     it('waits until the user answers and returns the answer', async () => {
       const { service } = createService();

@@ -25,6 +25,14 @@
     --oc-glass-popover-opacity: 50%;
     --oc-glass-tooltip-opacity: 62%;
     --oc-glass-saturation: 1.24;
+    /* Tone steps of flat tiles (.oc-tile and its inset and hover). Dark themes
+       take smaller steps: the same mix of text colour reads about 1.6 times
+       stronger near black (ΔL* 4 against 2.5 in light), so cards stood out
+       more in dark than in light. chat/lib/visualKit.ts mirrors these for
+       agent pages. */
+    --oc-tile-tone: 4%;
+    --oc-tile-inset-tone: 6%;
+    --oc-tile-hover-tone: 7%;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
     --text-markdown: 0.875rem;
@@ -126,6 +134,9 @@
   }
 
   .dark {
+    --oc-tile-tone: 3%;
+    --oc-tile-inset-tone: 4.5%;
+    --oc-tile-hover-tone: 5.5%;
     --oc-elevation-ring: rgb(255 255 255 / 0.08);
     --oc-elevation-button:
       inset 0 1px 0 0 rgb(255 255 255 / 0.04),
@@ -667,7 +678,7 @@
    dark themes: a tile is one step, a block inside it (an icon square, a
    neutral pill) is the next, and hover adds a step to what it sits on. */
 .oc-tile {
-  background-color: color-mix(in srgb, var(--foreground) 4%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-tone), transparent);
 }
 
 /* A row in the composer's top slot (goal, background commands, queue, hints).
@@ -678,7 +689,7 @@
 }
 
 .oc-tile-inset {
-  background-color: color-mix(in srgb, var(--foreground) 6%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-inset-tone), transparent);
 }
 
 .oc-tile-hover:hover {
@@ -686,7 +697,7 @@
 }
 
 .oc-tile.oc-tile-hover:hover {
-  background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+  background-color: color-mix(in srgb, var(--foreground) var(--oc-tile-hover-tone), transparent);
 }
 }
 

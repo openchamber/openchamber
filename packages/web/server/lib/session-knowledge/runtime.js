@@ -14,6 +14,7 @@
  * carry the same context as the ones a tab sends to.
  */
 import { isRecord } from '../shared/guards.js';
+import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const PINS_METADATA_KEY = 'project_context_pins';
 
@@ -125,21 +126,19 @@ export const DIRECT_TOOLS_GUIDANCE = "The openchamber tools (openchamber, opench
  * `openchamber_render` tool, and only here. Stated only in the tool
  * description, it went unread: asked for a breakdown of lines of code per
  * package, an agent answered with a list and drew the chart only when asked.
- * Interface mockups are named on their own: listed only as data, the cases
- * read to a literal model as "charts only", while a proposed UI change is
- * where a page helps most. The limits matter as much as the cases: a page for
- * two numbers is worse than a sentence.
+ * Data and structure go to UI blocks (`UI_BLOCKS_GUIDANCE`), which look the
+ * same whatever model writes them; a page is left with what the block
+ * catalog cannot draw. Interface mockups are named on their own, because a
+ * proposed UI change is where a page helps most.
  */
-export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws a chart, table, diagram or interface mockup inline in the chat."
-  + " Use it when the answer is mostly data or structure the user would otherwise picture:"
-  + " numbers across several items (sizes, counts, timings, costs, test results), shares of a whole,"
-  + " a trend, options compared on several criteria, a timeline, how components connect;"
-  + " or how something looks: a proposed interface change, before and after, layout options."
-  + " Skip it for a few numbers, a short list, code, or when the user asked for plain text."
+export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws an HTML page inline in the chat, above your reply."
+  + " Use it for what UI blocks cannot show: how something looks (a proposed interface change, before and after, layout options),"
+  + " or a custom drawing the block components do not cover. Never for data: charts, tables and comparisons are UI blocks, even when the user asks to see them."
   + " At most one page per answer."
   + " A mockup of the user's own project takes its look from that project's code (theme tokens, CSS variables, styles), not from OpenChamber's theme."
   + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
-  + " For a choice a page shows better than text, such as layouts or designs, ask on a page with awaitAnswer and continue from the answer.";
+  + " A choice that sets the direction of the work goes through ui with awaitAnswer (see UI blocks);"
+  + " a choice between visual designs, through an html page with awaitAnswer.";
 
 /**
  * Titles only for memory, never bodies: an index carrying full text grows
@@ -248,6 +247,7 @@ export const SECRET_REQUEST_GUIDANCE = "The openchamber_secret tool asks the use
 const buildGuidance = ({ linking, rendering, secrets, workflows, directTools }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
   linking ? WORK_NAME_GUIDANCE : '',
+  rendering ? UI_BLOCKS_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
   secrets ? SECRET_REQUEST_GUIDANCE : '',
   workflows ? WORKFLOW_GUIDANCE : '',

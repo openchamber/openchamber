@@ -127,6 +127,8 @@ const ANSWERED_NOTE = "The user answered on the page. summary is their choice in
  */
 export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the page and wrote in the chat instead; their message follows this result. Continue from that message and don't ask the same question on a page again unless they want it.";
 
+const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
+
 const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
 
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
@@ -184,6 +186,17 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
     if (!sessionId || !callId) {
       throw new OpenChamberControlError('sessionId and callId are required', 400);
     }
+    // A client that cannot draw a page's ui reports it, so the agent hears the
+    // parser's errors instead of waiting on fields nobody can see.
+    if (Array.isArray(input.notDrawn)) {
+      const errors = input.notDrawn.filter(isString).map((error) => error.slice(0, 500)).slice(0, 20);
+      const resolveNotDrawn = waiting.get(pageKey(sessionId, callId));
+      if (!resolveNotDrawn) {
+        throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
+      }
+      resolveNotDrawn({ answered: false, reason: 'ui-not-drawn', errors });
+      return { answered: false };
+    }
     const summary = isString(input.summary) ? input.summary.trim() : '';
     if (!summary) {
       throw new OpenChamberControlError('summary is required: what the user chose, in a few words', 400);
@@ -222,37 +235,45 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat }
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
   }
+  // A page is an HTML document or a ui program in the UI block language; the
+  // chat draws the program with its own components (packages/ui
+  // components/chat/uiBlocks). The server cannot parse that language: a
+  // client that cannot draw it reports so through the answer route.
   const html = isString(input.html) ? input.html : '';
-  if (!html.trim()) {
-    throw new OpenChamberControlError('html is required: one complete, self-contained HTML document. Send html and title together in one call', 400);
+  const ui = isString(input.ui) ? input.ui : '';
+  if (html.trim() && ui.trim()) {
+    throw new OpenChamberControlError('Send html or ui, not both', 400);
   }
-  if (html.length > RENDER_PAGE_MAX_HTML_LENGTH) {
-    throw new OpenChamberControlError(`html is ${html.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller, for example by drawing data with a script instead of writing out every element`, 400);
+  if (!html.trim() && !ui.trim()) {
+    throw new OpenChamberControlError('html or ui is required: one complete, self-contained HTML document, or one complete openui-lang program. Send it and title together in one call', 400);
+  }
+  const [field, content] = ui.trim() ? ['ui', ui] : ['html', html];
+  if (content.length > RENDER_PAGE_MAX_HTML_LENGTH) {
+    throw new OpenChamberControlError(`${field} is ${content.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller`, 400);
   }
   const title = (isString(input.title) ? input.title.trim() : '')
-    || renderPageTitleFromHtml(html)
+    || (html ? renderPageTitleFromHtml(html) : '')
     || RENDER_PAGE_FALLBACK_TITLE;
   if (title.length > RENDER_PAGE_MAX_TITLE_LENGTH) {
     throw new OpenChamberControlError(`title is ${title.length} characters; the limit is ${RENDER_PAGE_MAX_TITLE_LENGTH}`, 400);
   }
-  const hidden = await describeHiddenImages(html, directory);
+  const hidden = html ? await describeHiddenImages(html, directory) : null;
+  const withHidden = (result, note) => (hidden
+    ? { ...result, note: `${note} ${hidden.note}`, images: hidden.images }
+    : { ...result, note });
   if (input.awaitAnswer !== true) {
-    return hidden
-      ? { shown: true, title, note: `${SHOWN_NOTE} ${hidden.note}`, images: hidden.images }
-      : { shown: true, title, note: SHOWN_NOTE };
+    return withHidden({ shown: true, title }, SHOWN_NOTE);
   }
   // A plugin generated before pages could wait sends no call id.
   if (!sessionId || !callId) {
     throw new OpenChamberControlError('This connection cannot wait for an answer on a page; show the page without awaitAnswer and ask in text', 400);
   }
   if (await hasUnreadChat(sessionId)) {
-    const answer = { answered: false, reason: 'chat-sent-earlier' };
-    return hidden
-      ? { title, answer, note: `${CHAT_SENT_EARLIER_NOTE} ${hidden.note}`, images: hidden.images }
-      : { title, answer, note: CHAT_SENT_EARLIER_NOTE };
+    return withHidden({ title, answer: { answered: false, reason: 'chat-sent-earlier' } }, CHAT_SENT_EARLIER_NOTE);
   }
   const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
-  return hidden
-    ? { title, answer, note: `${ANSWERED_NOTE} ${hidden.note}`, images: hidden.images }
-    : { title, answer, note: ANSWERED_NOTE };
+  if (answer.reason === 'ui-not-drawn') {
+    return { title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [UI_NOT_DRAWN_NOTE, ...answer.errors].join('\n') };
+  }
+  return withHidden({ title, answer }, ANSWERED_NOTE);
 };

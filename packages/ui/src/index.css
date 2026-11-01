@@ -1108,6 +1108,28 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/* A UI block's bar grows from its start once, when it first appears. */
+.oc-bar-grow {
+  transform-origin: left center;
+  animation: oc-bar-grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[dir="rtl"] .oc-bar-grow {
+  transform-origin: right center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-bar-grow {
+    animation: none;
+  }
+}
+
+@keyframes oc-bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
 /* Every Pierre instance (Changes view, tool cards, the tool dialog, the Files
    view) renders into the shadow root of a `diffs-container`. Setting the font
    and line height on that host resolves `--text-code` where the instance sits, so local
@@ -2039,7 +2061,6 @@ diffs-container {
 
 .markdown-content [data-streamdown="table-cell"],
 .markdown-content [data-streamdown="table-header-cell"] {
-  min-width: 120px;
   padding: 0.625rem 1rem;
   border-inline-end: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   vertical-align: middle;
@@ -2051,6 +2072,10 @@ diffs-container {
 
 .markdown-content [data-streamdown="table-header-cell"] {
   color: var(--foreground);
+  /* A header breaks between words only: split mid-word it read as two
+     words ("Встановлен ня"). A long one widens its column, and the table
+     scrolls sideways when the row no longer fits. */
+  overflow-wrap: normal;
 }
 
 .markdown-content td:last-child,
@@ -2062,6 +2087,13 @@ diffs-container {
    (or shrinks to the column when cells wrap) until the reply settles. */
 .markdown-content [data-table-wrap="false"] [data-streamdown="table"][data-oc-table-layout="pending"] {
   width: max-content;
+}
+
+/* Cells break anywhere, so an unmeasured wrapping table could squeeze a
+   column to a letter. A measured one gets its widths from MarkdownTable,
+   where a short column (row numbers) keeps its own width. */
+.markdown-content [data-table-wrap="true"] [data-streamdown="table"][data-oc-table-layout="pending"] :is(td, th) {
+  min-width: 120px;
 }
 
 .markdown-content [data-streamdown="table"][data-oc-table-layout="pending"] code {

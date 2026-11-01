@@ -4,7 +4,6 @@ import { toast } from '@/components/ui';
 import { ToolbarTooltipButton } from '@/components/ui/action-toolbar';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useFrameAnnotation } from '@/components/browser/useFrameAnnotation';
-import { useWaitingBlink } from '@/hooks/useDurationTicker';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { BrowserAnnotationPayload } from '@/lib/browser/contract';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -49,6 +48,8 @@ import {
 import { useRenderPageHtml } from './renderPageImages';
 import { saveFile } from './saveFile';
 import { useHtmlRenderTheme } from './useHtmlRenderTheme';
+import { PageAskStatus } from './PageAskStatus';
+import { UiPageFrame } from './UiPageFrame';
 
 // A timeline row unmounts when it scrolls away and mounts again when it comes
 // back. The page's last height is kept per call, so it comes back at its size
@@ -349,7 +350,9 @@ export function ShownPage({ part }: { part: ToolPart }) {
     // its answer state again on every render.
     const { t } = useI18n();
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    return page ? <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} /> : null;
+    if (!page) return null;
+    if (page.ui) return <UiPageFrame part={part} source={page.ui} ask={page.ask} />;
+    return <HtmlRenderFrame part={part} html={page.html} title={page.title || t('chat.htmlRender.untitled')} ask={page.ask} />;
 }
 
 interface HtmlRenderFrameProps {
@@ -365,12 +368,6 @@ interface HtmlRenderFrameProps {
  * frame takes the height the page reports, so the page scrolls with the chat;
  * annotation, full screen and download sit in a row above it.
  */
-// Its own component: the blink re-renders this dot once a second, not the page around it.
-function WaitingDot() {
-    const blink = useWaitingBlink(true);
-    return <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full bg-[var(--primary-base)]', blink)} />;
-}
-
 function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     const { t } = useI18n();
     const partId = part.id;
@@ -443,15 +440,6 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         }
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
-    const status = answeredSummary !== undefined
-        ? t('chat.htmlRender.answered', { summary: answeredSummary })
-        : ask.kind === 'waiting'
-            ? t('chat.htmlRender.waiting')
-            : ask.kind === 'answered-in-chat'
-                ? t('chat.htmlRender.answeredInChat')
-                : ask.kind === 'chat-sent-earlier'
-                    ? t('chat.htmlRender.chatSentEarlier')
-                    : ask.kind === 'unanswered' ? t('chat.htmlRender.unanswered') : null;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
     // The chat brings a page that waits for an answer into view, and again
     // as its height arrives: an off-screen frame reports its size only once
@@ -520,12 +508,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                 </>
             )}
         </PageSelectionScope>
-        {status ? (
-            <div className="mt-1 flex items-center gap-1.5 typography-meta text-muted-foreground" data-html-render-status={ask.kind}>
-                {waiting ? <WaitingDot /> : null}
-                <span className="min-w-0 truncate" title={status}>{status}</span>
-            </div>
-        ) : null}
+        <PageAskStatus ask={ask} answeredSummary={answeredSummary} />
         </div>
     );
 }

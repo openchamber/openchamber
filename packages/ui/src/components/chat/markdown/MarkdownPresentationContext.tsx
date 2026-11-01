@@ -22,6 +22,10 @@ export interface MarkdownPresentation {
   /** A preview button next to loopback links; only chat messages show it. */
   loopbackPreview: boolean;
   purpose?: 'copy' | 'image';
+  /** `openui-lang` fences draw as UI blocks (`components/chat/uiBlocks`). */
+  uiBlocks: boolean;
+  /** The finished reply a block's answer replies to; absent while it streams, and outside chat replies. */
+  uiBlockReply: { sessionId: string; messageId: string } | null;
   disableLinkSafety?: boolean;
   theme: Theme;
   mermaidControls: MermaidControls;

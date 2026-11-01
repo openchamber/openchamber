@@ -153,14 +153,22 @@ depends on how the user works.
 
 A session whose agent has the managed `openchamber_render` tool (the setting is
 on and OpenChamber launched OpenCode, read through `isPageRenderingAvailable`)
-is told when a chart, table, diagram or interface mockup beats prose
-(`RENDER_PAGE_GUIDANCE`).
+is told how to draw UI blocks inside its reply (`UI_BLOCKS_GUIDANCE`, generated
+from the UI's block catalog into `ui-blocks-guidance.js`, see
+`packages/ui/src/components/chat/uiBlocks/DOCUMENTATION.md`) and when a page
+still beats them (`RENDER_PAGE_GUIDANCE`): how something looks, or a custom
+drawing the block components do not cover. Data is never a page, even when the
+user asks to see it: in a bench, DeepSeek V4.1 Flash answered "show it" with
+an HTML chart while the guidance only preferred blocks, and the `html`
+description still taught it how to draw charts.
 Stated only in the tool description, it went unread: asked for a breakdown of
 lines of code per package, an agent answered with a list and drew the chart
-only when asked again. The guidance holds the cases and the limits (no page for
-a few numbers, at most one per answer), the mockup exception, and asking with a
-page (`awaitAnswer`) when the user has to choose between visual options; the
-tool description repeats none of it. It goes into `openchamber.guidance`, so a
+only when asked again. The guidance holds the cases and the limits (no block
+for a few numbers, at most one page per answer), the mockup exception, and
+asking with a page (`awaitAnswer`) when the user has to choose between visual
+options; the tool description repeats none of it. Data and structure go to
+blocks because they look the same whatever model writes them, while a page's
+look depends on the model writing good HTML. It goes into `openchamber.guidance`, so a
 change to the text reaches running sessions on their next message.
 
 ## When to ask for a secret

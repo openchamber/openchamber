@@ -254,7 +254,7 @@ describe('htmlRenderTheme', () => {
     test('defines every variable the kit classes read, in both modes', () => {
         const fonts = { rem: 16, text: 14, sans: 'sans-serif', mono: 'monospace' };
         const document = buildHtmlRenderDocument('<p>a</p>', theme);
-        const read = new Set(Array.from(document.matchAll(/var\((--oc-[a-z-]+)/g), (match) => match[1]));
+        const read = new Set(Array.from(document.matchAll(/var\((--oc-[a-z0-9-]+)/g), (match) => match[1]));
         // Set by the class itself or by the page.
         for (const local of ['--oc-tone', '--oc-tone-text']) read.delete(local);
         for (const dark of [true, false]) {

@@ -32,9 +32,15 @@ export function MarkdownTableCell({ node, style, ...props }: React.ComponentProp
   return <Cell {...props} node={node} style={cellStyle} />;
 }
 
+// A wrapped column is never squeezed below this; a narrower one (row numbers,
+// short codes) keeps its own width.
+const MIN_COLUMN = 120;
+// A text column in a table that scrolls sideways wraps at this width.
+const WIDE_COLUMN = 280;
+
 // Keep short columns at their natural width and share only the remaining space.
 function fitColumns(natural: number[], available: number, wrap: boolean): number[] {
-  const widths = natural.map((width) => Math.min(Math.max(120, available || 320), Math.max(120, width)));
+  const widths = natural.map((width) => Math.min(Math.max(MIN_COLUMN, available || 320), width));
   if (!wrap || available <= 0) return widths;
   let open = widths.map((_, index) => index);
   let remaining = available;
@@ -42,12 +48,40 @@ function fitColumns(natural: number[], available: number, wrap: boolean): number
     const share = remaining / open.length;
     const fitting = open.filter((index) => widths[index] <= share);
     if (!fitting.length) {
-      for (const index of open) widths[index] = Math.max(120, Math.floor(share));
+      // Below the minimum share the table scrolls sideways anyway; squeezing a
+      // long text column to the minimum then only stacks it into a tall cell.
+      const width = share < MIN_COLUMN ? WIDE_COLUMN : Math.floor(share);
+      for (const index of open) widths[index] = Math.max(Math.min(MIN_COLUMN, natural[index]), Math.min(natural[index], width));
       break;
     }
     for (const index of fitting) remaining -= widths[index];
     open = open.filter((index) => widths[index] > share);
   }
+  return widths;
+}
+
+/**
+ * The widths hidden headings ask of their columns: a short one stays on one
+ * line, a long one wraps between words but never splits its longest word.
+ * Copies of the cells are measured next to the table, so code, bold and links
+ * inside a heading keep their own styles.
+ */
+function headingWidths(cells: HTMLTableCellElement[], host: HTMLElement): number[] {
+  const holder = host.ownerDocument.createElement('div');
+  holder.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;visibility:hidden';
+  const copies = cells.map((cell) => {
+    const copy = cell.ownerDocument.createElement(cell.localName);
+    for (const { name, value } of Array.from(cell.attributes)) copy.setAttribute(name, value);
+    copy.append(...Array.from(cell.childNodes, (node) => node.cloneNode(true)));
+    copy.style.cssText = 'display:block;width:max-content';
+    holder.append(copy);
+    return copy;
+  });
+  host.append(holder);
+  const full = copies.map((copy) => copy.getBoundingClientRect().width);
+  for (const copy of copies) copy.style.width = 'min-content';
+  const widths = copies.map((copy, index) => Math.ceil(Math.max(Math.min(full[index], MIN_COLUMN), copy.getBoundingClientRect().width)) + 1);
+  holder.remove();
   return widths;
 }
 
@@ -115,7 +149,14 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
       const bodyRows = rows.filter((row) => row.parentElement?.tagName === 'TBODY');
       for (const row of bodyRows.length ? bodyRows : rows) {
         Array.from(row.cells).forEach((cell, index) => {
-          natural[index] = Math.max(natural[index] ?? 120, Math.ceil(cell.getBoundingClientRect().width));
+          natural[index] = Math.max(natural[index] ?? 0, Math.ceil(cell.getBoundingClientRect().width));
+        });
+      }
+      const headRow = rows.find((row) => row.parentElement?.tagName === 'THEAD');
+      const headings = headRow ? Array.from(headRow.cells) : [];
+      if (bodyRows.length && headings.length && table.parentElement) {
+        headingWidths(headings, table.parentElement).forEach((width, index) => {
+          natural[index] = Math.max(natural[index] ?? 0, width);
         });
       }
       setMeasurement({ node, natural, available, font });
