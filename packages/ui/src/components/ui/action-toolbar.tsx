@@ -51,7 +51,8 @@ export interface ToolbarAction {
 export type ToolbarGroup = ReadonlyArray<ToolbarAction | null | false | undefined>;
 
 const REST_CLASS = 'text-muted-foreground hover:bg-transparent hover:text-foreground focus-visible:text-foreground active:bg-transparent';
-const PRESSED_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground active:bg-interactive-selection';
+/** The toggle-on fill, shared with the markdown wrap toggles that keep their own geometry. */
+export const PRESSED_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground active:bg-interactive-selection';
 
 /**
  * The 24px icon button every toolbar row shares. Three looks: an action rests

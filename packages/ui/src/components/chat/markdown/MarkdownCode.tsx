@@ -10,6 +10,7 @@ import {
 } from 'streamdown';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { PRESSED_CLASS } from '@/components/ui/action-toolbar';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
@@ -176,6 +177,7 @@ export function MarkdownCode({ children, className, node, ...props }: React.Comp
                 variant="ghost"
                 size="xs"
                 data-export-ignore
+                className={wrap ? PRESSED_CLASS : undefined}
                 title={t(wrap ? 'markdownRenderer.code.actions.disableWrapTitle' : 'markdownRenderer.code.actions.enableWrapTitle')}
                 aria-pressed={wrap}
                 onClick={() => useUIStore.getState().setCodeBlockLineWrap(!wrap)}
