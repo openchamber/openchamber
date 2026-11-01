@@ -93,6 +93,16 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `BlockLine.tsx`
   - The vertical connector line left of a collapsible block's body. It is also a click target: clicking it folds/expands the block via its header toggle handler (`onToggle`), or toggles the nearest native `<details>` when no handler is passed (JSON summary sections). Geometry is inline-styled (12px hit strip centered on the 1px line) so it does not depend on compiled Tailwind classes.
 
+### Why rendered-page typography is sampled after commit
+
+`useHtmlRenderTheme` owns the typography snapshot for page frames and HTML
+downloads. It subscribes to interface size, mobile layout and the effective font
+preferences. Each change schedules one cancellable animation-frame read, after
+the layout effect that writes root size and the app root's passive font-family
+effect. Reading computed styles during render, or in a child's passive effect,
+can capture the previous settings. Theme variables travel through the existing
+frame messages; typography changes never rebuild `srcDoc` or reset page inputs.
+
 ## Current important behavior
 
 ### Bidirectional prose
