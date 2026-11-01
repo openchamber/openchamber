@@ -307,7 +307,7 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
 };
 
 /** The starting points the section editor offers; names are set by the editor, translated. */
-export const SIDEBAR_SECTION_TEMPLATES = ['waiting', 'running', 'prs', 'stalled', 'today', 'projects', 'blank'] as const;
+const SIDEBAR_SECTION_TEMPLATES = ['waiting', 'running', 'prs', 'stalled', 'today', 'projects', 'blank'] as const;
 export type SidebarSectionTemplate = typeof SIDEBAR_SECTION_TEMPLATES[number];
 
 export const createSidebarSectionFromTemplate = (template: SidebarSectionTemplate, name: string): CustomSidebarSection => {

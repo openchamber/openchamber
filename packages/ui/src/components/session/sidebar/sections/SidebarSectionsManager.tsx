@@ -7,11 +7,12 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -30,7 +31,6 @@ import {
   SIDEBAR_SECTION_NAME_MAX,
   SIDEBAR_SECTION_TEXT_MAX,
   SIDEBAR_SECTION_STATES,
-  SIDEBAR_SECTION_TEMPLATES,
   SIDEBAR_SECTION_WORK_STATES,
   type BuiltinSidebarSectionId,
   type CustomSidebarSection,
@@ -143,6 +143,8 @@ export const SidebarSectionsManager: React.FC<{ anchor: React.RefObject<HTMLElem
   );
 };
 
+const SECTION_PRESETS = ['waiting', 'running', 'prs', 'stalled', 'today'] as const satisfies readonly SidebarSectionTemplate[];
+
 const SectionList: React.FC = () => {
   const { t } = useI18n();
   const sections = useSessionDisplayStore((state) => state.sections);
@@ -160,10 +162,31 @@ const SectionList: React.FC = () => {
     <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="typography-ui-label font-medium text-foreground">{t('sessions.sidebar.sections.title')}</span>
-        <Button variant="outline" size="xs" disabled={!canAddSidebarSection(sections)} onClick={() => editSection(createSidebarSectionFromTemplate('waiting', t(TEMPLATE_KEY.waiting)), true)}>
-          <Icon name="add" className="size-3.5" />
-          {t('sessions.sidebar.sections.new')}
-        </Button>
+        {/* A new section starts from a preset: the common ones by name, a group
+            of projects, or one the user builds from nothing and names. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="xs" disabled={!canAddSidebarSection(sections)}>
+              <Icon name="add" className="size-3.5" />
+              {t('sessions.sidebar.sections.new')}
+              <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[180px]">
+            {SECTION_PRESETS.map((preset) => (
+              <DropdownMenuItem key={preset} onClick={() => editSection(createSidebarSectionFromTemplate(preset, t(TEMPLATE_KEY[preset])), true)}>
+                {t(TEMPLATE_KEY[preset])}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => editSection(createSidebarSectionFromTemplate('projects', t(TEMPLATE_KEY.projects)), true)}>
+              {t(TEMPLATE_KEY.projects)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => editSection(createSidebarSectionFromTemplate('blank', ''), true)}>
+              {t(TEMPLATE_KEY.blank)}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={SECTION_LIST_MODIFIERS} autoScroll={ROW_DRAG_AUTO_SCROLL} onDragEnd={onDragEnd}>
         <SortableContext items={sections.map((entry) => entry.id)} strategy={verticalListSortingStrategy}>
@@ -240,12 +263,14 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
         ) : null}
       </div>
       {entry.kind === 'builtin' && entry.id === 'work' && showWork ? (
-        <label className="flex items-center gap-2 ps-2 pe-1 pb-1 typography-micro text-muted-foreground">
-          <span className="flex-1">{t('sessions.sidebar.header.displayMode.keepWorkInPlace')}</span>
-          <Switch
+        // A choice about In work itself, under its name, worded as the user's
+        // sections word the same choice.
+        <label className="flex items-center gap-2 ps-2 pe-1 pt-0.5 pb-2 typography-micro text-muted-foreground">
+          <Checkbox
             checked={keepWorkInPlace}
-            onCheckedChange={(keep) => { useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); }}
+            onChange={(keep) => { useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); }}
           />
+          <span>{t('sessions.sidebar.sections.alsoInProjects')}</span>
         </label>
       ) : null}
     </div>
@@ -312,20 +337,11 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
   const matchCount = useSidebarSectionsUiStore((state) => state.draftMatchCount);
   const pinLists = useSessionDisplayStore((state) => state.pinLists);
   const projects = useProjectsInSidebarOrder(useProjectsStore((state) => state.projects));
-  const [template, setTemplate] = React.useState<SidebarSectionTemplate | null>(isNew && draft.filter.text === '' ? 'waiting' : null);
   // The words row stays while the user clears it to type again; Add condition
   // opens it empty, and only its close button removes it.
   const [textRowOpen, setTextRowOpen] = React.useState(draft.filter.text.trim() !== '');
   const [focusText, setFocusText] = React.useState(false);
   const nameId = React.useId();
-  const applyTemplate = (next: SidebarSectionTemplate): void => {
-    // A name the user typed stays; a template's name follows the template.
-    const keepName = template === null || draft.name !== t(TEMPLATE_KEY[template]);
-    const section = createSidebarSectionFromTemplate(next, keepName ? draft.name : t(TEMPLATE_KEY[next]));
-    setTemplate(next);
-    setTextRowOpen(false);
-    updateSectionDraft({ ...section, id: draft.id });
-  };
   const byProjects = draft.grouping === 'project';
   const optionsOf = (category: ConditionCategory): readonly ConditionOption[] => {
     switch (category) {
@@ -381,33 +397,13 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
         <Input
           id={nameId}
           aria-label={t('sessions.sidebar.sections.name')}
+          placeholder={t('sessions.sidebar.sections.name')}
           inputSize="compact"
           value={draft.name}
           maxLength={SIDEBAR_SECTION_NAME_MAX}
           onChange={(event) => updateSectionDraft({ ...draft, name: event.target.value })}
           dir="auto"
         />
-        {isNew ? (
-          <div className="flex items-center justify-between gap-2">
-            <span className="typography-ui-label text-muted-foreground">{t('sessions.sidebar.sections.startFrom')}</span>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button type="button" className={cn(dropdownTriggerVariants(), 'max-w-[12rem] px-2.5 typography-ui-label')}>
-                  <span className="min-w-0 truncate">{template ? t(TEMPLATE_KEY[template]) : t(TEMPLATE_KEY.blank)}</span>
-                  <Icon name="arrow-down-s" className="size-4 shrink-0 text-muted-foreground" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[180px]">
-                {SIDEBAR_SECTION_TEMPLATES.map((entry) => (
-                  <DropdownMenuItem key={entry} onClick={() => applyTemplate(entry)} className="flex items-center justify-between gap-3">
-                    <span>{t(TEMPLATE_KEY[entry])}</span>
-                    {template === entry ? <Icon name="check" className="size-4 text-primary" /> : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        ) : null}
         <SettingsChipGroup
           className="self-start"
           aria-label={t('sessions.sidebar.sections.lists')}
@@ -420,6 +416,10 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
           // projects reads only its projects, and saving one drops the rest.
           onChange={(grouping) => updateSectionDraft({ ...draft, grouping })}
         />
+        {/* What the chosen kind lists, so the two need no explaining elsewhere. */}
+        <p className="-mt-1 typography-micro text-muted-foreground">
+          {byProjects ? t('sessions.sidebar.sections.grouping.projectHint') : t('sessions.sidebar.sections.grouping.timeHint')}
+        </p>
         <div className="flex flex-col gap-1">
           {shown.map((category) => {
             if (category === 'text') {
@@ -445,23 +445,48 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
               );
             }
             const values = conditionValues(draft.filter, category);
-            const labels = optionsOf(category).filter((option) => values.includes(option.value)).map((option) => option.label);
+            const options = optionsOf(category);
             const categoryLabel = t(CATEGORY_KEY[category]);
+            // Each value is its own chip and leaves on its own; Add opens the
+            // category's options. Activity holds one value: its chip goes, and
+            // another is picked from Add condition.
+            const addLabel = byProjects && values.length === 0
+              ? t('sessions.sidebar.sections.chooseProjects')
+              : t('sessions.sidebar.sections.addValue');
             return (
-              <div key={category} className="oc-tile flex items-center gap-1 rounded-md pe-1">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button type="button" className="flex min-w-0 flex-1 items-baseline gap-2 px-2.5 py-1.5 text-start typography-ui-label focus-visible:outline-none">
-                      <span className="shrink-0 text-muted-foreground">{categoryLabel}</span>
-                      <span className={cn('min-w-0 truncate', labels.length === 0 && 'text-muted-foreground')} dir="auto">
-                        {labels.length > 0 ? labels.join(', ') : t('sessions.sidebar.sections.chooseProjects')}
+              <div key={category} className="oc-tile flex items-start gap-2 rounded-md py-1.5 ps-2.5 pe-1">
+                <span className="shrink-0 pt-px typography-ui-label text-muted-foreground">{categoryLabel}</span>
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                  {values.map((value) => {
+                    const label = options.find((option) => option.value === value)?.label ?? value;
+                    return (
+                      <span key={value} className="oc-tile-inset inline-flex min-w-0 max-w-full items-center gap-0.5 rounded ps-1.5 typography-micro text-foreground">
+                        <span className="min-w-0 truncate" dir="auto">{label}</span>
+                        <button
+                          type="button"
+                          className="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                          aria-label={t('sessions.sidebar.sections.removeCondition', { name: label })}
+                          onClick={() => toggle(category, value)}
+                        >
+                          <Icon name="close" className="size-3" />
+                        </button>
                       </span>
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent side="bottom" align="start" className="max-h-[min(20rem,var(--available-height))] min-w-[200px] overflow-y-auto">
-                    {optionItems(category)}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    );
+                  })}
+                  {category !== 'activity' ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button type="button" className="inline-flex items-center gap-0.5 rounded border border-dashed border-[color-mix(in_srgb,var(--foreground)_24%,transparent)] px-1.5 typography-micro text-muted-foreground hover:border-[color-mix(in_srgb,var(--foreground)_40%,transparent)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+                          <Icon name="add" className="size-3" />
+                          {addLabel}
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent side="bottom" align="start" className="max-h-[min(20rem,var(--available-height))] min-w-[200px] overflow-y-auto">
+                        {optionItems(category)}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
+                </div>
                 {!byProjects ? (
                   <Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label={t('sessions.sidebar.sections.removeCondition', { name: categoryLabel })} onClick={() => updateSectionDraft({ ...draft, filter: clearCondition(draft.filter, category) })}>
                     <Icon name="close" className="size-3.5" />
