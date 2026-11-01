@@ -7,6 +7,7 @@ import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionNode } from '../types';
+import { isWorkflowAgentSession } from '@/lib/sessionWorkflowMetadata';
 
 /**
  * Per-row render extras precomputed once per group render and threaded down to
@@ -115,9 +116,10 @@ export const getSessionWorktreeMenuDisabled = ({
 
 /**
  * Choose which (directory, sessionIDs) scopes a sidebar row's blocking-request
- * badges should count. An expanded row counts only its own session; a collapsed
- * parent row additionally rolls up the hidden descendants of its subtree,
- * grouped by the directory store each descendant actually lives in.
+ * badges should count. An expanded row counts its own session and the workflow
+ * agents under it, which have no rows; a collapsed parent row additionally
+ * rolls up the hidden descendants of its subtree, grouped by the directory
+ * store each descendant actually lives in.
  */
 export const selectBlockingBadgeSessionScopes = (
   node: SessionNode,
@@ -134,8 +136,10 @@ export const selectBlockingBadgeSessionScopes = (
       sessionIDs.push(current.session.id);
       sessionIDsByDirectory.set(directory, sessionIDs);
     }
-    if (current === node && isExpanded) return;
-    for (const child of current.children) visit(child);
+    for (const child of current.children) {
+      if (current === node && isExpanded && !isWorkflowAgentSession(child.session)) continue;
+      visit(child);
+    }
   };
   visit(node);
   return [...sessionIDsByDirectory].map(([directory, sessionIDs]) => ({ directory, sessionIDs }));

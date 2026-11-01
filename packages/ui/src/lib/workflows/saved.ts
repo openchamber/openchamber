@@ -2,6 +2,7 @@ import React from 'react';
 import { create } from 'zustand';
 
 import { useUIStore } from '@/stores/useUIStore';
+import { selectWorkflowsShown } from '@/lib/workflows/availability';
 import { fetchSavedWorkflows, type SavedWorkflow } from './api';
 
 /**
@@ -27,7 +28,7 @@ export const useSavedWorkflowsStore = create<SavedWorkflowsState>((set) => ({
 
 /** A project's saved workflows, read again each time a surface that shows them mounts. */
 export const useSavedWorkflows = (directory: string | null): SavedWorkflow[] => {
-  const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const available = useUIStore(selectWorkflowsShown);
   const saved = useSavedWorkflowsStore((state) => (directory ? state.byDirectory[directory] : undefined) ?? NONE);
   const load = useSavedWorkflowsStore((state) => state.load);
   React.useEffect(() => {

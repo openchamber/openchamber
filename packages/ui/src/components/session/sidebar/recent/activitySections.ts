@@ -1,6 +1,7 @@
 import type { Session } from '@/lib/opencode/model';
 import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import type { SessionNode } from '../types';
+import { listedChildren } from '../listedChildren';
 import type { SidebarSessionLocation } from './sessionLocation';
 
 type SidebarActivityItem = {
@@ -27,7 +28,7 @@ const matchesSidebarSessionQuery = (session: Session, query: string): boolean =>
  */
 export const pruneSessionTreeForSidebarQuery = (node: SessionNode, query: string): SessionNode | null => {
   if (matchesSidebarSessionQuery(node.session, query)) return node;
-  const children = node.children.flatMap((child) => {
+  const children = listedChildren(node).flatMap((child) => {
     const pruned = pruneSessionTreeForSidebarQuery(child, query);
     return pruned ? [pruned] : [];
   });
@@ -37,7 +38,7 @@ export const pruneSessionTreeForSidebarQuery = (node: SessionNode, query: string
 /** Sessions in a tree that answer the query themselves, ancestors kept only as context excluded. */
 export const countSessionTreeQueryMatches = (node: SessionNode, query: string): number => (
   (matchesSidebarSessionQuery(node.session, query) ? 1 : 0)
-  + node.children.reduce((total, child) => total + countSessionTreeQueryMatches(child, query), 0)
+  + listedChildren(node).reduce((total, child) => total + countSessionTreeQueryMatches(child, query), 0)
 );
 
 /**

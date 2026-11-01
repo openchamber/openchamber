@@ -11,7 +11,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-const createHarness = async ({ settings = {}, env = {}, workflowAvailable = false } = {}) => {
+const createHarness = async ({ settings = {}, env = {} } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
   temporaryDirectories.push(dataDir);
   const agentToolRuntime = {
@@ -35,7 +35,6 @@ const createHarness = async ({ settings = {}, env = {}, workflowAvailable = fals
     env,
     agentToolRuntime,
     readSettings: () => current.settings,
-    isWorkflowAvailable: () => workflowAvailable,
   });
   const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
   return { dataDir, runtime, agentToolRuntime, current, readConfigFile, titleDirectory };
@@ -282,13 +281,13 @@ describe('managed OpenCode config file', () => {
     expect(on.agentToolRuntime.materializePlugin).toHaveBeenCalledWith(expect.objectContaining({ includeMemory: true }));
   });
 
-  it('injects the workflow tool by default only in a build that has workflows', async () => {
+  it('injects the workflow tool only once the user turns it on', async () => {
     const toolsOff = { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false, agentSecretToolEnabled: false };
-    const absent = await createHarness({ settings: toolsOff });
-    await absent.runtime.buildManagedChildEnv();
-    expect(absent.agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
+    const unset = await createHarness({ settings: toolsOff });
+    await unset.runtime.buildManagedChildEnv();
+    expect(unset.agentToolRuntime.materializePlugin).not.toHaveBeenCalled();
 
-    const present = await createHarness({ settings: toolsOff, workflowAvailable: true });
+    const present = await createHarness({ settings: { ...toolsOff, agentWorkflowToolEnabled: true } });
     await present.runtime.buildManagedChildEnv();
     expect(present.agentToolRuntime.materializePlugin).toHaveBeenCalledWith(expect.objectContaining({ includeWorkflow: true }));
     // The answer tool is denied everywhere; a workflow agent's session allows it.

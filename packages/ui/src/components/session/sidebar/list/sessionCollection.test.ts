@@ -207,6 +207,29 @@ describe('projectSidebarCollection', () => {
     expect(partitionSidebarSessions([promoted], false).chatSessions.map((entry) => entry.id)).toEqual(['fork']);
   });
 
+  test('keeps workflow agents in the hierarchy, where their requests count for the parent', () => {
+    const parent = { ...session('parent', '/workspace/a'), time: { created: 1, updated: 1 } };
+    const subagent = { ...session('subagent', '/workspace/a'), parentID: 'parent', time: { created: 2, updated: 2 } };
+    const agent = {
+      ...session('workflow-agent', '/workspace/a'),
+      parentID: 'parent',
+      time: { created: 3, updated: 3 },
+      metadata: { openchamber: { kind: 'workflow-agent' } },
+    };
+
+    const projection = buildSidebarSessionProjection({
+      globalActiveSessions: [parent, subagent, agent],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/a']),
+      isVSCode: false,
+      pinnedSessionIds: new Set(),
+      sessionOrderRanks: new Map(),
+    });
+
+    // Their rows are left out where rows are listed (`listedChildren`).
+    expect(projection.childrenMap.get('parent')?.map((entry) => entry.id).sort()).toEqual(['subagent', 'workflow-agent']);
+  });
+
   test('keeps a ranked managed root and its active child in the Chats hierarchy', () => {
     const managedRoot = { ...session('managed-root', '/home/.config/openchamber/chats/2026-08-24/session-root'), time: { created: 1, updated: 1 } };
     const managedChild = {

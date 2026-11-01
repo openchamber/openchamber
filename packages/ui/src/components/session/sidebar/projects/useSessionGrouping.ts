@@ -17,6 +17,7 @@ import { getWorktreeFirstSeenAt } from './worktreeFirstSeen';
 import { buildProjectWorktreeIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
 import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
+import { listedChildren } from '../listedChildren';
 
 type Args = {
   homeDirectory: string | null;
@@ -108,7 +109,7 @@ export const useSessionGrouping = (args: Args) => {
           return [node];
         }
 
-        const filteredChildren = filterSessionNodesForSearch(node.children, query);
+        const filteredChildren = filterSessionNodesForSearch([...listedChildren(node)], query);
         if (filteredChildren.length === 0) {
           return [];
         }

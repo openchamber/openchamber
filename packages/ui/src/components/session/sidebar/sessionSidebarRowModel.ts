@@ -1,4 +1,5 @@
 import type { Session } from '@/lib/opencode/model';
+import { listedChildren } from './listedChildren';
 import type { SessionFolder, SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { compareSessionsByLifecycleOrder, EMPTY_SESSION_ORDER_RANKS } from '@/sync/session-ordering';
 import { isSessionPinned } from '@/lib/sessionPins';
@@ -289,7 +290,7 @@ export const countSessionSearchMatches = (nodes: readonly SessionNode[], normali
   const idQuery = normalizedQuery.trim().toLowerCase();
   const isIdQuery = idQuery.startsWith('ses_');
   const count = (list: readonly SessionNode[]): number => list.reduce((total, node) => (
-    total + (!isIdQuery || node.session.id.toLowerCase() === idQuery ? 1 : 0) + count(node.children)
+    total + (!isIdQuery || node.session.id.toLowerCase() === idQuery ? 1 : 0) + count(listedChildren(node))
   ), 0);
   return count(nodes);
 };
@@ -437,6 +438,8 @@ const indexNodes = (roots: readonly SessionNode[]): IndexedSessionNodes => {
       preorderIds.push(entry.node.session.id);
       subtreeRangeByNode.set(entry.node, [start, start + 1]);
       stack.push({ node: entry.node, visited: true });
+      // The whole tree, rows or not (collapsed children, workflow agents):
+      // selecting a session selects what it started, for bulk archive.
       for (let index = entry.node.children.length - 1; index >= 0; index -= 1) {
         const child = entry.node.children[index];
         if (child) stack.push({ node: child, visited: false });
@@ -614,12 +617,13 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       // Whether its subsessions show, for a row that has some: the sidebar
       // animates the change like a header's.
       const expanded = search || args.expandedParents.has(expandedKey(rowContext, options.archived, current.node.session.id));
+      const children = listedChildren(current.node);
       push({
         kind: 'session',
         key: rowKey,
         estimateSize: detailed ? TIMELINE_SESSION_ESTIMATE : estimateSessionRow(rowContext),
-        expanded: current.node.children.length > 0 ? expanded : undefined,
-        forceExpanded: current.node.children.length > 0 ? search : undefined,
+        expanded: children.length > 0 ? expanded : undefined,
+        forceExpanded: children.length > 0 ? search : undefined,
         detailed,
         node: current.node,
         blockingBadgeSessionScopes: current.depth === baseDepth
@@ -653,8 +657,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         descendantRange,
       }));
       if (!expanded) continue;
-      for (let index = current.node.children.length - 1; index >= 0; index -= 1) {
-        const child = current.node.children[index];
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
         if (child) stack.push({ node: child, depth: current.depth + 1, directory });
       }
     }

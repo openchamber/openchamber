@@ -1,4 +1,5 @@
 import React from 'react';
+import { isWorkflowAgentSession } from '@/lib/sessionWorkflowMetadata';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
@@ -43,14 +44,17 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   const liveSessions = useAllLiveSessions();
   const statuses = useAllSessionStatuses();
   // A workflow's agents are child sessions too; the Workflows section lists
-  // them under their run, so they stay out of this list.
+  // them under their run, so they stay out of this list: by their mark, and
+  // by the runs for agents started before sessions carried one.
   const workflowRuns = useSessionWorkflowRuns(sessionId);
   const workflowAgentIds = React.useMemo(
     () => new Set(workflowRuns.flatMap((run) => run.agents.flatMap((agent) => (agent.sessionId ? [agent.sessionId] : [])))),
     [workflowRuns],
   );
   const children = React.useMemo(
-    () => (sessionId ? liveSessions.filter((candidate) => candidate.parentID === sessionId && !workflowAgentIds.has(candidate.id)) : []),
+    () => (sessionId ? liveSessions.filter((candidate) => (
+      candidate.parentID === sessionId && !workflowAgentIds.has(candidate.id) && !isWorkflowAgentSession(candidate)
+    )) : []),
     [liveSessions, sessionId, workflowAgentIds],
   );
 

@@ -331,7 +331,7 @@ export const SETTINGS_REGISTRY = {
     parse: parseBoolean,
     ui: uiStore('agentMemoryFeatureAvailable', (v) => useUIStore.getState().setAgentMemoryFeatureAvailable(v), { autoSave: false }),
   }),
-  // Server-owned: whether this build has agent workflows (`OPENCHAMBER_WORKFLOWS_ENABLE`).
+  // Server-owned: whether an OpenChamber server backs agent workflows here.
   agentWorkflowFeatureAvailable: field({
     scope: 'instance',
     computed: true,

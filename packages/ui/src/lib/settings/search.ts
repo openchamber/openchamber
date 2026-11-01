@@ -967,7 +967,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.tools.field.agentWorkflowTool',
     descriptionKey: 'settings.openchamber.tools.field.agentWorkflowToolInfo',
     keywords: ['agent', 'tool', 'workflow', 'workflows', 'subagents', 'fan out', 'parallel', 'openchamber'],
-    // Unreleased: only in builds that have workflows.
+    // Only where an OpenChamber server backs workflows, like memory.
     isAvailable: (ctx) => !ctx.isVSCode && useUIStore.getState().agentWorkflowFeatureAvailable,
   },
   {

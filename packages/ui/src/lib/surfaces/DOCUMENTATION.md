@@ -248,9 +248,10 @@ reaches every client as an event, and a read on its way never brings it back.
 
 Its rail icon shows while the project (worktrees included) has a run or a saved workflow or a
 Workflows tab is open (`useWorkflowsSurfaceShown`, and `isWorkflowsSurfaceShown`
-for the shortcut), never in VS Code, and in a build without workflows it is
-absent from the rail and from the rail's surfaces dialog, so the unreleased
-feature is not named anywhere.
+for the shortcut). While workflows are not shown (`selectWorkflowsShown`: VS
+Code, or the workflow tool off) it is absent from the rail and from the rail's
+surfaces dialog, and turning the tool off closes open Workflows tabs, as
+memory's tab goes with its tool.
 
 ## Panel header
 

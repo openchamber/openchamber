@@ -9,6 +9,7 @@ import { groupWorkflowAgentsByPhase, type WorkflowRun } from '@/lib/workflows/mo
 import { openWorkflowRunInPanel } from '@/lib/workflows/panel';
 import { useWorkflowRunsStore, useWorkflowRun } from '@/lib/workflows/store';
 import { useUIStore } from '@/stores/useUIStore';
+import { selectWorkflowsShown } from '@/lib/workflows/availability';
 import { useWorkflowRunAction, workflowRunLook } from './workflowRunPresentation';
 
 /**
@@ -21,11 +22,16 @@ export const WorkflowRunCard: React.FC<{ sessionId: string; runId: string }> = (
   const { t } = useI18n();
   const run = useWorkflowRun(sessionId, runId);
   const status = useWorkflowRunsStore((state) => state.bySession[sessionId]?.status);
-  // A build without workflows reads no runs; a card from an earlier one says so.
+  // Where workflows are unavailable (VS Code) or turned off no runs are read; a card says which.
   const available = useUIStore((state) => state.agentWorkflowFeatureAvailable);
+  const shown = useUIStore(selectWorkflowsShown);
 
-  if (!available) {
-    return <div className="my-2 oc-tile rounded-xl px-3 py-2.5 text-sm text-muted-foreground">{t('chat.workflow.unavailable')}</div>;
+  if (!shown) {
+    return (
+      <div className="my-2 oc-tile rounded-xl px-3 py-2.5 text-sm text-muted-foreground">
+        {t(available ? 'chat.workflow.turnedOff' : 'chat.workflow.unavailable')}
+      </div>
+    );
   }
   if (!run) {
     return (

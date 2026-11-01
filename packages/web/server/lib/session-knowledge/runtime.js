@@ -227,13 +227,19 @@ const buildPinnedBlock = ({ notes, plans }) => {
  * When to reach for a workflow, stated in every session that has the
  * `openchamber_workflow` tool. A run costs many agents, so the agent starts
  * one only when the user asks; spotting a task that fits is the agent's job
- * too, and it offers one instead of starting it.
+ * too, and it offers one instead of starting it. The models are agreed with
+ * the user before the run: without them every agent runs on the session's
+ * own model, often the most expensive one.
  */
 export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script that fans a large task out to many agents in the background.'
   + ' Start one when the user asks for a workflow.'
   + ' When the task in front of you has many similar independent pieces (a review per file, an audit across many routes, a migration of many files)'
   + ' or needs results cross-checked at that scale, say so and offer a workflow; never start one unasked.'
-  + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.';
+  + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.'
+  + ' Every agent runs on your own model unless the script names another, and dozens of agents on a top model cost many times what a cheap one does.'
+  + ' So when you propose a workflow, give each phase a model in the same message (look them up with the openchamber tool\'s models.list when you have it):'
+  + ' a cheap one for reading and checking against a fixed list, a strong one where a phase weighs judgement or writes what lands.'
+  + ' Start the run once the user agrees to the models.';
 
 /**
  * When to ask for a secret on a card, stated in every session that has the

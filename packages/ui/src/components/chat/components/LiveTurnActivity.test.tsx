@@ -212,7 +212,7 @@ describe('live Activity with the real message body', () => {
     });
 
     test('keeps both proposed workflow cards outside Activity while approval is pending', async () => {
-        useUIStore.setState({ agentWorkflowFeatureAvailable: true });
+        useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
         const proposal = (id: string, messageID: string): Part => ({
             type: 'tool', tool: 'openchamber_workflow', id, callID: id, sessionID: 'session', messageID,
             state: { status: 'completed', input: { action: 'workflow.run' },
@@ -239,7 +239,7 @@ describe('live Activity with the real message body', () => {
     });
 
     test('shows every pending run missing from loaded calls, then hands it over without duplication', async () => {
-        useUIStore.setState({ agentWorkflowFeatureAvailable: true });
+        useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
         const runs: WorkflowRun[] = ['first', 'second'].map((id) => ({
             id, parentSessionId: 'session', directory: '/project', name: `Workflow ${id}`, description: 'Review files',
             state: 'awaiting-approval', attempt: 0, createdAt: 1, currentPhase: null, phases: [], agents: [], logs: [],
@@ -273,7 +273,7 @@ describe('live Activity with the real message body', () => {
         const { default: MessageList } = await import('../MessageList');
         // Leave bootstrap pending so only the test publishes the real live store.
         const liveSdk = OpenCode.make({ baseUrl: 'http://workflow.test', fetch: () => new Promise<Response>(() => {}) });
-        useUIStore.setState({ agentWorkflowFeatureAvailable: true, activityRenderMode: 'summary' });
+        useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true, activityRenderMode: 'summary' });
         const run: WorkflowRun = {
             id: 'streaming-run', parentSessionId: 'session', directory: '/project', name: 'Streaming approval', description: 'Review files',
             state: 'awaiting-approval', attempt: 0, createdAt: 1, currentPhase: null, phases: [], agents: [], logs: [],
@@ -320,7 +320,7 @@ describe('live Activity with the real message body', () => {
     });
 
     test('the panel declines through the same endpoint and holds both approval buttons during the request', async () => {
-        useUIStore.setState({ agentWorkflowFeatureAvailable: true });
+        useUIStore.setState({ agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
         useSessionUIStore.setState({ currentSessionId: 'session' });
         const run: WorkflowRun = {
             id: 'pending', parentSessionId: 'session', directory: '/project', name: 'Review files', description: 'Review files',

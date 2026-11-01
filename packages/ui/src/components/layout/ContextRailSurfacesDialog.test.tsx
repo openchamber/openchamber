@@ -69,7 +69,7 @@ describe('rail panel arrangement dialog', () => {
     };
     ({ ContextRailSurfacesDialog } = await import('./ContextRailSurfacesDialog'));
     // The full registry, Workflows included, as in a build that has workflows.
-    useUIStore.setState({ contextRailOrder: [...defaultOrder], contextRailHiddenSurfaces: [], agentWorkflowFeatureAvailable: true });
+    useUIStore.setState({ contextRailOrder: [...defaultOrder], contextRailHiddenSurfaces: [], agentWorkflowFeatureAvailable: true, agentWorkflowToolEnabled: true });
     closeCount = 0;
     const container = document.createElement('div');
     document.body.appendChild(container);

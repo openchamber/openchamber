@@ -249,8 +249,8 @@ export const createOpenChamberControlService = (dependencies) => {
     // An agent waiting on its pull request (../pr-watch); absent means the
     // server cannot offer it.
     prWatch = null,
-    // Agent workflows (../workflows/runtime.js); absent where they are not
-    // available, which is every build without OPENCHAMBER_WORKFLOWS_ENABLE.
+    // Agent workflows (../workflows/runtime.js); absent means the server
+    // cannot offer them.
     workflowRuntime = null,
     // Archive lives in OpenChamber's own store now — v2 has no route that sets
     // Session.time.archived — so an unwired store simply means nothing is archived.

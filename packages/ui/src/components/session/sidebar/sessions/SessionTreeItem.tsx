@@ -2,6 +2,7 @@ import React from 'react';
 import { SessionNodeItem } from './SessionNodeItem';
 import type { SessionNodeItemProps } from './SessionNodeItem';
 import type { SessionNode } from '../types';
+import { listedChildren } from '../listedChildren';
 import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import type { SessionNodeRenderExtras } from './sessionNodeItemUtils';
 import { useSessionActions, type DeleteSessionConfirmState } from './useSessionActions';
@@ -203,7 +204,7 @@ function SessionTreeItemComponent({
       blockingBadgeSessionScopes={renderExtras?.blockingBadgeSessionScopes}
       relativeTimeTick={renderExtras?.relativeTimeTick}
     >
-      {renderChildren ? node.children.map((child) => (
+      {renderChildren ? listedChildren(node).map((child) => (
         <SessionTreeItem
           key={child.session.id}
            node={child}

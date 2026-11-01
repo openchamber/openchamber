@@ -1168,7 +1168,7 @@ interface UIStore {
    */
   agentMemoryFeatureAvailable: boolean;
   /**
-   * Whether this build has agent workflows (`OPENCHAMBER_WORKFLOWS_ENABLE`).
+   * Whether an OpenChamber server backs agent workflows here; false in VS Code.
    * Server-owned and not persisted, for the same reason as the memory flag.
    */
   agentWorkflowFeatureAvailable: boolean;
@@ -1704,7 +1704,7 @@ export const useUIStore = create<UIStore>()(
         agentImageModel: '',
         agentRenderToolEnabled: true,
         agentSecretToolEnabled: true,
-        agentWorkflowToolEnabled: true,
+        agentWorkflowToolEnabled: false,
         agentToolsCodeMode: false,
         isolatedSpacesEnabled: false,
         permissionDefaultMode: 'ask',
@@ -3371,6 +3371,12 @@ export const useUIStore = create<UIStore>()(
         },
         setAgentWorkflowToolEnabled: (value) => {
           set({ agentWorkflowToolEnabled: value });
+          if (value) return;
+          // Off hides workflows (`selectWorkflowsShown`), so an open Workflows tab closes too.
+          for (const [directory, panel] of Object.entries(get().contextPanelByDirectory)) {
+            const workflowTabIds = panel.tabs.filter((tab) => tab.mode === 'workflows').map((tab) => tab.id);
+            if (workflowTabIds.length > 0) get().closeContextPanelTabs(directory, workflowTabIds);
+          }
         },
         setAgentToolsCodeMode: (value) => {
           set({ agentToolsCodeMode: value });
