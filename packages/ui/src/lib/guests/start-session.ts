@@ -22,11 +22,15 @@ import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { guestProject, guestProjectWorktrees } from './workspace';
 import { normalizePath } from '@/lib/pathNormalization';
+import { isAutoModel } from '@/lib/routing/autoModel';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import * as sessionActions from '@/sync/session-actions';
+import { useSelectionStore } from '@/sync/selection-store';
+import { getAllSyncSessions, getDirectoryState } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type TranslateFn = (key: I18nKey, params?: I18nParams) => string;
@@ -158,6 +162,69 @@ const sendGuestFirstMessage = async (
   }
 };
 
+const captureGuestPromptSelection = (sessionId: string, directory: string) => {
+  const selection = useSelectionStore.getState();
+  const context = useContextStore.getState();
+  const sessions = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  if (sessions.currentSessionId === sessionId && config.currentProviderId && config.currentModelId) {
+    return {
+      providerID: config.currentProviderId,
+      modelID: config.currentModelId,
+      agentName: selection.getSessionAgentPick(sessionId) ?? config.currentAgentName ?? undefined,
+      variant: config.currentVariantSelection.override === null ? null : config.currentVariant,
+    };
+  }
+  const last = sessions.getLastUserChoice(sessionId);
+  const fallback = captureDefaultSendSelection();
+  // The directory child store is keyed by the normalized path, while the
+  // panel can hold a different path form (case, separators, trailing slash):
+  // the store then does not answer for that string. Read exactly the way
+  // `resolveSendSelection` does — directory state, and only when that is
+  // absent fall back to the cross-directory map — so the capture and the
+  // send always agree about the session record.
+  const sessionList = getDirectoryState(directory)?.session ?? getAllSyncSessions();
+  const record = sessionList.find((session) => session.id === sessionId);
+  const recordAgent = record?.agent;
+  const followedAgent = selection.sessionFollowedAgents.get(sessionId);
+  const agentPick = selection.getSessionAgentPick(sessionId);
+  const agentSwitched = !agentPick && recordAgent && recordAgent !== followedAgent;
+  const agentName = agentPick
+    ?? (agentSwitched ? recordAgent : undefined)
+    ?? selection.getSessionAgentSelection(sessionId)
+    ?? context.getSessionAgentSelection(sessionId)
+    ?? last?.agent
+    ?? fallback?.agentName;
+  const agentModel = agentName
+    ? selection.getAgentModelForSession(sessionId, agentName) ?? context.getAgentModelForSession(sessionId, agentName)
+    : null;
+  const savedModel = selection.getSessionModelSelection(sessionId) ?? context.getSessionModelSelection(sessionId);
+  const recordModel = record?.model;
+  const recordModelKey = recordModel?.providerID && recordModel.id
+    ? `${recordModel.providerID}/${recordModel.id}#${recordModel.variant ?? ''}` : null;
+  const switched = recordModelKey && selection.isSessionModelSwitched(sessionId, recordModelKey)
+    && !(savedModel && isAutoModel(savedModel.providerId, savedModel.modelId));
+  const model = (switched && recordModel ? { providerId: recordModel.providerID, modelId: recordModel.id } : null)
+    ?? (agentSwitched ? savedModel : agentModel) ?? savedModel
+    ?? (recordModel ? { providerId: recordModel.providerID, modelId: recordModel.id } : null)
+    ?? agentModel
+    ?? (last?.providerID && last.modelID ? { providerId: last.providerID, modelId: last.modelID } : null)
+    ?? (fallback ? { providerId: fallback.providerID, modelId: fallback.modelID } : null);
+  if (!model) return null;
+  const liveVariant = agentName
+    ? selection.getAgentModelVariantForSession(sessionId, agentName, model.providerId, model.modelId)
+    : undefined;
+  const storedVariant = agentName
+    ? context.getAgentModelVariantForSession(sessionId, agentName, model.providerId, model.modelId)
+    : undefined;
+  const recordVariant = recordModel?.providerID === model.providerId && recordModel.id === model.modelId ? recordModel.variant : undefined;
+  const variant = switched && recordVariant !== undefined ? recordVariant : liveVariant !== undefined ? liveVariant : storedVariant !== undefined ? storedVariant
+    : recordVariant !== undefined ? recordVariant
+    : last?.providerID === model.providerId && last.modelID === model.modelId && last.agent === agentName ? last.variant
+    : fallback?.providerID === model.providerId && fallback.modelID === model.modelId ? fallback.variant : undefined;
+  return { providerID: model.providerId, modelID: model.modelId, agentName, variant };
+};
+
 type GuestActionFailure = {
   ok: false;
   code: HostRequestErrorCode;
@@ -286,7 +353,7 @@ export const promptGuestSession = async (args: {
     args.compose(plan.text, 'replace');
     return { ok: true, result: { sent: 'skipped' } };
   }
-  const sent = await sendGuestFirstMessage(plan.sessionId, plan.directory, plan.text);
+  const sent = await sendGuestFirstMessage(plan.sessionId, plan.directory, plan.text, captureGuestPromptSelection(plan.sessionId, plan.directory));
   if (sent === 'no-model') {
     toast.error(args.t('contextPanel.plugin.prompt.noModel'));
   } else if (sent === 'failed') {

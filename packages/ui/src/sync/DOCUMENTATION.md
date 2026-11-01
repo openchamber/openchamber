@@ -451,6 +451,13 @@ followed; a different record value is a newer switch and replaces the pick
 (Auto excepted), while an unchanged one keeps an unsent pick
 (`packages/ui/src/stores/DOCUMENTATION.md`).
 
+Extension prompts sent into an existing session use its current composer selection
+when it is active, including an unsent agent pick. For another target they use
+its saved selection and follow newer switches on the loaded session record,
+then fall back to loaded message history and app send defaults. Explicit Default
+effort remains `null` when sent so the saved choice is not erased. An extension
+starting a new session still captures the app defaults before creating it.
+
 A picker change records the chosen level for that model in the profile
 (`lastUsedEfforts`, `lib/modelEfforts.ts`) immediately, including an explicit
 Default and the left/right keys inside the model picker. A successful user
