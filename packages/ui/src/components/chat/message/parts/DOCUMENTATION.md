@@ -60,8 +60,10 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `components/LiveTurnActivity.tsx` (relative to the chat folder)
   - Owns the optional turn disclosure. `MessageList` enables it when Activity
     Default is Collapsed and the turn has visible Activity content.
-  - `components/LiveActivityCollapse.tsx` owns the finite height transition;
-    `components/liveActivityContext.ts` scopes the final message's non-text
+  - The turn's rows (`lib/turns/timelineRows.ts`) are the fold's header,
+    the steps once it is opened, and the final answer; `TurnFold` draws the
+    header and, folded, what stays in view. `components/LiveActivityCollapse.tsx`
+    shows or hides the folded content at once; `components/liveActivityContext.ts` scopes the final message's non-text
     disclosure without changing message context or tool rendering.
   - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
   - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
@@ -418,13 +420,10 @@ replays the jump as a 220 ms glide of the rows (FLIP, `transform` only, skipped
 with reduced motion). The trim stays while the settled fold closes and lifts
 when the reader opens it.
 
-A long turn, in either mode, mounts only a window of its rows
-(`lib/turns/turnMessageWindow.ts`, `components/TurnMessageWindow.tsx`): past
-60 rows its newest 40, with the rest behind spacers that mount 40 at a time as
-they near the viewport. It counts rows with the same rule as the fold, and the
-head may end inside a message, whose first rows `MessageBody` skips through
-`ActivityRowSkipContext`. Counting messages left a turn of a few steps with
-dozens of parallel calls each fully mounted.
+A long turn, in either mode, is several list rows: a row per step once the
+fold is open, a step that ran dozens of calls cut every 24 parts, and a long
+answer cut between its blocks (`lib/turns/timelineRows.ts`). The list mounts
+only the rows near the view.
 
 A final assistant message with `finish: stop`
 collapses the earlier messages and the final message's non-text parts, keeping
@@ -438,15 +437,17 @@ opens a turn there (`createNoticeTurnSplitter`), so each answer keeps its own
 Activity and stays outside it; a notice between steps of one run does not.
 
 Manual expansion survives later metadata updates and timeline virtualization
-within the session. The disclosure uses a finite 180ms height transition,
-respects reduced motion, and delegates end pinning to the existing timeline.
-It never calls scroll-to-bottom. Collapsed history does not mount its hidden
-message bodies; initial history loads do not animate collapse.
-Layout-effect replay after a Suspense hide/reveal must settle the requested
-height and retained children even when the expanded target did not change.
-Cleanup stops the animation, so a same-target early return can leave a cached
-pre-collapse height on the DOM indefinitely. Failed animations also settle;
-callbacks from cancelled, superseded animations never settle a newer target.
+within the session. The disclosure opens and closes at once and delegates end
+pinning to the existing timeline. It never calls scroll-to-bottom. Collapsed
+history does not mount its hidden message bodies.
+
+### Why the fold opens and closes without a height animation
+
+Once the steps became list rows of their own, a fold no longer closes a block
+inside one row: closing it removes rows from the list's data, and the list
+keeps the reader's place. A 180 ms height transition across several rows would
+need its own choreography; the maintainer chose to start without one and add
+it back if it is missed.
 
 The virtualizer also adds temporary end padding while compensating prepended
 history. `@legendapp/list` stores that padding's CSSOM read-back value (built

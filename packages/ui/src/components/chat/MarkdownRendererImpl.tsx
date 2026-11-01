@@ -53,8 +53,7 @@ import { createMarkdownCodePlugin } from './markdown/streamdownCode';
 import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import { splitFrontmatter } from './markdown/frontmatter';
-import { MarkdownWindow, MarkdownWindowContext, type MarkdownWindowOptions } from './markdown/markdownWindow';
-import { holdReaderPlace } from './lib/scroll/holdAnchor';
+import { MarkdownWindow, MarkdownWindowContext } from './markdown/markdownWindow';
 import { WindowedMarkdownBlock } from './markdown/WindowedMarkdownBlock';
 import { FrontmatterProperties } from './markdown/FrontmatterProperties';
 import { isBareVideoUrl, markdownMediaCopySource, markdownMediaFilename } from './markdown/markdownVideo';
@@ -163,12 +162,6 @@ const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: 
 // Static mode renders the document whole and never reads the block split, but
 // Streamdown still computes it, running the marked lexer over the full text.
 const wholeDocument = (markdown: string) => [markdown];
-// A long answer in the chat mounts only its blocks near the view. Opening a
-// session mounted every answer of its rendered turns whole, several screens
-// each, and that render, its styles and its layout effects were most of the
-// open.
-const CHAT_WINDOW_MIN_LENGTH = 3000;
-const chatWindow: MarkdownWindowOptions = { initialBlocks: 0, beforeChange: holdReaderPlace };
 // Read once, when a block mounts. The value lives in a ref the provider keeps
 // for its lifetime: a context value that changed with every streamed update
 // re-rendered every block of the reply on each update.
@@ -228,7 +221,9 @@ function selectedCopyPayload(element: HTMLElement): { text: string; html: string
   if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
 
   const range = selection.getRangeAt(0);
-  if (!element.contains(range.startContainer) || !element.contains(range.endContainer)) return null;
+  // A selection that ends in a later row of the same long answer is copied by
+  // the row it starts in (`getMarkdownSelectionText` reads every row it crosses).
+  if (!element.contains(range.startContainer)) return null;
 
   const containingCode = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest('pre code');
   const code = containingCode(range.startContainer);
@@ -284,8 +279,8 @@ export interface MarkdownContentProps {
   repositoryLinks?: RepositoryLinkContext | null;
   /** `:tada:` reads as 🎉 with these names (`useEmojiShortcodes`); text keeps its shortcodes without them. */
   emojiShortcodes?: EmojiShortcodes | null;
-  /** A long document: only the blocks near the view mount (`markdownWindow`), with these options when given. */
-  windowed?: boolean | MarkdownWindowOptions;
+  /** A long document read in its own scroller: only the blocks near the view mount (`markdownWindow`). */
+  windowed?: boolean;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -338,8 +333,7 @@ export function MarkdownContent({
     committedBlockCount.current = nativeRoot?.childElementCount ?? 0;
   }, [content]);
 
-  // Options are read once: a caller passes a module constant.
-  const blockWindow = React.useMemo(() => (windowed ? new MarkdownWindow(windowed === true ? undefined : windowed) : null), [windowed]);
+  const blockWindow = React.useMemo(() => (windowed ? new MarkdownWindow() : null), [windowed]);
   React.useLayoutEffect(() => {
     const element = container.current;
     if (!blockWindow || !element) return;
@@ -432,7 +426,7 @@ export function MarkdownContent({
     disableLinkSafety,
     theme,
     mermaidControls,
-      onShowPopup,
+    onShowPopup,
     onExportCode,
     confirmFile,
     code,
@@ -553,9 +547,6 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       singleTilde={false}
       mode={mode}
       mediaMode={variant === 'assistant' ? 'assistant' : 'local'}
-      // Only a part already finished when it mounted: one that streamed here
-      // keeps the blocks it was drawn with.
-      windowed={mode === 'static' && content.length >= CHAT_WINDOW_MIN_LENGTH ? chatWindow : undefined}
       isStreaming={isStreaming}
       variant={variant}
       className={className}

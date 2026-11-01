@@ -9,19 +9,23 @@ import { isSkippedTimelineMessage, isBackgroundReportEntry, isTimelineNoticeRole
 import { earlierAssistantText } from './lib/turns/earlierAssistantText';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
-import { isHiddenUserMessage } from './message/hiddenUserMessage';
-import { LiveTurnActivity } from './components/LiveTurnActivity';
+import { turnHeaderCanStick } from './lib/turns/stickyPrompt';
+import { TurnFold, TurnPagesRow } from './components/LiveTurnActivity';
+import { useTurnFoldContexts } from './components/useTurnFold';
+import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './components/liveActivityContext';
+import { MessageSliceContext } from './message/messageSliceContext';
 import { PendingWorkflowApprovals } from './workflows/PendingWorkflowApprovals';
-import { getTurnsWithLaterAssistant, hasLiveActivity } from './lib/turns/liveActivity';
+import { getTurnsWithLaterAssistant } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { buildHistoryEntries, findFirstVisibleMessageId, type TimelineEntry } from './lib/turns/timelineEntries';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
-import { FULL_MESSAGE_WINDOW, TurnMessageWindowContext, createTurnMessageWindowStore } from './lib/turns/turnMessageWindow';
+import { buildTimelineRows, type TimelineRow } from './lib/turns/timelineRows';
 import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalization';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { useUIStore } from '@/stores/useUIStore';
+import { cn } from '@/lib/utils';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { streamPerfCount, streamPerfMark, streamPerfMeasure } from '@/stores/utils/streamDebug';
@@ -30,7 +34,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 import { resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
-import { registerListAnchorRow } from './lib/scroll/holdAnchor';
+import { onNavigationRelease } from './lib/scroll/timelineScrollIntent';
 import { isReasoningRevealTarget } from './search/reasoningReveal';
 import {
     ANCHOR_HOLD_MAX_FRAMES,
@@ -151,6 +155,8 @@ export interface MessageListHandle {
 }
 
 type RenderEntry = TimelineEntry;
+type RenderRow = TimelineRow;
+type TurnEntry = Extract<RenderEntry, { kind: 'turn' }>;
 
 type ToggleTurnActivity = (turnId: string) => void;
 
@@ -251,15 +257,11 @@ const MessageRow = React.memo<MessageRowProps>(({
 
 MessageRow.displayName = 'MessageRow';
 
-interface TurnBlockProps {
+interface TurnRendererInput {
     turn: TurnRecord;
-    hasLaterAssistant?: boolean;
     isLastTurn: boolean;
     nextEntryFirstMessage?: ChatMessageEntry;
     sessionIsWorking: boolean;
-    defaultActivityExpanded: boolean;
-    turnExpansion: Map<string, boolean>;
-    onToggleTurnActivity: ToggleTurnActivity;
     scrollToBottom?: () => void;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
@@ -268,29 +270,19 @@ interface TurnBlockProps {
     reviewTransferDirection?: ReviewTransferDirection | null;
 }
 
-const TurnBlock = React.memo(({
+/** Draws any message of a turn with the turn-wide context it needs; every row of the turn uses it. */
+const useTurnMessageRenderer = ({
     turn,
-    hasLaterAssistant = false,
     isLastTurn,
     nextEntryFirstMessage,
     sessionIsWorking,
-    defaultActivityExpanded,
-    turnExpansion,
-    onToggleTurnActivity,
     scrollToBottom,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
     activeStreamingMessageId,
     activeStreamingPhase,
     reviewTransferDirection,
-}: TurnBlockProps) => {
-
-    const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    const isActivityExpanded = turnExpansion.get(turn.turnId) === true;
-    const handleToggleActivity = React.useCallback(() => {
-        onToggleTurnActivity(turn.turnId);
-    }, [onToggleTurnActivity, turn.turnId]);
-
+}: TurnRendererInput) => {
     const streamingAssistantMessageId = React.useMemo(() => {
         if (activeStreamingMessageId && turn.assistantMessages.some((assistant) => assistant.info.id === activeStreamingMessageId)) {
             return activeStreamingMessageId;
@@ -359,7 +351,7 @@ const TurnBlock = React.memo(({
         };
     }, [turn.activityParts, turn.changedFiles, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.assistantMessages, turn.userMessage.info]);
 
-    const renderMessage = React.useCallback(
+    return React.useCallback(
         (message: ChatMessageEntry) => {
             const assistantIndex = assistantIndexById.get(message.info.id) ?? -1;
             const isAssistantMessage = assistantIndex >= 0;
@@ -429,32 +421,76 @@ const TurnBlock = React.memo(({
             onUserAnimationConsumed,
         ]
     );
+};
 
-    // The gap under an answer sits on the turn from the moment it is sent, so
-    // the steps of a running answer never hand it to each other (each new step
-    // moved the transcript by 8px), and no settled row changes height later:
-    // the list measures that a frame late. A hidden prompt continues the turn.
-    const gapBelow = !isHiddenUserMessage(nextEntryFirstMessage);
+type TurnRowProps = Omit<TurnRendererInput, 'turn' | 'isLastTurn' | 'nextEntryFirstMessage'> & {
+    row: Exclude<RenderRow, { kind: 'ungrouped' }>;
+    entry: TurnEntry;
+    turnExpansion: Map<string, boolean>;
+    onToggleTurnActivity: ToggleTurnActivity;
+};
 
+/** One list row of a turn (see `timelineRows.ts` for how a turn splits into rows). */
+const TurnRow = React.memo(({
+    row,
+    entry,
+    turnExpansion,
+    onToggleTurnActivity,
+    ...rendererInput
+}: TurnRowProps) => {
+    const { turn } = entry;
+    const renderMessage = useTurnMessageRenderer({
+        ...rendererInput,
+        turn,
+        isLastTurn: entry.isLastTurn,
+        nextEntryFirstMessage: entry.nextEntryFirstMessage,
+    });
+    const isActivityExpanded = turnExpansion.get(turn.turnId) === true;
+    const hasLaterAssistant = entry.hasLaterAssistant === true;
+    const foldContexts = useTurnFoldContexts(turn, hasLaterAssistant, isActivityExpanded, row.finalMessageId);
+    const handleToggleActivity = React.useCallback(() => {
+        onToggleTurnActivity(turn.turnId);
+    }, [onToggleTurnActivity, turn.turnId]);
+
+    if (row.kind === 'turn-head') {
+        return <TurnItem turn={turn} gapBelow={row.gapBelow} renderMessage={renderMessage} />;
+    }
+
+    let content: React.ReactNode = null;
+    if (row.kind === 'turn-fold') {
+        content = (
+            <TurnFold turn={turn} hasLaterAssistant={hasLaterAssistant} expanded={isActivityExpanded}
+                finalMessageId={row.finalMessageId} onToggle={handleToggleActivity} renderMessage={renderMessage} />
+        );
+    } else if (row.kind === 'turn-pages') {
+        content = <TurnPagesRow turn={turn} />;
+    } else {
+        const message = turn.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
+        if (message) {
+            content = (
+                <MessageSliceContext.Provider value={row.slice}>
+                    {row.final ? (
+                        <LiveFinalActivityContext.Provider value={foldContexts.finalContext}>
+                            {renderMessage(message)}
+                        </LiveFinalActivityContext.Provider>
+                    ) : renderMessage(message)}
+                </MessageSliceContext.Provider>
+            );
+        }
+    }
+
+    // Under a fold, a message does not draw the pages the turn hoists.
+    const underFold = row.underFold;
     return (
-        <TurnItem
-            turn={turn}
-            gapBelow={gapBelow}
-            renderMessage={renderMessage}
-            assistantContent={!defaultActivityExpanded && hasLiveActivity(turn, showReasoningTraces) ? (
-                <LiveTurnActivity
-                    turn={turn}
-                    hasLaterAssistant={hasLaterAssistant}
-                    expanded={isActivityExpanded}
-                    onToggle={handleToggleActivity}
-                    renderMessage={renderMessage}
-                />
-            ) : undefined}
-        />
+        <div className={cn('relative w-full', row.gapBelow && 'pb-2')} data-turn-row={turn.turnId}>
+            {underFold ? (
+                <LiveTurnHoistedPagesContext.Provider value={foldContexts.hoistedPages}>{content}</LiveTurnHoistedPagesContext.Provider>
+            ) : content}
+        </div>
     );
 });
 
-TurnBlock.displayName = 'TurnBlock';
+TurnRow.displayName = 'TurnRow';
 
 interface UngroupedMessageRowProps {
     message: ChatMessageEntry;
@@ -496,20 +532,6 @@ const UngroupedMessageRow = React.memo(({
 
 UngroupedMessageRow.displayName = 'UngroupedMessageRow';
 
-interface MessageListEntryProps {
-    entry: RenderEntry;
-    scrollToBottom?: () => void;
-    sessionIsWorking: boolean;
-    defaultActivityExpanded: boolean;
-    turnExpansion: Map<string, boolean>;
-    onToggleTurnActivity: ToggleTurnActivity;
-    shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
-    onUserAnimationConsumed: (messageId: string) => void;
-    activeStreamingMessageId?: string | null;
-    activeStreamingPhase?: StreamPhase | null;
-    reviewTransferDirection?: ReviewTransferDirection | null;
-}
-
 const turnContainsMessageId = (turn: TurnRecord, messageId: string | null | undefined): boolean => {
     if (!messageId) {
         return false;
@@ -522,74 +544,79 @@ const turnContainsMessageId = (turn: TurnRecord, messageId: string | null | unde
     return turn.assistantMessages.some((assistant) => assistant.info.id === messageId);
 };
 
-const MessageListEntry = React.memo(({
-    entry,
-    scrollToBottom,
-    sessionIsWorking,
-    defaultActivityExpanded,
-    turnExpansion,
-    onToggleTurnActivity,
-    shouldAnimateUserMessage,
-    onUserAnimationConsumed,
-    activeStreamingMessageId,
-    activeStreamingPhase,
-    reviewTransferDirection,
-}: MessageListEntryProps) => {
-    streamPerfCount('ui.message_list_entry.render');
-    if (entry.kind === 'ungrouped') {
-        return (
-            <UngroupedMessageRow
-                message={entry.message}
-                nextMessage={entry.nextMessage}
-                isFirstRow={entry.isFirstRow}
-                scrollToBottom={scrollToBottom}
-                shouldAnimateUserMessage={shouldAnimateUserMessage}
-                onUserAnimationConsumed={onUserAnimationConsumed}
-                activeStreamingMessageId={activeStreamingMessageId}
-                activeStreamingPhase={activeStreamingPhase}
-                reviewTransferDirection={reviewTransferDirection}
-            />
-        );
-    }
+/**
+ * The live tail's entry with the part store's newest parts, for the rows of
+ * the tail. `LiveTailSource` computes it once per publish; only the rows of
+ * the tail read it, so a streamed part re-renders those and nothing else.
+ */
+type LiveTailStore = {
+    get: () => RenderEntry | null;
+    set: (entry: RenderEntry | null) => void;
+    notify: () => void;
+    subscribe: (listener: () => void) => () => void;
+};
 
-    return (
-        <TurnBlock
-            turn={entry.turn}
-            hasLaterAssistant={entry.hasLaterAssistant}
-            isLastTurn={entry.isLastTurn}
-            nextEntryFirstMessage={entry.nextEntryFirstMessage}
-            sessionIsWorking={sessionIsWorking}
-            defaultActivityExpanded={defaultActivityExpanded}
-            turnExpansion={turnExpansion}
-            onToggleTurnActivity={onToggleTurnActivity}
-            shouldAnimateUserMessage={shouldAnimateUserMessage}
-            onUserAnimationConsumed={onUserAnimationConsumed}
-            activeStreamingMessageId={activeStreamingMessageId}
-            activeStreamingPhase={activeStreamingPhase}
-            reviewTransferDirection={reviewTransferDirection}
-            scrollToBottom={scrollToBottom}
-        />
-    );
-});
+const createLiveTailStore = (): LiveTailStore => {
+    let current: RenderEntry | null = null;
+    const listeners = new Set<() => void>();
+    return {
+        get: () => current,
+        set: (entry) => {
+            current = entry;
+        },
+        notify: () => {
+            for (const listener of listeners) listener();
+        },
+        subscribe: (listener) => {
+            listeners.add(listener);
+            return () => {
+                listeners.delete(listener);
+            };
+        },
+    };
+};
 
-MessageListEntry.displayName = 'MessageListEntry';
+const LiveTailSource: React.FC<{
+    entry: RenderEntry | undefined;
+    directory?: string;
+    showTurnChangedFiles: boolean;
+    store: LiveTailStore;
+}> = ({ entry, directory, showTurnChangedFiles, store }) => {
+    // Overlay live parts on every message of the tail, not only the one
+    // currently streaming: a finished step message's base record can lag the
+    // part store, and rendering it from that stale snapshot briefly unmounts
+    // its completed tool parts when the stream hands off to the next message.
+    const tailMessageIds = React.useMemo(() => {
+        if (!entry) return EMPTY_ROW_MESSAGE_IDS;
+        if (entry.kind === 'turn') return entry.turn.assistantMessageIds;
+        return [entry.message.info.id];
+    }, [entry]);
+    const livePartsByMessageId = useSessionPartsForMessages(tailMessageIds, directory);
+    const liveEntry = React.useMemo(() => (entry ? buildLiveStreamingEntry(entry, {
+        livePartsByMessageId,
+        showTurnChangedFiles,
+        mergeHiddenUserTurns: true,
+    }) : null), [entry, livePartsByMessageId, showTurnChangedFiles]);
+    // Set while rendering, before the rows of this pass read it; the rows a
+    // publish alone changes hear it after the commit.
+    store.set(liveEntry);
+    React.useLayoutEffect(() => {
+        store.notify();
+    }, [liveEntry, store]);
+    return null;
+};
 
-// Shared row state. Passed through context rather than closed over by
-// `renderItem` so the render callback keeps a stable identity — a changing
-// `renderItem` makes the list re-render every mounted row on every commit.
 type TimelineRowContextValue = {
     scrollToBottom?: () => void;
-    defaultActivityExpanded: boolean;
     turnExpansion: Map<string, boolean>;
     onToggleTurnActivity: ToggleTurnActivity;
-    showTurnChangedFiles: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
-    // The live tail row subscribes to streaming parts; every other row renders
-    // statically (see TimelineRowContent).
+    // The rows of the live tail read its live entry; every other row renders
+    // its entry as it is.
     streamingTailKey: string | null;
-    directory?: string;
+    liveTail: LiveTailStore;
     sessionIsWorking: boolean;
     activeStreamingMessageId: string | null;
     activeStreamingPhase: StreamPhase | null;
@@ -597,26 +624,61 @@ type TimelineRowContextValue = {
 
 const TimelineRowContext = React.createContext<TimelineRowContextValue | null>(null);
 
-const TimelineRow = React.memo(({ entry }: { entry: RenderEntry }) => {
+const subscribeNowhere = () => () => {};
+const readNothing = () => null;
+
+// Every row renders through this one component, live tail or history, so a
+// row keeps its React tree when it moves between the two. The live tail
+// changes on every send and on a revert; with a different component per role
+// the row remounted, its state reset for a commit (a long user message lost
+// its "show more" link), and the list measured that frame as the
+// row's height. The next row then sat that much too high until a later
+// re-measure.
+const TimelineRow = React.memo(({ row }: { row: RenderRow }) => {
     const context = React.useContext(TimelineRowContext);
+    const live = context?.streamingTailKey === row.entry.key;
+    const liveTail = context?.liveTail;
+    const liveEntry = React.useSyncExternalStore(
+        live && liveTail ? liveTail.subscribe : subscribeNowhere,
+        live && liveTail ? () => {
+            const entry = liveTail.get();
+            return entry?.key === row.entry.key ? entry : null;
+        } : readNothing,
+    );
     if (!context) return null;
 
-    const live = context.streamingTailKey === entry.key;
+    const entry = liveEntry ?? row.entry;
+    const activeStreamingMessageId = live ? context.activeStreamingMessageId : null;
+    const activeStreamingPhase = live ? context.activeStreamingPhase : null;
+    if (row.kind === 'ungrouped' || entry.kind === 'ungrouped') {
+        if (entry.kind !== 'ungrouped') return null;
+        return (
+            <UngroupedMessageRow
+                message={entry.message}
+                nextMessage={entry.nextMessage}
+                isFirstRow={entry.isFirstRow}
+                scrollToBottom={context.scrollToBottom}
+                shouldAnimateUserMessage={context.shouldAnimateUserMessage}
+                onUserAnimationConsumed={context.onUserAnimationConsumed}
+                activeStreamingMessageId={activeStreamingMessageId}
+                activeStreamingPhase={activeStreamingPhase}
+                reviewTransferDirection={context.reviewTransferDirection}
+            />
+        );
+    }
+    streamPerfCount('ui.message_list_entry.render');
     return (
-        <TimelineRowContent
+        <TurnRow
+            row={row}
             entry={entry}
-            live={live}
-            directory={context.directory}
             scrollToBottom={context.scrollToBottom}
             sessionIsWorking={live && context.sessionIsWorking}
-            defaultActivityExpanded={context.defaultActivityExpanded}
             turnExpansion={context.turnExpansion}
             onToggleTurnActivity={context.onToggleTurnActivity}
-            showTurnChangedFiles={context.showTurnChangedFiles}
             shouldAnimateUserMessage={context.shouldAnimateUserMessage}
             onUserAnimationConsumed={context.onUserAnimationConsumed}
-            activeStreamingMessageId={live ? context.activeStreamingMessageId : null}
-            activeStreamingPhase={live ? context.activeStreamingPhase : null}
+            activeStreamingMessageId={activeStreamingMessageId}
+            activeStreamingPhase={activeStreamingPhase}
             reviewTransferDirection={context.reviewTransferDirection}
         />
     );
@@ -624,18 +686,18 @@ const TimelineRow = React.memo(({ entry }: { entry: RenderEntry }) => {
 
 TimelineRow.displayName = 'TimelineRow';
 
-const timelineKeyExtractor = (item: RenderEntry): string => item.key;
+const timelineKeyExtractor = (item: RenderRow): string => item.key;
 
-// Row type drives container reuse. Turn blocks and ungrouped messages have very
+// Row type drives container reuse. Prompts, folds and messages have very
 // different shapes, so keeping them in separate pools avoids re-measuring a
 // container every time one replaces the other.
-const timelineItemType = (item: RenderEntry): string => item.kind;
+const timelineItemType = (item: RenderRow): string => item.kind;
 
-const renderTimelineItem = ({ item }: { item: RenderEntry }) => <TimelineRow entry={item} />;
+const renderTimelineItem = ({ item }: { item: RenderRow }) => <TimelineRow row={item} />;
 
 type TimelineListProps = {
-    entries: RenderEntry[];
-    streamingTailKey: string | null;
+    rows: RenderRow[];
+    stickyRowIndices: number[] | undefined;
     registerList: (list: LegendListRef | null) => void;
     endPinningReleased: boolean;
     composerOverlayHeight: number;
@@ -649,7 +711,8 @@ type TimelineListProps = {
 };
 
 const TimelineList = React.memo(({
-    entries,
+    rows,
+    stickyRowIndices,
     registerList,
     endPinningReleased,
     composerOverlayHeight,
@@ -673,27 +736,32 @@ const TimelineList = React.memo(({
         isAtEndRef.current = true;
     }, []);
 
-    // The row the list keeps in place when sizes change, found the way the
-    // list finds it (`maintainVisibleContentPosition.size`): the first row
-    // whose top is on screen, else the row the screen starts in. A long answer
-    // drawing its blocks keeps the reader's place inside that row itself
-    // (`holdReaderPlace`).
-    const endPinningReleasedRef = React.useRef(endPinningReleased);
-    endPinningReleasedRef.current = endPinningReleased;
-    React.useEffect(() => {
+    // The list keeps a prompt row on top until the next one reaches the top
+    // and covers it. A turn's prompt leaves with its turn instead: once the
+    // turn's last row scrolls under it, it is pushed up by as much.
+    const rowsRef = React.useRef(rows);
+    rowsRef.current = rows;
+    const pushedHeaderRef = React.useRef<HTMLElement | null>(null);
+    const pushStickyHeader = React.useCallback((state: ReturnType<LegendListRef['getState']>) => {
+        const active = state.activeStickyIndex;
+        const element = active >= 0 ? state.elementAtIndex(active) ?? null : null;
+        const pushed = pushedHeaderRef.current;
+        if (pushed && pushed !== element) pushed.style.transform = '';
+        pushedHeaderRef.current = element;
+        if (!element) return;
+        const data = rowsRef.current;
+        let end = active + 1;
+        while (end < data.length && data[end].kind !== 'turn-head' && data[end].kind !== 'ungrouped') end += 1;
+        // The turn's end is the top of the row after it; one not mounted is
+        // far below, and the prompt stays where it sticks.
+        const next = end < data.length ? state.elementAtIndex(end) : null;
         const scroller = listRef.current?.getScrollableNode();
-        if (!scroller) return;
-        return registerListAnchorRow(scroller, () => {
-            const state = listRef.current?.getState();
-            if (!state || !endPinningReleasedRef.current) return null;
-            const bottom = state.scroll + state.scrollLength;
-            for (let index = state.start; index >= 0 && index <= state.end; index += 1) {
-                const top = state.positionAtIndex(index);
-                if (top > bottom) break;
-                if (top >= state.scroll - 10) return state.elementAtIndex(index) ?? null;
-            }
-            return state.start >= 0 ? state.elementAtIndex(state.start) ?? null : null;
-        });
+        if (!next || !scroller) {
+            element.style.transform = '';
+            return;
+        }
+        const push = Math.min(0, next.getBoundingClientRect().top - scroller.getBoundingClientRect().top - element.offsetHeight);
+        element.style.transform = push < 0 ? `translateY(${push}px)` : '';
     }, []);
 
     // The list reports scroll continuously; only end-crossings are interesting,
@@ -702,26 +770,27 @@ const TimelineList = React.memo(({
     const handleScroll = React.useCallback(() => {
         const state = listRef.current?.getState();
         if (!state) return;
+        if (stickyRowIndices) pushStickyHeader(state);
         const isAtEnd = resolveTimelineIsAtEnd(state);
         if (typeof isAtEnd !== 'boolean' || isAtEnd === isAtEndRef.current) return;
         isAtEndRef.current = isAtEnd;
         onIsAtEndChange(isAtEnd);
-    }, [onIsAtEndChange]);
+    }, [onIsAtEndChange, pushStickyHeader, stickyRowIndices]);
 
     // Data changes are the only moment an automatic correction can be needed;
     // the owning hook decides whether one actually applies.
     React.useEffect(() => {
         onTimelineDataChange();
-    }, [entries, onTimelineDataChange]);
+    }, [rows, onTimelineDataChange]);
 
     const header = React.useMemo(() => (listHeader ? <>{listHeader}</> : undefined), [listHeader]);
     const footer = React.useMemo(() => (listFooter ? <>{listFooter}</> : undefined), [listFooter]);
 
     return (
         <TimelineRowContext.Provider value={rowContext}>
-            <LegendList<RenderEntry>
+            <LegendList<RenderRow>
                 ref={setListRef}
-                data={entries}
+                data={rows}
                 keyExtractor={timelineKeyExtractor}
                 getItemType={timelineItemType}
                 renderItem={renderTimelineItem}
@@ -747,6 +816,7 @@ const TimelineList = React.memo(({
                 maintainVisibleContentPosition={{ data: true, size: endPinningReleased }}
                 onScroll={handleScroll}
                 onMetricsChange={onListMetricsChange}
+                stickyHeaderIndices={stickyRowIndices}
                 ListHeaderComponent={header}
                 ListFooterComponent={footer}
                 {...scrollContainerProps}
@@ -757,79 +827,6 @@ const TimelineList = React.memo(({
 
 TimelineList.displayName = 'TimelineList';
 
-// Every row renders through this one component, live tail or history, so a
-// row keeps its React tree when it moves between the two. The live tail
-// changes on every send and on a revert; with a different component per role
-// the row remounted, its state reset for a commit (a long user message lost
-// its "show more" link), and the list measured that frame as the
-// row's height. The next row then sat that much too high until a later
-// re-measure.
-const TimelineRowContent: React.FC<{
-    entry: RenderEntry;
-    live: boolean;
-    directory?: string;
-    scrollToBottom?: () => void;
-    sessionIsWorking: boolean;
-    defaultActivityExpanded: boolean;
-    turnExpansion: Map<string, boolean>;
-    onToggleTurnActivity: ToggleTurnActivity;
-    showTurnChangedFiles: boolean;
-    shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
-    onUserAnimationConsumed: (messageId: string) => void;
-    activeStreamingMessageId?: string | null;
-    activeStreamingPhase?: StreamPhase | null;
-    reviewTransferDirection?: ReviewTransferDirection | null;
-}> = ({
-    entry,
-    live,
-    directory,
-    scrollToBottom,
-    sessionIsWorking,
-    defaultActivityExpanded,
-    turnExpansion,
-    onToggleTurnActivity,
-    showTurnChangedFiles,
-    shouldAnimateUserMessage,
-    onUserAnimationConsumed,
-    activeStreamingMessageId,
-    activeStreamingPhase,
-    reviewTransferDirection,
-}) => {
-    // Overlay live parts on every message of the tail, not only the one
-    // currently streaming: a finished step message's base record can lag the
-    // part store, and rendering it from that stale snapshot briefly unmounts
-    // its completed tool parts when the stream hands off to the next message.
-    // A history row subscribes to nothing.
-    const tailMessageIds = React.useMemo(() => {
-        if (!live) return EMPTY_ROW_MESSAGE_IDS;
-        if (entry.kind === 'turn') return entry.turn.assistantMessageIds;
-        return [entry.message.info.id];
-    }, [entry, live]);
-    const livePartsByMessageId = useSessionPartsForMessages(tailMessageIds, directory);
-    const rowEntry = React.useMemo(() => (live ? buildLiveStreamingEntry(entry, {
-        livePartsByMessageId,
-        showTurnChangedFiles,
-        mergeHiddenUserTurns: true,
-    }) : entry), [entry, live, livePartsByMessageId, showTurnChangedFiles]);
-
-    return (
-        <MessageListEntry
-            entry={rowEntry}
-            scrollToBottom={scrollToBottom}
-            sessionIsWorking={sessionIsWorking}
-            defaultActivityExpanded={defaultActivityExpanded}
-            turnExpansion={turnExpansion}
-            onToggleTurnActivity={onToggleTurnActivity}
-            shouldAnimateUserMessage={shouldAnimateUserMessage}
-            onUserAnimationConsumed={onUserAnimationConsumed}
-            activeStreamingMessageId={activeStreamingMessageId}
-            activeStreamingPhase={activeStreamingPhase}
-            reviewTransferDirection={reviewTransferDirection}
-        />
-    );
-};
-
-TimelineRowContent.displayName = 'TimelineRowContent';
 
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     sessionKey,
@@ -854,6 +851,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     streamPerfCount('ui.message_list.render');
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
     const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
+    const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const defaultActivityExpanded = activityRenderMode === 'summary';
     const reviewTransferDirection = useGlobalSessionsStore((state) => {
         return state.reviewTransferBySessionId.get(sessionKey) ?? null;
@@ -1030,6 +1029,29 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
 
+    const previousRowsRef = React.useRef<RenderRow[]>([]);
+    const rows = React.useMemo(() => streamPerfMeasure('ui.message_list.render_rows_ms', () => {
+        const next = buildTimelineRows(allEntries, {
+            collapsedActivity: !defaultActivityExpanded,
+            expandedTurns: turnExpansion,
+            showReasoningTraces,
+        }, previousRowsRef.current);
+        previousRowsRef.current = next;
+        return next;
+    }), [allEntries, defaultActivityExpanded, showReasoningTraces, turnExpansion]);
+
+    // The prompt rows the list keeps on top while their turn scrolls under them.
+    const stickyRowIndices = React.useMemo(() => {
+        if (!stickyUserHeader) return undefined;
+        const indices: number[] = [];
+        rows.forEach((row, index) => {
+            if (row.kind === 'turn-head' && turnHeaderCanStick(row.entry.turn.userMessage)) indices.push(index);
+        });
+        return indices.length > 0 ? indices : undefined;
+    }, [rows, stickyUserHeader]);
+
+    const [liveTail] = React.useState(createLiveTailStore);
+
     // Stable identities: these reach the list, where a changing callback would
     // re-render every mounted row.
     const stableIsAtEndChange = useStableEvent((isAtEnd: boolean) => {
@@ -1091,58 +1113,68 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         userAnimationRef.current.animatedIds.delete(messageId);
     }, []);
 
-    // Row lookups for navigation, built in one pass over the rows. Assistant
+    // Row lookups for navigation, built in one pass over the rows. A message
+    // maps to the row it starts in; one without a row of its own (a step
+    // under a closed fold) to its turn's fold, else its prompt. Assistant
     // messages before a turn's last one are collapsible: in a collapsed turn
-    // their text sits inside the folded activity and has no row of its own.
-    // Reasoning of any of a turn's messages, the last one included, sits in
-    // that fold too.
+    // their text sits inside the folded activity. Reasoning of any of a
+    // turn's messages, the last one included, sits in that fold too.
     const {
         messageIndexMap,
         turnIndexMap,
+        rowIndexByKey,
         collapsibleTurnByMessageId,
         turnByAssistantMessageId,
     } = React.useMemo(() => {
         const messageIndexes = new Map<string, number>();
         const turnIndexes = new Map<string, number>();
+        const rowIndexes = new Map<string, number>();
         const collapsible = new Map<string, string>();
         const all = new Map<string, string>();
-        allEntries.forEach((entry, index) => {
-            if (entry.kind === 'ungrouped') {
-                messageIndexes.set(entry.message.info.id, index);
+        const foldIndexes = new Map<string, number>();
+        rows.forEach((row, index) => {
+            rowIndexes.set(row.key, index);
+            if (row.kind === 'ungrouped') {
+                messageIndexes.set(row.entry.message.info.id, index);
                 return;
             }
-            const { turnId, userMessage, assistantMessages } = entry.turn;
-            turnIndexes.set(turnId, index);
-            messageIndexes.set(userMessage.info.id, index);
+            const { turnId } = row.entry.turn;
+            if (row.kind === 'turn-head') {
+                turnIndexes.set(turnId, index);
+                messageIndexes.set(row.entry.turn.userMessage.info.id, index);
+            } else if (row.kind === 'turn-fold') {
+                foldIndexes.set(turnId, index);
+            } else if (row.kind === 'turn-message' && !row.slice?.from) {
+                messageIndexes.set(row.messageId, index);
+            }
+        });
+        for (const entry of allEntries) {
+            if (entry.kind !== 'turn') continue;
+            const { turnId, assistantMessages } = entry.turn;
+            const fallback = foldIndexes.get(turnId) ?? turnIndexes.get(turnId);
             assistantMessages.forEach((message, assistantIndex) => {
                 const messageId = message.info.id;
-                messageIndexes.set(messageId, index);
+                if (!messageIndexes.has(messageId) && fallback !== undefined) messageIndexes.set(messageId, fallback);
                 all.set(messageId, turnId);
                 if (assistantIndex < assistantMessages.length - 1) collapsible.set(messageId, turnId);
             });
-        });
+        }
         return {
             messageIndexMap: messageIndexes,
             turnIndexMap: turnIndexes,
+            rowIndexByKey: rowIndexes,
             collapsibleTurnByMessageId: collapsible,
             turnByAssistantMessageId: all,
         };
-    }, [allEntries]);
+    }, [allEntries, rows]);
     const turnExpansionRef = React.useRef(turnExpansion);
     turnExpansionRef.current = turnExpansion;
 
-    // The list remounts per session, so entering a session again mounts only
-    // the newest messages of its long turns.
-    const [turnMessageWindow] = React.useState(createTurnMessageWindowStore);
-
-    /**
-     * Mounts the whole turn holding a message that navigation is about to
-     * reach but that its turn has not mounted yet (see TurnMessageWindow).
-     */
-    const mountWindowedMessage = React.useCallback((messageId: string): void => {
-        const turnId = turnByAssistantMessageId.get(messageId);
-        if (turnId) turnMessageWindow.setRange(turnId, FULL_MESSAGE_WINDOW);
-    }, [turnByAssistantMessageId, turnMessageWindow]);
+    /** The row an anchor names: the slice of a long answer it was taken in, else its message's first row. */
+    const anchorRowIndex = React.useCallback((anchor: MessageViewportAnchor): number | undefined => (
+        (anchor.slice ? rowIndexByKey.get(`step:${anchor.messageId}:${anchor.slice}`) : undefined)
+            ?? messageIndexMap.get(anchor.messageId)
+    ), [messageIndexMap, rowIndexByKey]);
 
     /**
      * Opens the turn a linked or searched message is folded into, the way a
@@ -1171,20 +1203,23 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             const reasoning = container.querySelector<HTMLElement>(`[data-reasoning-message-id="${messageId}"]`);
             if (reasoning) return reasoning;
         }
-        return container.querySelector(`[data-message-id="${messageId}"]`);
+        // A long answer's later rows carry its id too; its start is the one without a slice.
+        return container.querySelector(`[data-message-id="${messageId}"]:not([data-message-slice])`);
     }, [resolveScrollContainer]);
 
-    // A message the head of its turn's window cuts into is mounted from a
-    // later row on: its element's top is not the message's start.
-    const isMessageCut = React.useCallback((messageId: string): boolean => (
-        Boolean(resolveScrollContainer()?.querySelector(`[data-turn-message-cut="${messageId}"]`))
-    ), [resolveScrollContainer]);
+    // A slice that no longer exists (the message is cut elsewhere now: the
+    // reasoning was hidden) falls back to the message's first row, as its index does.
+    const findAnchorElement = React.useCallback((anchor: MessageViewportAnchor): HTMLElement | null => (
+        anchor.slice && rowIndexByKey.has(`step:${anchor.messageId}:${anchor.slice}`)
+            ? resolveScrollContainer()?.querySelector<HTMLElement>(`[data-message-id="${anchor.messageId}"][data-message-slice="${anchor.slice}"]`) ?? null
+            : findMessageElement(anchor.messageId)
+    ), [findMessageElement, resolveScrollContainer, rowIndexByKey]);
 
     // Accepts any index the list renders, the trailing streaming entry
     // included — it lives at historyEntries.length and is a legitimate
     // navigation target (the timeline rail's last item).
     const scrollHistoryIndexIntoView = React.useCallback((index: number) => {
-        if (index < 0 || index >= allEntries.length) {
+        if (index < 0 || index >= rows.length) {
             return false;
         }
 
@@ -1199,7 +1234,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // path in scrollMessageElementIntoView.
         void list.scrollToIndex({ index, animated: false, viewPosition: 0 });
         return true;
-    }, [allEntries.length]);
+    }, [rows.length]);
 
     // A navigation scroll lands on estimates: an unmounted target teleports
     // to its estimated offset, and even a mounted one drifts when neighbours
@@ -1223,16 +1258,19 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         let stable = 0;
         let cancelled = false;
         let frame: number;
+        let stopReleaseListener: (() => void) | null = null;
         const cancelOnUserInput = () => {
             cancelled = true;
             window.cancelAnimationFrame(frame);
             container.removeEventListener('touchstart', cancelOnUserInput);
             container.removeEventListener('wheel', cancelOnUserInput);
+            stopReleaseListener?.();
             if (cancelNavigationRef.current === cancelOnUserInput) cancelNavigationRef.current = null;
         };
         cancelNavigationRef.current = cancelOnUserInput;
         container.addEventListener('touchstart', cancelOnUserInput, { passive: true });
         container.addEventListener('wheel', cancelOnUserInput, { passive: true });
+        stopReleaseListener = onNavigationRelease(container, cancelOnUserInput);
         const step = () => {
             if (cancelled) return;
             const element = findElement();
@@ -1276,7 +1314,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [findMessageElement, resolveScrollContainer]);
 
     const alignViewportAnchor = React.useCallback((anchor: MessageViewportAnchor): ViewportAnchorAlignment => {
-        const index = messageIndexMap.get(anchor.messageId);
+        const index = anchorRowIndex(anchor);
         const container = resolveScrollContainer();
         if (index === undefined || !container) {
             return 'missing';
@@ -1286,11 +1324,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             return 'moved';
         }
 
-        const element = isMessageCut(anchor.messageId) ? null : findMessageElement(anchor.messageId);
+        const element = findAnchorElement(anchor);
         if (!element) {
-            // Not mounted, or mounted from a later row: bring its row in from
-            // the estimate; the next step measures the real position.
-            mountWindowedMessage(anchor.messageId);
+            // Not mounted: bring its row in from the estimate; the next step
+            // measures the real position.
             return scrollHistoryIndexIntoView(index) ? 'moved' : 'missing';
         }
         const delta = element.getBoundingClientRect().top
@@ -1304,7 +1341,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // A message near either end of the timeline cannot reach the offset:
         // the scroll is clamped, and where it stopped is as close as it gets.
         return Math.abs(container.scrollTop - before) < 0.5 ? 'aligned' : 'moved';
-    }, [findMessageElement, isMessageCut, messageIndexMap, mountWindowedMessage, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView]);
+    }, [anchorRowIndex, findAnchorElement, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView]);
 
     // Installed during layout so a parent's layout effect (session entry
     // restore) already reaches this list, not the one it replaced.
@@ -1350,7 +1387,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
 
                 revealFoldedMessage(messageId);
-                if (!findMessageElement(messageId) || isMessageCut(messageId)) mountWindowedMessage(messageId);
                 const didScroll = scrollMessageElementIntoView(messageId, behavior)
                     || scrollHistoryIndexIntoView(index);
                 if (didScroll && behavior !== 'smooth') {
@@ -1360,7 +1396,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             },
 
             holdViewportAnchor: (anchor) => {
-                settleNavigationTarget(() => findMessageElement(anchor.messageId), anchor.offsetTop);
+                settleNavigationTarget(() => findAnchorElement(anchor), anchor.offsetTop);
             },
 
             // The timeline is always virtualized now; the flag stays so callers
@@ -1402,32 +1438,28 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             if (objectRef.current === handle) objectRef.current = null;
         };
-    }, [alignViewportAnchor, findMessageElement, isMessageCut, messageIndexMap, mountWindowedMessage, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
+    }, [alignViewportAnchor, findAnchorElement, findMessageElement, messageIndexMap, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
 
     const rowContext = React.useMemo(() => ({
         scrollToBottom: stableScrollToBottom,
-        defaultActivityExpanded,
         turnExpansion,
         onToggleTurnActivity: toggleTurnActivity,
-        showTurnChangedFiles,
         shouldAnimateUserMessage,
         onUserAnimationConsumed,
         reviewTransferDirection,
         streamingTailKey: trailingStreamingEntry?.key ?? null,
-        directory,
+        liveTail,
         sessionIsWorking,
         activeStreamingMessageId,
         activeStreamingPhase,
     }), [
         activeStreamingMessageId,
         activeStreamingPhase,
-        defaultActivityExpanded,
-        directory,
+        liveTail,
         onUserAnimationConsumed,
         reviewTransferDirection,
         sessionIsWorking,
         shouldAnimateUserMessage,
-        showTurnChangedFiles,
         stableScrollToBottom,
         toggleTurnActivity,
         trailingStreamingEntry?.key,
@@ -1440,11 +1472,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // list's point of view, so fade-in is disabled for them — content
         // arriving inside the streaming tail keeps its own animations.
         <FadeInDisabledProvider disabled>
-            <TurnMessageWindowContext.Provider value={turnMessageWindow}>
-                <TimelineList
+            <LiveTailSource entry={trailingStreamingEntry} directory={directory}
+                showTurnChangedFiles={showTurnChangedFiles} store={liveTail} />
+            <TimelineList
                     key={sessionKey}
-                    entries={allEntries}
-                    streamingTailKey={trailingStreamingEntry?.key ?? null}
+                    rows={rows}
+                    stickyRowIndices={stickyRowIndices}
                     registerList={handleRegisterList}
                     composerOverlayHeight={composerOverlayHeight}
                     onIsAtEndChange={stableIsAtEndChange}
@@ -1456,7 +1489,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     rowContext={rowContext}
                     endPinningReleased={endPinningReleased}
                 />
-            </TurnMessageWindowContext.Provider>
         </FadeInDisabledProvider>
     );
 });

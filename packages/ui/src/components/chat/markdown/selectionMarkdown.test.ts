@@ -462,3 +462,23 @@ test('rich native strong markup keeps emphasis without application styles', () =
   normalizeMarkdownCopyContent(copy);
   expect(copy.querySelector('strong')?.textContent).toBe('Bold');
 });
+
+test('a selection across the rows of one long answer copies each row\'s part, in order', () => {
+  const row = (html: string) => {
+    const wrapper = document.createElement('div');
+    wrapper.setAttribute('data-answer-part', 'message:part');
+    wrapper.appendChild(render(html));
+    document.body.appendChild(wrapper);
+    return wrapper;
+  };
+  const first = row('<p>Start of the <strong>answer</strong> ends.</p>');
+  const second = row('<p>Next row <em>goes</em> on.</p>');
+  const range = selectionOf(textIn(first, 'strong'), 0, textIn(second, 'em'), 4);
+  expect(getMarkdownSelectionText(range)).toBe('**answer** ends.\n\nNext row *goes*');
+});
+
+test('a selection across two separate documents stays native', () => {
+  const first = render('<p>One document.</p>');
+  const second = render('<p>Another one.</p>');
+  expect(getMarkdownSelectionText(selectionOf(textIn(first, 'p'), 0, textIn(second, 'p'), 3))).toBeNull();
+});

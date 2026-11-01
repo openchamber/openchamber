@@ -36,7 +36,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import { frameRectInApp, onFrameSelection } from './frameSelection';
-import { captureChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { captureChatQuoteAnchor, findChatQuoteRoots, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
@@ -84,6 +84,22 @@ interface SelectionPayload {
 const normalizeDistilledInsight = (insight: string): string => (
   insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
 );
+
+const messageIdOf = (node: Node): string | null => (
+  (node instanceof Element ? node : node.parentElement)?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null
+);
+
+/**
+ * Whether this menu answers the selection: it lies inside the menu's
+ * container, or starts there and ends in a later row of the same long answer
+ * (each row has its own menu; the row it starts in shows it).
+ */
+const ownsSelection = (container: HTMLElement, range: Range): boolean => {
+  if (container.contains(range.commonAncestorContainer)) return true;
+  if (!container.contains(range.startContainer)) return false;
+  const messageId = messageIdOf(container);
+  return messageId !== null && messageId === messageIdOf(range.endContainer);
+};
 
 const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false }) => {
   const { t } = useI18n();
@@ -423,7 +439,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     // Check if selection is within the container
     const range = selection.getRangeAt(0);
     
-    if (!container.contains(range.commonAncestorContainer)) {
+    if (!ownsSelection(container, range)) {
       if (!isDraggingRef.current) {
         hideMenu();
       }
@@ -437,9 +453,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     const rect = measuredRange.getBoundingClientRect();
 
     // Store the selection but don't show menu yet if dragging
-    const anchorElement = range.commonAncestorContainer instanceof Element
-      ? range.commonAncestorContainer
-      : range.commonAncestorContainer.parentElement;
+    const anchorElement = range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
     const replaced = pendingSelectionRef.current;
     pendingSelectionRef.current = {
       plainText: text,
@@ -616,7 +632,11 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     const pending = pendingSelectionRef.current;
     // A page's selection was anchored by the page, in its own text.
     if (pending && !pending.range) return pending.anchor ?? null;
-    return container && pending?.range ? captureChatQuoteAnchor(container, pending.range) : null;
+    if (!container || !pending?.range) return null;
+    // A long answer's rows are one text: the anchor counts in all of its rows.
+    const scope = container.closest('[data-scrollbar="chat"]');
+    const roots = scope && pending.messageId ? findChatQuoteRoots(scope, pending.messageId) : [];
+    return captureChatQuoteAnchor(roots.includes(container) ? roots : [container], pending.range);
   }, [containerRef]);
 
   const openComment = React.useCallback((initialText: string) => {

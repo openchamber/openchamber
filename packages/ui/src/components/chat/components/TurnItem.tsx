@@ -3,15 +3,13 @@ import React from 'react';
 import { useDeviceInfo } from '@/lib/device';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
-import { isHiddenUserMessage } from '../message/hiddenUserMessage';
+import { turnHeaderCanStick } from '../lib/turns/stickyPrompt';
 import type { ChatMessageEntry, Turn } from '../lib/turns/types';
-import TurnAssistantBlock from './TurnAssistantBlock';
 
 interface TurnItemProps {
     turn: Turn;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
-    assistantContent?: React.ReactNode;
-    /** Keeps the gap between this turn's answer and the row after it. */
+    /** Keeps the gap between the turn and the row after it, when the turn is nothing but its prompt. */
     gapBelow?: boolean;
 }
 
@@ -40,24 +38,32 @@ const stickyHeaderBackground = (fadeRem: string): React.CSSProperties => ({
 const STICKY_HEADER_BACKGROUND_DESKTOP = stickyHeaderBackground('2.25rem');
 const STICKY_HEADER_BACKGROUND_MOBILE = stickyHeaderBackground('0.75rem');
 
-const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, assistantContent, gapBelow = false }) => {
+/**
+ * A turn's first list row: its prompt, and the notices that came before its
+ * first step. The turn's work and answer are the rows after it
+ * (`timelineRows.ts`); this row alone names the turn in the DOM, and it is the
+ * one the list keeps on top while the turn scrolls under it.
+ */
+const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = false }) => {
     const { isMobile } = useDeviceInfo();
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
-    // A hidden prompt has nothing to pin, and a turn opened by anything but
-    // a prompt (a background report, a compaction, a notice after an answer)
-    // opens as a notice row, which never sticks.
     const headerSticks = React.useMemo(
-        () => stickyUserHeader
-            && turn.userMessage.info.role === 'user'
-            && !isHiddenUserMessage(turn.userMessage),
+        () => stickyUserHeader && turnHeaderCanStick(turn.userMessage),
         [stickyUserHeader, turn.userMessage]
     );
 
+    const hasNotices = Boolean(turn.waitingNotices?.length);
     return (
         <section
-            // On mobile the header ends right at its actions row, so the reply
-            // keeps its distance below it and scrolls away with the reply.
-            className={cn('relative w-full', gapBelow && 'pb-2', headerSticks && isMobile && '[&>[data-turn-sticky-header]+*]:mt-4')}
+            className={cn(
+                'relative w-full',
+                gapBelow && 'pb-2',
+                // On mobile the header ends right at its actions row, so what
+                // follows keeps its distance below it. The row sticks whole;
+                // the gap lets taps through to what scrolls under it.
+                headerSticks && isMobile && 'pointer-events-none [&>*]:pointer-events-auto',
+                headerSticks && isMobile && !hasNotices && 'pb-4',
+            )}
             id={`turn-${turn.turnId}`}
             data-turn-id={turn.turnId}
             data-scroll-spy-id={turn.turnId}
@@ -76,10 +82,13 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, assistantConte
                 renderMessage(turn.userMessage)
             )}
 
-            {turn.waitingNotices?.map((notice) => (
-                <React.Fragment key={notice.info.id}>{renderMessage(notice)}</React.Fragment>
-            ))}
-            {assistantContent ?? <TurnAssistantBlock turnId={turn.turnId} assistantMessages={turn.assistantMessages} renderMessage={renderMessage} />}
+            {hasNotices ? (
+                <div className={cn(headerSticks && isMobile && 'mt-4')}>
+                    {turn.waitingNotices?.map((notice) => (
+                        <React.Fragment key={notice.info.id}>{renderMessage(notice)}</React.Fragment>
+                    ))}
+                </div>
+            ) : null}
         </section>
     );
 };

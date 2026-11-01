@@ -59,6 +59,7 @@ import { isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
+import { MessageSliceContext } from './messageSliceContext';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useSpaceProjectDirectory } from '@/lib/spaces/spaces-store';
@@ -77,7 +78,6 @@ import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
 import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth } from './imageExport';
 import { hasTextSelectionInside } from '@/lib/textSelection';
-import { holdMarkdownBlocksWithin } from '../markdown/markdownWindow';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -1292,6 +1292,10 @@ const AssistantMessageBody = React.memo(({
     const liveFinalActivity = React.useContext(LiveFinalActivityContext);
     const activityRowSkip = React.useContext(ActivityRowSkipContext);
     const hoistedPages = React.useContext(LiveTurnHoistedPagesContext);
+    // A long answer spans several rows; each draws its slice of the message,
+    // the first one what comes before the answer, the last one what follows.
+    const slice = React.useContext(MessageSliceContext);
+    const isSliceEnd = !slice?.to;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
     const effectiveStreamPhase: StreamPhase = hasStopFinish ? 'completed' : streamPhase;
@@ -1438,17 +1442,10 @@ const AssistantMessageBody = React.memo(({
             if (!sourceElement) return;
 
             let wrapper: HTMLDivElement | null = null;
-            // A long answer mounts only its blocks near the view: all of them
-            // for the copy, held until it is taken. A diagram that mounts now
-            // stays hidden until its viewer fits it, a frame or two later.
-            const releaseBlocks = holdMarkdownBlocksWithin(sourceElement, { sync: true });
             try {
                 // Load the exporter before attaching its temporary clone so a slow
                 // chunk request cannot leave export-only content in the page layout.
                 const { toPng } = await import('html-to-image');
-                for (let frame = 0; frame < 10 && sourceElement.querySelector('[data-oc-mermaid-viewer] > svg:not([data-oc-mermaid-fitted])'); frame += 1) {
-                    await new Promise((resolve) => window.requestAnimationFrame(resolve));
-                }
                 const originalElement = sourceElement;
                 const computedStyle = window.getComputedStyle(originalElement);
                 const rootStyle = window.getComputedStyle(document.documentElement);
@@ -1479,7 +1476,6 @@ const AssistantMessageBody = React.memo(({
                 wrapper.appendChild(exportStyle);
 
                 const clone = cloneMessageImageExportSource(originalElement);
-                releaseBlocks();
                 clone.style.cssText = `
                     ${computedStyle.cssText}
                     transform: none;
@@ -1582,7 +1578,6 @@ const AssistantMessageBody = React.memo(({
                 console.error('Failed to generate image:', error);
                 toast.error(t('chat.messageBody.toast.generateImageFailed'));
             } finally {
-                releaseBlocks();
                 if (wrapper && wrapper.parentNode) {
                     wrapper.parentNode.removeChild(wrapper);
                 }
@@ -1593,9 +1588,8 @@ const AssistantMessageBody = React.memo(({
 
     // Re-render every part so folded text and settled highlighting are included.
     const earlierAssistantText = turnGroupingContext?.earlierAssistantText;
-    const shareTurnAsImage = React.useCallback(
-        async (requestedSourceElement?: HTMLElement | null) => {
-            const segments = [...(earlierAssistantText ?? []), ...assistantTextSegments(assistantTextParts)];
+    const shareTextAsImage = React.useCallback(
+        async (segments: string[], requestedSourceElement?: HTMLElement | null) => {
             if (segments.length === 0) {
                 await shareMessageAsImage(requestedSourceElement);
                 return;
@@ -1611,13 +1605,28 @@ const AssistantMessageBody = React.memo(({
             }
             await shareMessageAsImage(turnSource);
         },
-        [assistantTextParts, earlierAssistantText, shareMessageAsImage, t]
+        [shareMessageAsImage, t]
+    );
+    const shareTurnAsImage = React.useCallback(
+        (requestedSourceElement?: HTMLElement | null) => shareTextAsImage(
+            [...(earlierAssistantText ?? []), ...assistantTextSegments(assistantTextParts)],
+            requestedSourceElement,
+        ),
+        [assistantTextParts, earlierAssistantText, shareTextAsImage]
+    );
+    // This row draws only part of a long answer: the image is made from the
+    // message's text, not from what this row shows.
+    const shareShownMessageAsImage = React.useCallback(
+        (requestedSourceElement?: HTMLElement | null) => (slice
+            ? shareTextAsImage(assistantTextSegments(assistantTextParts), requestedSourceElement)
+            : shareMessageAsImage(requestedSourceElement)),
+        [assistantTextParts, shareMessageAsImage, shareTextAsImage, slice]
     );
 
-    const showErrorMessage = Boolean(errorMessage);
+    const showErrorMessage = Boolean(errorMessage) && isSliceEnd;
     const isPeekSurface = chatSurfaceMode === 'peek';
-    const shouldShowMessageActions = hasCopyableText && !isPeekSurface;
-    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface;
+    const shouldShowMessageActions = hasCopyableText && !isPeekSurface && isSliceEnd;
+    const shouldShowTurnFooter = isLastAssistantInTurn && hasTextContent && (hasStopFinish || Boolean(errorMessage)) && !isPeekSurface && isSliceEnd;
     const shouldShowStandaloneMessageActions = showSplitAssistantMessageActions && shouldShowMessageActions && !shouldShowTurnFooter;
 
     const messageActionButtons = React.useMemo(() => (
@@ -1626,13 +1635,13 @@ const AssistantMessageBody = React.memo(({
             isTouchContext={isTouchContext}
             onCopyMessage={onCopyMessage}
             onCopyLink={onCopyLink}
-            onShareImage={shareMessageAsImage}
+            onShareImage={shareShownMessageAsImage}
             ttsText={assistantPlanText}
             ttsReadingKey={messageId}
             reviewTransferAction={reviewTransferAction}
             extraActions={extraActions}
         />
-    ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
+    ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareShownMessageAsImage]);
 
     // The turn footer copies the whole turn when the turn has more than this message.
     const onCopyFooter = onCopyTurn ?? onCopyMessage;
@@ -1680,9 +1689,22 @@ const AssistantMessageBody = React.memo(({
         // A working turn with Activity collapsed shows only its latest rows;
         // the first rows of the message it cuts into are left out here.
         let rowsToSkip = activityRowSkip?.messageId === messageId ? activityRowSkip.rows : 0;
+        // A slice starts at a part or inside a text, and ends at or inside
+        // another (or the same) one; the parts outside it are other rows'.
+        let sliceStarted = !slice?.from;
+        const firstTextPartId = visibleParts.find((candidate) => candidate.type === 'text')?.id;
         let i = 0;
         while (i < visibleParts.length) {
             const part = visibleParts[i];
+            if (!sliceStarted) {
+                sliceStarted = part.id === slice?.from?.partId;
+                if (!sliceStarted) {
+                    i += 1;
+                    continue;
+                }
+            }
+            // The next row starts at this part, or inside the one just drawn.
+            if (slice?.to && (slice.to.offset === 0 ? part.id === slice.to.partId : visibleParts[i - 1]?.id === slice.to.partId)) break;
             if (rowsToSkip > 0 && isActivityRowPart(part)) {
                 rowsToSkip -= 1;
                 i += 1;
@@ -1691,7 +1713,12 @@ const AssistantMessageBody = React.memo(({
             rendered = splitLiveActivity && part.type !== 'text' ? activityRendered : answerRendered;
 
             if (part.type === 'text') {
-                if (isFinalLiveAnswer && !hasRenderedAnswerText && (rendered.length > 0 || activityRendered.length > 0 || hasEarlierVisibleActivity || turnGroupingContext?.earlierAssistantText)) {
+                const textStart = slice?.from?.partId === part.id ? slice.from.offset : 0;
+                const textEnd = slice?.to?.partId === part.id && slice.to.offset > 0 ? slice.to.offset : undefined;
+                if (textStart > 0 || (slice?.from && part.id !== firstTextPartId)) {
+                    // An earlier row drew this answer's start, and what came before it.
+                    hasRenderedAnswerText = true;
+                } else if (isFinalLiveAnswer && !hasRenderedAnswerText && (rendered.length > 0 || activityRendered.length > 0 || hasEarlierVisibleActivity || turnGroupingContext?.earlierAssistantText)) {
                     rendered.push(
                         <div
                             key={`final-answer-divider-${messageId}`}
@@ -1700,7 +1727,7 @@ const AssistantMessageBody = React.memo(({
                         />
                     );
                 }
-                if (splitLiveActivity && !hasRenderedAnswerText) {
+                if (splitLiveActivity && !hasRenderedAnswerText && textStart === 0) {
                     for (const pagePart of liveFinalActivity?.pages ?? []) {
                         rendered.push(<ShownToolCard key={`page-${pagePart.id}`} part={pagePart} onShowPopup={onShowPopup} />);
                     }
@@ -1714,6 +1741,7 @@ const AssistantMessageBody = React.memo(({
                             messageId={messageId}
                             streamPhase={effectiveStreamPhase}
                             onShowPopup={onShowPopup}
+                            range={textStart > 0 || textEnd !== undefined ? { start: textStart, end: textEnd } : undefined}
                         />
                     </div>
                 );
@@ -1845,10 +1873,10 @@ const AssistantMessageBody = React.memo(({
             i++;
         }
 
-        if (splitLiveActivity && liveFinalActivity) {
+        if (splitLiveActivity && liveFinalActivity && (!slice?.from || activityRendered.length > 0)) {
             return [
                 <LiveActivityCollapse key="final-message-activity" expanded={liveFinalActivity.expanded}
-                    id={liveFinalActivity.contentId} animateOnMount={liveFinalActivity.animateCollapse}>
+                    id={slice?.from ? undefined : liveFinalActivity.contentId}>
                     {activityRendered}
                 </LiveActivityCollapse>,
                 ...answerRendered,
@@ -1874,6 +1902,7 @@ const AssistantMessageBody = React.memo(({
         shouldShowStandaloneMessageActions,
         effectiveStreamPhase,
         showReasoningTraces,
+        slice,
         turnGroupingContext,
         visibleParts,
     ]);
@@ -2223,7 +2252,7 @@ const AssistantMessageBody = React.memo(({
                         </FadeInOnReveal>
                     )}
                 </div>
-                <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} />
+                {isSliceEnd ? <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} /> : null}
                 {shouldRenderStandaloneActionsAfterContent && (
                     <div className={INLINE_MESSAGE_ACTIONS_CLASS_NAME} data-message-actions="true">
                         <div className="flex items-center gap-1.5" data-message-action-group="true">

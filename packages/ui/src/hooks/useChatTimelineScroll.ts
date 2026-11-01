@@ -3,7 +3,6 @@ import React from 'react';
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
 import { cancelWhenLayoutSettled, isLayoutAnimating, onLayoutAnimationStart, onWidthDragStart, runWhenLayoutSettled } from '@/lib/layoutAnimation';
-import { holdMarkdownBlocksWithin } from '@/components/chat/markdown/markdownWindow';
 import { createKeyboardFollowGlide, type KeyboardFollowGlide } from '@/components/chat/lib/scroll/keyboardFollowGlide';
 import { retireScrollContent } from '@/components/chat/lib/scroll/retireScrollContent';
 import {
@@ -227,10 +226,20 @@ interface FollowStop {
     readonly bottom: number;
 }
 
+// A turn is several list rows (`timelineRows.ts`); its prompt row names it
+// (`data-turn-id`), the others carry `data-turn-row`.
+const turnIdOf = (element: HTMLElement): string | undefined => (
+    element.closest<HTMLElement>('[data-turn-row]')?.dataset.turnRow
+        ?? element.closest<HTMLElement>('[data-turn-id]')?.dataset.turnId
+);
+
 const readFollowStop = (node: HTMLElement, element: HTMLElement): FollowStop => {
     const rect = element.getBoundingClientRect();
     const offset = node.scrollTop - node.getBoundingClientRect().top;
-    const header = element.closest('[data-turn-id]')?.querySelector<HTMLElement>(':scope > [data-turn-sticky-header]');
+    const turnId = turnIdOf(element);
+    const header = turnId
+        ? node.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(turnId)}"] > [data-turn-sticky-header]`)
+        : null;
     const headerHeight = header ? header.getBoundingClientRect().height : 0;
     return {
         element,
@@ -241,18 +250,19 @@ const readFollowStop = (node: HTMLElement, element: HTMLElement): FollowStop => 
 
 // The list places rows in pooled containers, so document order is not
 // timeline order: a new turn often lands in a container that comes earlier in
-// the document. The latest turn is the one lowest in the content.
-const findLatestTurn = (node: HTMLElement): HTMLElement | null => {
+// the document. The latest turn owns the row lowest in the content; its prompt
+// row may be far above and unmounted.
+const findLatestTurnId = (node: HTMLElement): string | undefined => {
     let latest: HTMLElement | null = null;
     let latestTop = Number.NEGATIVE_INFINITY;
-    for (const turn of node.querySelectorAll<HTMLElement>('[data-turn-id]')) {
-        const top = turn.getBoundingClientRect().top;
+    for (const row of node.querySelectorAll<HTMLElement>('[data-turn-id], [data-turn-row]')) {
+        const top = row.getBoundingClientRect().top;
         if (top > latestTop) {
-            latest = turn;
+            latest = row;
             latestTop = top;
         }
     }
-    return latest;
+    return latest ? turnIdOf(latest) : undefined;
 };
 
 const findStreamingReply = (node: HTMLElement): HTMLElement | null => lastMatch(node, '[data-streaming-reply]');
@@ -267,11 +277,24 @@ const findStreamingReply = (node: HTMLElement): HTMLElement | null => lastMatch(
  */
 const findFollowStops = (node: HTMLElement, stopAfterUserMessage: boolean, reply: HTMLElement | null): FollowStop[] => {
     const stops: FollowStop[] = [];
-    // The turn's work starts right after the reader's message: the sticky
-    // header, or the message row itself when the header does not stick.
-    const turn = stopAfterUserMessage ? findLatestTurn(node) : null;
-    const work = turn?.children[1];
-    if (work instanceof HTMLElement) stops.push(readFollowStop(node, work));
+    // The turn's work starts at the first row after the reader's message,
+    // the topmost of its rows (pooled containers are not in timeline order).
+    const turnId = stopAfterUserMessage ? findLatestTurnId(node) : undefined;
+    // The work ends with the turn's last row: "taller than the screen" counts
+    // all of it, as it did when the work was one element.
+    let work: HTMLElement | null = null;
+    let workBottom = Number.NEGATIVE_INFINITY;
+    if (turnId) {
+        for (const row of node.querySelectorAll<HTMLElement>(`[data-turn-row="${CSS.escape(turnId)}"]`)) {
+            const rect = row.getBoundingClientRect();
+            if (!work || rect.top < work.getBoundingClientRect().top) work = row;
+            workBottom = Math.max(workBottom, rect.bottom);
+        }
+    }
+    if (work) {
+        const stop = readFollowStop(node, work);
+        stops.push({ ...stop, bottom: workBottom + node.scrollTop - node.getBoundingClientRect().top });
+    }
     if (reply) stops.push(readFollowStop(node, reply));
     return stops;
 };
@@ -656,21 +679,6 @@ export const useChatTimelineScroll = ({
         if (first === 'missing') return false;
         holdRememberedPosition();
 
-        // The offset counts from the message's top: a long answer's blocks
-        // between there and the reader stand at estimated heights until drawn
-        // (`markdownWindow`), so they are all drawn while it is restored.
-        // Tried every frame: a message whose Markdown still loads has no
-        // window yet, and one that appears later is held from then on.
-        let releaseBlocks: (() => void) | null = null;
-        const holdMessageBlocks = () => {
-            const message = node.querySelector(`[data-message-id="${CSS.escape(anchor.messageId)}"]`);
-            if (!message) return;
-            const release = holdMarkdownBlocksWithin(message);
-            releaseBlocks?.();
-            releaseBlocks = release;
-        };
-        holdMessageBlocks();
-
         let frame: number | null = null;
         let frames = 0;
         let stable = first === 'aligned' ? 1 : 0;
@@ -695,7 +703,6 @@ export const useChatTimelineScroll = ({
             node.removeEventListener('pointerdown', onInput);
             node.removeEventListener('keydown', onInput);
             if (restoreRef.current === restore) restoreRef.current = null;
-            releaseBlocks?.();
             releaseReveal?.();
         };
         // The reader took the viewport: the link is served, wherever it stands.
@@ -718,7 +725,6 @@ export const useChatTimelineScroll = ({
                 return;
             }
             const result = messageListRef.current?.alignViewportAnchor(anchor) ?? 'missing';
-            holdMessageBlocks();
             frames += 1;
             stable = result === 'aligned' ? stable + 1 : 0;
             // Two still frames: shown where it belongs. The hold continues
@@ -1153,12 +1159,40 @@ export const useChatTimelineScroll = ({
     }, [releaseFollowAtStop, resumeFollow]);
     const revealWaitingPageRef = React.useRef(revealWaitingPage);
     revealWaitingPageRef.current = revealWaitingPage;
+    // The end reaching a reader without a scroll is judged once the list has
+    // finished the pass that reported the new total. The list reports the
+    // total before it moves the viewport for rows above the reader that
+    // measured smaller than estimated, sometimes a frame later; in between,
+    // a reader hundreds of pixels above the end reads as on it, and the
+    // follow it re-armed pulled them down to the end. The check waits for
+    // the frame after the pass (a microtask first, so it runs after any frame
+    // work the pass scheduled) and reads the list's state again there.
+    const endArrivalPendingRef = React.useRef(false);
+    const endArrivalFrameRef = React.useRef<number | null>(null);
+    const confirmEndArrived = React.useCallback(() => {
+        if (endArrivalPendingRef.current) return;
+        endArrivalPendingRef.current = true;
+        queueMicrotask(() => {
+            if (!endArrivalPendingRef.current) return;
+            endArrivalFrameRef.current = window.requestAnimationFrame(() => {
+                endArrivalFrameRef.current = null;
+                endArrivalPendingRef.current = false;
+                if (isAtEndRef.current) return;
+                const state = listRef.current?.getState();
+                if (!state || state.contentLength === undefined) return;
+                if (state.contentLength - state.scroll - state.scrollLength <= 1) onIsAtEndChange(true);
+            });
+        });
+    }, [onIsAtEndChange]);
     React.useEffect(() => () => {
         if (followFrameRef.current !== null) window.cancelAnimationFrame(followFrameRef.current);
         followFrameRef.current = null;
         glideRef.current = null;
         if (pageRevealFrameRef.current !== null) window.cancelAnimationFrame(pageRevealFrameRef.current);
         pageRevealFrameRef.current = null;
+        if (endArrivalFrameRef.current !== null) window.cancelAnimationFrame(endArrivalFrameRef.current);
+        endArrivalFrameRef.current = null;
+        endArrivalPendingRef.current = false;
     }, []);
 
     const onTimelineDataChange = React.useCallback(() => {
@@ -1208,7 +1242,7 @@ export const useChatTimelineScroll = ({
             const state = list.getState();
             const below = state.contentLength === undefined ? null : state.contentLength - state.scroll - state.scrollLength;
             if (!isAtEndRef.current) {
-                if (below !== null && below <= 1) onIsAtEndChange(true);
+                if (below !== null && below <= 1) confirmEndArrived();
                 return;
             }
             // A row opened on the end that grew less than the band leaves the
@@ -1258,7 +1292,7 @@ export const useChatTimelineScroll = ({
         // at 45% of the stream time spent 500-1600px behind at 420x640.
         if (modeRef.current !== 'following-end') return;
         followEnd();
-    }, [followEnd, isLiveFollowActive, onIsAtEndChange, revealWaitingPage, scheduleShowScrollButton]);
+    }, [confirmEndArrived, followEnd, isLiveFollowActive, onIsAtEndChange, revealWaitingPage, scheduleShowScrollButton]);
 
     // The streaming tail grows inside one row without changing the entries
     // array, so data-change callbacks are silent for the entire stream. The
@@ -1713,31 +1747,29 @@ export const useChatTimelineScroll = ({
         });
         spy.setContainer(container);
 
-        const elementByTurnId = new Map<string, HTMLElement>();
+        // Every row of a turn counts: a long turn's prompt row unmounts while
+        // the reader is deep in its answer.
+        const TURN_ROW_SELECTOR = '[data-turn-id], [data-turn-row]';
+        const turnIdOfRow = (node: HTMLElement) => node.dataset.turnId ?? node.dataset.turnRow;
         const registerTurnNode = (node: HTMLElement) => {
-            const turnId = node.dataset.turnId;
+            const turnId = turnIdOfRow(node);
             if (!turnId) return false;
-            elementByTurnId.set(turnId, node);
             spy.register(node, turnId);
             return true;
         };
         const unregisterTurnNode = (node: HTMLElement) => {
-            const turnId = node.dataset.turnId;
-            if (!turnId) return false;
-            if (elementByTurnId.get(turnId) !== node) return false;
-            elementByTurnId.delete(turnId);
-            spy.unregister(turnId);
+            spy.unregister(node);
             return true;
         };
         const collectTurnNodes = (node: Node): HTMLElement[] => {
             if (!(node instanceof HTMLElement)) return [];
             const collected: HTMLElement[] = [];
-            if (node.matches('[data-turn-id]')) collected.push(node);
-            node.querySelectorAll<HTMLElement>('[data-turn-id]').forEach((el) => collected.push(el));
+            if (node.matches(TURN_ROW_SELECTOR)) collected.push(node);
+            node.querySelectorAll<HTMLElement>(TURN_ROW_SELECTOR).forEach((el) => collected.push(el));
             return collected;
         };
 
-        container.querySelectorAll<HTMLElement>('[data-turn-id]').forEach(registerTurnNode);
+        container.querySelectorAll<HTMLElement>(TURN_ROW_SELECTOR).forEach(registerTurnNode);
         spy.markDirty();
 
         const mutationObserver = new MutationObserver((records) => {

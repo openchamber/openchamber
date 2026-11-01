@@ -1,4 +1,5 @@
 import React from 'react';
+import { MessageSliceContext } from './message/messageSliceContext';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { findCatalogModel, type Message, type Part } from '@/lib/opencode/model';
 import { readPromptOrigin } from '@/lib/opencode/prompt-origin';
@@ -133,6 +134,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const canPinIntoContext = !isVSCodeRuntime();
     const { currentTheme } = useThemeSystem();
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
+    // A long answer's later rows draw the rest of this message; they carry its
+    // id for search and quotes, and name their slice so navigation and the
+    // message's anchor id stay on its first row.
+    const slice = React.useContext(MessageSliceContext);
+    const sliceName = slice?.from ? `${slice.from.partId}:${slice.from.offset}` : undefined;
 
     const getAgentModelForSession = useSelectionStore((s) => s.getAgentModelForSession);
     const getSessionModelSelection = useSelectionStore((s) => s.getSessionModelSelection);
@@ -620,8 +626,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     // turn's (TurnItem gapBelow); only ungrouped lists (BTW) keep it here.
                     isUser || hasTurnGrouping || isFollowedByAssistant || nextIsHiddenUserMessage ? 'pb-0' : 'pb-2'
                 )}
-                id={`message-${message.info.id}`}
+                id={sliceName ? undefined : `message-${message.info.id}`}
                 data-message-id={message.info.id}
+                data-message-slice={sliceName}
+                data-message-continues={slice?.to ? '' : undefined}
+                data-message-row={slice ? `${slice.index}/${slice.count}` : undefined}
                 ref={messageContainerRef}
             >
                 <div className="chat-message-column relative">

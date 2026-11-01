@@ -9,10 +9,6 @@ import { flushSync } from 'react-dom';
  * thousands of nodes were laid out and, with an accessibility client on,
  * serialized again on every frame of a panel resize.
  *
- * The Files preview windows every Markdown file; the chat windows a long
- * answer that was finished when it mounted, and keeps the reader's place as
- * blocks above them are drawn (`beforeChange`, `holdReaderPlace`).
- *
  * Whatever reads the whole rendered document holds every block mounted while
  * it does (`holdMarkdownBlocks`): the find bar, heading links. A selection
  * keeps the blocks it reached mounted, so its ends never leave the DOM, and
@@ -24,18 +20,6 @@ export const BLOCK_INDEX = 'data-oc-block-index';
 export const BLOCK_KEY = 'data-oc-block-key';
 
 export type BlockSize = { height: number; start: number; end: number };
-
-export type MarkdownWindowOptions = {
-  /** Blocks rendered before the window knows where it is: the top of a document opened at its start. */
-  initialBlocks?: number;
-  /**
-   * Called before blocks mount or unmount, while the old ones are still in
-   * place. A scroller without browser scroll anchoring keeps what the reader
-   * looks at where it is from here: a block drawn for the first time above
-   * them is taller or shorter than its estimate.
-   */
-  beforeChange?: (scroller: HTMLElement) => void;
-};
 
 const scrollerOf = (element: HTMLElement): HTMLElement | null => {
   const view = element.ownerDocument.defaultView;
@@ -63,9 +47,11 @@ export const blockKey = (index: number, content: string): string => {
 
 const windows = new WeakMap<Element, MarkdownWindow>();
 
+// Blocks rendered before the window knows where it is: the top of a document
+// opened at its start paints in the first frame.
+const INITIAL_BLOCKS = 24;
+
 export class MarkdownWindow {
-  private readonly initialBlocks: number;
-  private readonly beforeChange: MarkdownWindowOptions['beforeChange'];
   private container: HTMLElement | null = null;
   private scroller: HTMLElement | null = null;
   private attached = false;
@@ -82,18 +68,13 @@ export class MarkdownWindow {
   private frame: number | null = null;
   charsPerLine = 80;
 
-  constructor(options: MarkdownWindowOptions = {}) {
-    this.initialBlocks = options.initialBlocks ?? 24;
-    this.beforeChange = options.beforeChange;
-  }
-
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   };
 
   isRendered(index: number): boolean {
-    if (!this.attached) return index < this.initialBlocks;
+    if (!this.attached) return index < INITIAL_BLOCKS;
     return !this.scroller || this.holds > 0 || this.near.has(index) || this.pins.has(index);
   }
 
@@ -243,7 +224,6 @@ export class MarkdownWindow {
       }
     }
     const changed = next.size !== this.near.size || [...next].some((index) => !this.near.has(index));
-    if (changed && this.attached) this.beforeChange?.(scroller);
     this.near = next;
     if (changed) this.notify();
   }
@@ -300,20 +280,6 @@ export const holdMarkdownBlocks = (element: Element, options: { block?: Element;
   if (!owner) return () => {};
   const index = options.block?.getAttribute(BLOCK_INDEX);
   return owner.hold(index === null || index === undefined ? undefined : Number(index), options.sync);
-};
-
-/** Keeps every block of every windowed document inside `root` mounted until the returned release. */
-export const holdMarkdownBlocksWithin = (root: Element, options: { sync?: boolean } = {}): (() => void) => {
-  const owners = new Set<MarkdownWindow>();
-  const own = root.closest('[data-markdown-content]');
-  for (const container of [...(own ? [own] : []), ...root.querySelectorAll('[data-markdown-content]')]) {
-    const owner = windows.get(container);
-    if (owner) owners.add(owner);
-  }
-  const releases = options.sync
-    ? flushSync(() => [...owners].map((owner) => owner.hold(undefined)))
-    : [...owners].map((owner) => owner.hold(undefined));
-  return () => { for (const release of releases) release(); };
 };
 
 export const MarkdownWindowContext = React.createContext<MarkdownWindow | null>(null);

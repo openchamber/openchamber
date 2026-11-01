@@ -395,9 +395,38 @@ const getMarkdownRoot = (node: Node): Element | null => {
 // them is that text, not the list, table or emphasis around it.
 const TEXT_BLOCK_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, td, th, summary, dt, dd';
 
+// A long answer is drawn as several transcript rows, one markdown root each,
+// under wrappers naming the text part they cut (`data-answer-part`).
+const ANSWER_PART_ATTRIBUTE = 'data-answer-part';
+
+const answerPartOf = (root: Element): string | null => root.closest(`[${ANSWER_PART_ATTRIBUTE}]`)?.getAttribute(ANSWER_PART_ATTRIBUTE) ?? null;
+
+/**
+ * A selection across the rows of one long answer, as the Markdown of each
+ * row's part of it, in order. Null unless both ends are in rows of one answer.
+ */
+const getAnswerSelectionText = (range: Range, startRoot: Element, endRoot: Element, format: RenderedCopyFormat): string | null => {
+  const part = answerPartOf(startRoot);
+  if (!part || part !== answerPartOf(endRoot)) return null;
+  const pieces: string[] = [];
+  for (const wrapper of startRoot.ownerDocument.querySelectorAll(`[${ANSWER_PART_ATTRIBUTE}]`)) {
+    if (wrapper.getAttribute(ANSWER_PART_ATTRIBUTE) !== part) continue;
+    const root = wrapper.querySelector(MARKDOWN_ROOT_SELECTOR);
+    if (!root || !range.intersectsNode(root)) continue;
+    const piece = root.ownerDocument.createRange();
+    piece.selectNodeContents(root);
+    if (root.contains(range.startContainer)) piece.setStart(range.startContainer, range.startOffset);
+    if (root.contains(range.endContainer)) piece.setEnd(range.endContainer, range.endOffset);
+    const text = getMarkdownSelectionText(piece, format);
+    if (text) pieces.push(text.trim());
+  }
+  return pieces.length > 0 ? pieces.join('\n\n') : null;
+};
+
 /**
  * The selected part of one rendered markdown block as Markdown (or its plain
- * reading), or null when the range is not inside a single markdown root.
+ * reading), or null when the range is not inside a single markdown root or
+ * the rows of one long answer.
  *
  * Formatting inside the selection is kept. `cloneContents` drops the ancestors
  * the range starts and ends in, so a selection that crosses blocks is
@@ -407,7 +436,9 @@ const TEXT_BLOCK_SELECTOR = 'p, h1, h2, h3, h4, h5, h6, li, td, th, summary, dt,
  */
 export const getMarkdownSelectionText = (range: Range, format: RenderedCopyFormat = 'markdown'): string | null => {
   const root = getMarkdownRoot(range.startContainer);
-  if (!root || root !== getMarkdownRoot(range.endContainer)) return null;
+  const endRoot = getMarkdownRoot(range.endContainer);
+  if (!root || !endRoot) return null;
+  if (root !== endRoot) return getAnswerSelectionText(range, root, endRoot, format);
 
   const fragment = cloneSelectionContent(range);
   let content: Node = fragment;

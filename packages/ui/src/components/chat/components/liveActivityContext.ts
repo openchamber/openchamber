@@ -7,7 +7,6 @@ export const LiveFinalActivityContext = createContext<{
     messageId: string;
     expanded: boolean;
     contentId: string;
-    animateCollapse: boolean;
     /** Pages the turn's agent showed, drawn above the answer instead of inside the fold. */
     pages: readonly ToolPart[];
 } | null>(null);
