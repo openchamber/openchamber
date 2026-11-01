@@ -33,8 +33,9 @@ const folderInstall = async () => {
       },
     },
   }));
-  await write(root, 'panel/index.html', '<link rel="stylesheet" href="styles.css"><script src="../dist/main.js"></script>');
+  await write(root, 'panel/index.html', '<link rel="stylesheet" href="styles.css"><img src="logo.png"><script src="../dist/main.js"></script>');
   await write(root, 'panel/styles.css', 'one');
+  await write(root, 'panel/logo.png', 'one');
   await write(root, 'dist/main.js', 'one');
   await write(root, 'service/main.js', 'one');
   await write(root, 'service/lib/routes.js', 'one');
@@ -60,7 +61,7 @@ describe('createGuestPackageWatch', () => {
     expect(changes).toEqual([root]);
   });
 
-  test('a page stylesheet and a module the service imports count; its node_modules do not', async () => {
+  test('a page stylesheet and image and a module the service imports count; its node_modules do not', async () => {
     const { root, changes } = await folderInstall();
 
     await write(root, 'service/node_modules/dep/index.js', 'two two');
@@ -69,9 +70,11 @@ describe('createGuestPackageWatch', () => {
 
     await write(root, 'panel/styles.css', 'two two');
     await settle();
+    await write(root, 'panel/logo.png', 'two two');
+    await settle();
     await write(root, 'service/lib/routes.js', 'two two');
     await settle();
-    expect(changes).toEqual([root, root]);
+    expect(changes).toEqual([root, root, root]);
   });
 
   test('a build that removes its output folder is reported again when the output comes back', async () => {

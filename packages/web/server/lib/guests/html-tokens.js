@@ -62,6 +62,9 @@ export const resolveGuestHtmlRelativePath = (entry, href) => {
   return segments.join('/');
 };
 
+/** Relative script, link, and img URLs: the subresources `injectGuestAssetTokens` rewrites. */
+export const listRelativeGuestAssetHrefs = (html) => [...html.matchAll(RELATIVE_ASSET)].map((match) => match[3]);
+
 /** Copy the iframe URL token onto relative script/link/img URLs in guest HTML. */
 export const injectGuestAssetTokens = (html, token) => {
   if (!token) {

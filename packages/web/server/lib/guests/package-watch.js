@@ -4,10 +4,9 @@ import path from 'node:path';
 import { resolveAttachEntry, resolvePageEntry, resolveStatusSectionEntry } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
-import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
+import { listRelativeGuestAssetHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
 
 const POLL_MS = 500;
-const LINK_HREF = /<link\b[^>]*?\shref=(["'])(?!https?:|\/\/|data:|#)([^"']+)\1/gi;
 const SCRIPT_MODULE = /\.[cm]?js$/;
 
 /** Every script a service can import: `.js`, `.mjs` and `.cjs` under its entry's folder, outside `node_modules` and dot folders. */
@@ -25,10 +24,10 @@ const serviceModules = async (root, folder) => {
 
 /**
  * What the host loads from a package: the manifest, the panel icon, each
- * page with the scripts and links it loads, and the service's scripts. Read
- * from the manifest itself, so a package that does not load yet still names
- * the files its build will write. Anything else a service writes beside them
- * does not count.
+ * page with the scripts, links, and images it loads, and the service's
+ * scripts. Read from the manifest itself, so a package that does not load yet
+ * still names the files its build will write. Anything else a service writes
+ * beside them does not count.
  */
 const loadedFiles = async (root) => {
   const files = ['package.json'];
@@ -48,8 +47,7 @@ const loadedFiles = async (root) => {
   for (const page of pages) {
     files.push(page);
     const html = await fs.readFile(path.join(root, page), 'utf8').catch(() => '');
-    const links = [...html.matchAll(LINK_HREF)].map((match) => match[2]);
-    for (const href of [...listRelativeGuestScriptHrefs(html), ...links]) {
+    for (const href of listRelativeGuestAssetHrefs(html)) {
       const file = resolveGuestHtmlRelativePath(page, href);
       if (file) files.push(file);
     }
