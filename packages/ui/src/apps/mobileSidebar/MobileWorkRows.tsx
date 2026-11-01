@@ -1,4 +1,5 @@
 import React from 'react';
+import { requestPinTo } from '@/components/session/sidebar/sections/sectionActions';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { Icon } from '@/components/icon/Icon';
 import { Spinner } from '@/components/ui/spinner';
@@ -233,7 +234,7 @@ export const MobileWorktreeRow: React.FC<{
             icon={work.pinned ? 'unpin' : 'pushpin'}
             label={work.pinned ? t('sessions.sidebar.work.menu.unpin') : t('sessions.sidebar.work.menu.pin')}
             revealed={revealed}
-            onClick={after(() => { void work.togglePin(); })}
+            onClick={after(() => requestPinTo({ current: work.pinList, pin: (list) => { void work.setPin(true, list); }, unpin: () => { void work.setPin(false); } }))}
           />
         ) : null}
         {work.canArchive ? (

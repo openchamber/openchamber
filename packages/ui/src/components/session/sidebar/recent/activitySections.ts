@@ -1,4 +1,5 @@
 import type { Session } from '@/lib/opencode/model';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import type { SessionNode } from '../types';
 import type { SidebarSessionLocation } from './sessionLocation';
 
@@ -10,14 +11,13 @@ type SidebarActivityItem = {
   getSecondaryMeta?: (sessionId: string) => SidebarActivityItem['secondaryMeta'];
 };
 
-// The zones filter their own lists with the sidebar's rule:
-// an exact `ses_` id, otherwise a case-insensitive title match.
+// The zones filter their own lists with the sidebar's rule: an exact `ses_`
+// id, otherwise every word of the query at the start of a word of the title.
 const matchesSidebarSessionQuery = (session: Session, query: string): boolean => {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return true;
   if (normalizedQuery.startsWith('ses_')) return session.id.toLowerCase() === normalizedQuery;
-  const title = typeof session.title === 'string' ? session.title.toLowerCase() : '';
-  return title.includes(query);
+  return matchesRankQuery([typeof session.title === 'string' ? session.title : ''], normalizedQuery, SIDEBAR_SEARCH);
 };
 
 /**

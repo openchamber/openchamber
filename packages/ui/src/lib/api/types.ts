@@ -943,6 +943,8 @@ export interface GitWorktreeInfo {
   title?: string;
   /** When the user pinned the task to the top of the sidebar; absent while unpinned. */
   pinnedAt?: number;
+  /** The user's pin list the pin is filed in; absent for Pinned. */
+  pinList?: string;
   provenance?: GitContributorWorktreeProvenance;
 }
 
@@ -1175,7 +1177,7 @@ interface GitWorktreeAPI {
   /** Sets the task title of the worktree at `directory` as the user's; an empty title clears it. */
   setTitle?(directory: string, title: string): Promise<GitWorktreeTitleResult>;
   /** Pins or unpins the task of the worktree at `directory`. */
-  setPinned?(directory: string, pinned: boolean): Promise<GitWorktreePinResult>;
+  setPinned?(directory: string, pinned: boolean, list?: string | null): Promise<GitWorktreePinResult>;
   /** `directory` is the worktree to snapshot. */
   snapshot?(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult>;
   /** `directory` is the project; the worktree is removed, its branch kept. */

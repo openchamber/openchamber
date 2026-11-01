@@ -1,4 +1,9 @@
 import React from 'react';
+import { canAddSidebarSection, closeSectionsManager, editSection, openSectionsManager, useSidebarSectionsUiStore } from '../sections/sectionActions';
+import { createSidebarSectionFromTemplate, SIDEBAR_SECTION_NAME_MAX, SIDEBAR_SECTION_TEXT_MAX } from '@/lib/sidebarSections';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+
+const loadSectionsManager = () => import('../sections/SidebarSectionsManager').then((module) => module.SidebarSectionsManager);
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import {
@@ -15,6 +20,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from "@/components/icon/icons";
 import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -56,6 +62,13 @@ const IDLE_PAGE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hove
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
+  // The header spans the sidebar: the sections manager opens beside its end
+  // edge, so the section being edited shows in the list as it stands.
+  const headerRef = React.useRef<HTMLDivElement | null>(null);
+  // The manager and its editor load the first time they open.
+  const sectionsManagerOpen = useSidebarSectionsUiStore((state) => state.managerOpen);
+  const sidebarSections = useSessionDisplayStore((state) => state.sections);
+  const SectionsManager = useOnDemandComponent(props.showSectionControls && sectionsManagerOpen, loadSectionsManager, closeSectionsManager);
   const guestPages = useGuestPages();
   const {
     hideDirectoryControls,
@@ -91,35 +104,28 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
   const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
 
-  const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
-  const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
-  const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
-  const setShowWorkSection = useSessionDisplayStore((state) => state.setShowWorkSection);
-  const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
-  const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
   const worktreeNameByBranch = useSessionDisplayStore((state) => state.worktreeNameByBranch);
   const setWorktreeNameByBranch = useSessionDisplayStore((state) => state.setWorktreeNameByBranch);
-  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const sidebarGrouping = useSessionDisplayStore(resolveSidebarGrouping);
   const setSidebarGrouping = useSessionDisplayStore((state) => state.setSidebarGrouping);
-  const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
-  const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
   // VS Code always groups under its workspace.
   const timeGrouping = showProjectDisplayControls && sidebarGrouping === 'time';
-  const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
+  // The list by time shows every project, whatever the project display says.
+  const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single' && !timeGrouping;
 
   // One choice per line, rarely touched orders behind submenus that name the
   // current choice, so the menu stays short: selection first, then the view,
-  // its orders, the sections, and collapse.
+  // its orders, the sections, and collapse. Choosing a view setting keeps the
+  // menu open, so several can be set in one go; the actions close it.
   const checkMark = <Icon name="check" className="h-4 w-4 text-primary" />;
   const choiceSubmenu = <T extends string>(
-    labelKey: I18nKey,
+    { labelKey, icon }: { labelKey: I18nKey; icon: IconName },
     options: readonly (readonly [T, I18nKey])[],
     current: T,
     onSelect: (value: T) => void,
@@ -127,13 +133,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
     const currentLabelKey = options.find(([value]) => value === current)?.[1];
     return (
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger className="gap-2">
+          <Icon name={icon} className="h-4 w-4" />
           <span className="flex-1">{t(labelKey)}</span>
           {currentLabelKey ? <span className="ms-4 text-muted-foreground">{t(currentLabelKey)}</span> : null}
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="min-w-[160px]">
           {options.map(([value, optionLabelKey]) => (
-            <DropdownMenuItem key={value} onClick={() => onSelect(value)} className="flex items-center justify-between">
+            <DropdownMenuItem key={value} closeOnClick={false} onClick={() => onSelect(value)} className="flex items-center justify-between">
               <span>{t(optionLabelKey)}</span>
               {current === value ? checkMark : null}
             </DropdownMenuItem>
@@ -142,24 +149,37 @@ export function SidebarHeader(props: Props): React.ReactNode {
       </DropdownMenuSub>
     );
   };
-  const toggleItem = (labelKey: I18nKey, checked: boolean, onToggle: () => void) => (
-    <DropdownMenuItem onClick={onToggle} className="flex items-center justify-between">
-      <span>{t(labelKey)}</span>
+  const toggleItem = ({ labelKey, icon }: { labelKey: I18nKey; icon: IconName }, checked: boolean, onToggle: () => void) => (
+    <DropdownMenuItem closeOnClick={false} onClick={onToggle} className="flex items-center gap-2">
+      <Icon name={icon} className="h-4 w-4" />
+      <span className="flex-1">{t(labelKey)}</span>
       {checked ? checkMark : null}
     </DropdownMenuItem>
   );
+  // The sections manager and Select sessions each open a surface or a mode of
+  // the list, so they share the first group; the manager, the way into the
+  // sidebar's sections, leads it.
   const displayMenuSections: React.ReactNode[] = [
-    <DropdownMenuItem key="select" onClick={toggleSelectionMode} className="flex items-center gap-2">
-      <Icon name="checkbox-multiple" className="h-4 w-4" />
-      <span>{selectionModeEnabled
-        ? t('sessions.sidebar.header.actions.exitSelection')
-        : t('sessions.sidebar.header.actions.selectSessions')}</span>
-    </DropdownMenuItem>,
+    <>
+      {showSectionControls ? (
+        <DropdownMenuItem onClick={openSectionsManager} className="flex items-center gap-2">
+          <Icon name="stack" className="h-4 w-4" />
+          <span>{t('sessions.sidebar.sections.open')}</span>
+        </DropdownMenuItem>
+      ) : null}
+      <DropdownMenuItem onClick={toggleSelectionMode} className="flex items-center gap-2">
+        <Icon name="checkbox-multiple" className="h-4 w-4" />
+        <span>{selectionModeEnabled
+          ? t('sessions.sidebar.header.actions.exitSelection')
+          : t('sessions.sidebar.header.actions.selectSessions')}</span>
+      </DropdownMenuItem>
+    </>,
   ];
   // One view: works under their projects, or every project's works in one
   // list by time, which has no project headers to sort.
   if (showProjectDisplayControls) {
-    displayMenuSections.push(choiceSubmenu('sessions.sidebar.header.listGrouping.label', [
+    // The grouping's icon follows the choice, so the menu says which one the list is in.
+    displayMenuSections.push(choiceSubmenu({ labelKey: 'sessions.sidebar.header.listGrouping.label', icon: sidebarGrouping === 'time' ? 'time' : 'folders' }, [
       ['project', 'sessions.sidebar.header.listGrouping.project'],
       ['time', 'sessions.sidebar.header.listGrouping.time'],
     ] as const, sidebarGrouping, (grouping) => {
@@ -167,8 +187,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
       void updateDesktopSettings({ sidebarGrouping: grouping });
     }));
   }
-  displayMenuSections.push(<>
-    {!timeGrouping ? choiceSubmenu('sessions.sidebar.header.actions.sortProjects', [
+  // Grouped by time the list has no project headers to sort and shows every
+  // project, so this group is empty then and takes no separator.
+  if (!timeGrouping) displayMenuSections.push(<>
+    {choiceSubmenu({ labelKey: 'sessions.sidebar.header.actions.sortProjects', icon: 'arrow-up-down' }, [
       ['manual', 'sessions.sidebar.header.projectSort.manual'],
       ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
       ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
@@ -177,8 +199,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
     ] as const, projectSortOrder, (order) => {
       setProjectSortOrder(order);
       void updateDesktopSettings({ sidebarProjectSortOrder: order });
-    }) : null}
-    {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.projectDisplay.label', [
+    })}
+    {showProjectDisplayControls ? choiceSubmenu({ labelKey: 'sessions.sidebar.header.projectDisplay.label', icon: 'folder-open' }, [
       ['all', 'sessions.sidebar.header.projectDisplay.all'],
       ['single', 'sessions.sidebar.header.projectDisplay.single'],
     ] as const, projectDisplayMode, (mode) => {
@@ -188,29 +210,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
   </>);
   if (showSectionControls) {
     displayMenuSections.push(<>
-      {toggleItem('sessions.sidebar.header.displayMode.showChats', showChatsSection, () => {
-        setShowChatsSection(!showChatsSection);
-        void updateDesktopSettings({ sidebarShowChatsSection: !showChatsSection });
-      })}
-      {toggleItem('sessions.sidebar.header.displayMode.showPinned', showPinnedSection, () => {
-        setShowPinnedSection(!showPinnedSection);
-        void updateDesktopSettings({ sidebarShowPinnedSection: !showPinnedSection });
-      })}
-      {sessionWorkEnabled ? toggleItem('sessions.sidebar.header.displayMode.showWork', showWorkSection, () => {
-        setShowWorkSection(!showWorkSection);
-        void updateDesktopSettings({ sidebarShowWorkSection: !showWorkSection });
-      }) : null}
-      {/* A work in In work leaves its project unless asked; VS Code always keeps it there. */}
-      {sessionWorkEnabled && showWorkSection && showProjectDisplayControls ? toggleItem('sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, () => {
-        setKeepWorkInPlace(!keepWorkInPlace);
-        void updateDesktopSettings({ sidebarKeepWorkInPlace: !keepWorkInPlace });
-      }) : null}
       {/* Rows that mix projects keep one line unless asked. */}
-      {toggleItem('sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, () => {
+      {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.detailedZoneRows', icon: 'list-check-2' }, detailedZoneRows, () => {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
       })}
-      {toggleItem('sessions.sidebar.header.displayMode.worktreeNameByBranch', worktreeNameByBranch, () => {
+      {toggleItem({ labelKey: 'sessions.sidebar.header.displayMode.worktreeNameByBranch', icon: 'git-branch' }, worktreeNameByBranch, () => {
         setWorktreeNameByBranch(!worktreeNameByBranch);
         void updateDesktopSettings({ sidebarWorktreeNameByBranch: !worktreeNameByBranch });
       })}
@@ -256,6 +261,18 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const morePageOpen = morePageItems.some((page) => page.open)
     || guestPages.some((guest) => guest.id === openGuestPageId);
 
+  // What the search found, kept as a section: the query becomes its words to
+  // find and its name, in the editor, with the search closed so the sidebar
+  // shows the section being made. An id lookup finds one session, not a topic.
+  const searchText = sessionSearchQuery.trim();
+  const canSaveSearch = showSectionControls && searchText !== '' && !searchText.toLowerCase().startsWith('ses_')
+    && canAddSidebarSection(sidebarSections);
+  const saveSearchAsSection = () => {
+    const section = createSidebarSectionFromTemplate('blank', searchText.slice(0, SIDEBAR_SECTION_NAME_MAX));
+    editSection({ ...section, filter: { ...section.filter, text: [searchText.slice(0, SIDEBAR_SECTION_TEXT_MAX)] } }, true);
+    closeSessionSearch();
+  };
+
   if (hideDirectoryControls) {
     // VS Code: the sidebar is always a single workspace, so project/directory
     // controls stay hidden, but session search is still useful. Show a compact,
@@ -281,7 +298,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
 
   return (
-    <div className="select-none flex-shrink-0 px-2.5 py-1">
+    <div ref={headerRef} className="select-none flex-shrink-0 px-2.5 py-1">
       <div className="flex h-auto min-h-8 flex-col gap-1">
         {/* Quiet toolbar at the top of the list: the list's own controls
             first, then one menu with the pages the sidebar opens. ms-[3px]
@@ -343,6 +360,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {showSectionControls && SectionsManager ? <SectionsManager anchor={headerRef} /> : null}
+
           <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -401,7 +420,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
                   : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
                 : undefined}
-              trailingHint={t('sessions.sidebar.header.search.escapeHint')}
+              trailingHint={canSaveSearch ? (
+                <button type="button" onClick={saveSearchAsSection} className="text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+                  {t('sessions.sidebar.sections.saveSearch')}
+                </button>
+              ) : t('sessions.sidebar.header.search.escapeHint')}
             />
           </div>
         ) : null}

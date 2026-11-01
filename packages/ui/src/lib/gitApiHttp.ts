@@ -1709,11 +1709,11 @@ export async function setGitWorktreeTitle(directory: string, title: string): Pro
 
 const worktreePinResultSchema = z.object({ pinned: z.boolean(), branch: z.string() });
 
-export async function setGitWorktreePinned(directory: string, pinned: boolean): Promise<GitWorktreePinResult> {
+export async function setGitWorktreePinned(directory: string, pinned: boolean, list: string | null = null): Promise<GitWorktreePinResult> {
   const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/pin`, directory), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pinned }),
+    body: JSON.stringify(list ? { pinned, list } : { pinned }),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {

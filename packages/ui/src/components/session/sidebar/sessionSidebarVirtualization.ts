@@ -24,7 +24,7 @@ export const findFirstVisibleSessionSidebarRowIndex = (
   scrollOffset: number,
 ): number => items.find((item) => item.end > scrollOffset)?.index ?? 0;
 
-const SECTION_SPACING_ESTIMATE = { 'pb-5': 20, 'pb-3': 12, 'pb-1.5': 6, 'pb-0.5': 2 } as const;
+const SECTION_SPACING_ESTIMATE = { 'pb-4': 16, 'pb-3': 12, 'pb-1.5': 6, 'pb-0.5': 2 } as const;
 
 type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
 
@@ -97,10 +97,10 @@ type SessionSidebarRowList = {
  * The list then behaves as the user's action makes it (a header's motion, new
  * rows where the control was); for any other change, sessions arriving,
  * leaving or moving and rows changing height, it keeps the row the user sees
- * in place (`SessionSidebarRows`). Projects dragged into another order are
- * the user's too, but the rows cannot tell them from projects sorted by
- * recent activity moving on their own: the drag says so itself
- * (`sessionSidebarProjectOrderChanged`).
+ * in place (`SessionSidebarRows`). Projects and sections dragged into
+ * another order are the user's too, but the rows cannot tell them from
+ * projects sorted by recent activity moving on their own: the drag holds the
+ * row it dropped instead (`heldRowRef`).
  */
 export const isSessionSidebarUserChange = (previous: SessionSidebarRowList, next: SessionSidebarRowList): boolean => {
   if (previous.search || next.search) return true;
@@ -113,16 +113,6 @@ export const isSessionSidebarUserChange = (previous: SessionSidebarRowList, next
   }
   return false;
 };
-
-const projectOrder = (list: SessionSidebarRowList, other: SessionSidebarRowList): string => list.rows
-  .filter((row) => row.kind === 'project-header' && other.rowIndexByKey.has(row.key))
-  .map((row) => row.key)
-  .join('\n');
-
-/** Whether projects present before and after changed their order. */
-export const sessionSidebarProjectOrderChanged = (previous: SessionSidebarRowList, next: SessionSidebarRowList): boolean => (
-  projectOrder(previous, next) !== projectOrder(next, previous)
-);
 
 /**
  * A row the user sees and where it sits: the row under the line `fraction` of
@@ -289,10 +279,19 @@ export const estimateSessionSidebarRowSize = (
   return (measured.height ?? row.estimateSize) + gap;
 };
 
-/** The classes of a row's wrapper: its trailing gap. */
-export const sectionWrapperClass = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => (
-  sectionSpacingAfter(row, nextRow) ?? ''
-);
+/**
+ * A hairline in the middle of the gap that closes an open project before the
+ * next one, from the project headers' content edge to theirs. Only there: a
+ * line between every two projects striped a run of collapsed ones.
+ */
+const PROJECT_DIVIDER_CLASS = "after:pointer-events-none after:absolute after:start-1.5 after:end-1.5 after:bottom-[5.5px] after:h-px after:bg-[color-mix(in_srgb,var(--foreground)_8%,transparent)] after:content-['']";
+
+/** The classes of a row's wrapper: its trailing gap, and the line between open projects. */
+export const sectionWrapperClass = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => {
+  const spacing = sectionSpacingAfter(row, nextRow);
+  if (spacing === 'pb-3' && nextRow?.kind === 'project-header') return `${spacing} ${PROJECT_DIVIDER_CLASS}`;
+  return spacing ?? '';
+};
 
 export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): SectionSpacing | undefined => {
   // Projects are set apart by space alone, with no line between them. A
@@ -307,6 +306,6 @@ export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSide
     if (row.kind === 'caption') return undefined;
     return row.kind === 'project-header' ? 'pb-0.5' : 'pb-3';
   }
-  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption') return 'pb-5';
+  if (nextRow?.kind === 'activity-header' || nextRow?.kind === 'caption') return 'pb-4';
   return nextRow?.kind === 'group-header' && !isGroupWork(nextRow.group) && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };

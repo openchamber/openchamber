@@ -4955,7 +4955,7 @@ export async function getWorktrees(directory) {
       .filter((entry) => entry.bare !== true)
       .map((entry) => {
         const title = entry.branch ? titles.get(entry.branch) : undefined;
-        const pinnedAt = entry.branch ? pins.get(entry.branch) : undefined;
+        const pin = entry.branch ? pins.get(entry.branch) : undefined;
         return {
           head: entry.head || '',
           name: path.basename(entry.worktree || ''),
@@ -4964,7 +4964,8 @@ export async function getWorktrees(directory) {
           prunable: entry.prunable === true,
           // Absent until the task is named; JSON leaves an undefined key out.
           title: title || undefined,
-          pinnedAt,
+          pinnedAt: pin?.pinnedAt,
+          pinList: pin?.list,
         };
       });
   } catch (error) {
@@ -5045,18 +5046,36 @@ const readBranchPins = async (repositoryDirectory) => {
     const newline = record.indexOf('\n');
     if (newline <= 0) continue;
     const branch = record.slice('branch.'.length, newline - BRANCH_PIN_KEY_SUFFIX.length);
-    const pinnedAt = Number(record.slice(newline + 1).trim());
-    if (branch && Number.isFinite(pinnedAt) && pinnedAt > 0) pins.set(branch, pinnedAt);
+    const pin = parseBranchPin(record.slice(newline + 1));
+    if (branch && pin) pins.set(branch, pin);
   }
   return pins;
 };
+
+/**
+ * The stored pin: the time it was pinned, then the id of the user's pin list
+ * when it is filed in one (`<at> <list>`). A build that knows no lists reads
+ * such a value as no pin, which leaves the worktree in its project.
+ */
+const parseBranchPin = (value) => {
+  const [at, list] = String(value || '').trim().split(/\s+/, 2);
+  const pinnedAt = Number(at);
+  if (!Number.isFinite(pinnedAt) || pinnedAt <= 0) return null;
+  return { pinnedAt, list: list || undefined };
+};
+const PIN_LIST_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Pin or unpin the task of the worktree at `directory`. A detached worktree
  * has no branch to keep the pin and is refused with 409. Clients re-list the
  * worktrees on the topology event published after a write.
  */
-export async function setWorktreePinned(directory, pinned, now = Date.now()) {
+export async function setWorktreePinned(directory, pinned, list = null, now = Date.now()) {
+  if (list !== null && !PIN_LIST_ID_PATTERN.test(list)) {
+    const error = new Error('The pin list id is not valid');
+    error.status = 400;
+    throw error;
+  }
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
     const error = new Error('The worktree folder does not exist');
@@ -5072,10 +5091,12 @@ export async function setWorktreePinned(directory, pinned, now = Date.now()) {
     });
   const branch = String(head.stdout || '').trim();
   const key = `branch.${branch}.openchamberPinned`;
-  const current = Number(await readGitConfigValue(directoryPath, key));
-  const isPinned = Number.isFinite(current) && current > 0;
-  if (isPinned !== pinned) {
-    await writeGitConfigValue(directoryPath, key, pinned ? String(now) : '');
+  const current = parseBranchPin(await readGitConfigValue(directoryPath, key));
+  // Moving a pin to another list keeps the time it was first pinned.
+  const next = pinned ? [String(current?.pinnedAt ?? now), ...(list ? [list] : [])].join(' ') : '';
+  const stored = current ? [String(current.pinnedAt), ...(current.list ? [current.list] : [])].join(' ') : '';
+  if (next !== stored) {
+    await writeGitConfigValue(directoryPath, key, next);
     void publishWorktreeTopologyChange(directoryPath);
   }
   return { pinned, branch };
