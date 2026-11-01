@@ -2314,20 +2314,16 @@ diffs-container {
   }
 }
 
-/* A block committed mid-stream enters with a fade and a gentle rise —
-   compositor-only properties, deliberately nothing heavier: during a long
-   stream the follow scroll masks the entrance anyway, so the effect only
-   really shows on short replies, and those must not pay for a GPU filter.
-   Blocks committed in the same tick cascade via --oc-md-enter-delay set
-   inline by the renderer. */
+/* A block committed mid-stream fades in where it stands. Text never moves on
+   arrival: a rise made the reply look like it slid up into place. Opacity is
+   compositor-only, so short replies pay nothing for it. Blocks committed in
+   the same tick cascade via --oc-md-enter-delay set inline by the renderer. */
 @keyframes oc-md-block-enter {
   from {
     opacity: 0;
-    transform: translateY(10px);
   }
   to {
     opacity: 1;
-    transform: none;
   }
 }
 
