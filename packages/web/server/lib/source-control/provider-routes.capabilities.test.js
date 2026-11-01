@@ -151,6 +151,63 @@ describe('provider route capabilities', () => {
     }));
   });
 
+  // The labels and milestones reads resolve the repository from the directory
+  // when the request names no project; the shell passes the absent selector
+  // through as `project: undefined`.
+  const choicesApp = (descriptor, impl) => {
+    const providers = createSourceControlProviders({
+      descriptors: createProviderDescriptors([descriptor]),
+      loaders: { [descriptor.id]: async () => ({ createProvider: () => impl }) },
+    });
+    const app = express();
+    app.use(express.json());
+    registerSourceControlRoutes(app, {
+      providers,
+      bindingService: { validateReadContext: vi.fn(async () => ({ provider: descriptor.id, instance, accountId: 'account', directory: '/repo', primaryRemote: 'origin', repositoryId: 'repo-1', bindingRevision: 1 })), validateMutationContext: vi.fn(), accountUnavailable: vi.fn(), accountConnected: vi.fn() },
+      identityProvisioning: { backfillAccountIdentities: vi.fn(), ensureAccountIdentity: vi.fn(), repointAccountIdentities: vi.fn() },
+      mutationExecutor: { read: vi.fn(), execute: vi.fn() },
+    });
+    return app;
+  };
+  const milestonesDescriptor = Object.freeze({ ...acme, capabilities: { ...acme.capabilities, milestones: true } });
+  const labelsDescriptor = Object.freeze({ ...acme, capabilities: { ...acme.capabilities, labels: true } });
+
+  it('answers /references/milestones from the directory when the request names no project', async () => {
+    const impl = fakeImplementation();
+    impl.resources.listMilestones = vi.fn(async () => [{ name: 'v1.0', state: 'open' }]);
+    const app = choicesApp(milestonesDescriptor, impl);
+    const response = await request(app).get('/api/source-control/acme/references/milestones')
+      .query({ instance, directory: '/repo' }).expect(200);
+    expect(response.body).toEqual({ connected: true, items: [{ name: 'v1.0', state: 'open' }] });
+    expect(impl.resources.listMilestones).toHaveBeenCalledTimes(1);
+    expect(impl.resources.listMilestones).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/repo', project: undefined,
+    }));
+  });
+
+  it('answers /references/labels from the directory when the request names no project', async () => {
+    const impl = fakeImplementation();
+    impl.resources.listLabels = vi.fn(async () => [{ name: 'bug', color: 'd73a4a' }]);
+    const app = choicesApp(labelsDescriptor, impl);
+    const response = await request(app).get('/api/source-control/acme/references/labels')
+      .query({ instance, directory: '/repo' }).expect(200);
+    expect(response.body).toEqual({ connected: true, items: [{ name: 'bug', color: 'd73a4a' }] });
+    expect(impl.resources.listLabels).toHaveBeenCalledTimes(1);
+    expect(impl.resources.listLabels).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/repo', project: undefined,
+    }));
+  });
+
+  it('refuses a milestones read that names only an owner, without reaching the resource', async () => {
+    const impl = fakeImplementation();
+    impl.resources.listMilestones = vi.fn(async () => []);
+    const app = choicesApp(milestonesDescriptor, impl);
+    const response = await request(app).get('/api/source-control/acme/references/milestones')
+      .query({ instance, directory: '/repo', owner: 'acme' }).expect(400);
+    expect(response.body).toEqual({ error: 'a complete project selector is required' });
+    expect(impl.resources.listMilestones).not.toHaveBeenCalled();
+  });
+
   it('forwards label and milestone on /issues/list into the issue list resource', async () => {
     // The real Gitea provider, so the route's filter parameters travel through
     // its resource wrapper; only the auth store and the resource service are

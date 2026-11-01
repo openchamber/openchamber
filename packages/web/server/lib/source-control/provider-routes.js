@@ -794,10 +794,13 @@ export function registerProviderRoutes(app, {
     }
 
     // The project's labels and who can review in it, for the board's pickers.
-    for (const [suffix, capability, method] of [
-      ['/references/labels', 'labels', 'listLabels'],
-      ['/references/reviewers', 'reviewers', 'listReviewerCandidates'],
-      ['/references/milestones', 'milestones', 'listMilestones'],
+    // Labels and milestones may name no project: the provider resolves the
+    // repository from the directory, as the issue list does. Reviewer
+    // candidates still require the complete selector.
+    for (const [suffix, capability, method, projectOptional] of [
+      ['/references/labels', 'labels', 'listLabels', true],
+      ['/references/reviewers', 'reviewers', 'listReviewerCandidates', false],
+      ['/references/milestones', 'milestones', 'listMilestones', true],
     ]) {
       boundRead(capability, suffix, async ({ req, res, impl, instance, directory, trustedContext }) => {
         const read = requireResource(impl, method);
@@ -805,7 +808,9 @@ export function registerProviderRoutes(app, {
         const project = optionalProject(req);
         return res.json({ connected: true, items: await read({ session, directory, project, context: trustedContext, remote: trustedContext.primaryRemote }) });
       }, {
-        validate: (req) => (!namesProject(req) ? 'a complete project selector is required' : null),
+        validate: (req) => (projectOptional
+          ? (projectSelectorProblem(req) ? 'a complete project selector is required' : null)
+          : (!namesProject(req) ? 'a complete project selector is required' : null)),
       });
     }
 

@@ -52,15 +52,12 @@ import type {
     PullRequestStackLayer,
     RepositoryReference,
     RepositoryReferenceKind,
-    RepositorySelector,
     SourceControlReadContext,
     TrackerDescriptor,
     TrackerMappingResult,
 } from '@/lib/api/types';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
-import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
-import { effectiveRepositoryBinding } from '@/lib/source-control/types';
 import { useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { cn } from '@/lib/utils';
 import { resolveTrackerMappedProjectPath } from '@/lib/trackers/projectMapping';
@@ -629,29 +626,16 @@ const SourceBoardBody: React.FC<{
     const listContextValue = useRepositoryReadContext(tracker ? null : allRepositories?.[0] ?? directory);
     const listContext = listContextValue && listContextValue !== 'missing' ? listContextValue : null;
     // The filter menu's name dropdowns: the board's project's labels and
-    // milestones, read with the list's context. A list across the folder's
-    // repositories has no single project to ask, so it offers none.
+    // milestones, read with the list's context. The reads name no project —
+    // the server resolves the repository from the context's directory. A list
+    // across the folder's repositories has no single context to ask, so it
+    // offers none.
     const filterContext = allRepositories === null ? listContext : null;
-    const filterBinding = useRepositoryBinding(filterContext?.directory ?? null, sourceControl, filterContext !== null);
-    const filterProject = React.useMemo<RepositorySelector | null>(() => {
-        if (!filterContext) return null;
-        const read = filterBinding.read;
-        if (!read) return null;
-        const bound = effectiveRepositoryBinding(read).providers
-            .find((entry) => entry.provider === filterContext.provider && entry.instance === filterContext.instance);
-        return bound?.repository ? { owner: bound.repository.owner, repo: bound.repository.name } : null;
-    }, [filterBinding.read, filterContext]);
-    const filterOptionsKey = filterContext && filterProject
+    const filterOptionsKey = filterContext
         ? JSON.stringify([filterContext.provider, filterContext.instance, filterContext.accountId, filterContext.directory, filterContext.repositoryId, filterContext.primaryRemote, filterContext.bindingRevision])
         : null;
-    const fetchLabelOptions = React.useCallback(async (): Promise<Label[]> => {
-        if (!filterContext || !filterProject) return [];
-        return sourceControl.referenceLabels(filterContext, filterProject);
-    }, [filterContext, filterProject, sourceControl]);
-    const fetchMilestoneOptions = React.useCallback(async (): Promise<MilestoneChoice[]> => {
-        if (!filterContext || !filterProject) return [];
-        return sourceControl.referenceMilestones(filterContext, filterProject);
-    }, [filterContext, filterProject, sourceControl]);
+    const fetchLabelOptions = React.useCallback(async (): Promise<Label[]> => (filterContext ? sourceControl.referenceLabels(filterContext) : []), [filterContext, sourceControl]);
+    const fetchMilestoneOptions = React.useCallback(async (): Promise<MilestoneChoice[]> => (filterContext ? sourceControl.referenceMilestones(filterContext) : []), [filterContext, sourceControl]);
     const labelOptions = useChoiceOptions(fetchLabelOptions, filterOptionsKey);
     const milestoneOptions = useChoiceOptions(fetchMilestoneOptions, filterOptionsKey);
     const [listRefreshing, setListRefreshing] = React.useState(false);

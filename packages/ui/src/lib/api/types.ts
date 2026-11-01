@@ -1949,10 +1949,10 @@ export interface SourceControlAPI {
    * refresh).
    */
   refreshProviderReads(identity: SourceControlIdentity, scope: ProviderReadsRefreshScope): Promise<void>;
-  /** One page of a project's labels, for the board's picker. */
-  referenceLabels(context: SourceControlReadContext, project: RepositorySelector): Promise<Label[]>;
-  /** One page of a project's milestones, for the issues filter dropdowns. */
-  referenceMilestones(context: SourceControlReadContext, project: RepositorySelector): Promise<MilestoneChoice[]>;
+  /** One page of a project's labels, for the board's picker. Without a project, the repository the directory binds to. */
+  referenceLabels(context: SourceControlReadContext, project?: RepositorySelector): Promise<Label[]>;
+  /** One page of a project's milestones, for the issues filter dropdowns. Without a project, the repository the directory binds to. */
+  referenceMilestones(context: SourceControlReadContext, project?: RepositorySelector): Promise<MilestoneChoice[]>;
   /** One page of the people who can be asked to review in a project. */
   referenceReviewers(context: SourceControlReadContext, project: RepositorySelector): Promise<RepositoryReferenceReviewer[]>;
   changeRequestsList(

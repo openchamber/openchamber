@@ -621,17 +621,23 @@ interface RepositoryChoicesDTO extends ErrorResponse {
   items?: Array<{ name?: string; color?: string; state?: 'open' | 'closed'; id?: string; login?: string; avatarUrl?: string }>;
 }
 
-/** Labels or reviewer candidates of one project in the bound repository's network. */
+/**
+ * Labels or reviewer candidates of one project in the bound repository's
+ * network; with no project named, the server resolves the repository from the
+ * directory, as the issue list does.
+ */
 const readRepositoryChoices = async (
   fetch: SourceControlFetch,
   context: SourceControlReadContext,
-  project: RepositorySelector,
+  project: RepositorySelector | null,
   path: string,
 ): Promise<NonNullable<RepositoryChoicesDTO['items']>> => {
   const identity = normalizeIdentity(context);
   const query = boundReadQuery(context);
-  query.set('owner', project.owner);
-  query.set('repo', project.repo);
+  if (project) {
+    query.set('owner', project.owner);
+    query.set('repo', project.repo);
+  }
   const payload = await request<RepositoryChoicesDTO>(fetch, identity, path, {}, query);
   if (payload.connected !== true) throw new Error(`${providerLabel(identity)} is not connected`);
   if (!Array.isArray(payload.items)) throw new Error('Source control response contained an invalid list');
@@ -1456,8 +1462,8 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
         : new URLSearchParams({ scope: 'lists' });
       await request<ErrorResponse>(fetch, identity, '/read-cache/refresh', { method: 'POST' }, query);
     },
-    referenceLabels: async (context, project) => parseLabelChoices(await readRepositoryChoices(fetch, context, project, '/references/labels')),
-    referenceMilestones: async (context, project) => parseMilestoneChoices(await readRepositoryChoices(fetch, context, project, '/references/milestones')),
+    referenceLabels: async (context, project) => parseLabelChoices(await readRepositoryChoices(fetch, context, project ?? null, '/references/labels')),
+    referenceMilestones: async (context, project) => parseMilestoneChoices(await readRepositoryChoices(fetch, context, project ?? null, '/references/milestones')),
     referenceReviewers: async (context, project) => parseReviewerChoices(await readRepositoryChoices(fetch, context, project, '/references/reviewers')),
     issueComment: async (payload: CommentInput) => {
       const identity = normalizeIdentity(payload);

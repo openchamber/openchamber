@@ -61,7 +61,8 @@ const readContext: SourceControlReadContext = {
 };
 
 // The folder's binding; its entry for the read context's provider and instance
-// names the repository the option and detail reads ask for.
+// names the repository the detail read asks for. Tests swap in the
+// unconfigured variant, whose binding has no provider entries at all.
 const bindingRead: SourceControlBindingRead = {
   repository: {
     repositoryId: 'org/chats',
@@ -92,6 +93,14 @@ const bindingRead: SourceControlBindingRead = {
     state: 'bound',
     configRevision: 'cfg-1',
   },
+};
+
+// The same folder before anyone configured a provider for it: the read's
+// binding has no provider entries, so no read names a repository.
+const unconfiguredBindingRead: SourceControlBindingRead = {
+  ...bindingRead,
+  status: 'missing',
+  binding: null,
 };
 
 const giteaDescriptor: SourceControlProviderDescriptor = {
@@ -247,9 +256,12 @@ mock.module('@/components/references/referenceSources', () => ({
   useRepositoryReferenceList: () => list,
 }));
 // The folder's binding answers the project question the list rows used to.
+// `currentBindingRead` swaps which read the section sees; tests point it at the
+// unconfigured variant to pin the no-provider-entries case.
+let currentBindingRead: SourceControlBindingRead = bindingRead;
 mock.module('@/lib/source-control/repository-binding', () => ({
   ...actualRepositoryBinding,
-  useRepositoryBinding: () => ({ status: 'ready', read: bindingRead, error: null, contexts: [readContext], scope: {}, retry: () => undefined, isCurrent: () => true, stale: false }),
+  useRepositoryBinding: () => ({ status: 'ready', read: currentBindingRead, error: null, contexts: [readContext], scope: {}, retry: () => undefined, isCurrent: () => true, stale: false }),
 }));
 mock.module('@/lib/source-control/providers/registry', () => ({
   ...actualRegistry,
@@ -334,6 +346,7 @@ const reopen = async () => {
 };
 
 beforeEach(() => {
+  currentBindingRead = bindingRead;
   list.status = 'ready';
   list.unavailable = null;
   list.items = [];
@@ -363,25 +376,46 @@ test('a failed list read shows the failure, never an empty list', async () => {
   expect(host?.textContent).not.toContain('No issues match the filter');
 });
 
-test('an empty list page still reads its options: the project comes from the binding', async () => {
-  // No issues on the page (every one closed, say). The option reads must not
-  // wait for a list row to name the project: the binding does, so the reads
-  // run for the bound repository and the dropdowns reach ready instead of
-  // staying in loading.
+test('an empty list page still reads its options: the read context alone names the repository', async () => {
+  // No issues on the page (every one closed, say). The option reads send the
+  // read context alone; the server resolves the repository from the directory,
+  // so the dropdowns reach ready instead of staying in loading.
   list.items = [];
-  const labelReads: Array<{ owner: string; repo: string }> = [];
-  sourceControl.referenceLabels = async (_context, project) => {
-    labelReads.push({ owner: project.owner, repo: project.repo });
+  const labelReads: Array<{ context: SourceControlReadContext; project: unknown }> = [];
+  sourceControl.referenceLabels = async (context, project) => {
+    labelReads.push({ context, project });
     return [{ name: 'bug', color: 'd042f1' }];
   };
-  const milestoneReads: Array<{ owner: string; repo: string }> = [];
-  sourceControl.referenceMilestones = async (_context, project) => {
-    milestoneReads.push({ owner: project.owner, repo: project.repo });
+  const milestoneReads: Array<{ context: SourceControlReadContext; project: unknown }> = [];
+  sourceControl.referenceMilestones = async (context, project) => {
+    milestoneReads.push({ context, project });
     return [{ name: 'v1.0', state: 'open' }];
   };
   await renderSection();
-  expect(labelReads).toEqual([{ owner: 'org', repo: 'chats' }]);
-  expect(milestoneReads).toEqual([{ owner: 'org', repo: 'chats' }]);
+  expect(labelReads).toEqual([{ context: readContext, project: undefined }]);
+  expect(milestoneReads).toEqual([{ context: readContext, project: undefined }]);
+});
+
+test('an unconfigured project still reads its options: the binding has no provider entries', async () => {
+  // The binding read has no provider entries (an unconfigured project). The
+  // option reads must not short-circuit to an empty list because no project is
+  // named: they send the read context alone and let the server resolve the
+  // repository from the directory.
+  currentBindingRead = unconfiguredBindingRead;
+  list.items = [];
+  const labelReads: Array<SourceControlReadContext> = [];
+  sourceControl.referenceLabels = async (context) => {
+    labelReads.push(context);
+    return [{ name: 'bug', color: 'd042f1' }];
+  };
+  const milestoneReads: Array<SourceControlReadContext> = [];
+  sourceControl.referenceMilestones = async (context) => {
+    milestoneReads.push(context);
+    return [{ name: 'v1.0', state: 'open' }];
+  };
+  await renderSection();
+  expect(labelReads).toEqual([readContext]);
+  expect(milestoneReads).toEqual([readContext]);
 });
 
 test('the open issue shows its full body, its comments, its milestone and its labels', async () => {

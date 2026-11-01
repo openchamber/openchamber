@@ -1078,6 +1078,33 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
+  it('reads labels and milestones with no project named, sending no owner or repo', async () => {
+    // The unconfigured project: the read context alone goes over the wire, and
+    // the server resolves the repository from the directory.
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ name: 'bug', color: 'd73a4a' }] }))
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ name: 'v1.0', state: 'open' }] }));
+
+    await expect(api.referenceLabels(readContext)).resolves.toEqual([{ name: 'bug', color: 'd73a4a' }]);
+    await expect(api.referenceMilestones(readContext)).resolves.toEqual([{ name: 'v1.0', state: 'open' }]);
+
+    const directoryQuery = new URLSearchParams({
+      instance: 'github.com',
+      directory: '/workspace/a b',
+      repositoryId: 'repo_one',
+      accountId: 'github.com#7',
+      bindingRevision: '4',
+      primaryRemote: 'upstream',
+    });
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/references/labels', expect.objectContaining({
+      query: directoryQuery,
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/references/milestones', expect.objectContaining({
+      query: directoryQuery,
+    }));
+  });
+
   it('keeps credential authority separate from provider actor metadata', async () => {
     const credentialContext = { ...mutationContext, accountId: 'occred:v1:github:credential:r1' };
     runtimeFetchMock.mockResolvedValueOnce(Response.json({

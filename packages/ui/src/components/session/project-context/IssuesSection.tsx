@@ -70,11 +70,10 @@ export const IssuesSection: React.FC<IssuesSectionProps> = ({ directory, filter,
     query: '',
   });
 
-  // The project the option and detail reads name. The binding is the
-  // authority: the read context names provider and instance, and the binding
-  // entry for them names the repository. It does not depend on the list, so
-  // an empty first page — every issue closed, say — still reads its options
-  // instead of leaving the dropdowns in loading.
+  // The project the detail read names. The binding is the authority: the read
+  // context names provider and instance, and the binding entry for them names
+  // the repository. Null for a project with no provider entry, where the read
+  // names the directory alone.
   const binding = useRepositoryBinding(directory, sourceControl, context !== null);
   const project = React.useMemo<RepositorySelector | null>(() => {
     const read = binding.read;
@@ -84,19 +83,22 @@ export const IssuesSection: React.FC<IssuesSectionProps> = ({ directory, filter,
     return bound?.repository ? { owner: bound.repository.owner, repo: bound.repository.name } : null;
   }, [binding.read, context]);
 
+  // The option reads name no project: the server resolves the repository from
+  // the read context's directory, as the list read does, so an unconfigured
+  // project reads its options instead of leaving the dropdowns in loading.
   const labels = useChoiceOptions<Label>(
     React.useCallback(
-      async () => (context && project ? sourceControl.referenceLabels(context, { owner: project.owner, repo: project.repo }) : []),
-      [context, project, sourceControl],
+      async () => (context ? sourceControl.referenceLabels(context) : []),
+      [context, sourceControl],
     ),
-    context && project ? `${context.provider}:${context.directory}:labels` : null,
+    context ? `${context.provider}:${context.directory}:labels` : null,
   );
   const milestones = useChoiceOptions<MilestoneChoice>(
     React.useCallback(
-      async () => (context && project ? sourceControl.referenceMilestones(context, { owner: project.owner, repo: project.repo }) : []),
-      [context, project, sourceControl],
+      async () => (context ? sourceControl.referenceMilestones(context) : []),
+      [context, sourceControl],
     ),
-    context && project ? `${context.provider}:${context.directory}:milestones` : null,
+    context ? `${context.provider}:${context.directory}:milestones` : null,
   );
 
   const [openIssue, setOpenIssue] = React.useState<OpenIssueRead | null>(null);

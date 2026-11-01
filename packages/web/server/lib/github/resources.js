@@ -632,7 +632,8 @@ export function createGitHubResources({
     // bound project's network.
     listLabels: async ({ session, directory, project, remote }) => {
       const { octokit } = accountOf(session);
-      const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
+      const requested = project ? { owner: project.owner, repo: project.name } : null;
+      const repo = await resolveRepoForRequest(octokit, directory, requested, remote);
       if (!repo) throw notInProject();
       const response = await octokit.rest.issues.listLabelsForRepo({ owner: repo.owner, repo: repo.repo, per_page: 100 });
       return requireProviderArray(response?.data, 'GitHub returned an invalid label list').flatMap((label) => {
