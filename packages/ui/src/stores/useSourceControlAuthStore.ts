@@ -81,7 +81,8 @@ const sameIdentities = (held: readonly SourceControlIdentity[], next: readonly S
   held.length === next.length
   && held.every((identity, index) => {
     const other = next[index];
-    return other !== undefined && getSourceControlAuthKey(identity) === getSourceControlAuthKey(other);
+    return other !== undefined && getSourceControlAuthKey(identity) === getSourceControlAuthKey(other)
+      && (identity.instanceSshUrl ?? '') === (other.instanceSshUrl ?? '');
   })
 );
 

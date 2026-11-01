@@ -7,7 +7,7 @@ description: Conecte GitHub, GitLab, Gitea, Forgejo ou Gerrit e trabalhe com iss
 
 Conecte uma conta no host onde seu projeto está e o OpenChamber pode listar as issues e pull requests dele, iniciar uma sessão a partir de um item, e abrir, revisar e fazer merge de pull requests para você. Cinco hosts vêm integrados: GitHub, incluindo o GitHub Enterprise; GitLab, incluindo o GitLab self-managed; Gitea; Forgejo, incluindo o Codeberg; e Gerrit. Uma [extensão](/pt-br/extensions/#uma-extensão-como-host-git) pode adicionar outro.
 
-O remoto do projeto decide com qual host o OpenChamber conversa. Um projeto cujo `origin` está no gitlab.com usa sua conta do GitLab para o quadro, o selo de pull request nos branches e o painel Git. Um remoto num alias de host do `~/.ssh/config`, como `github.com-work`, não é associado a nenhum host.
+O remoto do projeto decide com qual host o OpenChamber conversa. Um projeto cujo `origin` está no gitlab.com usa sua conta do GitLab para o quadro, o selo de pull request nos branches e o painel Git. Um remoto num alias de host do `~/.ssh/config`, como `github.com-work`, não é associado a nenhum host. Gitea e Forgejo associam um alias cuja configuração SSH aponta para o endereço web da instância, e um remoto no endereço de clone SSH da instância assim que você informar esse endereço em **Settings → Integrations**.
 
 Os termos seguem o host. O GitLab diz merge request, e o Gerrit diz change (alteração).
 

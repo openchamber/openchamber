@@ -35,6 +35,16 @@ const getIdentityAuthority = (identity: SourceControlIdentity): string => {
   }
 };
 
+/** The authorities a provider instance answers on: its web address and its separate SSH address, if it has one. */
+const getIdentityAuthorities = (identity: SourceControlIdentity): string[] => {
+  const authorities = [getIdentityAuthority(identity)];
+  if (identity.instanceSshUrl) {
+    const sshAuthority = getRemoteAuthority({ name: '', fetchUrl: identity.instanceSshUrl, pushUrl: identity.instanceSshUrl });
+    if (sshAuthority && !authorities.includes(sshAuthority)) authorities.push(sshAuthority);
+  }
+  return authorities;
+};
+
 type SourceControlTarget = {
   identity: SourceControlIdentity;
   remote: GitRemote;
@@ -147,7 +157,7 @@ export const resolveSourceControlTarget = (
   for (const remote of remotes) {
     const authority = getRemoteAuthority(remote);
     if (!authority) continue;
-    const identity = identities.find((candidate) => getIdentityAuthority(candidate) === authority);
+    const identity = identities.find((candidate) => getIdentityAuthorities(candidate).includes(authority));
     if (identity) targets.push({ identity, remote });
   }
   return targets.length === 1 ? targets[0] : null;
@@ -214,17 +224,51 @@ export const isSshRemoteUrl = (remoteUrl: string): boolean => {
   return !value.includes('://') && /^(?:[^@/:\s]+@)?[^/:\s]+:[^\s]+$/.test(value);
 };
 
-/** What a remote URL allows: which host answers for it and how it can be reached. */
-export type RemoteTraits = { host: string | null; https: boolean; ssh: boolean };
+/** What a remote URL allows: which host answers for it, its SSH port, and how it can be reached. */
+export type RemoteTraits = { host: string | null; https: boolean; ssh: boolean; sshPort?: number };
 
 export const remoteTraits = (remoteUrl: string): RemoteTraits => {
   const value = remoteUrl.trim();
-  return { host: gitRemoteHost(value), https: value.startsWith('https://'), ssh: isSshRemoteUrl(value) };
+  const ssh = isSshRemoteUrl(value);
+  let sshPort: number | undefined;
+  if (ssh) {
+    if (value.startsWith('ssh://')) {
+      try { sshPort = Number(new URL(value).port || 22); }
+      catch { sshPort = 22; }
+    } else {
+      sshPort = 22;
+    }
+  }
+  const traits: RemoteTraits = { host: gitRemoteHost(value), https: value.startsWith('https://'), ssh };
+  if (sshPort !== undefined) traits.sshPort = sshPort;
+  return traits;
+};
+
+/** The host and port a stored instance SSH address names, or null. */
+export const sshInstanceTraits = (sshUrl: string): { host: string; port: number } | null => {
+  const value = sshUrl.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'ssh:' || !url.hostname) return null;
+    return { host: url.hostname.toLowerCase(), port: Number(url.port || 22) };
+  } catch {
+    return null;
+  }
 };
 
 /** The host a provider instance names, whether stored bare or as a URL. */
 export const instanceHost = (instance: string): string | null =>
   gitRemoteHost(instance.includes('://') ? instance : `https://${instance}`);
+
+/** Each provider instance's separate SSH address, keyed by instance, for the identity pickers. */
+export const instanceSshHostsFrom = (identities: readonly SourceControlIdentity[]) => {
+  const addresses: Record<string, string> = {};
+  for (const identity of identities) {
+    if (identity.instanceSshUrl) addresses[identity.instance] = identity.instanceSshUrl;
+  }
+  return addresses;
+};
 
 /**
  * The identity to offer for a repository on this host.
@@ -329,11 +373,14 @@ export const proposeIdentityForHost = <T extends { id: string; account?: { insta
   identities: T[],
   host: string | null,
   defaultIdentityId?: string | null,
+  instanceSshHosts: Readonly<Record<string, string>> = {},
 ): T | null => {
   const matching = host
     ? identities.find((identity) => {
       const instance = identity.account?.instance ?? '';
-      return instance.length > 0 && instanceHost(instance) === host;
+      if (!instance) return false;
+      return instanceHost(instance) === host
+        || gitRemoteHost(instanceSshHosts[instance] ?? '') === host;
     })
     : undefined;
   if (matching) return matching;

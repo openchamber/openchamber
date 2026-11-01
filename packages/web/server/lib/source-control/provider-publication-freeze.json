@@ -236,6 +236,11 @@
             "secret": false
           },
           {
+            "id": "sshUrl",
+            "kind": "instance-url",
+            "secret": false
+          },
+          {
             "id": "token",
             "kind": "personal-access-token",
             "secret": true

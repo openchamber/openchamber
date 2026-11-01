@@ -100,7 +100,7 @@ import { ContributorDestinationDialog } from './git/ContributorDestinationDialog
 import { useContributorDestinationChooser } from './git/contributorDestination';
 import { RepositoryConfigurationDialog } from '@/components/sections/openchamber/SourceControlBindingSettings';
 import { applyIdentityToRepository, identityApplicability, type IdentityApplicability } from '@/lib/source-control/applyIdentity';
-import { remoteTraits, identityDisplayName } from '@/lib/source-control/identity';
+import { instanceSshHostsFrom, remoteTraits, identityDisplayName } from '@/lib/source-control/identity';
 import { activeAuthor, offeredAuthors } from './git/gitAuthors';
 import { dirtySwitchPushTarget } from './git/dirtySwitchPushTarget';
 import { mapWithConcurrency } from '@/lib/concurrency';
@@ -386,10 +386,12 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     ?? binding.read?.repository.remotes.find((remote) => remote.name === 'origin')?.name
     ?? binding.read?.repository.remotes[0]?.name
     ?? '';
+  const sourceControlIdentities = useSourceControlAuthStore((state) => state.identities);
+  const instanceSshHosts = React.useMemo(() => instanceSshHostsFrom(sourceControlIdentities), [sourceControlIdentities]);
   const identityApplicabilityOf = React.useCallback((identity: GitIdentityProfile): IdentityApplicability => {
     const remote = binding.read?.repository.remotes.find((entry) => entry.name === bindingRemoteName);
-    return remote ? identityApplicability(identity, remoteTraits(remote.fetch.displayUrl)) : { applicable: true };
-  }, [binding.read, bindingRemoteName]);
+    return remote ? identityApplicability(identity, remoteTraits(remote.fetch.displayUrl), instanceSshHosts) : { applicable: true };
+  }, [binding.read, bindingRemoteName, instanceSshHosts]);
   const sourceControlAuthEntries = useSourceControlAuthStore((state) => state.entries);
   const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
   const beginActiveSourceControlContextsLoad = useGitHubPrStatusStore((state) => state.beginActiveContextsLoad);

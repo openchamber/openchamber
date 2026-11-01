@@ -3,6 +3,7 @@ import { createStandardMutations } from '../source-control/standard-mutations.js
 import { classifyGiteaFailure, createGiteaClient } from './client.js';
 import { giteaDescriptor } from './descriptor.js';
 import { createGiteaResourceService } from './resources.js';
+import { normalizeSshUrl, parseSshUrl } from '../source-control/ssh-url.js';
 import { isForgejoVersion, probeGiteaVersion, verifyGiteaToken } from './verify.js';
 
 /**
@@ -146,7 +147,10 @@ export function createGiteaFamilyProvider({
     ? null
     : otherEditions(edition).find((other) => servesEdition(other, probeResult)) ?? null);
   const identityFor = (origin, accountId) => ({ provider: descriptor.id, instance: origin, accountId });
-  const accounts = createPatAccountAuth({ descriptor, store, events, verify, probe, classifyFailure: classifyGiteaFailure, ownerElsewhere });
+  const accounts = createPatAccountAuth({
+    descriptor, store, events, verify, probe, classifyFailure: classifyGiteaFailure, ownerElsewhere,
+    normalizeSshUrl: (value) => normalizeSshUrl(value, { label }), parseSshUrl,
+  });
 
   // One resource service per session, so a request's reads, mutation target
   // and provider call share one client. Errors carry the acting account for
@@ -160,6 +164,7 @@ export function createGiteaFamilyProvider({
       client: createClient({ origin: session.instance, token: accounts.tokenFor(session), fetch: fetchImpl, timeoutMs, label }),
       provider: descriptor.id,
       providerLabel: label,
+      sshUrl: accounts.sshUrlFor(session),
     };
     if (resolveRepos) options.resolveRepos = resolveRepos;
     const service = createResourceService(options);

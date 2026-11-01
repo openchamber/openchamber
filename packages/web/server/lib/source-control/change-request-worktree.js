@@ -9,7 +9,8 @@ import { forkRemoteName } from '../git/contributor-remote.js';
  *
  * - The read context is the repository's: a ready bound provider first, else a
  *   remote on a host a registered provider owns (`auth.ownsHost` over its
- *   default and known instances), read with that host's current account.
+ *   default and known instances, plus any instance's separate SSH address),
+ *   read with that host's current account.
  *   Where two contexts could answer, the earlier provider in registry order
  *   wins, as the dialog's picker does (GitHub before GitLab).
  * - The project, head and head revision are the provider's current answer for
@@ -19,14 +20,21 @@ import { forkRemoteName } from '../git/contributor-remote.js';
  * result; the contributor pipeline then resolves and checks the source again.
  */
 
-/** A remote's host, and its web port when the remote is an HTTP(S) URL (an SSH remote names none). */
+/** A remote's host and the port it reaches: the web port for HTTP(S), and `sshPort` for SSH, which no web port decides. */
 const remoteEndpoint = (displayUrl) => {
   const host = hostOf(displayUrl);
   if (!host) return null;
   const text = String(displayUrl).trim();
-  if (!/^https?:\/\//i.test(text) || !URL.canParse(text)) return { host };
-  const url = new URL(text);
-  return { host, port: Number(url.port || (url.protocol === 'http:' ? 80 : 443)) };
+  if (/^https?:\/\//i.test(text) && URL.canParse(text)) {
+    const url = new URL(text);
+    return { host, port: Number(url.port || (url.protocol === 'http:' ? 80 : 443)) };
+  }
+  if (/^ssh:\/\//i.test(text) && URL.canParse(text)) {
+    const url = new URL(text);
+    return { host, sshPort: Number(url.port || 22) };
+  }
+  if (!text.includes('://') && /^(?:[^@/:\s]+@)?[^/:\s]+:[^\s]+$/.test(text)) return { host, sshPort: 22 };
+  return { host };
 };
 
 const sourceControlError = (message, status, code) => Object.assign(new Error(message), { status, code });
@@ -54,7 +62,8 @@ export const createChangeRequestWorktreeSource = ({
         const impl = await providers.implementation(descriptor.id);
         if (!(impl?.auth?.ownsHost instanceof Function)) continue;
         const knownInstances = [...descriptor.instance.defaultInstances, ...(await impl.auth.listInstances?.()) ?? []];
-        owners.push({ provider: descriptor.id, owns: (endpoint) => impl.auth.ownsHost({ ...endpoint, knownInstances }) });
+        const knownSshHosts = (await impl.auth.listSshHosts?.()) ?? [];
+        owners.push({ provider: descriptor.id, owns: (endpoint) => impl.auth.ownsHost({ ...endpoint, knownInstances, knownSshHosts }) });
       } catch (error) {
         console.warn(`Skipping ${descriptor.label} for a change request worktree:`, redactSensitiveText(error?.message));
       }

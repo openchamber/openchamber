@@ -318,7 +318,11 @@ the info hint stays.
 Where the descriptor's settings have a `username` field, the token form asks
 for a username above the token and sends both (`authSetToken(…, { username })`);
 an `http-password` field names the secret an HTTP password instead of a token
-(`sourceControlProviderSettings.ts`). Gerrit signs in this way.
+(`sourceControlProviderSettings.ts`). Gerrit signs in this way. A settings field
+with the id `sshUrl` adds an instance-level SSH address row, saved through
+`authSetSshUrl`; Gitea and Forgejo use it when `SSH_DOMAIN` differs from the
+web address. Its published kind stays `instance-url` so older clients, which
+ignore field ids they do not know, still draw the card.
 `normalizeInstanceInput` reads what the user typed the way the descriptor
 says: an origin or a bare host, HTTPS only (HTTP on loopback where allowed), a
 port only where allowed, reserved instances refused.

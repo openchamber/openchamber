@@ -197,6 +197,7 @@ type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise
 type PostBody =
   | { flowId: string }
   | { token: string; username?: string }
+  | { sshUrl: string | null }
   | { accountId: string }
   | { disabled: boolean }
   | CreateBody
@@ -284,11 +285,13 @@ const normalizeHostInstance = (identity: SourceControlIdentity): SourceControlId
   return { provider: identity.provider, instance: host };
 };
 
-const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => (
-  (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
+const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
+  const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
     ? normalizeHostInstance(identity)
-    : normalizeOriginInstance(identity)
-);
+    : normalizeOriginInstance(identity);
+  if (!identity.instanceSshUrl?.trim()) return normalized;
+  return { ...normalized, instanceSshUrl: identity.instanceSshUrl.trim() };
+};
 
 const parseRepositoryContext = (payload: RepositoryContextDTO): SourceControlRepositoryContext => {
   if (!payload || !isStringValue(payload.repositoryId) || !payload.repositoryId
@@ -1298,6 +1301,14 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const normalized = normalizeIdentity(identity);
       await post<ErrorResponse>(fetch, normalized, '/auth/token', tokenOptions?.username ? { token, username: tokenOptions.username } : { token });
       return parseProviderAuthStatus(await request<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
+    },
+    authSetSshUrl: async (identity, sshUrl) => {
+      const normalized = normalizeIdentity(identity);
+      const payload = await post<{ sshUrl?: string | null; error?: string }>(fetch, normalized, '/auth/ssh-url', { sshUrl });
+      if (payload.sshUrl !== null && !isNonEmptyString(payload.sshUrl)) {
+        throw new Error('Source control response contained an invalid SSH URL');
+      }
+      return { sshUrl: payload.sshUrl ?? null };
     },
     authDisconnect: async (identity, accountId) => {
       if (!isNonEmptyString(accountId) || accountId.trim() !== accountId) {

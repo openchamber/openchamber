@@ -84,7 +84,7 @@ const sourceControl: SourceControlAPI = {
   repositoryBinding: () => new Promise(() => {}),
   repositoryContext: unexpected, resetRepositoryBinding: unexpected, repositoryProviderBindingMutate: unexpected,
   authInstances: unexpected, capabilities: unexpected, authStatus: unexpected, authStart: unexpected,
-  authComplete: unexpected, authSetToken: unexpected, authDisconnect: unexpected, authActivate: unexpected,
+  authComplete: unexpected, authSetToken: unexpected, authSetSshUrl: unexpected, authDisconnect: unexpected, authActivate: unexpected,
   authSetCliDisabled: unexpected,
   changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected,
   changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestComment: unexpected,

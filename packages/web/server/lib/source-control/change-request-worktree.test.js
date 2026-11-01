@@ -25,7 +25,7 @@ const head = {
  * instances, labels) with fake implementations whose `ownsHost` follows each
  * provider's rule: a GitHub host by name, a GitLab one only as a known origin.
  */
-const registryWith = ({ gitlabInstances = [], order = ['github', 'gitlab'], failing = [] } = {}) => {
+const registryWith = ({ gitlabInstances = [], giteaInstances = [], giteaSshHosts = [], order = ['github', 'gitlab'], failing = [] } = {}) => {
   const implementations = {
     github: { auth: {
       listInstances: async () => [],
@@ -34,6 +34,14 @@ const registryWith = ({ gitlabInstances = [], order = ['github', 'gitlab'], fail
     gitlab: { auth: {
       listInstances: async () => gitlabInstances,
       ownsHost: ownedOriginInstance,
+    } },
+    gitea: { auth: {
+      listInstances: async () => giteaInstances,
+      listSshHosts: async () => giteaSshHosts,
+      ownsHost: ({ host, sshPort, knownSshHosts }) => (knownSshHosts ?? []).find((entry) => {
+        const url = new URL(entry.sshUrl);
+        return url.hostname.toLowerCase() === host && Number(url.port || 22) === (sshPort ?? 22);
+      })?.instance ?? null,
     } },
   };
   return {
@@ -45,12 +53,12 @@ const registryWith = ({ gitlabInstances = [], order = ['github', 'gitlab'], fail
   };
 };
 
-const setup = ({ binding, accounts = {}, gitlabInstances = [], order, failing }) => {
+const setup = ({ binding, accounts = {}, gitlabInstances = [], giteaInstances = [], giteaSshHosts = [], order, failing }) => {
   const readChangeRequestHead = vi.fn(async () => head);
   const readCurrentAccountId = vi.fn(async ({ provider, instance }) => accounts[`${provider}:${instance}`] ?? null);
   const resolve = createChangeRequestWorktreeSource({
     readBinding: vi.fn(async () => binding),
-    providers: registryWith({ gitlabInstances, order, failing }),
+    providers: registryWith({ gitlabInstances, giteaInstances, giteaSshHosts, order, failing }),
     readCurrentAccountId,
     readChangeRequestHead,
   });
@@ -96,6 +104,50 @@ describe('change request source for a worktree made by number', () => {
 
     expect(readCurrentAccountId).not.toHaveBeenCalled();
     expect(readChangeRequestHead.mock.calls[0][0].context).toMatchObject({ accountId: 'github.com#9', bindingRevision: 4 });
+  });
+
+  it('reads a Gitea pull request through the instance\'s separate SSH address', async () => {
+    const { resolve, readChangeRequestHead } = setup({
+      binding: read({ remotes: [remote('origin', 'git@giteassh.example.com:team/app.git')] }),
+      accounts: { 'gitea:https://gitea.example.com': 'https://gitea.example.com#3' },
+      giteaInstances: ['https://gitea.example.com'],
+      giteaSshHosts: [{ instance: 'https://gitea.example.com', sshUrl: 'ssh://giteassh.example.com' }],
+      order: ['gitea', 'github', 'gitlab'],
+    });
+
+    await resolve({ directory: '/repo', number: 7 });
+
+    expect(readChangeRequestHead.mock.calls[0][0].context).toMatchObject({
+      provider: 'gitea', instance: 'https://gitea.example.com', accountId: 'https://gitea.example.com#3',
+    });
+  });
+
+  it('reads a Gitea pull request through a non-default SSH port', async () => {
+    const { resolve, readChangeRequestHead } = setup({
+      binding: read({ remotes: [remote('origin', 'ssh://git@giteassh.example.com:2222/team/app.git')] }),
+      accounts: { 'gitea:https://gitea.example.com': 'https://gitea.example.com#3' },
+      giteaInstances: ['https://gitea.example.com'],
+      giteaSshHosts: [{ instance: 'https://gitea.example.com', sshUrl: 'ssh://giteassh.example.com:2222' }],
+      order: ['gitea', 'github', 'gitlab'],
+    });
+
+    await resolve({ directory: '/repo', number: 7 });
+
+    expect(readChangeRequestHead.mock.calls[0][0].context).toMatchObject({
+      provider: 'gitea', instance: 'https://gitea.example.com', accountId: 'https://gitea.example.com#3',
+    });
+  });
+
+  it('does not claim a Gitea instance on another SSH port', async () => {
+    const { resolve } = setup({
+      binding: read({ remotes: [remote('origin', 'ssh://git@giteassh.example.com:2200/team/app.git')] }),
+      accounts: { 'gitea:https://gitea.example.com': 'https://gitea.example.com#3' },
+      giteaInstances: ['https://gitea.example.com'],
+      giteaSshHosts: [{ instance: 'https://gitea.example.com', sshUrl: 'ssh://giteassh.example.com:2222' }],
+      order: ['gitea', 'github', 'gitlab'],
+    });
+
+    await expect(resolve({ directory: '/repo', number: 7 })).rejects.toMatchObject({ code: 'AUTHENTICATION_REQUIRED' });
   });
 
   it('prefers the earlier provider in registry order (GitHub over GitLab), as the dialog does', async () => {

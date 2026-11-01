@@ -7,7 +7,7 @@ description: GitHub, GitLab, Gitea, Forgejo 또는 Gerrit를 연결하고 OpenCh
 
 프로젝트가 있는 호스트의 계정을 연결하면 OpenChamber가 그 이슈와 풀 리퀘스트를 나열하고, 그중 하나에서 세션을 시작하고, 풀 리퀘스트를 열고 리뷰하고 병합해 줍니다. 기본 제공 호스트는 다섯 가지입니다. GitHub(GitHub Enterprise 포함), GitLab(자체 관리형 GitLab 포함), Gitea, Forgejo(Codeberg 포함), Gerrit입니다. [확장](/ko/extensions/#git-호스트-역할을-하는-확장)으로 다른 호스트를 추가할 수도 있습니다.
 
-OpenChamber가 어느 호스트와 통신할지는 프로젝트의 원격 저장소가 정합니다. `origin`이 gitlab.com에 있는 프로젝트는 보드, 브랜치의 풀 리퀘스트 배지, Git 패널에 GitLab 계정을 사용합니다. `github.com-work`처럼 `~/.ssh/config`의 호스트 별칭에 있는 원격 저장소는 어떤 호스트와도 연결되지 않습니다.
+OpenChamber가 어느 호스트와 통신할지는 프로젝트의 원격 저장소가 정합니다. `origin`이 gitlab.com에 있는 프로젝트는 보드, 브랜치의 풀 리퀘스트 배지, Git 패널에 GitLab 계정을 사용합니다. `github.com-work`처럼 `~/.ssh/config`의 호스트 별칭에 있는 원격 저장소는 어떤 호스트와도 연결되지 않습니다. Gitea와 Forgejo는 SSH 설정이 인스턴스의 웹 주소를 가리키는 별칭을 연결하고, 인스턴스의 SSH 클론 주소를 **Settings → Integrations**에 입력하면 그 주소에 있는 원격 저장소도 연결합니다.
 
 용어는 호스트를 따릅니다. GitLab에서는 머지 리퀘스트, Gerrit에서는 변경이라고 부릅니다.
 

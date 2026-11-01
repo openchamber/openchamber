@@ -112,7 +112,10 @@ unbinding removes those entries.
 an account identity whose instance host differs from the remote host, an
 account or anonymous identity on a non-HTTPS remote, or an SSH-key identity on a
 non-SSH remote is disabled with a localized reason (`describeIdentityApplicability`)
-and never proposed. `proposeIdentityForHost` proposes, among applicable identities,
+and never proposed. The instance's separate SSH address (`instanceSshUrl`) counts as
+its host for an SSH remote, so a Gitea or Forgejo instance whose `SSH_DOMAIN`
+differs from its web address still serves its own repositories.
+`proposeIdentityForHost` proposes, among applicable identities,
 the one whose account answers for the remote host, then the default identity,
 then the System identity — the repository as it is. The add screen shows the
 repository as it is signed today, its own local author included, and writes
