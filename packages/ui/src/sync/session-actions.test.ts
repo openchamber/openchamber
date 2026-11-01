@@ -8,6 +8,8 @@ import type { InputState } from "./input-store"
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const registeredSessionDirectories: Array<{ sessionID: string; directory: string }> = []
 let formReplyError: unknown | null = null
+let selectionApplyError: unknown | null = null
+let agentUnavailableForSelection = false
 let formCancelError: unknown | null = null
 let permissionReplyError: unknown | null = null
 const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
@@ -163,6 +165,24 @@ mock.module("@/lib/opencode/client", () => ({
       if (formReplyError) throw formReplyError
       return true
     }),
+    applySendSelection: mock(async (
+      sessionId: string,
+      selection: { model?: { providerID: string; id: string; variant?: string | null }; agent?: string },
+      directory?: string | null,
+      _runtimeKey?: string,
+    ) => {
+      // The real entry checks the agent against the folder's list before it
+      // switches anything; mirror that so the unavailable-agent case behaves.
+      if (selection.agent && agentUnavailableForSelection) {
+        const error = new Error("agent unavailable for this folder")
+        error.name = "AgentUnavailableError"
+        throw error
+      }
+      if (selectionApplyError) throw selectionApplyError
+      if (selection.model || selection.agent) {
+        replyCalls.push({ method: "selection.apply", params: { sessionID: sessionId, selection, directory } })
+      }
+    }),
     cancelForm: mock(async (sessionId: string, formId: string, directory?: string | null) => {
       replyCalls.push({ method: "form.cancel", params: { sessionID: sessionId, formID: formId, directory } })
       if (formCancelError) throw formCancelError
@@ -173,14 +193,31 @@ mock.module("@/lib/opencode/client", () => ({
 
 let idCounter = 0
 
-// Mock useConfigStore
+// Mock useConfigStore. The composer selection fields are configurable per
+// test: the form reply applies whatever the composer now shows (#6053).
+type ComposerSelectionState = {
+  currentProviderId: string
+  currentModelId: string
+  currentVariant?: string
+  currentAgentName?: string
+}
+let configState: ComposerSelectionState = { currentProviderId: "", currentModelId: "" }
+// Agents listed in the folder catalog for the current test; empty by default
+// (nothing listed) so the unchanged-agent-not-in-catalog case passes through.
+let listedAgents: string[] = []
 mock.module("@/stores/useConfigStore", () => ({
   useConfigStore: {
     getState: () => ({
       isConnected: true,
       hasEverConnected: true,
+      currentProviderId: configState.currentProviderId,
+      currentModelId: configState.currentModelId,
+      currentVariant: configState.currentVariant,
+      currentAgentName: configState.currentAgentName,
     }),
   },
+  selectConfigAgentsForDirectory: () => listedAgents.map((id) => ({ id })),
+  selectCatalogLoadedForDirectory: () => true,
 }))
 
 // Mock useSessionUIStore
@@ -451,9 +488,11 @@ mock.module("./session-deletion-cleanup", () => ({
   },
 }))
 
+// Lets a test place a session record where resolveSendSelection reads it.
+let directoryStateOverride: ((directory?: string) => State | undefined) | null = null
 mock.module("./sync-refs", () => ({
   getAllSyncSessionMap: () => sessionRecords,
-  getDirectoryState: () => undefined,
+  getDirectoryState: (directory?: string) => (directoryStateOverride ? directoryStateOverride(directory) : undefined),
   getSyncSessionDirectory: () => null,
   getAllSyncSessions: () => [],
   registerSessionDirectory: (sessionID: string, directory: string) => {
@@ -462,6 +501,7 @@ mock.module("./sync-refs", () => ({
 }))
 
 import { INITIAL_STATE } from "./types"
+import type { State } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
 import type { LinkedIssue } from "@/lib/linkedIssues"
@@ -3242,6 +3282,198 @@ describe("cancelForm passes directory", () => {
   })
 })
 
+describe("replyToForm applies the composer selection", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    formReplyError = null
+    selectionApplyError = null
+    agentUnavailableForSelection = false
+    directoryStateOverride = null
+    configState = { currentProviderId: "", currentModelId: "" }
+    listedAgents = []
+  })
+
+  afterEach(() => {
+    // Keep the composer suite's module state out of every describe that
+    // follows (bun's mock.module leaks across files, and config/listing
+    // state leaks across describes inside one file too).
+    directoryStateOverride = null
+    configState = { currentProviderId: "", currentModelId: "" }
+    listedAgents = []
+    agentUnavailableForSelection = false
+    selectionApplyError = null
+  })
+
+  test("routes the composer pick through the guarded selection entry before the answer", async () => {
+    const childStores = createChildStores([])
+    configState = {
+      currentProviderId: "anthropic",
+      currentModelId: "claude-3",
+      currentVariant: undefined,
+      currentAgentName: "build",
+    }
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await replyToForm("session-a", "q-1", { choice: true })
+
+    // The model/agent picked while the form waited must reach the session
+    // before the answer continues it, through the same guarded entry the
+    // sends use (#6053).
+    expect(replyCalls.map((call) => call.method)).toEqual(["selection.apply", "form.reply"])
+    expect(replyCalls[0].params.selection).toEqual({
+      model: { providerID: "anthropic", id: "claude-3" },
+      agent: "build",
+    })
+    expect(replyCalls[1].params.formID).toBe("q-1")
+  })
+
+  test("leaves the answer unsent when the selection apply fails", async () => {
+    const childStores = createChildStores([])
+    configState = {
+      currentProviderId: "anthropic",
+      currentModelId: "claude-3",
+      currentVariant: undefined,
+      currentAgentName: undefined,
+    }
+    selectionApplyError = new Error("model switch failed")
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await expect(replyToForm("session-a", "q-1", { choice: true })).rejects.toThrow("model switch failed")
+    expect(replyCalls.map((call) => call.method)).toEqual([])
+  })
+
+  test("an agent the folder lacks leaves the form pending with the answer unsent", async () => {
+    // The composer pick was made for another directory, or the agent file
+    // has since been removed: the guarded entry must stop before anything
+    // is switched or answered, or the form is consumed by a continuation
+    // that fails on the missing agent.
+    const childStores = createChildStores([])
+    configState = {
+      currentProviderId: "anthropic",
+      currentModelId: "claude-3",
+      currentVariant: undefined,
+      currentAgentName: "build",
+    }
+    agentUnavailableForSelection = true
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await expect(replyToForm("session-a", "q-1", { choice: true })).rejects.toThrow("agent unavailable")
+    expect(replyCalls.map((call) => call.method)).toEqual([])
+  })
+
+  test("an unchanged composer selection switches nothing", async () => {
+    // The session record already carries what the composer shows: the
+    // common reply-without-touching-the-composer case switches nothing.
+    const store = createStore({}, {
+      session: [{
+        ...sessionFixture("session-a"),
+        model: { providerID: "anthropic", id: "claude-3" },
+        agent: "build",
+      }],
+    })
+    const childStores = {
+      ...createChildStores([["/test/project", store]]),
+      getState: (dir: string) => (dir === "/test/project" ? store.getState() : undefined),
+    }
+    listedAgents = ["build"]
+    configState = {
+      currentProviderId: "anthropic",
+      currentModelId: "claude-3",
+      currentVariant: undefined,
+      currentAgentName: "build",
+    }
+    // SAFETY: resolveSendSelection reads only the session slice of the state.
+    directoryStateOverride = () => ({ session: [{ ...sessionFixture("session-a"), model: { providerID: "anthropic", id: "claude-3" }, agent: "build" }] }) as State
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await replyToForm("session-a", "q-1", { choice: true })
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+  })
+
+  test("an empty composer selection switches nothing", async () => {
+    const childStores = createChildStores([])
+    configState = { currentProviderId: "", currentModelId: "" }
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await replyToForm("session-a", "q-1", { choice: true })
+
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+  })
+
+  test("unchanged composer agent that is in catalog switches nothing", async () => {
+    // Session record already matches the composer pick, and the agent is
+    // listed in the folder catalog, so nothing needs to switch.
+    const store = createStore({}, {
+      session: [{
+        ...sessionFixture("session-a"),
+        model: { providerID: "anthropic", id: "claude-3" },
+        agent: "build",
+      }],
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    configState = {
+      currentProviderId: "anthropic",
+      currentModelId: "claude-3",
+      currentVariant: undefined,
+      currentAgentName: "build",
+    }
+    listedAgents = ["build"]
+    // SAFETY: resolveSendSelection reads only the session slice of the state.
+    directoryStateOverride = () => ({ session: [{ ...sessionFixture("session-a"), model: { providerID: "anthropic", id: "claude-3" }, agent: "build" }] }) as State
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await replyToForm("session-a", "q-1", { choice: true })
+
+    // Unchanged pick + agent listed in catalog → no switch at all.
+    expect(replyCalls.map((call) => call.method)).toEqual(["form.reply"])
+  })
+
+  test("an unchanged agent the folder lacks leaves the form pending with the answer unsent", async () => {
+    // resolveSendSelection drops an agent that equals the session record, so
+    // without the catalog rule the entry would never re-check it: the folder's
+    // loaded catalog no longer lists the agent the session sits on, and the
+    // answer must not be consumed by a continuation that fails on it.
+    const store = createStore({}, {
+      session: [{
+        ...sessionFixture("session-a"),
+        model: { providerID: "anthropic", id: "claude-3" },
+        agent: "build",
+      }],
+    })
+    const childStores = createChildStores([["/test/project", store]])
+    configState = {
+      currentProviderId: "anthropic",
+      currentModelId: "claude-3",
+      currentVariant: undefined,
+      currentAgentName: "build",
+    }
+    // Catalog loaded, and "build" is not in it.
+    listedAgents = []
+    agentUnavailableForSelection = true
+    // SAFETY: resolveSendSelection reads only the session slice of the state.
+    directoryStateOverride = () => ({ session: [{ ...sessionFixture("session-a"), model: { providerID: "anthropic", id: "claude-3" }, agent: "build" }] }) as State
+
+    const { setActionRefs, replyToForm } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    await expect(replyToForm("session-a", "q-1", { choice: true })).rejects.toThrow("agent unavailable")
+    expect(replyCalls.map((call) => call.method)).toEqual([])
+  })
+})
+
 function archivedFixture(id: string): Session {
   return { ...sessionFixture(id), time: { created: 1, updated: 1, archived: 5 } }
 }
@@ -3349,6 +3581,11 @@ describe("blocking request reply routing and stale recovery (issue OPE-236)", ()
     formReplyError = null
     formCancelError = null
     materializationCalls.length = 0
+    // replyToForm reads the composer selection; an empty one keeps this suite
+    // about routing rather than model switching.
+    directoryStateOverride = null
+    configState = { currentProviderId: "", currentModelId: "" }
+    listedAgents = []
   })
 
   test("routes the form reply by the request's own session directory, not the containing store key", async () => {

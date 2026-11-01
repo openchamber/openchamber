@@ -30,7 +30,7 @@ import { ascendingId } from "@/lib/opencode/ids"
 import { mergeSessionDirectoryMetadata, resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
-import { useConfigStore } from "@/stores/useConfigStore"
+import { useConfigStore, selectCatalogLoadedForDirectory, selectConfigAgentsForDirectory } from "@/stores/useConfigStore"
 import { waitForOpenCodeStartup } from "./opencode-startup-gate"
 import { registerSessionDirectory } from "./sync-refs"
 import { useGlobalSessionStatusStore } from "./global-session-status"
@@ -2518,6 +2518,60 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
 /** One filled-in form: every field the agent declared, keyed by field key. */
 export type FormAnswer = Record<string, string | number | boolean | string[]>
 
+/**
+ * A form reply continues the session on whatever the composer now shows, but
+ * the reply path is not a send: the send-time switch never ran for it, so a
+ * model, variant or agent picked while the form waited stayed on the composer
+ * only (#6053). Resolve the composer's pick against the session's own record —
+ * an unchanged selection switches nothing — and route the switches through the
+ * client's send-time entry, so the agent-availability and runtime guards the
+ * sends rely on apply here too. A failed switch leaves the answer unsent, so
+ * the form stays pending and the caller's retry path applies.
+ */
+const applyComposerSelection = async (sessionId: string, directory: string | null | undefined): Promise<void> => {
+    const config = useConfigStore.getState()
+    const hasModelPick = Boolean(config.currentProviderId && config.currentModelId)
+    // The agent comparison needs a desired model ref even when the composer
+    // carries none; the model half of the answer is discarded below.
+    const selection = resolveSendSelection(
+        sessionId,
+        directory,
+        hasModelPick
+            ? {
+                providerID: config.currentProviderId,
+                modelID: config.currentModelId,
+                variant: config.currentVariant,
+                agent: config.currentAgentName,
+            }
+            : { providerID: "", modelID: "", agent: config.currentAgentName },
+        )
+    // An unchanged agent pick (resolveSendSelection drops agent when it equals
+    // the session record) must still pass through to applySendSelection when
+    // the agent is not in the folder catalog, so its availability is re-checked
+    // and a missing agent rejects the reply instead of silently sending.
+    if (!selection.agent && config.currentAgentName && directory) {
+        const listed =
+            !selectCatalogLoadedForDirectory(config, "agents", directory) ||
+            selectConfigAgentsForDirectory(config, directory).some(
+                (agent) => agent.id === config.currentAgentName
+            )
+        if (!listed) {
+            selection.agent = config.currentAgentName
+        }
+    }
+    await opencodeClient.applySendSelection(
+        sessionId,
+        {
+            model: hasModelPick && selection.model
+                ? { providerID: selection.model.providerID, id: selection.model.id, variant: selection.model.variant }
+                : undefined,
+            agent: selection.agent,
+        },
+        directory,
+        getRuntimeKey(),
+    )
+}
+
 export async function replyToForm(
   sessionId: string,
   formId: string,
@@ -2526,6 +2580,7 @@ export async function replyToForm(
   await waitForConnectionOrThrow()
   const directory = getRequestReplyDirectory("form", sessionId, formId)
   try {
+    await applyComposerSelection(sessionId, directory)
     if (await opencodeClient.replyToForm(sessionId, formId, answer, directory) !== true) {
       throw new Error("Form reply failed")
     }

@@ -1405,9 +1405,10 @@ class OpencodeService {
    *
    * OpenCode records an agent the session's folder does not have and fails
    * only the next turn, so the agent is checked first: a missing one stops the
-   * send before anything, the model included, is switched.
+   * send before anything, the model included, is switched. Form replies share
+   * this entry for the same reason — their continuation is a turn too.
    */
-  private async applySendSelection(
+  async applySendSelection(
     sessionID: string,
     selection: { model?: ModelSelection; agent?: string },
     directory: string | null | undefined,
