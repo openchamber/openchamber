@@ -644,6 +644,14 @@ composer holds a prompt, not a source file: it is short enough that a full pass
 is cheaper and far simpler than incremental mapping, and it keeps the editor
 and the send path reading the same grammar.
 
+### Why reference summaries shrink inside the editor
+
+The content flex item has a zero minimum width, so a long message-link summary
+cannot set the wrapping width of every line in the draft. Session-link widgets
+cap their width at the available line width minus the shared chip's 2px inline
+margins; the label's existing ellipsis then handles long summaries. This is local
+to the composer and leaves the source string and sent-message chips unchanged.
+
 ## Ordering rules worth knowing
 
 ### Why mention deduplication requires a full path
