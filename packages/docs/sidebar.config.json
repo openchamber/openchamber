@@ -222,6 +222,23 @@
           }
         },
         {
+          "label": "Workflows",
+          "link": "/workflows/",
+          "translations": {
+            "nl": "Workflows",
+            "uk": "Воркфлоу",
+            "zh-CN": "工作流",
+            "es": "Workflows",
+            "pt-BR": "Workflows",
+            "ko": "워크플로",
+            "pl": "Workflowy",
+            "fr": "Workflows",
+            "ja": "ワークフロー",
+            "de": "Workflows",
+            "tr": "Workflow'lar"
+          }
+        },
+        {
           "label": "Session Goals",
           "link": "/session-goals/",
           "translations": {

@@ -1,0 +1,54 @@
+---
+title: Workflows
+description: Permite que un agente reparta una tarea grande entre muchos agentes que trabajan en segundo plano.
+---
+
+# Workflows
+
+Un workflow divide una tarea grande en muchas piezas pequeñas y asigna a cada pieza su propio agente. El agente de tu sesión escribe un script breve que indica qué agentes iniciar y qué pedir a cada uno. OpenChamber ejecuta el script en segundo plano, así que tu sesión queda libre mientras los agentes trabajan. Cuando termina la ejecución, su informe vuelve a la sesión.
+
+Los workflows encajan con trabajo de muchas piezas parecidas e independientes: revisar cada archivo modificado, auditar cada ruta de una API, migrar muchos archivos o investigar comprobando cada fuente por separado. Una sola funcionalidad o unos pocos pasos se resuelven antes en una única sesión.
+
+## Activarlo
+
+La herramienta de workflows está desactivada de forma predeterminada. Abre **Configuración → General → Herramientas de OpenChamber** y activa **Herramienta de workflows**. Las sesiones en curso la reciben en su siguiente turno; al desactivarla de nuevo, la herramienta y sus instrucciones desaparecen de todas las sesiones y el panel Workflows se oculta. Las ejecuciones que ya tienes vuelven al activarla otra vez.
+
+Los workflows necesitan el servidor OpenCode propio de OpenChamber. No están disponibles cuando OpenChamber se conecta a un servidor OpenCode externo mediante `OPENCODE_HOST` o skip-start, ni dentro de la extensión de VS Code.
+
+## Ejecutar un workflow
+
+1. Pídelo con lenguaje natural, por ejemplo: "Ejecuta un workflow que revise cada archivo modificado en esta rama y liste los errores que encuentre."
+2. El agente propone un plan y un modelo para cada fase. Acuerda los modelos con él antes de que empiece la ejecución: consulta [Modelos y coste](#modelos-y-coste).
+3. En el chat aparece una tarjeta con el plan. Selecciona **Ejecutar workflow** para iniciarlo o **No ejecutar** para descartarlo. No se ejecuta nada hasta que eliges.
+4. Mientras se ejecuta, la tarjeta muestra cada fase y cada agente. La fila de la sesión en la barra lateral indica **Workflow en ejecución**, y la sección **Workflows** del panel de estado de trabajo lista la ejecución. Selecciona **Detener** para terminarla antes.
+5. Cuando termina la ejecución, su informe llega a la sesión como un mensaje. Una ejecución terminada o fallida despierta al agente para que actúe sobre el resultado; una que detuviste o rechazaste no lo hace.
+
+Una ejecución detenida o fallida se puede continuar con **Reanudar**. Los agentes que ya respondieron conservan sus respuestas y solo se vuelven a ejecutar los demás.
+
+Los agentes de un workflow en ejecución no pueden iniciar un workflow propio.
+
+## Modelos y coste
+
+Cada agente de un workflow usa el modelo de tu sesión, salvo que el script indique otro. Decenas de agentes con un modelo de gama alta cuestan muchas veces lo que cuesta el mismo trabajo con uno pequeño. Por eso el agente sugiere un modelo por fase: uno barato para leer y comprobar contra una lista fija, y uno más potente donde una fase tiene que valorar o escribe lo que llega a tu proyecto. Si la elección no te convence, cámbiala antes de aprobar la ejecución.
+
+Como máximo trabajan 8 agentes a la vez, y una ejecución inicia como máximo 200 agentes entre todos sus intentos.
+
+## El panel Workflows
+
+El panel **Workflows** de la barra lateral derecha muestra las ejecuciones del proyecto: sus agentes, el registro, el resultado y el script, con el modelo y el uso de tokens de cada agente. Desde ahí o desde la tarjeta del chat puedes abrir la sesión de cualquier agente para leer su conversación completa. El icono aparece cuando el proyecto tiene una ejecución o un workflow guardado.
+
+Los agentes de un workflow no aparecen en la barra lateral de sesiones, ya que una sola ejecución puede iniciar cien. Siguen accesibles desde la tarjeta de la ejecución y desde el panel Workflows.
+
+**Eliminar ejecución** quita del panel una ejecución terminada. Las sesiones de los agentes se conservan.
+
+## Workflows guardados
+
+Pide al agente que guarde un workflow que quieras volver a ejecutar. Se almacena como `.openchamber/workflows/<name>.js` en el proyecto, así que puedes confirmarlo junto con el resto del repositorio.
+
+Ejecuta un workflow guardado desde **Workflows guardados** en el selector de ejecuciones del panel. Se inicia de inmediato, en la sesión abierta o en una nueva, y su informe vuelve a esa sesión. También puedes pedir al agente que lo ejecute por su nombre.
+
+## Relacionado
+
+- [Herramienta de control para agentes](/es/agent-control-tool/): las demás herramientas de OpenChamber que reciben los agentes
+- [Notas, tareas y planes de proyecto](/es/notes-todos-plans/): las herramientas de conocimiento del proyecto y de memoria
+- [Uso y cuotas](/es/usage/): lo que cuestan tus sesiones
