@@ -12,7 +12,8 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.
 - A page takes one answer: a press answers the waiting call at once, and the block freezes.
-- In a reply a press only chooses. A decision is the buttons that share a `value` (buttons without one make one more), and each takes one choice. Once every decision has one, or the user presses "Send chosen", the choices go to the agent in one piece and the block freezes. The chosen buttons carry a check, also after a reload.
+- In a reply a press only chooses. A decision is the buttons of one card whose title no other card in the block shares, named by the title; elsewhere, the buttons that share a `value` (buttons without one make one more). Each decision takes one answer: a button, the card's note alone, or both. Once every decision has one, or the user presses "Send chosen", the answers go to the agent in one piece and the block freezes. An answered card without fields folds to one line with its answer and a way to change it before sending; the fold and the notes come back after a reload.
+- A primary button is the agent's pick and is tinted until its decision has an answer; then only the chosen button is, with a check.
 - `@openuidev/lang-core` is a dependency of this private package only, bundled at build time. It never goes into `packages/web`'s dependencies.
 
 ## Decisions
@@ -40,6 +41,36 @@ A `Table` in a block becomes a GFM table string drawn by the chat's Markdown ren
 ### Why text with a block stays out of a collapsed Activity
 
 Text the agent wrote before a later step counts as a step, so a collapsed Activity used to fold it away, blocks included: a showcase of eight blocks followed by one question showed only the question. `getShownPages` lists such text with the pages, so it stays in view like them (`message/parts/DOCUMENTATION.md`).
+
+### Why blocks and HTML pages share one visual kit
+
+Chart series colours, badges and their tones, legend dots, bars on their track and boxes come from `../lib/visualKit.ts` in both a block and an HTML page an agent draws (`message/parts/htmlRender.ts`). They drifted apart before: a mockup page coloured its first series with the theme's accent while a block drew a fixed blue, and a badge was a pill on a page and a square in a block. The module holds the values (`kitVariables`, `chartSeriesColors`) and the CSS (`KIT_SHARED_CSS`); a page carries both in its document, a block sets the variables on its root and the CSS is added to the app's document once. On a page the kit's variables alias the public `--chart-N` and status names, so a page that sets its own recolours the kit too. A visual change to one of these goes into the module, never into one side.
+
+### Why charts look the way they do
+
+Each chart was picked by the maintainer from variants drawn on the same data. A single LineChart series is an area with its last value and its change since the first point on top, on an axis that spans its own values. Several series stay lines from zero; the legend and the lines bring one forward (a line only after the pointer rests on it, so a sweep does not flicker; a tap on the legend pins it), with a crosshair and a tooltip of every value. BarChart is a ranked list: name and value on a line, a thin bar under them, one series in the accent stronger as the value grows, with its largest and average on top (no sum or shares: they are false for percentages); several series keep their colours.
+
+Stat and Progress were picked the same way. A Stat is a tile: label, large value, and its change as a kit badge with an arrow from the sign and the agent's tone; a Row of Stats is a grid of equal columns, so the last one on a wrapped line does not stretch. A Progress shows its percent on the right (never 100% before it is done) and the count beside it unless the max is 100; a done bar turns success-green with a check.
+
+Steps are marks joined by a line, left to right in a row and top to bottom in a column, the line green after a done step. The current step is an accent disc with a halo and an accent title, and it does not move: a pulse was the first proposal, but a block can stay on screen for a whole session and a loop that never ends keeps the compositor working all that time.
+
+A form looks like the question tool's: a Choice is one option per line with our Radio or Checkbox, so one-or-several is told by the control, and fields are the tool's compact boxes; a waiting form's note uses the same box. Chips were tried first: the chosen state of a chip barely shows in some themes, and a single choice looked the same as a multiple one. The option rows get no fill on hover or when chosen (no hover fills on rows anywhere in the app); the control and a heavier label show the choice.
+
+A Callout is a tinted banner only for a warning or an error, with its title in the tone, as the git and MCP banners are; a note, info or success is an icon and text with no box, since five tinted boxes in a reply read as stripes. KeyValue joins label and value with a dotted leader, as the shortcuts dialog lists keys, and stays narrow so the eye does not cross a wide reply. A tab's content sits in a tile under the strip and frames what it holds as a card does. A Table inside a card or tab spans it without its own frame or column lines; a Table elsewhere, and every table written in a reply's Markdown, stays the chat's table.
+
+### Why a waiting form always offers a note
+
+A form an agent waits on (`openchamber_render` with `ui` and `awaitAnswer`) shows "Add a note" whether or not the agent asked for one. Users pick an option that is close but not exact and need to add conditions to it ("the minimal fix, with a regression test"); the question tool only takes an option or free text instead of it. Agents do not reliably add such a field themselves, so the form does. The note sits before the form's last run of buttons (`noteSlot`), so it is written before one of them is pressed, and reaches the agent as `data.note` and as the last line of the summary.
+
+In a reply each decision card takes its own note. Its toggle is an icon at the end of the card's buttons, so a card is no taller until the user wants a note; the note opens above the buttons, and "Answer with the note only" takes the icon's place at once, disabled until the note has text, so the row does not shift while typing. A note alone answers the card: the user can say "not like this, ask the author first" without picking an option that does not fit.
+
+### Why a titled card is one decision whatever its buttons' values say
+
+The guidance asks for one `value` per item, but in the triage benchmark four of five blocks gave every option its own value ("#6101: investigate", "#6101: defer"). Read by value, each button was a decision of its own: no card folded, and the answers waited for every button of every card to be pressed. A card is the item in the guidance's own words ("a Card per item, a Button per option"), so its title names the decision. Two cards that share a title fall back to their values, so they never merge into one answer. A page keeps telling buttons apart by value: it answers on the first press, and the agent reads `data.value`.
+
+### Why an answered card folds
+
+A triage of five cards was a wall of buttons in which the undecided cards were hard to find. A card folds once answered, so what is left to decide stays open and what is decided reads as one line: the title, the answer, "Change". The recommended button is tinted rather than marked by its text colour, which did not read as a recommendation; with the chosen card folded, a tint no longer looks like a choice already made.
 
 ### Why OpenUI's state, bindings and actions are left out
 

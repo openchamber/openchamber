@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { blockDecisions, blockNode, blockProps, parseUiBlock, type BlockValue } from './catalog';
+import { blockDecisions, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue } from './catalog';
 
 const program = `root = Stack([note, flow])
 note = Callout("Routers rewrite **MAC** addresses", "info")
@@ -59,15 +59,52 @@ describe('parseUiBlock', () => {
 });
 
 describe('blockDecisions', () => {
-  test('buttons that share a value make one decision; buttons without one make another', () => {
+  test('a titled card is one decision named by its title; elsewhere buttons that share a value are one', () => {
     const parsed = parseUiBlock([
-      'root = Stack([a, b, go])',
-      'a = Card("A", [Button("Yes", "primary", "#1"), Button("No", "secondary", "#1")])',
-      'b = Card("B", [Button("Yes", "primary", "#2"), Button("No", "secondary", "#2")])',
+      'root = Stack([a, b, c, go])',
+      'a = Card("A", [Button("Yes", "primary", "#1: yes"), Button("No", "secondary", "#1: no")])',
+      'b = Card("B", [Button("Yes", "primary"), Button("No", "secondary")])',
+      'c = Card("", [Button("Yes", "primary", "#3"), Button("No", "secondary", "#3")])',
       'go = Button("Done")',
     ].join('\n'), true);
     if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${parsed.kind}`);
-    expect(blockDecisions(parsed.root)).toEqual(['#1', '#2', '']);
+    expect(blockDecisions(parsed.root)).toEqual(['A', 'B', '#3', '']);
+  });
+
+  test('cards that share a title fall back to their values instead of merging', () => {
+    const parsed = parseUiBlock([
+      'root = Stack([a, b])',
+      'a = Card("Deploy", [Button("Yes", "primary", "#1"), Button("No", "secondary", "#1")])',
+      'b = Card("Deploy", [Button("Yes", "primary", "#2"), Button("No", "secondary", "#2")])',
+    ].join('\n'), true);
+    if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${parsed.kind}`);
+    expect(blockDecisions(parsed.root)).toEqual(['#1', '#2']);
+  });
+});
+
+describe('cardDecision', () => {
+  const titled = (source: string) => {
+    const parsed = parseUiBlock(`root = Stack([c])\nc = ${source}`, true);
+    if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${parsed.kind}`);
+    return blockProps.Stack.parse(blockNode.parse(parsed.root).props).children[0];
+  };
+  const cardDecisionOf = (source: string) => {
+    const card = titled(source);
+    return cardDecision(card, decisionTitles(card));
+  };
+
+  test('is the card title, whatever values its buttons carry, also inside a row', () => {
+    expect(cardDecisionOf('Card("A", [Text("x"), Row([Button("Yes", "primary", "#1: yes"), Button("No", "secondary", "#1: no")])])')).toBe('A');
+  });
+
+  test('an untitled card is one decision only when its buttons share a value', () => {
+    expect(cardDecisionOf('Card("", [Button("Yes", "primary", "#1"), Button("No", "secondary", "#1")])')).toBe('#1');
+    expect(cardDecisionOf('Card("", [Button("Yes", "primary", "#1"), Button("No", "secondary", "#2")])')).toBeNull();
+  });
+
+  test('is null for a card with a field or no buttons', () => {
+    expect(cardDecisionOf('Card("A", [Input("why"), Button("Yes", "primary", "#1")])')).toBeNull();
+    expect(cardDecisionOf('Card("A", [Text("x")])')).toBeNull();
   });
 });
 
@@ -84,5 +121,26 @@ describe('catalog additions', () => {
 
   test('a card with an empty title parses', () => {
     expect(parseUiBlock('root = Stack([Card("", [Text("no title")])])', true).kind).toBe('ready');
+  });
+});
+
+describe('noteSlot', () => {
+  const root = (source: string) => {
+    const parsed = parseUiBlock(source, true);
+    if (parsed.kind !== 'ready') throw new Error(parsed.kind);
+    return parsed.root;
+  };
+
+  test('goes before the last run of buttons, inside the card that holds them', () => {
+    expect(noteSlot(root([
+      'root = Stack([intro, form])',
+      'intro = Text("Pick one")',
+      'form = Card("Scope", [Choice("scope", ["Minimal", "Broad"]), Button("Send", "primary"), Button("Skip", "secondary")])',
+    ].join('\n')))).toEqual({ parent: '1', index: 1 });
+  });
+
+  test('a row of buttons moves as one, and a block without buttons has no place', () => {
+    expect(noteSlot(root('root = Stack([Choice("a", ["x"]), Row([Button("Send"), Button("Skip")])])'))).toEqual({ parent: '', index: 1 });
+    expect(noteSlot(root('root = Stack([Text("no buttons")])'))).toBeNull();
   });
 });

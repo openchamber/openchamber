@@ -93,13 +93,13 @@ const Steps = defineComponent({
 const Series = defineComponent({ name: 'Series', description: 'one value per label; null = no data', props: blockProps.Series, component: null });
 const BarChart = defineComponent({
   name: 'BarChart',
-  description: 'categories',
+  description: 'categories, not time',
   props: blockProps.BarChart.extend({ series: z.array(Series.ref) }),
   component: null,
 });
 const LineChart = defineComponent({
   name: 'LineChart',
-  description: 'trend',
+  description: 'values over time; one series draws as an area',
   props: blockProps.LineChart.extend({ series: z.array(Series.ref) }),
   component: null,
 });
@@ -138,7 +138,7 @@ const Row = defineComponent({
 });
 const Card = defineComponent({
   name: 'Card',
-  description: 'title "" for none',
+  description: 'title: inline Markdown, "" for none',
   props: blockProps.Card.extend({ children: z.array(z.union([leaf, Row.ref])) }),
   component: null,
 });
@@ -264,14 +264,15 @@ function checkFinishedNode(value: BlockValue, errors: string[]): void {
 
 export type BlockField = { name: string; label: string };
 
-/** Every node of a block, parent before children, in reading order. */
-function eachNode(root: BlockValue, visit: (node: z.infer<typeof blockNode>) => void): void {
+/** Every node of a block, parent before children, in reading order, with the title of the card it sits in. */
+function eachNode(root: BlockValue, visit: (node: z.infer<typeof blockNode>, cardTitle: string) => void, cardTitle = ''): void {
   const node = blockNode.safeParse(root);
   if (!node.success) return;
-  visit(node.data);
+  const title = node.data.typeName === 'Card' ? blockProps.Card.safeParse(node.data.props).data?.title ?? '' : cardTitle;
+  visit(node.data, title);
   const slots = childSlots.safeParse(node.data.props);
   if (!slots.success) return;
-  for (const child of [...slots.data.children ?? [], ...slots.data.tabs ?? []]) eachNode(child, visit);
+  for (const child of [...slots.data.children ?? [], ...slots.data.tabs ?? []]) eachNode(child, visit, title);
 }
 
 /** The fields of a block, in reading order; their values make up an answer. */
@@ -288,18 +289,87 @@ export function blockFields(root: BlockValue): BlockField[] {
   return fields;
 }
 
+/** Where a node's children sit: the child indexes that lead to it from the root. */
+export type BlockPath = string;
+export const blockPath = (parent: BlockPath, index: number): BlockPath => (parent ? `${parent}/${index}` : String(index));
+
+const isButtonRun = (value: BlockValue) => {
+  const node = blockNode.safeParse(value);
+  if (!node.success) return false;
+  if (node.data.typeName === 'Button') return true;
+  // A row of buttons moves as one; the note never lands inside a row.
+  return node.data.typeName === 'Row'
+    && (childSlots.safeParse(node.data.props).data?.children ?? []).some((child) => blockNode.safeParse(child).data?.typeName === 'Button');
+};
+
 /**
- * The decisions a block asks for, in reading order: the buttons that share a
- * value make one decision, and buttons without a value one more.
+ * Where a waiting form's note goes: before the last run of buttons in reading
+ * order, outside tabs, so the user writes it before pressing one. `parent` is
+ * the path of the node whose children hold the run, `index` the run's first
+ * child. null when the block has no such run.
  */
-export function blockDecisions(root: BlockValue): string[] {
-  const decisions: string[] = [];
-  eachNode(root, (node) => {
-    if (node.typeName !== 'Button') return;
-    const button = blockProps.Button.safeParse(node.props);
-    const decision = button.data?.value ?? '';
-    if (button.success && !decisions.includes(decision)) decisions.push(decision);
-  });
-  return decisions;
+export function noteSlot(root: BlockValue): { parent: BlockPath; index: number } | null {
+  let found: { parent: BlockPath; index: number } | null = null;
+  const walk = (value: BlockValue, path: BlockPath) => {
+    const children = childSlots.safeParse(blockNode.safeParse(value).data?.props).data?.children;
+    if (!children) return;
+    children.forEach((child, index) => {
+      if (isButtonRun(child)) {
+        if (index === 0 || !isButtonRun(children[index - 1])) found = { parent: path, index };
+        return;
+      }
+      walk(child, blockPath(path, index));
+    });
+  };
+  walk(root, '');
+  return found;
 }
 
+/**
+ * Titles of the cards that name their decision: those no other card in the
+ * block shares. A card is one item, so all its buttons are one decision named
+ * by its title, whatever values they carry: agents often give each option its
+ * own value. Two cards with one title would merge, so they fall back to values.
+ */
+export function decisionTitles(root: BlockValue): ReadonlySet<string> {
+  const counts = new Map<string, number>();
+  eachNode(root, (node) => {
+    const title = node.typeName === 'Card' ? blockProps.Card.safeParse(node.props).data?.title : undefined;
+    if (title) counts.set(title, (counts.get(title) ?? 0) + 1);
+  });
+  return new Set([...counts].flatMap(([title, count]) => (count === 1 ? [title] : [])));
+}
+
+/**
+ * Which decision a button of a reply answers: its card's title when that
+ * names a decision (`decisionTitles`), else its value. Buttons that share a
+ * value are one decision.
+ */
+export const decisionOf = (titles: ReadonlySet<string>, cardTitle: string, buttonValue: string | undefined): string => (
+  titles.has(cardTitle) ? cardTitle : buttonValue ?? ''
+);
+
+const decisionsIn = (root: BlockValue, titles: ReadonlySet<string>) => {
+  const decisions: string[] = [];
+  let fields = false;
+  eachNode(root, (node, cardTitle) => {
+    if (node.typeName === 'Choice' || node.typeName === 'Input') fields = true;
+    const button = node.typeName === 'Button' ? blockProps.Button.safeParse(node.props) : null;
+    const decision = button?.success ? decisionOf(titles, cardTitle, button.data.value) : null;
+    if (decision !== null && !decisions.includes(decision)) decisions.push(decision);
+  });
+  return { decisions, fields };
+};
+
+/**
+ * The one decision a card in a reply asks for, when it holds no fields. Once
+ * answered the card folds to one line; a card with fields stays open so they
+ * stay readable. null for a card with no buttons, several decisions, or fields.
+ */
+export function cardDecision(card: BlockValue, titles: ReadonlySet<string>): string | null {
+  const { decisions, fields } = decisionsIn(card, titles);
+  return !fields && decisions.length === 1 ? decisions[0] : null;
+}
+
+/** The decisions a reply's block asks for, in reading order (`decisionOf`). */
+export const blockDecisions = (root: BlockValue): string[] => decisionsIn(root, decisionTitles(root)).decisions;

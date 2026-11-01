@@ -4,6 +4,7 @@ import type { FrameScrollDirection } from '@/components/chat/lib/scroll/timeline
 import { PREVIEW_BRIDGE_CHANNEL } from '@/lib/browser/previewFrameHost';
 import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import type { JsonValue } from '@/lib/opencode/model';
+import { chartSeriesColors, KIT_SHARED_CSS, kitVariables } from '@/components/chat/lib/visualKit';
 import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import type { Theme } from '@/types/theme';
 
@@ -74,19 +75,6 @@ export interface HtmlRenderMetrics {
     mono: string;
 }
 
-/**
- * Chart series after the accent, the same in every theme. A theme's syntax
- * colors were used here first, but they are picked for reading code: in the
- * default theme they made near-twins (the accent orange beside the string
- * salmon, two teals, two greens), and the first two series of almost every
- * chart blurred together. These hues stay apart from each other and from any
- * accent; the light set is darker so it holds on a light background.
- */
-const CHART_SERIES = {
-    dark: ['#60a5fa', '#2dd4bf', '#a78bfa', '#f472b6', '#a3e635'],
-    light: ['#2563eb', '#0d9488', '#7c3aed', '#db2777', '#65a30d'],
-} as const;
-
 const darkLift = (foreground: string) => `inset 0 0.5px 0 0 color-mix(in srgb,${foreground} 8%,transparent), 0 1px 2px 0 rgb(0 0 0 / 0.4)`;
 
 /**
@@ -121,10 +109,19 @@ export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlR
             '--info': status.info,
             '--code-background': syntax.base.background,
             '--code-foreground': syntax.base.foreground,
-            // The first series is the theme's accent, so the main one reads
-            // as the app's own; the rest are a fixed set (CHART_SERIES).
-            '--chart-1': primary.base,
-            ...Object.fromEntries(CHART_SERIES[theme.metadata.variant].map((color, index) => [`--chart-${index + 2}`, color])),
+            // The first series is the theme's accent, so the main one reads as
+            // the app's own; the rest are a fixed set. UI blocks use the same
+            // colours (../../lib/visualKit.ts), under --oc-series-N.
+            ...Object.fromEntries(chartSeriesColors(theme).map((color, index) => [`--chart-${index + 1}`, color])),
+            ...kitVariables(theme),
+            // On a page the kit reads the public names, so a page that sets
+            // its own --chart-1 or --success recolours the kit's dots, bars and
+            // badges with them.
+            ...Object.fromEntries(chartSeriesColors(theme).map((_, index) => [`--oc-series-${index + 1}`, `var(--chart-${index + 1})`])),
+            '--oc-tone-success': 'var(--success)',
+            '--oc-tone-warning': 'var(--warning)',
+            '--oc-tone-error': 'var(--destructive)',
+            '--oc-tone-info': 'var(--info)',
             '--oc-button-text': readable.tinted.primary,
             '--oc-button-bg': dark ? tint(16, 'transparent') : tint(10, surface.background),
             '--oc-button-hover': dark ? tint(22, 'transparent') : tint(16, surface.background),
@@ -165,11 +162,6 @@ export function htmlRenderTheme(theme: Theme, metrics: HtmlRenderMetrics): HtmlR
             '--oc-recessed': `inset 0 1px 2px 0 rgb(0 0 0 / ${dark ? 0.4 : 0.05})`,
             '--oc-hover': interactive.hover,
             '--oc-active': interactive.active,
-            // Status text that stays readable on its own pale tint (a badge).
-            '--oc-success-text': readable.tinted.success,
-            '--oc-warning-text': readable.tinted.warning,
-            '--oc-error-text': readable.tinted.error,
-            '--oc-info-text': readable.tinted.info,
             '--oc-rem': `${metrics.rem}px`,
             // Not listed for agents: the page's root font size (see BASE_CSS).
             '--oc-text': `${metrics.text}px`,
@@ -219,10 +211,10 @@ const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repe
 // write plain HTML; the classes only spare them the styling. The
 // agent-facing description in packages/web/server/lib/agent-tool/runtime.js
 // names them; change both together.
-const badgeTone = (tone: 'success' | 'warning' | 'error' | 'info', color: string) => `.oc-badge[data-tone=${tone}]{--oc-tone:${color};--oc-tone-text:var(--oc-${tone}-text)}`;
 const CHEVRON = 'linear-gradient(45deg,transparent 50%,var(--muted-foreground) 50%),linear-gradient(135deg,var(--muted-foreground) 50%,transparent 50%)';
-const KIT_CSS = '.oc-box{box-sizing:border-box;padding:16px;border-radius:var(--radius);background-color:color-mix(in srgb,var(--foreground) 4%,transparent)}'
-    + '.oc-box .oc-box{background-color:color-mix(in srgb,var(--foreground) 6%,transparent)}'
+// Boxes, badges, legend dots and bars come from the kit UI blocks share
+// (../../lib/visualKit.ts), so both draw them alike.
+const KIT_CSS = KIT_SHARED_CSS
     + '.oc-muted{color:var(--muted-foreground)}'
     + '.oc-num{font-variant-numeric:tabular-nums;text-align:end}'
     // The chat's own Markdown table (chat/markdown/MarkdownTable.tsx): a framed
@@ -233,12 +225,6 @@ const KIT_CSS = '.oc-box{box-sizing:border-box;padding:16px;border-radius:var(--
     + '.oc-table th,.oc-table td{padding:.625em 1em;text-align:start;vertical-align:middle;border-bottom:1px solid color-mix(in srgb,var(--border) 40%,transparent)}'
     + '.oc-table th{font-weight:600}.oc-table td{color:color-mix(in srgb,var(--foreground) 90%,transparent)}'
     + '.oc-table tr:last-child>td{border-bottom:0}.oc-table .oc-num{text-align:end}'
-    + '.oc-badge{display:inline-flex;align-items:center;padding:.0625em .5em;border-radius:999px;background-color:color-mix(in srgb,var(--foreground) 6%,transparent);color:var(--muted-foreground);font-size:.8125em;font-weight:500;line-height:1.45;white-space:nowrap}'
-    + '.oc-badge[data-tone]{background-color:color-mix(in srgb,var(--oc-tone) 15%,transparent);color:var(--oc-tone-text)}'
-    + badgeTone('success', 'var(--success)') + badgeTone('warning', 'var(--warning)') + badgeTone('error', 'var(--destructive)') + badgeTone('info', 'var(--info)')
-    + '.oc-dot{display:inline-block;width:.5em;height:.5em;border-radius:50%;background-color:var(--color,var(--chart-1));vertical-align:.1em}'
-    + '.oc-bar{display:block;height:8px;border-radius:999px;overflow:hidden;background-color:color-mix(in srgb,var(--foreground) 8%,transparent)}'
-    + '.oc-bar::before{content:"";display:block;width:var(--value,0%);max-width:100%;height:100%;border-radius:inherit;background-color:var(--color,var(--chart-1))}'
     // A field is the app's Input (components/ui/input.tsx): sized in the
     // app's rem like .oc-button, its edge brightening on focus.
     + '.oc-field{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:calc(var(--oc-rem) * .8125);font-weight:500}'

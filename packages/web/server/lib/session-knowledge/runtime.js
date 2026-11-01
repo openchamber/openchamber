@@ -133,12 +133,12 @@ export const DIRECT_TOOLS_GUIDANCE = "The openchamber tools (openchamber, opench
  */
 export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws an HTML page inline in the chat, above your reply."
   + " Use it for what UI blocks cannot show: how something looks (a proposed interface change, before and after, layout options),"
-  + " or a custom drawing the block components do not cover."
+  + " or a custom drawing the block components do not cover. Never for data: charts, tables and comparisons are UI blocks, even when the user asks to see them."
   + " At most one page per answer."
   + " A mockup of the user's own project takes its look from that project's code (theme tokens, CSS variables, styles), not from OpenChamber's theme."
   + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
-  + " To ask something your next step depends on, call it with ui (Choice and Input fields with a Button) and awaitAnswer, and continue from the answer;"
-  + " for a choice between visual designs, ask on an html page with awaitAnswer.";
+  + " A choice that sets the direction of the work goes through ui with awaitAnswer (see UI blocks);"
+  + " a choice between visual designs, through an html page with awaitAnswer.";
 
 /**
  * Titles only for memory, never bodies: an index carrying full text grows

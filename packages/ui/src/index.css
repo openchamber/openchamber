@@ -1108,6 +1108,28 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/* A UI block's bar grows from its start once, when it first appears. */
+.oc-bar-grow {
+  transform-origin: left center;
+  animation: oc-bar-grow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+[dir="rtl"] .oc-bar-grow {
+  transform-origin: right center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-bar-grow {
+    animation: none;
+  }
+}
+
+@keyframes oc-bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
 /* Every Pierre instance (Changes view, tool cards, the tool dialog, the Files
    view) renders into the shadow root of a `diffs-container`. Setting the font
    and line height on that host resolves `--text-code` where the instance sits, so local

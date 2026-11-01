@@ -9,12 +9,17 @@ describe('describeUiBlockAnswer', () => {
   ];
 
   test('reads as what the user said: the button, then each filled field', () => {
-    expect(describeUiBlockAnswer(fields, { button: 'Send', values: { database: 'PostgreSQL', tags: ['a', 'b'], notes: '  ' } }))
+    expect(describeUiBlockAnswer(fields, { button: 'Send', values: { database: 'PostgreSQL', tags: ['a', 'b'], notes: '  ' } }, 'Note'))
       .toBe('Send\nWhich database do you use? PostgreSQL\nTags: a, b');
   });
 
   test('a button value names what the pressed button is about', () => {
-    expect(describeUiBlockAnswer(fields, { button: 'Take it', value: '#5931', values: {} })).toBe('Take it · #5931');
+    expect(describeUiBlockAnswer(fields, { button: 'Take it', value: '#5931', values: {} }, 'Note')).toBe('Take it · #5931');
+  });
+
+  test('the user\'s note comes last under its label', () => {
+    expect(describeUiBlockAnswer(fields, { button: 'Minimal fix', values: {}, note: 'add a regression test' }, 'Note'))
+      .toBe('Minimal fix\nNote: add a regression test');
   });
 
   test('a page summary fits the server limit', () => {
@@ -37,6 +42,21 @@ describe('describeUiBlockReplyAnswer', () => {
       'They sent it without a choice for: #18, the buttons that name no item.',
     ].join('\n'));
   });
+});
+
+test('a note goes under its decision, and a note alone answers one', () => {
+  const text = describeUiBlockReplyAnswer([], {
+    picks: [{ button: 'Take it', value: '#12', note: 'after the release' }, { value: '#15', note: 'ask Yulia first' }],
+    values: {},
+    skipped: [],
+  });
+  expect(text).toBe([
+    'The user answered the UI block in your previous reply:',
+    '- #12: Take it',
+    '  Their note: after the release',
+    '- #15: no option chosen',
+    '  Their note: ask Yulia first',
+  ].join('\n'));
 });
 
 describe('uiBlockKey', () => {

@@ -41,7 +41,10 @@ export function buildUiBlocksGuidance(): string {
   return [
     'UI blocks: a fenced openui-lang block in your reply draws native UI there; keep the explanation in Markdown around it.',
     'Use one for data or structure the user would otherwise picture: values across items, comparisons, flows, trends, status. Not for a few numbers, a short list, code, or when asked for plain text. Several per reply are fine.',
-    'Per-item decisions: a Card per item, a Button per option, value = the item. Choices collect until each decision has one (or the user sends early), then reach you together as your next turn. A question your current turn waits on goes through openchamber_render with ui (this language) and awaitAnswer.',
+    'Asking the user, by what the answer needs:',
+    '- a quick clarification its options fully answer: the question tool;',
+    '- a choice that sets the direction of the work (scope, approach, a trade-off): always openchamber_render with ui (this language) and awaitAnswer, never the question tool, so the user can add conditions to the option they pick; the form adds a note field itself, read it in data.note;',
+    '- decisions on several separate items, each with its own context: a block in your reply, a Card per item, a Button per option, value = the item. Choices collect until each decision has one (or the user sends early), then reach you together as your next turn, with any note the user wrote on a card.',
     '',
     'Syntax: one statement per line, name = Component(args); first line root = Stack([...]). Positional args in signature order, optional ones droppable from the end. Strings "...", arrays [...], objects {key: value}. Every name must be reachable from root.',
     `Item = any component below except Tab and Series. Card holds no Card or Tabs; Row holds no Row or Tabs; Tab holds no Tabs. Tone = ${TONE_UNION}.`,
