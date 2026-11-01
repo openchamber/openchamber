@@ -7,7 +7,6 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -260,7 +259,7 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
       className={cn('flex cursor-grab touch-pan-y select-none flex-col rounded-md active:cursor-grabbing', isDragging && 'oc-tile relative z-10 cursor-grabbing')}
       {...listeners}
     >
-      <div className="flex items-center gap-1.5 py-1 ps-2 pe-1">
+      <div className="flex min-h-8 items-center gap-1.5 py-1 ps-2 pe-1">
         <span className={cn('min-w-0 flex-1 truncate typography-ui-label', visibility?.shown === false ? 'text-muted-foreground' : 'text-foreground')} dir="auto">{name}</span>
         {entry.kind === 'custom' ? (
           <>
@@ -272,21 +271,32 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
             </Button>
           </>
         ) : null}
+        {/* In work's one choice sits behind its edit button, as a section of
+            the user's keeps its choices in its editor: a line under the row
+            pushed the sections below it apart. */}
+        {entry.kind === 'builtin' && entry.id === 'work' && showWork ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-6" aria-label={t('sessions.sidebar.sections.edit', { name })}>
+                <Icon name="edit" className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[200px]">
+              <DropdownMenuItem
+                closeOnClick={false}
+                onClick={() => { const keep = !keepWorkInPlace; useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); }}
+                className="flex items-center justify-between gap-3"
+              >
+                <span>{t('sessions.sidebar.sections.alsoInProjects')}</span>
+                {keepWorkInPlace ? <Icon name="check" className="size-4 text-primary" /> : null}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         {visibility ? (
-          <Switch checked={visibility.shown} onCheckedChange={visibility.set} aria-label={t('sessions.sidebar.sections.show', { name })} />
+          <Switch size="sm" checked={visibility.shown} onCheckedChange={visibility.set} aria-label={t('sessions.sidebar.sections.show', { name })} />
         ) : null}
       </div>
-      {entry.kind === 'builtin' && entry.id === 'work' && showWork ? (
-        // A choice about In work itself, under its name, worded as the user's
-        // sections word the same choice.
-        <label className="flex items-center gap-2 ps-2 pe-1 pt-0.5 pb-2 typography-micro text-muted-foreground">
-          <Checkbox
-            checked={keepWorkInPlace}
-            onChange={(keep) => { useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); }}
-          />
-          <span>{t('sessions.sidebar.sections.alsoInProjects')}</span>
-        </label>
-      ) : null}
     </div>
   );
 };
@@ -561,12 +571,12 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
           {!byProjects ? (
             <label className="flex items-center gap-2 typography-ui-label">
               <span className="flex-1">{t('sessions.sidebar.sections.alsoInProjects')}</span>
-              <Switch checked={!draft.claims} onCheckedChange={(alsoInProjects) => updateSectionDraft({ ...draft, claims: !alsoInProjects })} />
+              <Switch size="sm" checked={!draft.claims} onCheckedChange={(alsoInProjects) => updateSectionDraft({ ...draft, claims: !alsoInProjects })} />
             </label>
           ) : null}
           <label className="flex items-center gap-2 typography-ui-label">
             <span className="flex-1">{t('sessions.sidebar.sections.hideWhenEmpty')}</span>
-            <Switch checked={draft.hideWhenEmpty} onCheckedChange={(hideWhenEmpty) => updateSectionDraft({ ...draft, hideWhenEmpty })} />
+            <Switch size="sm" checked={draft.hideWhenEmpty} onCheckedChange={(hideWhenEmpty) => updateSectionDraft({ ...draft, hideWhenEmpty })} />
           </label>
         </div>
       </div>
