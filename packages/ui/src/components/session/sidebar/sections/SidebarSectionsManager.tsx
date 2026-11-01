@@ -7,6 +7,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -271,27 +272,28 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
             </Button>
           </>
         ) : null}
-        {/* In work's one choice sits behind its edit button, as a section of
-            the user's keeps its choices in its editor: a line under the row
-            pushed the sections below it apart. */}
+        {/* In work's one choice stays on its row, as a chip that says it and
+            switches it: a line under the row pushed the sections below it
+            apart, and a menu behind an edit button hid it. */}
         {entry.kind === 'builtin' && entry.id === 'work' && showWork ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-6" aria-label={t('sessions.sidebar.sections.edit', { name })}>
-                <Icon name="edit" className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[200px]">
-              <DropdownMenuItem
-                closeOnClick={false}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-pressed={keepWorkInPlace}
                 onClick={() => { const keep = !keepWorkInPlace; useSessionDisplayStore.getState().setKeepWorkInPlace(keep); void updateDesktopSettings({ sidebarKeepWorkInPlace: keep }); }}
-                className="flex items-center justify-between gap-3"
+                className={cn(
+                  'inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 typography-micro focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                  keepWorkInPlace ? 'oc-tile-inset text-foreground' : 'oc-tile text-muted-foreground hover:text-foreground',
+                )}
               >
-                <span>{t('sessions.sidebar.sections.alsoInProjects')}</span>
-                {keepWorkInPlace ? <Icon name="check" className="size-4 text-primary" /> : null}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {/* The same width either way: a mark that turns from add to check. */}
+                <Icon name={keepWorkInPlace ? 'check' : 'add'} className="size-3" />
+                {t('sessions.sidebar.sections.alsoInProjectsShort')}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{t('sessions.sidebar.sections.alsoInProjects')}</TooltipContent>
+          </Tooltip>
         ) : null}
         {visibility ? (
           <Switch size="sm" checked={visibility.shown} onCheckedChange={visibility.set} aria-label={t('sessions.sidebar.sections.show', { name })} />
