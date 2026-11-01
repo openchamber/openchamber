@@ -5688,7 +5688,6 @@ describe('parseRemoteListing', () => {
       '',
     ].join('\r\n');
     expect(parseRemoteListing(['bare', 'mirror', 'origin'], listing)).toEqual([
-      { name: 'bare', fetchUrl: 'bare', pushUrl: 'bare' },
       { name: 'mirror', fetchUrl: 'https://example.com/a b.git', pushUrl: 'https://example.com/a b.git' },
       { name: 'origin', fetchUrl: 'git@github.com:owner/repo.git', pushUrl: 'git@github.com:owner/push.git' },
     ]);
@@ -5709,7 +5708,6 @@ describe('parseRemoteListing', () => {
       '',
     ].join('\n');
     expect(parseRemoteListing(['bare', 'future', 'mirror', 'origin'], listing)).toEqual([
-      { name: 'bare', fetchUrl: 'bare', pushUrl: 'bare' },
       { name: 'future', fetchUrl: 'https://example.com/f.git', pushUrl: 'https://example.com/f.git' },
       { name: 'mirror', fetchUrl: 'https://example.com/repo.git', pushUrl: 'https://example.com/repo.git' },
       { name: 'origin', fetchUrl: 'git@github.com:owner/repo.git', pushUrl: 'git@github.com:owner/repo.git' },
@@ -5735,6 +5733,7 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
     });
 
     expect(remotes).toEqual(expected);
+    expect(remotes.map(({ name }) => name)).toEqual(['origin', 'rewritten']);
     expect(remotes.find((remote) => remote.name === 'rewritten')?.fetchUrl).toBe('https://github.com/other/repo.git');
     expect(remotes.find((remote) => remote.name === 'origin')?.pushUrl).toBe('git@github.com:owner/push.git');
   });
@@ -5753,6 +5752,21 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
       fetchUrl: 'git@github.com:owner/repo.git',
       pushUrl: 'git@github.com:owner/repo.git',
     });
+  });
+
+  it('leaves out a remote with no fetch URL, such as a git-annex special remote (#5995)', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['remote', 'add', 'origin', 'https://github.com/owner/repo.git']);
+    runGit(repository, ['config', 'remote.storage.annex-externaltype', 'example']);
+    runGit(repository, ['config', 'remote.storage.annex-uuid', '00000000-0000-0000-0000-000000000000']);
+    runGit(repository, ['config', 'remote.pushonly.pushurl', 'https://example.com/push.git']);
+
+    expect(await getRepositoryRemoteUrls(repository)).toEqual([{
+      name: 'origin',
+      fetchUrl: 'https://github.com/owner/repo.git',
+      pushUrl: 'https://github.com/owner/repo.git',
+    }]);
   });
 });
 
