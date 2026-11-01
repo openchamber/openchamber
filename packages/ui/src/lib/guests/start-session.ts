@@ -30,7 +30,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import * as sessionActions from '@/sync/session-actions';
 import { useSelectionStore } from '@/sync/selection-store';
-import { getSyncSessions } from '@/sync/sync-refs';
+import { getAllSyncSessions, getDirectoryState } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type TranslateFn = (key: I18nKey, params?: I18nParams) => string;
@@ -177,7 +177,14 @@ const captureGuestPromptSelection = (sessionId: string, directory: string) => {
   }
   const last = sessions.getLastUserChoice(sessionId);
   const fallback = captureDefaultSendSelection();
-  const record = getSyncSessions(directory).find((session) => session.id === sessionId);
+  // The directory child store is keyed by the normalized path, while the
+  // panel can hold a different path form (case, separators, trailing slash):
+  // the store then does not answer for that string. Read exactly the way
+  // `resolveSendSelection` does — directory state, and only when that is
+  // absent fall back to the cross-directory map — so the capture and the
+  // send always agree about the session record.
+  const sessionList = getDirectoryState(directory)?.session ?? getAllSyncSessions();
+  const record = sessionList.find((session) => session.id === sessionId);
   const recordAgent = record?.agent;
   const followedAgent = selection.sessionFollowedAgents.get(sessionId);
   const agentPick = selection.getSessionAgentPick(sessionId);
