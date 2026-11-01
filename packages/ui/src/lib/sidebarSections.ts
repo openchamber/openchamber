@@ -44,11 +44,12 @@ export type SidebarSectionFilter = {
   projectIds: readonly string[];
   activity: SidebarSectionActivity;
   /**
-   * Words to find in the work's title or branch, matched as the sidebar's
-   * search matches them: every word somewhere in a session's title, the
-   * worktree's name or its branch. Empty asks nothing.
+   * Phrases to find in the work's title or branch, any one of them: each
+   * matches as the sidebar's search matches, every word at the start of a
+   * word in a session's title, the worktree's name or its branch. Empty asks
+   * nothing.
    */
-  text: string;
+  text: readonly string[];
 };
 
 /**
@@ -75,13 +76,15 @@ export const SIDEBAR_SECTION_NAME_MAX = 60;
 export const SIDEBAR_SECTIONS_MAX = 24;
 export const SIDEBAR_PIN_LISTS_MAX = 24;
 export const SIDEBAR_SECTION_TEXT_MAX = 100;
+export const SIDEBAR_SECTION_PHRASES_MAX = 12;
 
 export const EMPTY_SIDEBAR_SECTION_FILTER: SidebarSectionFilter = Object.freeze({
-  states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], activity: 'any', text: '',
+  states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], activity: 'any', text: [],
 });
 
 
 const idSchema = z.string().trim().min(1).max(64);
+const phraseSchema = z.string().trim().transform((value) => value.slice(0, SIDEBAR_SECTION_TEXT_MAX));
 const nameSchema = z.string().trim().min(1).transform((value) => value.slice(0, SIDEBAR_SECTION_NAME_MAX));
 // Chips the build does not know (a newer client's) are dropped, the rest kept once.
 const chips = <const T extends readonly [string, ...string[]]>(values: T) => z.array(z.unknown()).transform((entries) => (
@@ -110,7 +113,13 @@ const filterSchema = z.object({
   links: chips(SIDEBAR_SECTION_LINKS).catch([]),
   projectIds: projectIds.catch([]),
   activity: z.enum(SIDEBAR_SECTION_ACTIVITY).catch('any'),
-  text: z.string().transform((value) => value.trim().slice(0, SIDEBAR_SECTION_TEXT_MAX)).catch(''),
+  // A list of phrases; a build before lists kept one phrase as a string.
+  text: z.union([z.string().transform((value) => [value]), z.array(z.unknown())]).transform((entries) => (
+    [...new Set(entries.flatMap((entry) => {
+      const phrase = phraseSchema.safeParse(entry);
+      return phrase.success && phrase.data ? [phrase.data] : [];
+    }))].slice(0, SIDEBAR_SECTION_PHRASES_MAX)
+  )).catch([]),
 }).partial();
 
 const customSchema = z.object({
@@ -138,7 +147,7 @@ const toFilter = (filter: z.infer<typeof filterSchema>, grouping: 'time' | 'proj
       links: filter.links ?? [],
       projectIds: filter.projectIds ?? [],
       activity: filter.activity ?? 'any',
-      text: filter.text ?? '',
+      text: filter.text ?? [],
     }
 );
 
@@ -213,7 +222,7 @@ export const hasSidebarSectionConditions = (filter: SidebarSectionFilter): boole
   || filter.links.length > 0
   || filter.projectIds.length > 0
   || filter.activity !== 'any'
-  || filter.text.trim() !== ''
+  || filter.text.length > 0
 );
 
 /** Whether a section asks for plans, which live with the project's knowledge, not with the session. */
@@ -302,7 +311,7 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
   if (filter.kinds.length > 0 && !filter.kinds.some((kind) => (kind === 'scheduled' ? facts.scheduled : kind === facts.kind))) return false;
   if (filter.links.length > 0 && !filter.links.some((link) => matchesLink(link, facts))) return false;
   if (filter.projectIds.length > 0 && (facts.projectId === null || !filter.projectIds.includes(facts.projectId))) return false;
-  if (filter.text.trim() !== '' && !matchesRankQuery(facts.texts, filter.text, SIDEBAR_SEARCH)) return false;
+  if (filter.text.length > 0 && !filter.text.some((phrase) => matchesRankQuery(facts.texts, phrase, SIDEBAR_SEARCH))) return false;
   return matchesActivity(filter.activity, facts.lastActivityAt, now);
 };
 

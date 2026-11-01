@@ -151,7 +151,7 @@ describe('useSessionDisplayStore cached sections', () => {
     try {
       await useSessionDisplayStore.persist.rehydrate();
       const section = useSessionDisplayStore.getState().sections.find((entry) => entry.id === 's1');
-      expect(section?.kind === 'custom' ? section.filter.text : null).toBe('');
+      expect(section?.kind === 'custom' ? section.filter.text : null).toEqual([]);
       expect(useSessionDisplayStore.getState().sections.some((entry) => entry.id === 'projects')).toBe(true);
     } finally {
       useSessionDisplayStore.persist.setOptions({ storage: originalStorage });

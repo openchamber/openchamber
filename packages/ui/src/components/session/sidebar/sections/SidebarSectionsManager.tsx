@@ -29,6 +29,7 @@ import {
   SIDEBAR_SECTION_KINDS,
   SIDEBAR_SECTION_LINKS,
   SIDEBAR_SECTION_NAME_MAX,
+  SIDEBAR_SECTION_PHRASES_MAX,
   SIDEBAR_SECTION_TEXT_MAX,
   SIDEBAR_SECTION_STATES,
   SIDEBAR_SECTION_WORK_STATES,
@@ -322,7 +323,7 @@ const TIME_CATEGORIES: readonly ConditionCategory[] = ['text', 'states', 'work',
 /** The values a condition holds; activity is one choice, "any time" being no condition. */
 const conditionValues = (filter: SidebarSectionFilter, category: ConditionCategory): readonly string[] => {
   if (category === 'activity') return filter.activity === 'any' ? [] : [filter.activity];
-  if (category === 'text') return filter.text.trim() === '' ? [] : [filter.text];
+  if (category === 'text') return filter.text;
   return filter[category];
 };
 
@@ -353,7 +354,7 @@ const toggleCondition = (filter: SidebarSectionFilter, category: Exclude<Conditi
 
 const clearCondition = (filter: SidebarSectionFilter, category: ConditionCategory): SidebarSectionFilter => {
   if (category === 'activity') return { ...filter, activity: 'any' };
-  if (category === 'text') return { ...filter, text: '' };
+  if (category === 'text') return { ...filter, text: [] };
   return { ...filter, [category]: [] };
 };
 
@@ -363,10 +364,9 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
   const matchCount = useSidebarSectionsUiStore((state) => state.draftMatchCount);
   const pinLists = useSessionDisplayStore((state) => state.pinLists);
   const projects = useProjectsInSidebarOrder(useProjectsStore((state) => state.projects));
-  // The words row stays while the user clears it to type again; Add condition
-  // opens it empty, and only its close button removes it.
-  const [textRowOpen, setTextRowOpen] = React.useState(draft.filter.text.trim() !== '');
-  const [focusText, setFocusText] = React.useState(false);
+  // The phrase being typed into Title or branch, or null while no field is
+  // open: Add condition and the row's Add open it empty.
+  const [phraseDraft, setPhraseDraft] = React.useState<string | null>(null);
   const nameId = React.useId();
   const byProjects = draft.grouping === 'project';
   const optionsOf = (category: ConditionCategory): readonly ConditionOption[] => {
@@ -397,14 +397,14 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
   };
   const removeCondition = (category: ConditionCategory): void => {
     placeCondition(category, false);
-    if (category === 'text') setTextRowOpen(false);
+    if (category === 'text') setPhraseDraft(null);
     updateSectionDraft({ ...draft, filter: clearCondition(draft.filter, category) });
   };
   // Only the conditions the section asks for are on screen; a group of
   // projects asks for its projects alone, so that row is always there.
   const categories: readonly ConditionCategory[] = byProjects ? ['projectIds'] : TIME_CATEGORIES;
   const isShown = (category: ConditionCategory): boolean => (
-    byProjects || conditionValues(draft.filter, category).length > 0 || (category === 'text' && textRowOpen)
+    byProjects || conditionValues(draft.filter, category).length > 0 || (category === 'text' && phraseDraft !== null)
   );
   const shown = byProjects ? categories : [
     ...order.filter(isShown),
@@ -420,6 +420,22 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
     if (byProjects) countLabel = matchCount === 1 ? t('sessions.sidebar.sections.matchProjectsSingle', { count: matchCount }) : t('sessions.sidebar.sections.matchProjectsPlural', { count: matchCount });
     else countLabel = matchCount === 1 ? t('sessions.sidebar.sections.matchWorksSingle', { count: matchCount }) : t('sessions.sidebar.sections.matchWorksPlural', { count: matchCount });
   }
+  // Title or branch holds phrases, any one of which matches: each is a chip
+  // like another condition's values, and Add types one more.
+  const commitPhrase = (): void => {
+    const phrase = (phraseDraft ?? '').trim().slice(0, SIDEBAR_SECTION_TEXT_MAX);
+    const phrases = phrase && !draft.filter.text.includes(phrase)
+      ? [...draft.filter.text, phrase].slice(0, SIDEBAR_SECTION_PHRASES_MAX)
+      : draft.filter.text;
+    setPhraseDraft(null);
+    placeCondition('text', phrases.length > 0);
+    if (phrases !== draft.filter.text) updateSectionDraft({ ...draft, filter: { ...draft.filter, text: phrases } });
+  };
+  const removePhrase = (phrase: string): void => {
+    const phrases = draft.filter.text.filter((entry) => entry !== phrase);
+    placeCondition('text', phrases.length > 0 || phraseDraft !== null);
+    updateSectionDraft({ ...draft, filter: { ...draft.filter, text: phrases } });
+  };
   const optionItems = (category: Exclude<ConditionCategory, 'text'>) => {
     const values = conditionValues(draft.filter, category);
     // Several values of a category can be picked, so the menu stays open; activity is one choice.
@@ -472,19 +488,56 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
             if (category === 'text') {
               const textLabel = t(CATEGORY_KEY.text);
               return (
-                <div key={category} className="oc-tile flex items-center gap-1 rounded-md pe-1">
-                  <label className="flex min-w-0 flex-1 items-baseline gap-2 px-2.5 py-1.5 typography-ui-label">
-                    <span className="shrink-0 text-muted-foreground">{textLabel}</span>
-                    <input
-                      ref={(node) => { if (node && focusText) { node.focus(); setFocusText(false); } }}
-                      value={draft.filter.text}
-                      maxLength={SIDEBAR_SECTION_TEXT_MAX}
-                      placeholder={t('sessions.sidebar.sections.textPlaceholder')}
-                      onChange={(event) => updateSectionDraft({ ...draft, filter: { ...draft.filter, text: event.target.value } })}
-                      className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-                      dir="auto"
-                    />
-                  </label>
+                <div key={category} className="oc-tile flex items-start gap-2 rounded-md py-1.5 ps-2.5 pe-1">
+                  <span className="flex h-6 shrink-0 items-center typography-ui-label text-muted-foreground">{textLabel}</span>
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 py-0.5">
+                    {draft.filter.text.map((phrase) => (
+                      <span key={phrase} className="oc-tile-inset inline-flex h-5 min-w-0 max-w-full items-center gap-0.5 rounded ps-1.5 typography-micro text-foreground">
+                        <span className="min-w-0 truncate" dir="auto">{phrase}</span>
+                        <button
+                          type="button"
+                          className="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                          aria-label={t('sessions.sidebar.sections.removeCondition', { name: phrase })}
+                          onClick={() => removePhrase(phrase)}
+                        >
+                          <Icon name="close" className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                    {phraseDraft !== null ? (
+                      <input
+                        autoFocus
+                        value={phraseDraft}
+                        maxLength={SIDEBAR_SECTION_TEXT_MAX}
+                        placeholder={t('sessions.sidebar.sections.textPlaceholder')}
+                        aria-label={textLabel}
+                        onChange={(event) => setPhraseDraft(event.target.value)}
+                        onBlur={commitPhrase}
+                        onKeyDown={(event) => {
+                          // Enter adds the phrase rather than saving the section;
+                          // Escape drops it rather than closing the panel. Both
+                          // belong to an input method while it composes.
+                          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            commitPhrase();
+                          } else if (event.key === 'Escape') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setPhraseDraft(null);
+                            placeCondition('text', draft.filter.text.length > 0);
+                          }
+                        }}
+                        className="h-5 min-w-24 flex-1 bg-transparent px-1 typography-micro text-foreground outline-none placeholder:text-muted-foreground"
+                        dir="auto"
+                      />
+                    ) : draft.filter.text.length < SIDEBAR_SECTION_PHRASES_MAX ? (
+                      <button type="button" onClick={() => setPhraseDraft('')} className="inline-flex h-5 items-center gap-0.5 rounded border border-dashed border-[color-mix(in_srgb,var(--foreground)_24%,transparent)] px-1.5 typography-micro text-muted-foreground hover:border-[color-mix(in_srgb,var(--foreground)_40%,transparent)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+                        <Icon name="add" className="size-3" />
+                        {t('sessions.sidebar.sections.addValue')}
+                      </button>
+                    ) : null}
+                  </div>
                   <Button type="button" variant="ghost" size="icon" className="size-6 shrink-0" aria-label={t('sessions.sidebar.sections.removeCondition', { name: textLabel })} onClick={() => removeCondition('text')}>
                     <Icon name="close" className="size-3.5" />
                   </Button>
@@ -555,7 +608,7 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
               </DropdownMenuTrigger>
               <DropdownMenuContent side="bottom" align="start" className="max-h-[min(20rem,var(--available-height))] min-w-[180px] overflow-y-auto">
                 {addable.map((category) => category === 'text' ? (
-                  <DropdownMenuItem key={category} onClick={() => { setTextRowOpen(true); setFocusText(true); placeCondition('text', true); }}>{t(CATEGORY_KEY.text)}</DropdownMenuItem>
+                  <DropdownMenuItem key={category} onClick={() => { setPhraseDraft(''); placeCondition('text', true); }}>{t(CATEGORY_KEY.text)}</DropdownMenuItem>
                 ) : (
                   <DropdownMenuSub key={category}>
                     <DropdownMenuSubTrigger>{t(CATEGORY_KEY[category])}</DropdownMenuSubTrigger>

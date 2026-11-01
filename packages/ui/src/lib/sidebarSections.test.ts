@@ -49,15 +49,19 @@ describe('sidebarSectionsSchema', () => {
     expect(entry?.kind === 'custom' ? entry.filter.projectIds : null).toEqual([id]);
   });
 
-  test('keeps the words to find trimmed and short, and reads a list saved before them as asking none', () => {
+  test('keeps phrases trimmed, short and once, and reads one saved as a string or none at all', () => {
     const parsed = sidebarSectionsSchema.parse([
       { kind: 'custom', id: 't', name: 'Relay', filter: { text: `  relay ${'x'.repeat(200)}` } },
+      { kind: 'custom', id: 'l', name: 'Topics', filter: { text: [' relay ', 'relay', '', 42, 'mobile'] } },
       { kind: 'custom', id: 'o', name: 'Old', filter: { states: ['running'] } },
     ]);
-    const entry = parsed.find((section) => section.id === 't');
-    const older = parsed.find((section) => section.id === 'o');
-    expect(entry?.kind === 'custom' ? entry.filter.text : null).toBe(`relay ${'x'.repeat(94)}`);
-    expect(older?.kind === 'custom' ? older.filter.text : null).toBe('');
+    const textOf = (id: string) => {
+      const entry = parsed.find((section) => section.id === id);
+      return entry?.kind === 'custom' ? entry.filter.text : null;
+    };
+    expect(textOf('t')).toEqual([`relay ${'x'.repeat(94)}`]);
+    expect(textOf('l')).toEqual(['relay', 'mobile']);
+    expect(textOf('o')).toEqual([]);
   });
 });
 
@@ -90,16 +94,23 @@ describe('matchesSidebarSectionFilter', () => {
     expect(matchesSidebarSectionFilter(scheduled, facts({ kind: 'worktree', scheduled: true }), now)).toBe(true);
     expect(matchesSidebarSectionFilter(scheduled, facts(), now)).toBe(false);
     // With a title: the runs of one task.
-    expect(matchesSidebarSectionFilter({ ...scheduled, text: 'nightly triage' }, facts({ scheduled: true, texts: ['Nightly triage 2026-10-31'] }), now)).toBe(true);
-    expect(matchesSidebarSectionFilter({ ...scheduled, text: 'nightly triage' }, facts({ texts: ['Nightly triage notes'] }), now)).toBe(false);
+    expect(matchesSidebarSectionFilter({ ...scheduled, text: ['nightly triage'] }, facts({ scheduled: true, texts: ['Nightly triage 2026-10-31'] }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter({ ...scheduled, text: ['nightly triage'] }, facts({ texts: ['Nightly triage notes'] }), now)).toBe(false);
   });
 
-  test('text: every word in a title or the branch, as the sidebar search matches', () => {
-    const filter = { ...EMPTY_SIDEBAR_SECTION_FILTER, text: 'relay fix' };
+  test('text: every word of a phrase in a title or the branch, as the sidebar search matches', () => {
+    const filter = { ...EMPTY_SIDEBAR_SECTION_FILTER, text: ['relay fix'] };
     expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Fix the Relay reconnect'] }), now)).toBe(true);
     expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Relay pairing', 'fix/relay-pairing'] }), now)).toBe(true);
     expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Relay pairing'] }), now)).toBe(false);
-    expect(matchesSidebarSectionFilter({ ...filter, text: '  ' }, facts(), now)).toBe(true);
+    expect(matchesSidebarSectionFilter({ ...filter, text: [] }, facts(), now)).toBe(true);
+  });
+
+  test('text: any one of the phrases', () => {
+    const filter = { ...EMPTY_SIDEBAR_SECTION_FILTER, text: ['relay', 'mobile drawer'] };
+    expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Relay pairing'] }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Mobile drawer scroll'] }), now)).toBe(true);
+    expect(matchesSidebarSectionFilter(filter, facts({ texts: ['Mobile sheet'] }), now)).toBe(false);
   });
 
   test('activity: today and the last two days from local midnight, stalled after three quiet days', () => {

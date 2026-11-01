@@ -50,7 +50,13 @@ const sidebarSectionSchema = z.union([
       links: sidebarChips(['pr', 'issue', 'tracker', 'plan', 'goal']).catch([]),
       projectIds: sidebarProjectIds.catch([]),
       activity: z.enum(['any', 'today', 'two-days', 'week', 'stalled']).catch('any'),
-      text: z.string().transform((value) => value.trim().slice(0, 100)).catch(''),
+      // A list of phrases; a build before lists kept one phrase as a string.
+      text: z.union([z.string().transform((value) => [value]), z.array(z.unknown())]).transform((entries) => (
+        [...new Set(entries.flatMap((entry) => {
+          const phrase = z.string().trim().transform((value) => value.slice(0, 100)).safeParse(entry);
+          return phrase.success && phrase.data ? [phrase.data] : [];
+        }))].slice(0, 12)
+      )).catch([]),
     }).partial().catch({}),
     claims: z.boolean().catch(false),
     hideWhenEmpty: z.boolean().catch(true),

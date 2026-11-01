@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { dropSectionsOfOtherInstance, useSessionDisplayStore } from './useSessionDisplayStore';
 
-const custom = { kind: 'custom' as const, id: 's1', name: 'Mine', grouping: 'time' as const, filter: { states: ['running' as const], work: [], pins: [], kinds: [], links: [], projectIds: [], activity: 'any' as const, text: '' }, claims: false, hideWhenEmpty: true };
+const custom = { kind: 'custom' as const, id: 's1', name: 'Mine', grouping: 'time' as const, filter: { states: ['running' as const], work: [], pins: [], kinds: [], links: [], projectIds: [], activity: 'any' as const, text: [] }, claims: false, hideWhenEmpty: true };
 
 describe('sidebar sections belong to their instance', () => {
   test('another instance drops them back to the built-in sections, the same one keeps them', () => {

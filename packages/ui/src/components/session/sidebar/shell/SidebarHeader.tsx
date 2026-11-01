@@ -269,7 +269,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     && canAddSidebarSection(sidebarSections);
   const saveSearchAsSection = () => {
     const section = createSidebarSectionFromTemplate('blank', searchText.slice(0, SIDEBAR_SECTION_NAME_MAX));
-    editSection({ ...section, filter: { ...section.filter, text: searchText.slice(0, SIDEBAR_SECTION_TEXT_MAX) } }, true);
+    editSection({ ...section, filter: { ...section.filter, text: [searchText.slice(0, SIDEBAR_SECTION_TEXT_MAX)] } }, true);
     closeSessionSearch();
   };
 
