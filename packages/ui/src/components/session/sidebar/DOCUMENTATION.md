@@ -547,8 +547,12 @@ sections as toggles too; it has no manager.
   2026-10-28). Projects are set apart by
   space alone (`sectionSpacingAfter`): 12px before a project that has rows
   above it, 2px after a collapsed project, so a run of collapsed projects
-  reads as a list. A hairline between projects was tried and dropped: with
-  projects collapsed it striped every row (maintainer, 2026-10-28).
+  reads as a list. A hairline between every two projects was dropped: with
+  projects collapsed it striped every row (maintainer, 2026-10-28). It came
+  back only where an open project ends before the next one, in the middle of
+  that 12px gap, from the headers' content edge (maintainer, 2026-11-01): long
+  open projects ran together without it, and a run of collapsed ones keeps no
+  line.
 - Rows of zones that mix projects (Pinned, In work, the list by time) are
   `'mixed-compact'`: one line with no project icon (the room goes to the
   title; the whole-row tooltip names the project, branch and model), the PR

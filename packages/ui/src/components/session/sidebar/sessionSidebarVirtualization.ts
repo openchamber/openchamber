@@ -279,10 +279,19 @@ export const estimateSessionSidebarRowSize = (
   return (measured.height ?? row.estimateSize) + gap;
 };
 
-/** The classes of a row's wrapper: its trailing gap. */
-export const sectionWrapperClass = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => (
-  sectionSpacingAfter(row, nextRow) ?? ''
-);
+/**
+ * A hairline in the middle of the gap that closes an open project before the
+ * next one, from the project headers' content edge to theirs. Only there: a
+ * line between every two projects striped a run of collapsed ones.
+ */
+const PROJECT_DIVIDER_CLASS = "after:pointer-events-none after:absolute after:start-1.5 after:end-1.5 after:bottom-[5.5px] after:h-px after:bg-[color-mix(in_srgb,var(--foreground)_8%,transparent)] after:content-['']";
+
+/** The classes of a row's wrapper: its trailing gap, and the line between open projects. */
+export const sectionWrapperClass = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => {
+  const spacing = sectionSpacingAfter(row, nextRow);
+  if (spacing === 'pb-3' && nextRow?.kind === 'project-header') return `${spacing} ${PROJECT_DIVIDER_CLASS}`;
+  return spacing ?? '';
+};
 
 export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): SectionSpacing | undefined => {
   // Projects are set apart by space alone, with no line between them. A
