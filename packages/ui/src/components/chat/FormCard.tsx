@@ -13,7 +13,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useChatSessionSelection } from './chatColumnSession';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
-import { isFormRequestNotFoundError } from '@/sync/form-request-error';
+import { agentUnavailableFrom, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
@@ -134,6 +134,11 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
             // The store removes not-found requests, so no card remains to retry.
             if (!recovered && isFormRequestNotFoundError(error)) {
                 setHasResponded(true);
+                return;
+            }
+            const unavailableAgent = agentUnavailableFrom(error instanceof Error ? error : null);
+            if (unavailableAgent) {
+                toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
                 return;
             }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });
