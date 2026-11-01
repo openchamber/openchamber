@@ -48,9 +48,11 @@ export const mountProgress = (root: Element, initial: ProgressProps): ProgressHa
     if (props.label) track.setAttribute('aria-label', props.label); else track.removeAttribute('aria-label');
     setText(label, props.label);
     setText(percentText, `${value}%`);
-    // Done reads as done: the app's progress turns green with a check.
-    setAttr(node, 'data-done', value === 100 ? 'true' : null);
-    doneMark.style.display = value === 100 ? '' : 'none';
+    // Done reads as done: the app's progress turns green with a check. A bar
+    // the extension tinted keeps its tone, as the served look keeps its fill.
+    const done = value === 100 && (!props.tone || props.tone === 'neutral');
+    setAttr(node, 'data-done', done ? 'true' : null);
+    doneMark.style.display = done ? '' : 'none';
     caption.hidden = !props.label;
   };
   paint();
