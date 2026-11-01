@@ -12,7 +12,7 @@ import { Icon } from "@/components/icon/Icon";
 import { Spinner } from '@/components/ui/spinner';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { getDesktopUpdateChannel, setDesktopUpdateChannel } from '@/lib/desktop';
-import { formatCanaryBuildDate, parseCanaryVersion, type UpdateChannel } from '@/lib/updateChannel';
+import { formatCanaryBuild, parseCanaryVersion, type UpdateChannel } from '@/lib/updateChannel';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -232,18 +232,20 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     };
 
   // A Canary build reads as the release it leads to and the day it was made:
-  // "2.5.4 Canary · 30 Oct" for 2.5.4-canary.20261030.123.
-  const describeVersion = (version: string) => {
+  // "2.5.4 Canary · 30 Oct" for 2.5.4-canary.20261030.123, with the build
+  // number when the build it is shown with was made the same day.
+  const describeVersion = (version: string, beside?: string | null) => {
     const canary = parseCanaryVersion(version);
     return canary
       ? t('settings.openchamber.about.canaryVersion', {
         version: canary.release,
-        date: formatCanaryBuildDate(canary.builtOn, getCurrentIntlLocale()),
+        date: formatCanaryBuild(canary, getCurrentIntlLocale(), parseCanaryVersion(beside)),
       })
       : version;
   };
-  const currentVersion = describeVersion(openChamberVersion || update.info?.currentVersion || 'unknown');
-  const appVersion = describeVersion(desktopAppVersion || updateStore.info?.currentVersion || 'unknown');
+  const offeredVersion = update.available ? update.info?.version : null;
+  const currentVersion = describeVersion(openChamberVersion || update.info?.currentVersion || 'unknown', offeredVersion);
+  const appVersion = describeVersion(desktopAppVersion || updateStore.info?.currentVersion || 'unknown', offeredVersion);
   const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
 
   // The update channel of the desktop app, or of the server installed from npm
@@ -275,13 +277,13 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   // the server the phone is connected to (or the desktop app serving it),
   // never the phone app itself, which updates through its store.
   const serverUpdateLabel = (info: UpdateInfo | null) => {
-    const version = describeVersion(info?.version || '');
+    const version = describeVersion(info?.version || '', info?.currentVersion);
     return info?.packageManager === 'electron'
       ? t('settings.openchamber.about.actions.updateDesktopToVersion', { version })
       : t('settings.openchamber.about.actions.updateServerToVersion', { version });
   };
   const openChamberUpdateLabel = (() => {
-    const version = describeVersion(update.info?.version || '');
+    const version = describeVersion(update.info?.version || '', update.info?.currentVersion);
     if (isNativeApp) return serverUpdateLabel(update.info);
     return isDesktopRemote
       ? t('settings.openchamber.about.actions.updateAppToVersion', { version })
@@ -565,7 +567,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               disabled={isChecking}
               className="w-auto justify-center gap-2"
             >
-              {isChecking ? <Icon name="loader" className="size-4 animate-spin" /> : <Icon name="refresh" className="size-4" />}
+              {isChecking ? <Spinner className="size-4" /> : <Icon name="refresh" className="size-4" />}
               {isChecking
                 ? t('settings.openchamber.about.state.checking')
                 : isNativeApp
@@ -660,31 +662,37 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     );
   }
 
-  // Desktop layout: the brand with its links, then one run of field rows, each
-  // version with its own update action on the right.
-  // The check button is always there and stays put while checking (it also
-  // re-checks a remote host's server); the outcome reads before it.
-  const openChamberStatus = (
+  // Desktop layout: the brand with its links, then one run of one-line field
+  // rows with every value on the right: each version followed by its outcome
+  // or update action, then the channel with the check button. The outcome
+  // follows a version that does not change width, and the check button
+  // follows the channel, so a check moves neither.
+  const statusSeparator = <span aria-hidden="true" className="typography-meta text-muted-foreground/60">·</span>;
+  const openChamberStatus = isChecking ? (
     <>
-      {isChecking ? (
-        <span className="flex items-center gap-1.5 typography-meta text-muted-foreground">
-          <Icon name="loader" className="size-4 animate-spin" />
-          {t('settings.openchamber.about.state.checking')}
-        </span>
-      ) : update.available && !installBlocked ? (
-        <Button size="sm" variant="default" onClick={() => setUpdateDialogOpen(true)}>
-          <Icon name="download" className="size-4" />
-          {openChamberUpdateLabel}
-        </Button>
-      ) : !update.available && !update.error ? (
-        <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
-      ) : null}
-      <Button size="sm" variant="outline" onClick={checkAll} disabled={isChecking}>
-        {t('settings.openchamber.about.actions.checkForUpdates')}
-      </Button>
+      {statusSeparator}
+      <span className="flex items-center gap-1.5 typography-meta text-muted-foreground">
+        <Spinner className="size-4" />
+        {t('settings.openchamber.about.state.checking')}
+      </span>
     </>
+  ) : update.available && !installBlocked ? (
+    <Button size="sm" variant="default" onClick={() => setUpdateDialogOpen(true)}>
+      <Icon name="download" className="size-4" />
+      {openChamberUpdateLabel}
+    </Button>
+  ) : !update.available && !update.error ? (
+    <>
+      {statusSeparator}
+      <span className="typography-meta text-muted-foreground">{t('settings.openchamber.about.state.upToDate')}</span>
+    </>
+  ) : null;
+  const versionValue = (version: string) => (
+    <span className="typography-meta font-mono text-muted-foreground">{version}</span>
   );
-  const versionValue = (version: string) => <span className="font-mono">{version}</span>;
+  // Rows without a button keep the height of rows with one; in a narrow pane
+  // a version and its update button wrap instead of overflowing.
+  const valueRow = 'min-h-8 flex-wrap @xl:flex-initial';
   const notes = [
     manualUpdateNotice,
     remoteHostInstallBlocked ? remoteHostUpdateControls : null,
@@ -727,32 +735,35 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
       <SettingsSection contentClassName="space-y-4">
         <div>
-          {updateChannelControl && (
-            <SettingsFieldRow
-              label={t('settings.openchamber.about.field.updateChannel')}
-              info={t('settings.openchamber.about.field.updateChannelHint')}
-            >
-              {updateChannelControl}
-            </SettingsFieldRow>
-          )}
           {isDesktopRemote ? (
             <>
-              <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} description={versionValue(appVersion)}>
+              <SettingsFieldRow label={t('settings.openchamber.about.field.appVersion')} controlClassName={valueRow}>
+                {versionValue(appVersion)}
                 {openChamberStatus}
               </SettingsFieldRow>
-              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} description={versionValue(remoteHostVersion)}>
+              <SettingsFieldRow label={t('settings.openchamber.about.field.serverVersion')} controlClassName={valueRow}>
+                {versionValue(remoteHostVersion)}
                 {remoteHostInstallBlocked ? null : remoteHostUpdateControls}
               </SettingsFieldRow>
             </>
           ) : (
-            <SettingsFieldRow label={t('settings.openchamber.about.field.version')} description={versionValue(currentVersion)}>
+            <SettingsFieldRow label={t('settings.openchamber.about.field.version')} controlClassName={valueRow}>
+              {versionValue(currentVersion)}
               {openChamberStatus}
             </SettingsFieldRow>
           )}
           <SettingsFieldRow
-            label={t('settings.openchamber.about.field.openCodeVersion')}
-            description={versionValue(openCodeVersion || t('settings.openchamber.about.state.unknown'))}
+            label={t('settings.openchamber.about.field.updateChannel')}
+            info={updateChannelControl ? t('settings.openchamber.about.field.updateChannelHint') : undefined}
+            controlClassName={valueRow}
           >
+            {updateChannelControl}
+            <Button size="sm" variant="outline" onClick={checkAll} disabled={isChecking}>
+              {t('settings.openchamber.about.actions.checkForUpdates')}
+            </Button>
+          </SettingsFieldRow>
+          <SettingsFieldRow label={t('settings.openchamber.about.field.openCodeVersion')} controlClassName={valueRow}>
+            {versionValue(openCodeVersion || t('settings.openchamber.about.state.unknown'))}
             {openCodeUpdate?.action}
           </SettingsFieldRow>
           <InstanceServiceUrls label={t('settings.openchamber.about.field.instanceUrls')} />

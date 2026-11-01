@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Switch as BaseSwitch } from '@base-ui/react/switch';
 
-import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
 type SwitchProps = React.ComponentPropsWithoutRef<typeof BaseSwitch.Root> & {
@@ -33,7 +33,7 @@ const Switch = React.forwardRef<
         loading && 'bg-status-warning text-background',
       )}
     >
-      {loading ? <Icon name="loader" className="size-3 animate-spin" /> : null}
+      {loading ? <Spinner className="size-3" /> : null}
     </BaseSwitch.Thumb>
   </BaseSwitch.Root>
 ));

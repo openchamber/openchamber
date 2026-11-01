@@ -16,7 +16,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { installWebUpdate, waitForUpdateApplied } from '@/lib/web-update';
-import { formatCanaryBuildDate, parseCanaryVersion } from '@/lib/updateChannel';
+import { formatCanaryBuild, parseCanaryVersion } from '@/lib/updateChannel';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -188,12 +188,13 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     return count === 1 ? t('updateDialog.changelog.changeCountSingle') : t('updateDialog.changelog.changeCountPlural', { count });
   };
   // "2.5.4 Canary · Oct 31" for 2.5.4-canary.20261031.5. Between two Canary
-  // builds the header names the channel once: "Canary: 2.5.4 · Oct 29 → 2.5.4 · Oct 31".
+  // builds the header names the channel once: "Canary: 2.5.4 · Oct 29 → 2.5.4 · Oct 31",
+  // and two builds of one day add their build numbers: "Oct 31 #123 → Oct 31 #124".
   const bothCanary = Boolean(parseCanaryVersion(info?.currentVersion) && parseCanaryVersion(info?.version));
-  const describeVersion = (version: string) => {
+  const describeVersion = (version: string, beside: string | undefined) => {
     const canary = parseCanaryVersion(version);
     if (!canary) return version;
-    const values = { version: canary.release, date: formatCanaryBuildDate(canary.builtOn, getCurrentIntlLocale()) };
+    const values = { version: canary.release, date: formatCanaryBuild(canary, getCurrentIntlLocale(), parseCanaryVersion(beside)) };
     return bothCanary ? t('updateDialog.canary.build', values) : t('updateDialog.canary.version', values);
   };
   const mobileUpdateUrl = info?.downloadUrl || releaseUrl;
@@ -284,12 +285,19 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     return {
       kind: 'sections',
       title: t('updateDialog.changelog.title'),
-      sections: sorted.map((section) => {
+      sections: sorted.map((section, index) => {
         const content = processChangelogMentions(stripChangelogHeading(section.raw) || body);
         const canary = parseCanaryVersion(section.version);
+        // Another build of the same day among the sections adds the build number.
+        const sameDayBuild = canary
+          ? sorted
+            .filter((_, other) => other !== index)
+            .map((other) => parseCanaryVersion(other.version))
+            .find((other) => other?.builtOn.getTime() === canary.builtOn.getTime())
+          : null;
         return {
           version: section.version,
-          dateLabel: canary ? formatCanaryBuildDate(canary.builtOn, getCurrentIntlLocale()) : formatIsoDateForUI(section.date),
+          dateLabel: canary ? formatCanaryBuild(canary, getCurrentIntlLocale(), sameDayBuild) : formatIsoDateForUI(section.date),
           content,
           canaryGroups: canary ? splitNotesGroups(content) : null,
         };
@@ -319,13 +327,13 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 <span className="text-muted-foreground">{t('updateDialog.canary.pair')}</span>
               )}
               {info?.currentVersion && (
-                <span className="text-muted-foreground">{describeVersion(info.currentVersion)}</span>
+                <span className="text-muted-foreground">{describeVersion(info.currentVersion, info.version)}</span>
               )}
               {info?.currentVersion && info?.version && (
                 <span className="text-muted-foreground/50">→</span>
               )}
               {info?.version && (
-                <span className="text-[var(--primary-base)] font-medium">{describeVersion(info.version)}</span>
+                <span className="text-[var(--primary-base)] font-medium">{describeVersion(info.version, info.currentVersion)}</span>
               )}
             </div>
           )}

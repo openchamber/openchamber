@@ -102,5 +102,5 @@ export const InstanceServiceUrls: React.FC<{ label?: string }> = ({ label }) => 
     </div>
   );
 
-  return label ? <SettingsFieldRow label={label}>{links}</SettingsFieldRow> : links;
+  return label ? <SettingsFieldRow label={label} controlClassName="min-h-8">{links}</SettingsFieldRow> : links;
 };
