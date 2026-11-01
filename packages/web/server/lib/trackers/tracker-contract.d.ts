@@ -162,7 +162,11 @@ export type TrackerAccountsView = {
   hasClient: boolean;
 };
 
-/** Server-side implementation a registry entry loads. JSON in, JSON out. */
+/**
+ * Server-side implementation a registry entry loads. JSON in, JSON out. A
+ * rejection that is a `TrackerRouteError` (`route-error.js`) answers its status
+ * and code on the route; any other rejection is 500.
+ */
 export interface TrackerImplementation {
   auth: {
     /** `origin` is the address this OpenChamber is opened at, for an extension tracker's redirect URI. */

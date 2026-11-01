@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
+import { TrackerRouteError } from './route-error.js';
+
 /**
  * Everything OpenChamber keeps for an extension's tracker (`provides:
  * ["tracker"]`), by its provider id (`ext-<guestId>`), in
@@ -102,7 +104,7 @@ const corrupt = (persistPath, cause) => Object.assign(new Error(`Tracker account
   code: 'INVALID_TRACKER_ACCOUNTS_STORE', cause,
 });
 
-const conflict = (code, message) => Object.assign(new Error(message), { status: 409, code });
+const conflict = (code, message) => new TrackerRouteError(409, code, message);
 
 /** What leaves this module about one account: who it is and how it signed in, never a credential. */
 const publicAccountOf = (account) => {

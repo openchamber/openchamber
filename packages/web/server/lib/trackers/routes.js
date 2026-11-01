@@ -2,6 +2,7 @@ import express from 'express';
 
 import { renderOauthCallbackPage, requestOrigin } from '../guests/routes.js';
 import { isPlainObject, isString } from '../shared/guards.js';
+import { TrackerRouteError } from './route-error.js';
 
 /** @typedef {import('./tracker-contract').TrackerRegistry} TrackerRegistry */
 /** @typedef {import('./tracker-contract').TrackerDescriptor} TrackerDescriptor */
@@ -11,14 +12,6 @@ const JSON_LIMIT = '16kb';
 const PEOPLE_FILTERS = new Set(['any', 'me', 'created']);
 const PRIORITY_FILTERS = new Set(['all', 'none', 'urgent', 'high', 'medium', 'low']);
 const SESSION_STATUS_KINDS = new Set(['started', 'completed', 'failure']);
-
-class TrackerRouteError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
 
 const invalid = (message) => new TrackerRouteError(400, 'INVALID', message);
 // What the account store keeps (`extension-accounts.js`), checked here so an
@@ -38,9 +31,6 @@ const readString = (value) => {
 const queryValue = (req, key) => readString(req.query?.[key]);
 
 const isUserError = (error) => error?.code === 'INVALID' || error?.userError === true;
-
-/** An error the implementation answered with a status and a code of its own (an extension tracker's connect). */
-const isCodedError = (error) => Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 && isString(error.code) && error.code.length > 0;
 
 /**
  * List options from the query, checked against what the descriptor offers.
@@ -70,9 +60,11 @@ function readListOptions(req, descriptor) {
  * follow the legacy Linear routes: disconnected is 200 `{ connected: false }`,
  * a missing or invalid input and a provider's user error are 400, an unknown
  * tracker is 404 `UNKNOWN_TRACKER`, and an action the tracker's capabilities
- * leave out is 404 `UNSUPPORTED`. An extension tracker's connect routes answer
- * their own status and code (401 `TOKEN_REFUSED`, 409 `CONNECT_SUPERSEDED`,
- * 503 `TRACKER_UNAVAILABLE`). Any other path under `/api/tracker` is 404
+ * leave out is 404 `UNSUPPORTED`. An extension tracker answers its own status
+ * and code through `TrackerRouteError` (`route-error.js`: 401 `TOKEN_REFUSED`,
+ * 409 `CONNECT_SUPERSEDED`, 503 `TRACKER_UNAVAILABLE`); any other error is
+ * 500 whatever fields it carries, so a built-in's errors answer here as they
+ * do on `/api/linear`. Any other path under `/api/tracker` is 404
  * here, so it never falls through to the OpenCode proxy. `/api/tracker` is
  * host-only in `spaces/dispatcher.js`: these routes read with the host's
  * tracker tokens.
@@ -97,7 +89,7 @@ export function registerTrackerRoutes(app, { registry }) {
       if (!supports(descriptor, tracker)) throw unsupported();
       return res.json(await run({ req, descriptor, tracker }));
     } catch (error) {
-      if (error instanceof TrackerRouteError || isCodedError(error)) {
+      if (error instanceof TrackerRouteError) {
         return res.status(error.status).json({ error: error.message, code: error.code });
       }
       if (isUserError(error)) {

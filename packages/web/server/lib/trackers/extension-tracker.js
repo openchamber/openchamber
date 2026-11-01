@@ -22,6 +22,7 @@ import { extensionProviderId, isProviderUsername } from '../source-control/provi
 import { TRACKER_ACCOUNTS_MAX } from './extension-accounts.js';
 import { createDescriptorUrlMatcher } from './extension-descriptor.js';
 import { oauthTargetOf, trackerRedirectUri } from './extension-oauth.js';
+import { TrackerRouteError, routeError } from './route-error.js';
 import { createSessionStatusRuntime } from './session-status-runtime.js';
 import { buildSessionOpenUrl, buildSessionStatusComment, isPublicSessionOrigin, readSessionOrigin } from './session-origin.js';
 
@@ -90,9 +91,16 @@ export const normalizeTrackerInstance = (value) => {
   return null;
 };
 
-const routeError = (status, code, message) => Object.assign(new Error(message), { status, code });
-/** `kind` says what a failed call means: `invalid-token`, `unavailable` (never reached), `malformed`, or `provider-error`. */
-const callError = (message, { status, code, kind = 'provider-error' } = {}) => Object.assign(new Error(message), { status, code, kind });
+/**
+ * `kind` says what a failed call means: `invalid-token`, `unavailable` (never
+ * reached), `malformed`, or `provider-error`. The route answers the status and
+ * code only when both are known (`TrackerRouteError`); a provider's answer that
+ * carries neither is 500 there.
+ */
+const callError = (message, { status, code, kind = 'provider-error' } = {}) => {
+  const coded = Number.isInteger(status) && typeof code === 'string' && code.length > 0;
+  return Object.assign(coded ? new TrackerRouteError(status, code, message) : new Error(message), { status, code, kind });
+};
 const userError = (message) => Object.assign(new Error(message), { code: 'INVALID', userError: true });
 
 /** Plain JSON of an input the shell built, without `undefined` fields. */

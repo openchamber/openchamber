@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LINEAR_TRACKER_DESCRIPTOR } from '../linear/tracker.js';
 import { createTrackerRegistry } from './registry.js';
+import { TrackerRouteError } from './route-error.js';
 import { registerTrackerRoutes } from './routes.js';
 
 const descriptorFor = (id, capabilities = {}) => {
@@ -63,6 +64,18 @@ describe('tracker routes', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('answers 500 for an error that carries a status and a code without being the route layer\'s own, as the legacy Linear routes do', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Linear's token failures carry both (`linear/oauth.js`); the upstream's status is not the client's to see.
+    tracker.auth.start.mockRejectedValueOnce(Object.assign(new Error('Linear token request failed (401)'), { status: 401, code: 'LINEAR_TOKEN_FAILED' }));
+    const upstream = await request(app).post('/api/tracker/fake/auth/start').send({ origin: 'web' }).expect(500);
+    expect(upstream.body).toEqual({ error: 'Linear token request failed (401)' });
+    expect(logged).toHaveBeenCalledTimes(1);
+    tracker.auth.start.mockRejectedValueOnce(new TrackerRouteError(503, 'TRACKER_UNAVAILABLE', 'Not now'));
+    await request(app).post('/api/tracker/fake/auth/start').send({ origin: 'web' }).expect(503, { error: 'Not now', code: 'TRACKER_UNAVAILABLE' });
+    expect(logged).toHaveBeenCalledTimes(1);
   });
 
   it('lists provider descriptors as plain JSON', async () => {
@@ -336,7 +349,7 @@ describe('tracker routes over an extension tracker', () => {
     const connected = await request(app).post('/api/tracker/ext-yt/auth/token').send({ token: 'secret', instance: ' https://yt.example.com ', username: '' }).expect(200);
     expect(connected.body).toEqual(view);
     expect(tracker.auth.connectToken).toHaveBeenCalledWith({ instance: 'https://yt.example.com', token: 'secret', username: undefined });
-    tracker.auth.connectToken.mockRejectedValueOnce(Object.assign(new Error('YouTrack refused this credential.'), { status: 401, code: 'TOKEN_REFUSED' }));
+    tracker.auth.connectToken.mockRejectedValueOnce(new TrackerRouteError(401, 'TOKEN_REFUSED', 'YouTrack refused this credential.'));
     const refused = await request(app).post('/api/tracker/ext-yt/auth/token').send({ token: 'bad' }).expect(401);
     expect(refused.body).toEqual({ error: 'YouTrack refused this credential.', code: 'TOKEN_REFUSED' });
 
@@ -388,7 +401,7 @@ describe('tracker routes over an extension tracker', () => {
     expect(done.type).toBe('text/html');
     expect(done.text).toContain('Connected');
     expect(tracker.auth.completeAuthorization).toHaveBeenCalledWith({ code: 'code-1', state: 'st', error: '', errorDescription: '' });
-    tracker.auth.completeAuthorization.mockRejectedValueOnce(Object.assign(new Error('Authorization state was missing or expired.'), { status: 400, code: 'STATE_MISMATCH' }));
+    tracker.auth.completeAuthorization.mockRejectedValueOnce(new TrackerRouteError(400, 'STATE_MISMATCH', 'Authorization state was missing or expired.'));
     const failed = await request(app).get('/api/tracker/ext-yt/oauth/callback?code=x&state=y').expect(400);
     expect(failed.text).toContain('Authorization state was missing or expired.');
     tracker.auth.completeAuthorization.mockRejectedValueOnce(new Error('boom'));
