@@ -303,30 +303,30 @@ describe('resolveSendSelection thinking level', () => {
 
   // An explicit Default is `null` in UI state; OpenCode rejects a null
   // variant, so it has to switch the session off its effort without one.
-  test('Default on a session with an effort switches it to the model without a variant', () => {
+  test('Default on a session with an effort switches it to the model without a variant', async () => {
     seedSession({ ...MODEL, variant: 'high' });
-    expect(desire(null).model).toEqual(MODEL);
+    expect((await desire(null)).model).toEqual(MODEL);
   });
 
-  test('Default on a session without an effort sends no switch', () => {
+  test('Default on a session without an effort sends no switch', async () => {
     seedSession(MODEL);
-    expect(desire(null).model).toBeUndefined();
-    expect(desire(undefined).model).toBeUndefined();
+    expect((await desire(null)).model).toBeUndefined();
+    expect((await desire(undefined)).model).toBeUndefined();
   });
 
   // OpenCode records a switch without a variant as variant "default"; reading
   // that back as a difference would switch again before every prompt.
-  test('Default on a session OpenCode recorded as "default" sends no switch', () => {
+  test('Default on a session OpenCode recorded as "default" sends no switch', async () => {
     seedSession({ ...MODEL, variant: 'default' });
-    expect(desire(null).model).toBeUndefined();
-    expect(desire(undefined).model).toBeUndefined();
-    expect(desire('high').model).toEqual({ ...MODEL, variant: 'high' });
+    expect((await desire(null)).model).toBeUndefined();
+    expect((await desire(undefined)).model).toBeUndefined();
+    expect((await desire('high')).model).toEqual({ ...MODEL, variant: 'high' });
   });
 
-  test('a chosen effort switches only when it differs', () => {
+  test('a chosen effort switches only when it differs', async () => {
     seedSession({ ...MODEL, variant: 'high' });
-    expect(desire('high').model).toBeUndefined();
-    expect(desire('low').model).toEqual({ ...MODEL, variant: 'low' });
+    expect((await desire('high')).model).toBeUndefined();
+    expect((await desire('low')).model).toEqual({ ...MODEL, variant: 'low' });
   });
 });
 
@@ -334,8 +334,10 @@ describe('routeMessage agent the folder lacks (#5522)', () => {
   const DIRECTORY = '/repo/agent-check';
   const agent = (id) => ({ id, name: id, displayName: id, mode: 'primary' });
   let previousConfig;
+  let getSession;
 
   beforeEach(() => {
+    getSession = spyOn(opencodeClient, 'getSession').mockResolvedValue({ agent: 'stock' });
     previousConfig = useConfigStore.getState();
     const childStores = new ChildStoreManager();
     childStores.ensureChild(DIRECTORY, { bootstrap: false }).setState({
@@ -345,6 +347,7 @@ describe('routeMessage agent the folder lacks (#5522)', () => {
   });
 
   afterEach(() => {
+    getSession.mockRestore();
     useConfigStore.setState(previousConfig, true);
     setSyncRefs({}, new ChildStoreManager(), '');
   });
@@ -420,6 +423,7 @@ describe('routeMessage inline skills', () => {
 
 describe('sendMessage captured target', () => {
   let originalSendMessage;
+  let originalGetSession;
   let originalFetch;
   const calls = [];
 
@@ -444,6 +448,8 @@ describe('sendMessage captured target', () => {
     });
 
     originalSendMessage = opencodeClient.sendMessage;
+    originalGetSession = opencodeClient.getSession;
+    opencodeClient.getSession = async () => ({ agent: 'build' });
     originalFetch = globalThis.fetch;
     globalThis.fetch = async (input) => {
       const url = input?.href ?? input?.url ?? String(input);
@@ -460,6 +466,7 @@ describe('sendMessage captured target', () => {
 
   afterEach(() => {
     opencodeClient.sendMessage = originalSendMessage;
+    opencodeClient.getSession = originalGetSession;
     globalThis.fetch = originalFetch;
   });
 
@@ -2437,6 +2444,7 @@ describe('deleteSessions option forwarding', () => {
 
 describe('sendMessage effort record', () => {
   let originalSendMessage;
+  let getSession;
 
   const SESSION = 'session-effort';
   const PROVIDER = 'provider-a';
@@ -2448,6 +2456,7 @@ describe('sendMessage effort record', () => {
     .getAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL);
 
   beforeEach(() => {
+    getSession = spyOn(opencodeClient, 'getSession').mockResolvedValue({ agent: AGENT });
     const childStore = {
       getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
       setState: () => {},
@@ -2477,6 +2486,7 @@ describe('sendMessage effort record', () => {
   });
 
   afterEach(() => {
+    getSession.mockRestore();
     opencodeClient.sendMessage = originalSendMessage;
     useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL, undefined);
   });
@@ -2631,8 +2641,10 @@ describe('missing session directory recovery', () => {
 describe('send does not wait for session knowledge before showing the message', () => {
   let originalSendMessage;
   let originalFetch;
+  let getSession;
 
   beforeEach(() => {
+    getSession = spyOn(opencodeClient, 'getSession').mockResolvedValue({ agent: 'build' });
     originalSendMessage = opencodeClient.sendMessage;
     originalFetch = globalThis.fetch;
     useConfigStore.setState({ isConnected: true });
@@ -2640,6 +2652,7 @@ describe('send does not wait for session knowledge before showing the message', 
   });
 
   afterEach(() => {
+    getSession.mockRestore();
     opencodeClient.sendMessage = originalSendMessage;
     globalThis.fetch = originalFetch;
   });
