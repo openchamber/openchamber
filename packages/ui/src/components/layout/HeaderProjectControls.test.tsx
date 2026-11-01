@@ -125,12 +125,13 @@ const terminal = {
   },
 };
 
-mock.module('@/components/ui/dropdown-menu', () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
-  DropdownMenuContent: ({ children, ...props }: React.ComponentProps<'div'>) => React.createElement('div', props, children),
-  DropdownMenuItem: ({ children, onClick, className }: { children: React.ReactNode; onClick?: () => void; className?: string }) => React.createElement('button', { type: 'button', onClick, className }, children),
-  DropdownMenuSeparator: () => React.createElement('hr'),
-  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+// The right-click menu renders inline, so its items are plain buttons.
+mock.module('@/components/ui/context-menu', () => ({
+  ContextMenu: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+  ContextMenuContent: ({ children }: { children: React.ReactNode }) => React.createElement('div', null, children),
+  ContextMenuItem: ({ children, onClick, className }: { children: React.ReactNode; onClick?: () => void; className?: string }) => React.createElement('button', { type: 'button', onClick, className }, children),
+  ContextMenuSeparator: () => React.createElement('hr'),
+  ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
 }));
 mock.module('@/components/ui/tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
@@ -154,7 +155,9 @@ mock.module('@/stores/useUIStore', () => ({ useUIStore: useUiStoreMock }));
 mock.module('@/contexts/useThemeSystem', () => ({ useThemeSystem: () => ({ currentTheme: { metadata: { variant: 'dark' }, colors: { surface: { background: '#000' }, syntax: { base: { foreground: '#fff' } } } } }) }));
 mock.module('@/stores/useDesktopSshStore', () => ({ useDesktopSshStore: useDesktopSshStoreMock }));
 mock.module('@/lib/url', () => ({ openExternalUrl: async (url: string) => { openExternalCalls.push(url); } }));
+const openchamberConfig = await import('@/lib/openchamberConfig');
 mock.module('@/lib/openchamberConfig', () => ({
+  ...openchamberConfig,
   getProjectActionsState: async () => mockedActionsState,
   getProjectSetup: async (projectRef: { id: string; path: string }) => {
     projectSetupReads.push(projectRef);
@@ -184,11 +187,11 @@ mock.module('@/lib/detectDevServer', () => ({
   readPackageJsonScripts: async () => ({}),
 }));
 
-const { ProjectActionsButton } = await import('./ProjectActionsButton');
+const { HeaderProjectAction } = await import('./HeaderProjectControls');
 const { ProjectActionsScope } = await import('./ProjectActionsScope');
 const { getSharedTrustConfirmationSnapshot, settleSharedTrustConfirmation } = await import('@/lib/sharedTrustConfirmation');
 
-describe('ProjectActionsButton lifecycle', () => {
+describe('HeaderProjectAction lifecycle', () => {
   let windowInstance: Window;
   let root: Root;
   let host: HTMLDivElement;
@@ -269,22 +272,16 @@ describe('ProjectActionsButton lifecycle', () => {
             projectRef: { id: 'project-1', path: projectPath },
             directory,
             allowMobile: true,
-          }, React.createElement(ProjectActionsButton)),
+          }, React.createElement(HeaderProjectAction, { buttonClassName: '' })),
         ),
       );
     });
     await act(async () => { await Promise.resolve(); });
   };
 
-
-
-
-  test('the action picker menu carries the work-status popup marker', async () => {
-    await renderButton();
-    expect(host.querySelector('[data-work-status-popup]')).not.toBeNull();
-  });
-
-  const primaryLabel = () => host.querySelector('button')?.getAttribute('aria-label') ?? '';
+  // The run or stop button; the preview globe can stand before it.
+  const runButton = () => host.querySelector<HTMLButtonElement>('button[aria-label^="Run "], button[aria-label^="Stop "]');
+  const primaryLabel = () => runButton()?.getAttribute('aria-label') ?? '';
   const menuItem = (name: string) => [...host.querySelectorAll('button')]
     .find((button) => button.textContent === name);
 
@@ -386,7 +383,7 @@ describe('ProjectActionsButton lifecycle', () => {
     expect(primaryLabel()).toContain('Auto-discover dev server');
   });
 
-  test('a running action takes the row over the first idle one', async () => {
+  test('a running action takes the button over the first idle one', async () => {
     mockedDeviceInfo.isMobile = false;
     const originalList = terminal.listSessions;
     Object.assign(terminal, { listSessions: async () => [{
@@ -396,7 +393,7 @@ describe('ProjectActionsButton lifecycle', () => {
     try {
       await renderButton();
       await act(async () => { await Promise.resolve(); });
-      const primary = host.querySelector('button');
+      const primary = runButton();
       expect(primary?.getAttribute('aria-label') ?? '').toContain('Build');
     } finally { terminal.listSessions = originalList; }
   });
@@ -423,7 +420,7 @@ describe('ProjectActionsButton lifecycle', () => {
     } });
     try {
       await renderButton();
-      const button = host.querySelector('button');
+      const button = runButton();
       if (!button) throw new Error('missing action button');
       await act(async () => { button.click(); });
       const tab = useTerminalStore.getState().getDirectoryState('/repo')?.tabs.find((tab) => tab.purpose.type === 'project-action');
@@ -445,7 +442,7 @@ describe('ProjectActionsButton lifecycle', () => {
 
   test('a stale rerun adopts the server run without closing it', async () => {
     await renderButton();
-    const button = host.querySelector('button');
+    const button = runButton();
     if (!button) throw new Error('missing action button');
     await act(async () => { button.click(); });
     await act(async () => { emitToSession(firstSessionId(), { type: 'exit', sequence: 2 }); });
@@ -469,7 +466,7 @@ describe('ProjectActionsButton lifecycle', () => {
     effectiveDirectory = '/repo-worktree';
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', runIn: 'parent', autoOpenUrl: true, openUrl: 'http://localhost:4000' }];
     await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
-    const button = host.querySelector('button');
+    const button = runButton();
     if (!button) throw new Error('missing action button');
     await act(async () => { button.click(); });
     expect(openContextPreviewCalls).toEqual([{ directory: '/repo-worktree', url: 'http://localhost:4000/' }]);
@@ -477,7 +474,7 @@ describe('ProjectActionsButton lifecycle', () => {
 
   test('replaced executions cannot be cleared by their still-open old stream', async () => {
     await renderButton();
-    const button = host.querySelector('button');
+    const button = runButton();
     if (!button) throw new Error('missing action button');
     await act(async () => { button.click(); });
     await act(async () => {
@@ -495,7 +492,7 @@ describe('ProjectActionsButton lifecycle', () => {
   test('runs, stops, and reruns on the same action tab while cleaning old subscriptions once', async () => {
     await renderButton();
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }
@@ -545,7 +542,7 @@ describe('ProjectActionsButton lifecycle', () => {
     effectiveDirectory = '/repo-worktree';
     await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }
@@ -567,7 +564,7 @@ describe('ProjectActionsButton lifecycle', () => {
     effectiveDirectory = '/repo-worktree';
     await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }
@@ -588,7 +585,7 @@ describe('ProjectActionsButton lifecycle', () => {
     effectiveDirectory = '/live-host';
     await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }
@@ -609,7 +606,7 @@ describe('ProjectActionsButton lifecycle', () => {
     detectedDevServer.command = 'bun run dev';
     await renderButton();
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }
@@ -647,7 +644,7 @@ describe('ProjectActionsButton lifecycle', () => {
     effectiveDirectory = '/repo-worktree';
     await renderButton({ projectPath: '/repo', directory: '/repo' });
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }
@@ -670,7 +667,7 @@ describe('ProjectActionsButton lifecycle', () => {
     effectiveDirectory = '/repo-worktree';
     await renderButton({ projectPath: '/repo', directory: '/repo' });
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }
@@ -699,7 +696,7 @@ describe('ProjectActionsButton lifecycle', () => {
     effectiveDirectory = '/repo-worktree';
     await renderButton({ projectPath: '/repo', directory: '/repo-worktree' });
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }
@@ -728,7 +725,7 @@ describe('ProjectActionsButton lifecycle', () => {
     }];
     await renderButton();
 
-    const primaryButton = host.querySelector('button');
+    const primaryButton = runButton();
     if (!primaryButton) {
       throw new Error('expected primary button');
     }

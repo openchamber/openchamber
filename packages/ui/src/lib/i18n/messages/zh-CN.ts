@@ -2984,7 +2984,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconDiscovered': '项目图标已发现',
   'openInApp.actions.open': '打开',
   'openInApp.actions.openInAria': '在 {app} 中打开',
-  'openInApp.actions.chooseAppAria': '选择要打开的应用',
   'openInApp.actions.copyPath': '复制路径',
   'openInApp.actions.refreshApps': '刷新应用',
   'openInApp.toast.pathCopied': '路径已复制到剪贴板',

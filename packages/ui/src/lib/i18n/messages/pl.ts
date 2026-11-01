@@ -3022,7 +3022,6 @@ export const dict: Record<I18nKey, string> = {
   'openCodeStatusDialog.toast.copiedDescription': 'Dziennik diagnostyczny skopiowany do schowka',
   'openCodeStatusDialog.toast.copiedTitle': 'Skopiowano',
   'openCodeStatusDialog.toast.copyFailed': 'Nie udało się skopiować dziennika diagnostycznego',
-  'openInApp.actions.chooseAppAria': 'Wybierz aplikację do otwarcia',
   'openInApp.actions.copyPath': 'Kopiuj ścieżkę',
   'openInApp.actions.open': 'Otwórz',
   'openInApp.actions.openInAria': 'Otwórz w {app}',

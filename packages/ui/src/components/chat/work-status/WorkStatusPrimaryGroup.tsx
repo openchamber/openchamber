@@ -35,9 +35,6 @@ import { WorkStatusWarmingToggle } from './WorkStatusWarmingToggle';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/providers/terminology';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
-import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
-import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
-import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { PrChecksValue } from './PrChecksValue';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
@@ -68,13 +65,10 @@ const UNKNOWN_PERCENT = '\u2014';
  */
 export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository, children }) => {
   const { t } = useI18n();
-  // On the phone the rows lead to the phone's own pages, and the project's
-  // app and run controls, which need a desktop host, are left out.
+  // On the phone the rows lead to the phone's own pages.
   const mobile = useMobileAppActions();
   const leaveWorkStatus = useLeaveWorkStatus();
   const openTrackerItem = useOpenTrackerItem();
-  const desktopProjectActionsContext = useProjectActionsContext();
-  const projectActionsContext = mobile ? null : desktopProjectActionsContext;
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
@@ -294,7 +288,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // restate the number directly above it.
   const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
   const hasSession = showSession && (contextUsage !== null || cost !== null || Boolean(goalRow));
-  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel || projectActionsContext);
+  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
 
   useReportWorkStatusPresence('session-repository', hasSession || hasRepository);
 
@@ -347,9 +341,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
         <WorkStatusSection
           title={t('chat.workStatus.section.project')}
           subject={projectLabel}
-          summary={projectActionsContext?.directory
-            ? <OpenInAppButton directory={projectActionsContext.directory} />
-            : null}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}
 
@@ -434,9 +425,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               ) : null}
             </>
           ) : null}
-
-          {/* Last: the readouts above describe the project, this runs something in it. */}
-          {projectActionsContext ? <ProjectActionsButton /> : null}
         </WorkStatusSection>
       ) : null,
   });

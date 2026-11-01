@@ -2944,7 +2944,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'تم اكتشاف أيقونة المشروع',
   'openInApp.actions.open': 'فتح',
   'openInApp.actions.openInAria': 'فتح في {app}',
-  'openInApp.actions.chooseAppAria': 'اختيار التطبيق للفتح',
   'openInApp.actions.copyPath': 'نسخ المسار',
   'openInApp.actions.refreshApps': 'تحديث التطبيقات',
   'openInApp.toast.pathCopied': 'تم نسخ المسار إلى الحافظة',

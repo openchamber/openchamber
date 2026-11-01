@@ -2944,7 +2944,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'סמל הפרויקט אותר',
   'openInApp.actions.open': 'פתח',
   'openInApp.actions.openInAria': 'פתח ב-{app}',
-  'openInApp.actions.chooseAppAria': 'בחר יישום לפתיחה',
   'openInApp.actions.copyPath': 'העתק נתיב',
   'openInApp.actions.refreshApps': 'רענן יישומים',
   'openInApp.toast.pathCopied': 'הנתיב הועתק ללוח',

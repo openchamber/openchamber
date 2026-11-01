@@ -3018,7 +3018,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconDiscovered': '프로젝트 아이콘을 찾았습니다',
   'openInApp.actions.open': '열기',
   'openInApp.actions.openInAria': '{app}에서 열기',
-  'openInApp.actions.chooseAppAria': '열 앱 선택',
   'openInApp.actions.copyPath': '경로 복사',
   'openInApp.actions.refreshApps': '앱 새로고침',
   'openInApp.toast.pathCopied': '경로를 클립보드에 복사했습니다',

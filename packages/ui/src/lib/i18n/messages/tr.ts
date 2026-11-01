@@ -2835,7 +2835,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'Proje ikonu keşfedildi',
   'openInApp.actions.open': 'Aç',
   'openInApp.actions.openInAria': '{app} içinde aç',
-  'openInApp.actions.chooseAppAria': 'Açılacak uygulamayı seç',
   'openInApp.actions.copyPath': 'Yolu Kopyala',
   'openInApp.actions.refreshApps': 'Uygulamaları Yenile',
   'openInApp.toast.pathCopied': 'Yol panoya kopyalandı',

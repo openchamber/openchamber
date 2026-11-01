@@ -2975,7 +2975,6 @@ export const dict: Record<I18nKey, string> = {
   "projectEditDialog.toast.iconDiscovered": "Виявлено значок проєкту",
   "openInApp.actions.open": "Відкрити",
   "openInApp.actions.openInAria": "Відкрити в {app}",
-  "openInApp.actions.chooseAppAria": "Вибрати програму для відкриття",
   "openInApp.actions.copyPath": "Копіювати шлях",
   "openInApp.actions.refreshApps": "Оновити застосунки",
   "openInApp.toast.pathCopied": "Шлях скопійовано в буфер обміну",

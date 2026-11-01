@@ -3018,7 +3018,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'Projecticoon gevonden',
   'openInApp.actions.open': 'Openen',
   'openInApp.actions.openInAria': 'Openen in {app}',
-  'openInApp.actions.chooseAppAria': 'Kies de app om te openen',
   'openInApp.actions.copyPath': 'Pad kopiëren',
   'openInApp.actions.refreshApps': 'Apps vernieuwen',
   'openInApp.toast.pathCopied': 'Pad naar het klembord gekopieerd',

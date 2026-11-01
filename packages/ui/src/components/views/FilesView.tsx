@@ -187,33 +187,6 @@ const getParentDirectoryPath = (path: string): string => {
   return parent;
 };
 
-const OpenInAppListIcon = ({ label, iconDataUrl }: { label: string; iconDataUrl?: string }) => {
-  const [failed, setFailed] = React.useState(false);
-  const initial = label.trim().slice(0, 1).toUpperCase() || '?';
-
-  if (iconDataUrl && !failed) {
-    return (
-      <img
-        src={iconDataUrl}
-        alt=""
-        className="size-4 rounded-sm"
-        onError={() => setFailed(true)}
-      />
-    );
-  }
-
-  return (
-    <span
-      className={cn(
-        'size-4 rounded-sm flex items-center justify-center',
-        'oc-tile-inset text-[0.5625rem] font-medium text-muted-foreground'
-      )}
-    >
-      {initial}
-    </span>
-  );
-};
-
 const sortNodes = (items: FileNode[]) =>
   items.slice().sort((a, b) => {
     if (a.type !== b.type) {
@@ -4218,7 +4191,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             className="flex items-center gap-2"
             onClick={() => void handleOpenInApp(app)}
           >
-            <OpenInAppListIcon label={app.label} iconDataUrl={app.iconDataUrl} />
+            <Icon name={app.icon} className="size-4" />
             <span className="typography-ui-label text-foreground">{app.label}</span>
           </DropdownMenuItem>
         ))}

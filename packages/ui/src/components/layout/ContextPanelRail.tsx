@@ -60,7 +60,7 @@ import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
-import { ContextRailTooltipDetails, ContextUsageRingIcon } from './ContextRailUsage';
+import { ContextRailTooltipDetails } from './ContextRailUsage';
 import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { startZoneDragGesture, type ZoneDragGesture } from './zoneDrag';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -142,8 +142,6 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
           >
             {surface.id === 'diff' ? (
               <DiffViewIcon className="h-[17px] w-[17px]" />
-            ) : surface.id === 'context' ? (
-              <ContextUsageRingIcon className="h-[17px] w-[17px]" />
             ) : (
               <GuestIcon
                 icon={surface.icon}

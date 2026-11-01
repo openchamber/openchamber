@@ -81,7 +81,7 @@ export interface ProjectActionsRunner {
   available: boolean;
   /** The project's own actions, then auto-discovery where it is offered. */
   actions: OpenChamberProjectAction[];
-  /** The action the Work Status row shows: a running one wins over the stored pick. */
+  /** The action the header button shows: a running one wins over the stored pick. */
   shown: OpenChamberProjectAction | null;
   isLoading: boolean;
   /**

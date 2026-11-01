@@ -3017,7 +3017,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconDiscovered': 'プロジェクトアイコンを検出しました',
   'openInApp.actions.open': '開く',
   'openInApp.actions.openInAria': '{app}で開く',
-  'openInApp.actions.chooseAppAria': '開くアプリを選択',
   'openInApp.actions.copyPath': 'パスをコピー',
   'openInApp.actions.refreshApps': 'アプリを更新',
   'openInApp.toast.pathCopied': 'パスをクリップボードにコピーしました',
