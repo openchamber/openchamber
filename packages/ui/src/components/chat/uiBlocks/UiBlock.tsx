@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useCalendarPreferences } from '@/components/ui/useCalendarPreferences';
 import { useI18n } from '@/lib/i18n';
+import { ErrorResponseDetails } from '../ErrorResponseDetails';
 import { KIT_SHARED_CSS, kitVariables, seriesColor } from '../lib/visualKit';
 import { cn } from '@/lib/utils';
 import { MarkdownContent } from '../MarkdownRenderer';
@@ -1391,18 +1392,19 @@ function Node({ value }: { value: BlockValue }) {
 }
 
 /**
- * A block that fails to draw shows its source. The next source text clears
+ * A block that fails to draw keeps its cause and source behind a disclosure. The next source text clears
  * the failure without remounting a working tree, so a streamed update keeps
  * the user's chosen tab.
  */
+type BlockFailure = { error: Error | null; source: string };
 class BlockErrorBoundary extends React.Component<
-  { source: string; fallback: React.ReactNode; onFailed?: (errors: string[]) => void; children: React.ReactNode },
-  { failed: boolean; source: string }
+  { source: string; onFailed?: (errors: string[]) => void; children: React.ReactNode },
+  BlockFailure
 > {
-  state = { failed: false, source: this.props.source };
+  state: BlockFailure = { error: null, source: this.props.source };
 
-  static getDerivedStateFromError() {
-    return { failed: true };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
   }
 
   componentDidCatch(error: Error) {
@@ -1410,12 +1412,27 @@ class BlockErrorBoundary extends React.Component<
   }
 
   static getDerivedStateFromProps(props: { source: string }, state: { source: string }) {
-    return props.source !== state.source ? { source: props.source, failed: false } : null;
+    return props.source !== state.source ? { source: props.source, error: null } : null;
   }
 
   render() {
-    return this.state.failed ? this.props.fallback : this.props.children;
+    return this.state.error
+      ? <InvalidBlock source={this.props.source} errors={[this.state.error.message]} />
+      : this.props.children;
   }
+}
+
+function InvalidBlock({ source, errors }: { source: string; errors: string[] }) {
+  const { t } = useI18n();
+  return (
+    <div className="mt-3 mb-6 max-w-full rounded-2xl bg-[var(--status-info-background)] px-4 py-3">
+      <div className="flex items-center gap-3" role="status">
+        <Icon name="information" className="size-4 shrink-0 text-[var(--status-info)]" />
+        <span className="min-w-0 typography-meta text-foreground">{t('chat.uiBlock.invalid')}</span>
+      </div>
+      <ErrorResponseDetails key={source} body={`${errors.join('\n')}\n\n${source}`} className="ps-7" />
+    </div>
+  );
 }
 
 /** The kit's CSS (badges, boxes, bars) that HTML pages carry in their own document, added to the app's once. */
@@ -1574,18 +1591,12 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   ) : !disabled ? <NoteToggle onOpen={() => setNoteOpen(true)} /> : null;
   const slot = slotPlace && noteElement ? { ...slotPlace, element: noteElement } : null;
   const canSendChosen = host.kind === 'reply' && !sent && chosen.size > 0 && (chosen.size < decisions.length || failed);
-  const fallback = (
-    <div className="flex flex-col gap-1">
-      <div className="typography-meta text-[var(--status-error)]">{t('chat.uiBlock.invalid')}</div>
-      <pre dir="ltr"><code>{source}</code></pre>
-    </div>
-  );
-  if (parsed.kind === 'invalid') return fallback;
+  if (parsed.kind === 'invalid') return <InvalidBlock source={source} errors={parsed.errors} />;
   if (parsed.kind === 'empty') return null;
   // A block that fails to draw falls back to its source; the rest of the reply stays.
   return (
     <div ref={blockRef} data-oc-ui-block="" className="oc-ui-block my-3">
-      <BlockErrorBoundary source={source} fallback={fallback} onFailed={onNotDrawn}>
+      <BlockErrorBoundary source={source} onFailed={onNotDrawn}>
         <FormContext.Provider value={form}>
           <SlotContext.Provider value={slot}>
             <Node value={parsed.root} />

@@ -447,6 +447,10 @@ the visible-turn mapping established by `projectTurnRecords`. A notice the
 timeline skips that separates a `stop` answer from the next assistant message
 opens a turn there (`createNoticeTurnSplitter`), so each answer keeps its own
 Activity and stays outside it; a notice between steps of one run does not.
+Automatic UI repair carries `metadata.openchamberUiBlockRepair: true` on its
+synthetic input. That marker keeps the correction in the original turn, so the
+existing last-assistant rule draws one footer. Context attachment and history
+windowing use the same splitter; stored messages and their IDs remain intact.
 
 Manual expansion survives later metadata updates and timeline virtualization
 within the session. The disclosure opens and closes at once and delegates end

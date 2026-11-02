@@ -24,7 +24,7 @@ test.each(['none', 'cleanup', 'admission', 'failure'])('HTTP/SDK repair settles 
   });
   upstream.post('/api/session/:id/synthetic', (req, res) => {
     calls.push('synthetic');
-    expect(req.body).toMatchObject({ resume: true,
+    expect(req.body).toMatchObject({ resume: true, metadata: { openchamberUiBlockRepair: true },
       text: 'Fix this UI block, then continue the unfinished answer without repeating completed content or tools.\nUndefined names: missing' });
     finishAdmission = () => stopAt === 'failure' ? res.sendStatus(500) : res.json({ data: { id: 'msg_repair' } });
     if (stopAt !== 'admission') finishAdmission();

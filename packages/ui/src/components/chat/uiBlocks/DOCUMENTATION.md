@@ -8,7 +8,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 
 - Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and copies and image exports keep the source. User messages, reasoning, tool output and documents show the fence as code.
 - The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
-- A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. A block never shows with parts silently dropped.
+- A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root shows a compact notice. Its source and diagnostics are collapsed behind the existing response-details control. Drawing failures use the same disclosure. A block never shows with parts silently dropped.
 - The connected OpenChamber server detects closed invalid programs from live text events and owns automatic repair. Rendering and form submission have no role in triggering it. Standalone VS Code keeps the source fallback.
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.

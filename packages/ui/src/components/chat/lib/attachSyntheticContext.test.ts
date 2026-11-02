@@ -5,9 +5,30 @@ import { CONTEXT_METADATA_KEY, readContextPart } from '@/lib/messages/contextPar
 import { readSessionNoticePart } from '@/lib/opencode/session-notices';
 
 import { attachSyntheticContext } from './attachSyntheticContext';
+import { projectTurnRecords } from './turns/projectTurnRecords';
+import { buildTurnWindowModel } from './turns/windowTurns';
 import type { ChatMessageEntry } from './turns/types';
 
 const SESSION = 'ses_1';
+
+test('UI repair stays in the original answer through context attachment and turn projection', () => {
+    const user = userMessage('u1', 'Show a UI');
+    const answer = roleMessage('a1', 'assistant');
+    if (answer.info.role === 'assistant') answer.info.finish = 'stop';
+    const idle = entry({ id: 'idle1', sessionID: SESSION, role: 'idle', time: { created: 2 }, outcome: 'interrupted' });
+    const repair = entry({ id: 'r1', sessionID: SESSION, role: 'synthetic', time: { created: 3 }, text: 'Fix the block', metadata: { openchamberUiBlockRepair: true } });
+    const instructions = entry({ id: 's1', sessionID: SESSION, role: 'system', time: { created: 4 }, text: 'Instructions' });
+    const corrected = roleMessage('a2', 'assistant');
+    const history = [user, answer, idle, repair, instructions, corrected];
+    expect(buildTurnWindowModel(history).turnCount).toBe(1);
+    const projected = projectTurnRecords(attachSyntheticContext(history));
+    expect(projected.turns).toHaveLength(1);
+    expect(projected.turns[0].assistantMessageIds).toEqual(['a1', 'a2']);
+    expect(projected.indexes.messageMetaById.get('a1')?.isLastAssistantInTurn).toBe(false);
+    expect(projected.indexes.messageMetaById.get('a2')?.isLastAssistantInTurn).toBe(true);
+    const next = userMessage('u2', 'Next task');
+    expect(projectTurnRecords(attachSyntheticContext([...history, next, roleMessage('a3', 'assistant')])).turns).toHaveLength(2);
+});
 
 const entry = (info: Message, parts: Part[] = []): ChatMessageEntry => ({ info, parts });
 

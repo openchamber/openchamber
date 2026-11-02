@@ -68,6 +68,7 @@ export function createUiBlockRepair({ clientFor, onStop }) {
       // before reaching OpenCode, or the newly admitted execution could escape.
       state.delivery = client.session.synthetic({
         sessionID: sessionId, id: inputId, resume: true,
+        metadata: { openchamberUiBlockRepair: true },
         text: `${REPAIR_PROMPT}\n${errors.slice(0, 6).map((error) => error.slice(0, 500)).join('\n')}`,
       }, { signal: AbortSignal.timeout(30_000) });
       await state.delivery;

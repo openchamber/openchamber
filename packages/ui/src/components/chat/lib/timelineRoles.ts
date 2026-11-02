@@ -79,6 +79,13 @@ export const createNoticeTurnSplitter = () => {
     let afterAnswer = false;
     let noticeIndex = -1;
     return (message: Message, index: number): number => {
+        // Repair resumes the same answer, including when idle/instruction records
+        // surround it. Keep the original turn's single footer after the correction.
+        if (message.role === 'synthetic' && message.metadata?.openchamberUiBlockRepair === true) {
+            afterAnswer = false;
+            noticeIndex = -1;
+            return -1;
+        }
         if (message.role === 'assistant') {
             const splitAt = noticeIndex;
             afterAnswer = message.finish === 'stop';
