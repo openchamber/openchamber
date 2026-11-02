@@ -4,11 +4,11 @@
 // master; its layers are art, not geometry, so this module works on the
 // picture Icon Composer renders and needs Xcode 26 (ictool), like Assets.car.
 //
-// - Windows and Linux: the rendered icon cut out of its tile, cube and bird,
-//   with the black outer outline of the release icon without a tile. The bird
-//   stands in front of the outline. The .ico takes blue pixel cubes below
-//   32 px, each with a round pixel chick (raster.mjs, PIXEL_BIRDS): the
-//   slender bird does not read at taskbar and tray sizes.
+// - Windows and Linux: the release icon without a tile, its cube flat in blue,
+//   with the rendered document's bird in front in a black outline. The .ico
+//   takes blue pixel cubes below 32 px, each with a round pixel chick
+//   (raster.mjs, PIXEL_BIRDS): the slender bird does not read at taskbar and
+//   tray sizes.
 // - macOS menu bar: the release glyph with the canary in pixel art at its lower
 //   right, so the two apps are told apart when both run.
 
@@ -19,7 +19,7 @@ import { join } from 'node:path';
 
 import sharp from 'sharp';
 
-import { GLYPH_UNSEEN_WALLS, MENU_BAR_GLYPH_ZOOM, glyphBreathRings, glyphSvg } from './geometry.mjs';
+import { GLYPH_UNSEEN_WALLS, MENU_BAR_GLYPH_ZOOM, glyphBreathRings, glyphSvg, noTileIconSvg } from './geometry.mjs';
 import { CANARY_PIXEL_COLORS, encodeIco, pixelCubePng, svgToPng } from './raster.mjs';
 
 const SIZE = 1024;
@@ -29,27 +29,20 @@ const SIZE = 1024;
 // (cube half-width 41.568) is `UNIT` px there.
 const CUBE = { cx: 512, cy: 508, halfWidth: 309 };
 const UNIT = CUBE.halfWidth / 41.568;
-// The outer outline of the release icon without a tile, in geometry units.
-const OUTLINE_RADIUS = 44.27;
-const OUTLINE_WIDTH = 3.1;
-// The picture keeps what lies inside this hexagon (shell and glass), plus the bird.
-const KEEP_RADIUS = 42.75;
 // Without its tile the yellow bird had no edge on light backgrounds, so it gets
 // a black outline like the cube's: its mask grown by this blur, in px.
 const BIRD_OUTLINE_BLUR = 7;
 // The square around the cube centre that becomes the icon; wide enough for the bird.
 const CROP_HALF = 450;
-const hexagonPoints = (radius) => {
-  const w = radius * UNIT;
-  const h = w * (2 / Math.sqrt(3));
-  const { cx, cy } = CUBE;
-  return [[cx, cy - h], [cx + w, cy - h / 2], [cx + w, cy + h / 2], [cx, cy + h], [cx - w, cy + h / 2], [cx - w, cy - h / 2]]
-    .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+// The cube without a tile is the release one, flat, in the blue of the Canary
+// tile; the glass of the rendered document read as a thin pale edge on Windows.
+const CANARY_NO_TILE = {
+  outline: '#000000',
+  inside: '#2444b0',
+  tiers: ['#7898ed', '#a2bbf4', '#e0eaff'],
+  tierOpacity: 0.85,
+  edge: '#f5f5f7',
 };
-
-const svgSquare = (inner) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}">${inner}</svg>`);
-
-const alphaOf = async (svg) => sharp(svg).ensureAlpha().extractChannel(3).raw().toBuffer();
 
 /**
  * One channel, 255 where the rendered picture shows the bird's yellow. With
@@ -84,32 +77,55 @@ const renderDocument = (documentPath, ictool) => {
   }
 };
 
-/** The icon without a tile, 1024 px, from the rendered document. */
+/** One channel, 255 inside closed gaps of `mask` (the eye), which the bird's outline leaves clear. */
+const enclosed = (mask) => {
+  const outside = new Uint8Array(SIZE * SIZE);
+  const queue = [];
+  for (let i = 0; i < SIZE; i += 1) queue.push(i, (SIZE - 1) * SIZE + i, i * SIZE, i * SIZE + SIZE - 1);
+  while (queue.length) {
+    const i = queue.pop();
+    if (outside[i] || mask[i] > 127) continue;
+    outside[i] = 1;
+    const x = i % SIZE;
+    if (x > 0) queue.push(i - 1);
+    if (x < SIZE - 1) queue.push(i + 1);
+    if (i >= SIZE) queue.push(i - SIZE);
+    if (i < SIZE * (SIZE - 1)) queue.push(i + SIZE);
+  }
+  return Buffer.from(outside.map((value, i) => (value || mask[i] > 127 ? 0 : 255)));
+};
+
+/**
+ * The icon without a tile, 1024 px: the release cube drawn flat in blue, the
+ * same size as the cube in the rendered document, with the document's bird on
+ * top in a black outline.
+ */
 const noTileIcon = async (rendered) => {
   const rgba = await sharp(rendered).ensureAlpha().raw().toBuffer();
   const bird = await birdMask(rgba, 1.5);
-  const hexagon = await alphaOf(svgSquare(`<polygon points="${hexagonPoints(KEEP_RADIUS)}" fill="#fff"/>`));
-  const keep = Buffer.alloc(SIZE * SIZE);
-  for (let i = 0; i < keep.length; i += 1) keep[i] = Math.max(hexagon[i], bird[i]);
-  const rgb = await sharp(rendered).removeAlpha().raw().toBuffer();
-  const cut = await sharp(rgb, { raw: { width: SIZE, height: SIZE, channels: 3 } })
-    .joinChannel(keep, { raw: { width: SIZE, height: SIZE, channels: 1 } })
+  const cut = await sharp(await sharp(rendered).removeAlpha().raw().toBuffer(), { raw: { width: SIZE, height: SIZE, channels: 3 } })
+    .joinChannel(bird, { raw: { width: SIZE, height: SIZE, channels: 1 } })
     .png()
     .toBuffer();
-  const outline = svgSquare(`<polygon points="${hexagonPoints(OUTLINE_RADIUS)}" fill="none" stroke="#000" stroke-width="${(OUTLINE_WIDTH * UNIT).toFixed(1)}" stroke-linejoin="round"/>`);
+  const holes = enclosed(bird);
+  const outlineMask = (await birdMask(rgba, BIRD_OUTLINE_BLUR, { grow: true })).map((value, i) => (holes[i] ? 0 : value));
   const birdOutline = await sharp({ create: { width: SIZE, height: SIZE, channels: 3, background: '#000' } })
-    .joinChannel(await birdMask(rgba, BIRD_OUTLINE_BLUR, { grow: true }), { raw: { width: SIZE, height: SIZE, channels: 1 } })
+    .joinChannel(outlineMask, { raw: { width: SIZE, height: SIZE, channels: 1 } })
     .png()
     .toBuffer();
-  const full = await sharp({ create: { width: SIZE, height: SIZE, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-    .composite([{ input: outline }, { input: birdOutline }, { input: cut }])
+  const birdLayer = await sharp({ create: { width: SIZE, height: SIZE, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: birdOutline }, { input: cut }])
     .png()
     .toBuffer();
-  return sharp(full)
+  const birdCrop = await sharp(birdLayer)
     .extract({ left: CUBE.cx - CROP_HALF, top: CUBE.cy - CROP_HALF, width: CROP_HALF * 2, height: CROP_HALF * 2 })
     .resize(SIZE, SIZE)
     .png()
     .toBuffer();
+  // The release icon's cube spans 106 units of its square; here the square is
+  // 2 * CROP_HALF rendered px, which keeps the cube where the document has it.
+  const cube = await svgToPng(noTileIconSvg({ cubeShare: (106 * UNIT) / (2 * CROP_HALF), colors: CANARY_NO_TILE }), SIZE);
+  return sharp(cube).composite([{ input: birdCrop }]).png().toBuffer();
 };
 
 /**

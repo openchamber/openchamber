@@ -131,13 +131,13 @@ const NO_TILE = {
 };
 const CUBE_SILHOUETTE = 'M0 -48 L41.568 -24 L41.568 24 L0 48 L-41.568 24 L-41.568 -24 Z';
 
-const noTileInner = () => (
+const noTileInner = (colors) => (
   `<defs>${wallGradients('nt-', 'white', 0.55)}${floorGradient('nt-f', 'white', 0.55)}</defs>`
-  + `<path d="${OUTER_HEXAGON}" fill="none" stroke="${NO_TILE.outline}" stroke-width="3.1" stroke-linejoin="round"/>`
-  + `<path d="${CUBE_SILHOUETTE}" fill="${NO_TILE.inside}"/>`
+  + `<path d="${OUTER_HEXAGON}" fill="none" stroke="${colors.outline}" stroke-width="3.1" stroke-linejoin="round"/>`
+  + `<path d="${CUBE_SILHOUETTE}" fill="${colors.inside}"/>`
   + `<path d="${LEFT_SHADE}" fill="url(#nt-l)"/><path d="${RIGHT_SHADE}" fill="url(#nt-r)"/><path d="${FLOOR_SHADE}" fill="url(#nt-f)"/>`
-  + TIER_SCALES.map((scale, i) => `<path d="${rhombus(scale)}" fill="${NO_TILE.tiers[i]}" fill-opacity="${NO_TILE.tierOpacity}"/>`).join('')
-  + shellStrokes(NO_TILE.edge, 2.6)
+  + TIER_SCALES.map((scale, i) => `<path d="${rhombus(scale)}" fill="${colors.tiers[i]}" fill-opacity="${colors.tierOpacity}"/>`).join('')
+  + shellStrokes(colors.edge, 2.6)
 );
 
 // Construction tape across the lower cube, the full width of a picture `view`
@@ -158,15 +158,16 @@ export const devTapeSvg = ({ size = 1024 } = {}) => (
 
 /**
  * `cubeShare` is the cube's height as a share of the square (1 = touches the
- * edges). `background` fills the square; `tape` adds the development-copy tape.
+ * edges). `background` fills the square; `tape` adds the development-copy tape;
+ * `colors` repaints the cube (Canary's blue).
  */
-export const noTileIconSvg = ({ size = 1024, background = null, cubeShare = 1, tape = false } = {}) => {
+export const noTileIconSvg = ({ size = 1024, background = null, cubeShare = 1, tape = false, colors = NO_TILE } = {}) => {
   const view = 106 / cubeShare;
   const half = view / 2;
   const back = background ? `<rect x="${fmt(-half)}" y="${fmt(-half)}" width="${fmt(view)}" height="${fmt(view)}" fill="${background}"/>` : '';
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="${fmt(-half)} ${fmt(-half)} ${fmt(view)} ${fmt(view)}">`
-    + back + noTileInner() + (tape ? devTape(view) : '')
+    + back + noTileInner(colors) + (tape ? devTape(view) : '')
     + '</svg>\n'
   );
 };
