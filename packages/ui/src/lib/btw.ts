@@ -13,7 +13,7 @@ import { forkAtTranscriptCut, transcriptCutAfterMessage } from '@/sync/transcrip
 import { Binary } from '@/sync/binary';
 import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 
 /**
  * The composer identity a `/btw` fork takes while the fork is still being
@@ -198,6 +198,39 @@ export async function preparePendingBtwSend(
   return token;
 }
 
+/** Find a persisted record after the answer without depending on live-event coverage. */
+async function readBtwForkCut(
+  parentSessionId: string,
+  answerMessageID: string,
+  directory: string,
+  expectedRuntimeKey: string,
+): Promise<string | undefined> {
+  if (getRuntimeKey() !== expectedRuntimeKey) throw new Error('runtime changed');
+  const isCurrent = captureRuntimeInstance();
+  let before: string | undefined;
+  let cursor: string | undefined;
+  const seenCursors = new Set<string>();
+  for (;;) {
+    if (!isCurrent()) throw new Error('runtime changed');
+    const page = await opencodeClient.getSessionMessages(
+      parentSessionId,
+      cursor ? { cursor } : { limit: 50, order: 'desc' },
+      directory,
+    );
+    if (!isCurrent()) throw new Error('runtime changed');
+    // Descending pages walk back toward the selected answer. The previous
+    // record is its exclusive cut, even across a page boundary.
+    for (const { info } of page.items) {
+      if (info.id === answerMessageID) return before;
+      before = info.id;
+    }
+    const next = page.cursor.next;
+    if (!next || seenCursors.has(next)) return undefined;
+    seenCursors.add(next);
+    cursor = next;
+  }
+}
+
 export async function startBtwSession(input: StartBtwInput): Promise<Session> {
   const { setPanelState } = useBtwStore.getState();
   if (useBtwStore.getState().byParent[input.parentSessionId]?.creating) {
@@ -214,9 +247,10 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
     const parentMessages = getSyncMessages(input.parentSessionId, input.directory);
     const forkPointMessageID = findLastCompletedAssistantMessageID(parentMessages);
     if (!forkPointMessageID) throw new Error('No completed turn to fork from');
-    const before = transcriptCutAfterMessage(parentMessages, forkPointMessageID);
-    // The server can already have a new turn that this window has not received.
-    // Only an explicit `before` bounds the fork even when local history is idle.
+    const before = transcriptCutAfterMessage(parentMessages, forkPointMessageID)
+      ?? await readBtwForkCut(input.parentSessionId, forkPointMessageID, input.directory, expectedRuntimeKey);
+    // An idle parent has a persisted idle record after its answer, absent from
+    // live events. Its ID bounds the fork even if a new turn starts meanwhile.
     if (!before) throw new Error('No safe transcript boundary to fork from');
     const forked = await forkAtTranscriptCut(input.parentSessionId, before, input.directory, expectedRuntimeKey);
 
