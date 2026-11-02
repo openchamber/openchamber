@@ -314,7 +314,7 @@
     "concurrently": "^10.0.0",
     "esbuild": "^0.28.0",
     "typescript": "~7.0.2",
-    "vite": "^7.1.2"
+    "vite": "^7.3.2"
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
