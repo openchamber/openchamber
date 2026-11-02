@@ -2763,7 +2763,7 @@ describe('GET /api/fs/search', () => {
     await rm(repo, { recursive: true, force: true });
   });
 
-  const register = async () => {
+  const register = async (overrides = {}) => {
     const { spawn } = await import('node:child_process');
     const { app, getRoute } = createRouteRegistry();
     registerFsRoutes(app, {
@@ -2772,6 +2772,7 @@ describe('GET /api/fs/search', () => {
       resolveProjectDirectory: async () => ({ directory: repo }),
       buildAugmentedPath: () => '/usr/bin', resolveGitBinaryForSpawn: () => 'git',
       openchamberUserConfigRoot: '/home/user/.config',
+      ...overrides,
     });
     return async (query) => {
       const response = createMockResponse();
@@ -2802,6 +2803,59 @@ describe('GET /api/fs/search', () => {
     } finally {
       await rm(link, { force: true });
     }
+  });
+
+  it('reads Git ignores once per repository and preserves nested rules and tracked files', async () => {
+    const { spawn } = await import('node:child_process');
+    const gitReads = [];
+    const ask = await register({ spawn: (...args) => { gitReads.push(args[2].cwd); return spawn(...args); } });
+    for (let index = 0; index < 12; index++) {
+      const directory = path.join(repo, `dir-${index}`);
+      await mkdir(directory);
+      await nativeFs.writeFile(path.join(directory, 'ordinary.txt'), '');
+    }
+    await mkdir(path.join(repo, 'src'));
+    await nativeFs.writeFile(path.join(repo, 'src/.gitignore'), '*.ts\n!keep-needle.ts\n');
+    await nativeFs.writeFile(path.join(repo, 'src/keep-needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, 'src/drop-needle.ts'), '');
+    await nativeFs.writeFile(path.join(repo, 'build/tracked-needle.ts'), '');
+    execFileSync('git', ['add', '-f', 'build/tracked-needle.ts'], { cwd: repo });
+    const nested = path.join(repo, 'nested');
+    await mkdir(nested);
+    execFileSync('git', ['init', '-q'], { cwd: nested });
+    await nativeFs.writeFile(path.join(nested, '.gitignore'), '*.ts\n!keep-needle.ts\n');
+    await nativeFs.writeFile(path.join(nested, 'keep-needle.ts'), '');
+    await nativeFs.writeFile(path.join(nested, 'drop-needle.ts'), '');
+
+    const files = (await ask({ query: 'needle', includeHidden: 'true' })).body.files;
+    expect(files.map((file) => file.relativePath)).toEqual([
+      'needle.ts', '.needle.ts', 'src/keep-needle.ts', 'nested/keep-needle.ts', 'build/tracked-needle.ts',
+    ]);
+    expect(gitReads.sort()).toEqual((await Promise.all([repo, nested].map((directory) => nativeFs.realpath(directory)))).sort());
+  });
+
+  it('refreshes ignore rules on the next query and isolates requested directories', async () => {
+    const other = await mkdtemp(path.join(tmpdir(), 'oc-file-search-other-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: other });
+      await nativeFs.writeFile(path.join(other, 'needle.ts'), '');
+      const ask = await register();
+      expect((await ask({ query: 'needle' })).body.files.map((file) => file.relativePath)).toEqual(['needle.ts']);
+      await nativeFs.writeFile(path.join(repo, '.gitignore'), 'build/\nneedle.ts\n');
+      expect((await ask({ query: 'needle' })).body.files).toEqual([]);
+      expect((await ask({ directory: other, query: 'needle' })).body.files.map((file) => file.relativePath)).toEqual(['needle.ts']);
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it('respects an ignored search root while retaining tracked exceptions', async () => {
+    const ask = await register();
+    const query = { directory: path.join(repo, 'build'), query: 'needle' };
+    expect((await ask(query)).body.files).toEqual([]);
+    await nativeFs.writeFile(path.join(repo, 'build/other-needle.ts'), '');
+    execFileSync('git', ['add', '-f', 'build/needle.ts'], { cwd: repo });
+    expect((await ask(query)).body.files.map((file) => file.relativePath)).toEqual(['needle.ts']);
   });
 });
 
