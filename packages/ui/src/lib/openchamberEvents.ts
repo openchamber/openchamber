@@ -151,6 +151,12 @@ type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
 type GuestsChangedEvent = { type: 'guests-changed' };
 
 /**
+ * A theme file in the server's custom themes folder was added, removed or
+ * rewritten. Carries nothing; listeners re-read the custom themes.
+ */
+type ThemesChangedEvent = { type: 'themes-changed' };
+
+/**
  * A usage limit stopped a session and the server moved on: the provider to
  * its next account (for every session), or this session to the fallback model.
  */
@@ -302,6 +308,7 @@ type OpenChamberEvent =
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
   | GuestsChangedEvent
+  | ThemesChangedEvent
   | LimitFailoverEvent
   | ProjectContextChangedEvent
   | SessionFoldersChangedEvent
@@ -617,6 +624,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:guests-changed') {
     for (const listener of listeners) listener({ type: 'guests-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:themes-changed') {
+    for (const listener of listeners) listener({ type: 'themes-changed' });
     return;
   }
 

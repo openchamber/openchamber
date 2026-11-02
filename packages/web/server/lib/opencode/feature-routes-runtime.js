@@ -38,6 +38,7 @@ import { registerPrWatchRoutes } from '../pr-watch/runtime.js';
 import { registerWorkflowRoutes } from '../workflows/routes.js';
 import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
+import { createThemeFolderWatch } from './theme-watch.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
@@ -114,6 +115,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     platform: process.env.OPENCHAMBER_RUNTIME === 'desktop' ? 'desktop' : 'web',
   });
 
+  let themeFolderWatch = null;
   let quotaProviders = null;
   const getQuotaProviders = async () => {
     if (!quotaProviders) {
@@ -238,6 +240,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveProjectDirectory,
       resolveOptionalProjectDirectory,
       validateDirectoryPath,
+      // Absent in tests; without it the themes folder is not watched.
+      customThemesDir = null,
       readCustomThemesFromDisk,
       saveImportedTheme,
       deleteImportedTheme,
@@ -724,6 +728,16 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         }
       }
     };
+    // Theme files edited by hand or by an agent reach every client without a reload.
+    themeFolderWatch?.stop();
+    themeFolderWatch = customThemesDir
+      ? createThemeFolderWatch({
+        fsPromises,
+        path,
+        themesDir: customThemesDir,
+        onChange: () => announceChange('openchamber:themes-changed'),
+      })
+      : null;
     // Extensions that act as a Git host, kept in step with the catalog; every
     // client re-reads the provider list when the set changes.
     const extensionSourceControlProviders = createExtensionProviders({
@@ -930,5 +944,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     createChangeRequestWorktree,
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
+    stopThemeFolderWatch: () => {
+      themeFolderWatch?.stop();
+      themeFolderWatch = null;
+    },
   };
 };

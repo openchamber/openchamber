@@ -47,6 +47,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getRelayService,
     getRelayReconcileTimer,
     getSpacesHost = () => null,
+    stopThemeFolderWatch = () => {},
   } = dependencies;
 
   let shutdownPromise = null;
@@ -91,6 +92,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => getSpacesHost()?.close(),
       () => getRelayService()?.stop(),
       () => getDictationRuntime()?.stop(),
+      stopThemeFolderWatch,
       () => openCodeWatcherRuntime.stop(),
       () => sessionRuntime.dispose(),
       () => sessionAssistRuntime?.stop?.(),
