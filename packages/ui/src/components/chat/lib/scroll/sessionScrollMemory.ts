@@ -20,3 +20,19 @@ export const rememberSessionScrollPosition = (sessionKey: string, anchor: Messag
         if (oldest !== undefined) positions.delete(oldest);
     }
 };
+
+/**
+ * The outgoing timeline's parting write. At the end the record is the
+ * anchor's absence — the caller clears it. But a null anchor away from the
+ * end is a container that could not be measured (the outgoing timeline is
+ * already `display:none` while its KeepAlive entry swaps), not a user
+ * decision; the previous record stays (#6045).
+ */
+export const rememberOutgoingSessionScrollPosition = (
+    sessionKey: string,
+    atEnd: boolean,
+    anchor: MessageViewportAnchor | null,
+): void => {
+    if (!atEnd && anchor === null) return;
+    rememberSessionScrollPosition(sessionKey, atEnd ? null : anchor);
+};
