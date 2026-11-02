@@ -111,6 +111,12 @@ opening failures do not fall back to a browser window for application links.
 
 Native menu actions reach the renderer as one DOM event per click. Main must not also send them over IPC: preload turns every IPC emit into a call to its bridge listeners and a DOM event, so the action would run again. Update-check notifications go over IPC only, for the same reason.
 
+The Edit menu's Copy targets `webContents.getFocusedWebContents()`, including
+browser guests and undocked DevTools. The additional app copy event goes only
+to a matching app window's document, identified by exact `webContents` identity
+among live BrowserWindows excluding browser-panel popups. Host presence cannot
+identify app documents because DevTools can have no `hostWebContents`.
+
 Native Copy link uses `context-menu-clipboard.mjs` to write URL text and bookmark
 metadata together through Electron's `ClipboardItem` API. `electron-context-menu`
 4.1.2 still uses the old object-shaped clipboard write. Inside its `prepend` hook,
