@@ -468,6 +468,41 @@ export const createOpenChamberControlService = (dependencies) => {
     };
   };
 
+  /**
+   * A task's model is pinned onto the sessions it drives, so a model the call
+   * names has to exist in the catalog: today a dead id is stored with
+   * `ok: true` and only every fire fails with `provider.no-route` hours later
+   * (#5950). Only the model the call names is checked — a stored task whose
+   * model has since disappeared stays editable, and disableable, without
+   * fixing the model first. The catalog is read for the task's project when
+   * it is known — including the Chats destination, whose root this file's
+   * own list now carries — falling back to the caller's directory: providers
+   * are configured for the instance. An empty answer is not evidence of
+   * absence: the first read for a not-yet-started directory answers empty and
+   * fills in moments later, so it must not turn a valid model into a
+   * rejection — the same rule the session routes apply when they validate a
+   * requested selection.
+   */
+  const assertNamedModelKnown = async (projectID, input, contextDirectory) => {
+    if (input.model === undefined) return;
+    const parsed = parseModel(input.model);
+    const project = (await projects()).find((candidate) => candidate.id === projectID);
+    const client = await getClient(project?.path || asNonEmptyString(contextDirectory) || '');
+    const catalog = await client.model.list();
+    const entries = Array.isArray(catalog.data) ? catalog.data : [];
+    if (entries.length === 0) return;
+    // Same matcher as the session routes' `findCatalogModel`: a catalog entry
+    // may carry a display override in `id`, and the `modelID` is the upstream
+    // name the fire path dispatches and the UI's model strings carry, so
+    // either form names a model that will run.
+    const known = entries
+      .some((model) => model.providerID === parsed.providerID
+        && (model.id === parsed.modelID || model.modelID === parsed.modelID));
+    if (!known) {
+      throw new OpenChamberControlError(`unknown model: ${parsed.providerID}/${parsed.modelID}`, 400);
+    }
+  };
+
   // /api/session/active is global in v2 and reports only `{ type: 'running' }`.
   // The action contract stays busy/idle, so running is reported as busy.
   const activeSessions = async (client) => {
@@ -967,12 +1002,14 @@ export const createOpenChamberControlService = (dependencies) => {
           case 'schedule.list':
             return { scheduler: await scheduledTaskService.status(), tasks: await scheduledTaskService.list(projectID) };
           case 'schedule.create': {
+            await assertNamedModelKnown(projectID, input, contextDirectory);
             const result = await scheduledTaskService.upsert(projectID, buildScheduledTask(input));
             return { task: result.task, created: result.created };
           }
           case 'schedule.update': {
             const existing = (await scheduledTaskService.list(projectID)).find((task) => task.id === taskID);
             if (!existing) throw new OpenChamberControlError(`Scheduled task not found: ${taskID}`, 404);
+            await assertNamedModelKnown(projectID, input, contextDirectory);
             const result = await scheduledTaskService.upsert(projectID, patchScheduledTask(existing, input));
             return { task: result.task, updated: true };
           }
