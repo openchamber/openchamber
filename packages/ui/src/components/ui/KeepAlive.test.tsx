@@ -102,6 +102,30 @@ test('an empty foreground hides retained entries without replacing them', async 
   expect(host.querySelector('[data-session="A"]')).toBe(a);
 });
 
+test('captures before visibility mutations and skips same-key updates', async () => {
+  const captures: string[] = [];
+  const renderSelection = (name: string | null) => act(async () => {
+    root.render(
+      <div style={name === null ? { display: 'none' } : undefined}>
+        <KeepAlive cacheKey={name} capacity={4} onBeforeHide={() => {
+          const outgoing = host.querySelector<HTMLElement>(`[data-session="${name}"]`)!;
+          expect(outgoing.style.display).toBe('');
+          expect(outgoing.parentElement?.style.display).toBe('');
+          captures.push(name!);
+        }}>
+          <Content name={name ?? ''} text="content" />
+        </KeepAlive>
+      </div>,
+    );
+  });
+  await renderSelection('A');
+  await renderSelection('A');
+  expect(captures).toEqual([]);
+  await renderSelection('B');
+  await renderSelection(null);
+  expect(captures).toEqual(['A', 'B']);
+});
+
 test('promoting an entry does not reorder retained DOM', async () => {
   await render('A');
   await render('B');

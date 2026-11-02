@@ -1430,11 +1430,13 @@ React then throttles later-resolving boundaries by ~300ms, which staggered
 user and assistant text on a cold open.
 
 An opened session is shown already in place: at its end, or where the reader
-left it. When a list detaches (session switch, chat unmount) and its reader is
-away from the live end, `useChatTimelineScroll` records the topmost visible
+left it. Before KeepAlive hides a list on a session switch, and again on list
+detach for ordinary unmounts, `useChatTimelineScroll` records the topmost visible
 message and its offset (`lib/scroll/messageViewportAnchor.ts`) in an in-memory,
 100-session memory keyed by runtime, directory and session
 (`lib/scroll/sessionScrollMemory.ts`); a reader on the end clears the record.
+Unavailable measurements preserve an existing record. The before-hide snapshot
+also captures a first visit while the outgoing transcript is still measurable.
 Nothing is persisted across reloads. Re-entering the session aligns that
 message frame by frame until it holds still, with follow off and the
 scroll-to-bottom pill shown; any wheel, touch, pointer or key input ends the

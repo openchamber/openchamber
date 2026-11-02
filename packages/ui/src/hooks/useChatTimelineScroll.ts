@@ -12,7 +12,7 @@ import {
     type MessageViewportAnchor,
     type ViewportAnchorAlignment,
 } from '@/components/chat/lib/scroll/messageViewportAnchor';
-import { readSessionScrollPosition, rememberSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
+import { readSessionScrollPosition, rememberOutgoingSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
 import {
     peekMessageFocus,
     releaseMessageFocusOutside,
@@ -136,6 +136,7 @@ interface UseChatTimelineScrollResult {
     scrollNode: HTMLDivElement | null;
     isPinned: boolean;
     registerList: (list: TimelineListHandle | null, sessionKey?: string) => void;
+    captureOutgoingPosition: () => void;
     onIsAtEndChange: (isAtEnd: boolean) => void;
     onListMetricsChange: (metrics: { readonly headerSize: number; readonly footerSize: number }) => void;
     onManualNavigation: () => void;
@@ -533,13 +534,10 @@ export const useChatTimelineScroll = ({
     // same link is a new request and is shown again.
     const linkServedRef = React.useRef<{ key: string; serial: number } | null>(null);
 
-    // Called while the outgoing list is still in the document: React detaches
-    // a list's ref before removing its nodes. This runs inside the commit, so
-    // the end check reads the list's own measurements; only a reader who left
-    // away from the end costs a DOM read.
+    // KeepAlive captures before its visibility mutation. Ref detach also tries
+    // for ordinary unmounts, but a retained list may already be hidden then.
     const rememberOutgoingPosition = React.useCallback((node: HTMLElement, list: TimelineListHandle | null) => {
         const sessionKey = listSessionKeyRef.current;
-        listSessionKeyRef.current = null;
         // A list detached before its entry was decided was never read; this
         // is also Strict Mode's detach/reattach right after mount, which must
         // not erase the position the entry is about to restore.
@@ -547,10 +545,20 @@ export const useChatTimelineScroll = ({
         const state = list?.getState();
         // A hidden container measures nothing; keep what was recorded before.
         if (!state || state.scrollLength <= 0) return;
+        // An unknown at-end answer is not "at the end": missing measurements
+        // must not clear the record either (#6045).
         const atEnd = (modeRef.current === 'following-end' && isAtEndRef.current)
-            || resolveTimelineIsAtEnd(state) !== false;
-        rememberSessionScrollPosition(sessionKey, atEnd ? null : captureMessageViewportAnchor(node));
+            || resolveTimelineIsAtEnd(state) === true;
+        rememberOutgoingSessionScrollPosition(
+            sessionKey,
+            atEnd,
+            atEnd ? null : captureMessageViewportAnchor(node),
+        );
     }, []);
+
+    const captureOutgoingPosition = React.useCallback(() => {
+        if (scrollRef.current) rememberOutgoingPosition(scrollRef.current, listRef.current);
+    }, [rememberOutgoingPosition]);
 
     // ── scroll commands ─────────────────────────────────────────────────────
     const goToBottomReassertTimersRef = React.useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -875,9 +883,7 @@ export const useChatTimelineScroll = ({
         listRef.current = list;
         scrollRef.current = node;
         setScrollNode(node);
-        if (node) {
-            listSessionKeyRef.current = sessionKey ?? currentSessionKeyRef.current;
-        }
+        listSessionKeyRef.current = node ? sessionKey ?? currentSessionKeyRef.current : null;
         if (previousNode && previousNode !== node) {
             retireScrollContent(previousNode, () => scrollRef.current === previousNode);
         }
@@ -1822,6 +1828,7 @@ export const useChatTimelineScroll = ({
         scrollNode,
         isPinned,
         registerList,
+        captureOutgoingPosition,
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,

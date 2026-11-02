@@ -228,6 +228,7 @@ type ChatViewportProps = {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
     registerList: (list: TimelineListHandle | null, sessionKey?: string) => void;
+    captureOutgoingPosition: () => void;
     onIsAtEndChange: (isAtEnd: boolean) => void;
     onListMetricsChange: (metrics: { readonly headerSize: number; readonly footerSize: number }) => void;
     onTimelineDataChange: () => void;
@@ -279,6 +280,7 @@ const ChatViewport = React.memo(({
     scrollRef,
     messageListRef,
     registerList,
+    captureOutgoingPosition,
     onIsAtEndChange,
     onListMetricsChange,
     onTimelineDataChange,
@@ -576,6 +578,7 @@ const ChatViewport = React.memo(({
                         key={getRuntimeKey()}
                         cacheKey={showingTranscript ? currentSessionId : null}
                         capacity={retainedTimelines()}
+                        onBeforeHide={captureOutgoingPosition}
                     >
                         <ChatColumnSessionContext.Provider value={session}>
                             <MessageList
@@ -1340,6 +1343,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         scrollRef,
         scrollNode,
         registerList,
+        captureOutgoingPosition,
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,
@@ -1885,6 +1889,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             directory={effectiveSessionDirectory}
             scrollRef={scrollRef}
             registerList={registerList}
+            captureOutgoingPosition={captureOutgoingPosition}
             onIsAtEndChange={onIsAtEndChange}
             onListMetricsChange={onListMetricsChange}
             onTimelineDataChange={onTimelineDataChange}

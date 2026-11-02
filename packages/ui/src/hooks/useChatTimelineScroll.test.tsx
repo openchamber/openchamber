@@ -6,6 +6,9 @@ import { useChatTimelineScroll, type TimelineListHandle } from './useChatTimelin
 import { requestMessageFocus, releaseMessageFocusOutside } from '@/lib/router/messageFocus';
 import { dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { useUIStore } from '@/stores/useUIStore';
+import { KeepAlive } from '@/components/ui/KeepAlive';
+import { readSessionScrollPosition, rememberSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
+import type { MessageViewportAnchor } from '@/components/chat/lib/scroll/messageViewportAnchor';
 
 let root: Root;
 let node: HTMLDivElement;
@@ -73,6 +76,7 @@ beforeEach(() => {
         Element: dom.Element,
         CustomEvent: dom.CustomEvent,
         WheelEvent: dom.WheelEvent,
+        CSS: dom.CSS,
         localStorage: dom.localStorage,
         sessionStorage: dom.sessionStorage,
         getComputedStyle: dom.getComputedStyle.bind(dom),
@@ -122,6 +126,101 @@ test('cancels a pending follow frame and can schedule again after effect reconne
     await frame();
     expect(writes).toBe(before + 1);
 });
+
+for (const leaving of ['first reading position', 'changed reading position', 'end'] as const) {
+    test(`captures ${leaving} before a retained transcript hides and restores on return`, async () => {
+        const key = `retained-${leaving}`;
+        rememberSessionScrollPosition(key, leaving === 'first reading position' ? null : { messageId: 'message', offsetTop: -10 });
+        let aNode: HTMLElement | null = null;
+        const alignments: MessageViewportAnchor[] = [];
+        type AnchorHandle = { alignViewportAnchor: (anchor: MessageViewportAnchor) => 'aligned' };
+
+        function RetainedList({ name, register, anchorRef }: {
+            name: string;
+            register: (list: TimelineListHandle | null) => void;
+            anchorRef: React.RefObject<AnchorHandle | null>;
+        }) {
+            const ref = React.useRef<HTMLDivElement>(null);
+            React.useLayoutEffect(() => {
+                const element = ref.current!.parentElement;
+                if (!element) throw new Error('Missing retained list host');
+                if (name === key) aNode = element;
+                const hidden = () => {
+                    for (let parent: HTMLElement | null = element; parent; parent = parent.parentElement) {
+                        if (parent.style.display === 'none') return true;
+                    }
+                    return false;
+                };
+                Object.defineProperties(element, {
+                    scrollHeight: { configurable: true, value: 2000 },
+                    clientHeight: { configurable: true, value: 500 },
+                });
+                element.getBoundingClientRect = () => new dom.DOMRect(0, 0, 800, hidden() ? 0 : 500);
+                element.firstElementChild!.getBoundingClientRect = () => hidden()
+                    ? new dom.DOMRect()
+                    : new dom.DOMRect(0, 700 - element.scrollTop, 800, 1000);
+                const handle: AnchorHandle = {
+                    alignViewportAnchor: (anchor) => {
+                        alignments.push(anchor);
+                        element.scrollTop = 700 - anchor.offsetTop;
+                        return 'aligned';
+                    },
+                };
+                anchorRef.current = handle;
+                register({
+                    getScrollableNode: () => element,
+                    getState: () => ({
+                        data: [], scroll: element.scrollTop, scrollLength: 500, contentLength: 2000,
+                        positionAtIndex: () => undefined, sizeAtIndex: () => undefined,
+                    }),
+                    scrollToEnd: () => { element.scrollTop = 1500; },
+                    scrollToOffset: () => {}, scrollToIndex: () => {},
+                });
+                return () => {
+                    if (anchorRef.current === handle) anchorRef.current = null;
+                };
+            }, [name, register, anchorRef]);
+            // Retained lists can unregister after Activity has hidden their
+            // host. Keep the detach on that lifecycle edge in this fixture.
+            React.useEffect(() => () => register(null), [register]);
+            return <div ref={ref} data-message-id="message" />;
+        }
+        function RetainedHarness({ name }: { name: string }) {
+            const anchorRef = React.useRef<AnchorHandle | null>(null);
+            scroll = useChatTimelineScroll({
+                currentSessionId: name, currentSessionKey: name, composerOverlayHeight: 0,
+                messageListRef: anchorRef, sessionIsWorking: false,
+            });
+            const { registerList, captureOutgoingPosition } = scroll;
+            const register = React.useCallback((list: TimelineListHandle | null) => registerList(list, name), [registerList, name]);
+            return <KeepAlive cacheKey={name} capacity={4} onBeforeHide={captureOutgoingPosition}>
+                <div><RetainedList name={name} register={register} anchorRef={anchorRef} /></div>
+            </KeepAlive>;
+        }
+        const select = (name: string) => act(async () => root.render(<RetainedHarness name={name} />));
+        await select(key);
+        await frame();
+        // Finish any entry alignment before the reader changes position.
+        for (let index = 0; index < 35; index += 1) await frame();
+        const outgoing = aNode!;
+        act(() => outgoing.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })));
+        outgoing.scrollTop = leaving === 'end' ? 1500 : 730;
+        if (leaving === 'end') {
+            act(() => scroll.onIsAtEndChange(true));
+            await frame();
+        }
+        alignments.length = 0;
+        await select(`${key}-B`);
+        expect(outgoing.style.display).toBe('none');
+        expect(readSessionScrollPosition(key)).toEqual(leaving === 'end' ? null : { messageId: 'message', offsetTop: -30 });
+        outgoing.scrollTop = 0;
+        await select(key);
+        await frame();
+        expect(aNode).toBe(outgoing);
+        expect(outgoing.scrollTop).toBe(leaving === 'end' ? 1500 : 730);
+        if (leaving !== 'end') expect(alignments.at(-1)).toEqual({ messageId: 'message', offsetTop: -30 });
+    });
+}
 
 test('clears return-to-end reassert timers across a hidden interval', async () => {
     await render('visible'); await frame();
