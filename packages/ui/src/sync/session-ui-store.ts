@@ -2545,7 +2545,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (routed !== "shell" && options?.recordEffort && isCurrentRuntimeInstance()) {
         rememberEffort(providerID, modelID, variant ?? null, effortRevision)
       }
-      if (routed !== "shell") settleModelPick?.()
+      if (routed !== "shell") {
+        settleModelPick?.()
+        if (targetSessionId && isCurrentRuntimeInstance()) {
+          useSelectionStore.getState().markSessionSelectionSent(targetSessionId, providerID, modelID, effectiveAgent, variant)
+        }
+      }
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
     })
