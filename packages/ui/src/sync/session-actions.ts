@@ -494,7 +494,8 @@ export async function compactSession(
 ): Promise<void> {
   const isCurrentRuntime = captureRuntimeInstance()
   if (selection && !isAutoModel(selection.providerID, selection.modelID)) {
-    const { model } = resolveSendSelection(sessionId, directory ?? undefined, selection)
+    const { model } = await resolveSendSelection(sessionId, directory ?? undefined, selection)
+    if (!isCurrentRuntime()) throw new Error("Compaction was cancelled because the runtime changed.")
     if (model) {
       await opencodeClient.switchSessionModel(sessionId, model, directory)
     }

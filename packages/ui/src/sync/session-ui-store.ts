@@ -199,9 +199,9 @@ export async function routeMessage(params: {
   // show, so only a genuine change travels with the prompt. Resolved when the
   // request is about to leave: a session created from a draft has its record,
   // with the model it was created on, only once `ready` settles.
-  const sendSelection = () => {
+  const sendSelection = async () => {
     const directory = sendDirectory()
-    const selection = resolveSendSelection(params.sessionId, directory, {
+    const selection = await resolveSendSelection(params.sessionId, directory, {
       providerID: params.providerID,
       modelID: params.modelID,
       variant: params.variant,
@@ -301,7 +301,7 @@ export async function routeMessage(params: {
         ...contextItems,
         ...skillInstructionContext(),
       ]
-      const selection = sendSelection()
+      const selection = await sendSelection()
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
@@ -341,7 +341,7 @@ export async function routeMessage(params: {
     appendSubmissions: params.appendSubmissions,
     send: async (messageID, context) => {
       assertRuntimeCurrent()
-      const selection = sendSelection()
+      const selection = await sendSelection()
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,

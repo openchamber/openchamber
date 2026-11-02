@@ -187,10 +187,10 @@ const sendPlainMessage = async (
     directory,
     context,
     onOptimisticInsert: () => requestChatForceScrollBottom(sessionID),
-    send: (messageID, context) => {
+    send: async (messageID, context) => {
       // Only a genuine change travels with the prompt; the review session was
       // created on this selection, so normally nothing is switched.
-      const selection = resolveSendSelection(sessionID, directory, resolved);
+      const selection = await resolveSendSelection(sessionID, directory, resolved);
       return opencodeClient.sendMessage({
         runtimeKey,
         id: sessionID,
