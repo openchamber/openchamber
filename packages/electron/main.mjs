@@ -97,6 +97,7 @@ import {
 } from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
 import { createCopyLinkMenuHook } from './context-menu-clipboard.mjs';
+import { createCopyMenuAction } from './menu-copy-action.mjs';
 import {
   CANARY_UPDATER_FEED,
   PRODUCTION_UPDATER_FEED,
@@ -2253,6 +2254,17 @@ const dispatchMenuAction = (action) => {
 };
 
 const dispatchAddSelectionToChat = () => dispatchMenuAction('add-selection-to-chat');
+
+// Copy is not a plain role because the app's own copy action still runs for
+// app pages; the shared handler routes the clipboard write to whatever
+// webContents has focus, DevTools windows and guest pages included (#6012).
+const handleCopyAction = createCopyMenuAction({
+  getFocusedWebContents: () => webContents.getFocusedWebContents(),
+  getAppWindows: () => BrowserWindow.getAllWindows().filter(
+    (window) => !window.isDestroyed() && !isBrowserPanelPopup(window),
+  ),
+  dispatchAppCopy: (window) => dispatchDomEventToWindow(window, 'openchamber:menu-action', 'copy'),
+});
 
 // Mini-chat draft windows are not deduplicated, so this must reach the renderer
 // exactly once — emitToWindow alone (no DOM-event double dispatch). The renderer
@@ -5423,10 +5435,6 @@ const buildMacMenu = (locale = 'en') => {
   const dispatchAction = (action) => dispatchMenuAction(action);
   const t = (key) => menuLabel(locale, key);
   const roleItem = (role, key) => roleMenuItem(locale, role, key);
-  const handleCopyAction = () => {
-    BrowserWindow.getFocusedWindow()?.webContents.copy();
-    dispatchAction('copy');
-  };
 
   return Menu.buildFromTemplate([
     {
@@ -5535,10 +5543,6 @@ const buildAutoHiddenMenu = (locale = 'en') => {
   const dispatchAction = (action) => dispatchMenuAction(action);
   const t = (key) => menuLabel(locale, key);
   const roleItem = (role, key) => roleMenuItem(locale, role, key);
-  const handleCopyAction = () => {
-    BrowserWindow.getFocusedWindow()?.webContents.copy();
-    dispatchAction('copy');
-  };
 
   return Menu.buildFromTemplate([
     {
