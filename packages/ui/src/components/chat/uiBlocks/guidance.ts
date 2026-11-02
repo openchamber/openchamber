@@ -39,7 +39,7 @@ const componentLines = (): string => Object.values(uiBlockLibrary.toSpec().compo
 
 export function buildUiBlocksGuidance(): string {
   return [
-    'UI blocks: a fenced openui-lang block in your reply draws native UI there; keep the explanation in Markdown around it.',
+    'UI blocks: a fenced openui-lang block in your reply draws native UI there; keep the explanation in Markdown around it. The fence is Markdown: a line ```openui-lang, the program, a line ```.',
     'Use one for data or structure the user would otherwise picture: values across items, comparisons, flows, trends, status. Not for a few numbers, a short list, code, or when asked for plain text. Several per reply are fine.',
     'Asking the user, by what the answer needs:',
     '- a quick clarification its options fully answer: the question tool;',

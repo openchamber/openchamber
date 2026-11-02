@@ -3,6 +3,7 @@ import { getLastConversationRecord, type TextPart, type ToolPart } from '@/lib/o
 import { isShownInPlace, openChamberToolCall } from '@/lib/opencode/tools';
 import { isSessionNoticePart } from '@/lib/opencode/session-notices';
 import { isStandaloneTool } from '../../message/parts/toolRenderUtils';
+import { fenceTaggedUiBlocks } from '../../uiBlocks/taggedBlocks';
 import type { ChatMessageEntry, TurnRecord } from './types';
 
 /** A queued user message alone does not retire the previous turn. */
@@ -66,6 +67,6 @@ const isSettledAsk = (part: ToolPart): boolean => (
 export function getShownPages(messages: readonly ChatMessageEntry[], finalMessage?: ChatMessageEntry): ShownPart[] {
     return messages.flatMap((message) => message.parts.filter((part): part is ShownPart => (
         (part.type === 'tool' && isShownInPlace(part.tool, part.state) && !isSettledAsk(part))
-        || (part.type === 'text' && message !== finalMessage && UI_BLOCK_FENCE.test(part.text))
+        || (part.type === 'text' && message !== finalMessage && UI_BLOCK_FENCE.test(fenceTaggedUiBlocks(part.text)))
     )));
 }
