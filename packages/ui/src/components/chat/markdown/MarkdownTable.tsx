@@ -2,6 +2,7 @@ import React from 'react';
 import { defaultComponents, tableDataToCSV, tableDataToTSV, type ExtraProps } from 'streamdown';
 import type { Element } from 'hast';
 import { Button } from '@/components/ui/button';
+import { PRESSED_CLASS } from '@/components/ui/action-toolbar';
 import { Icon } from '@/components/icon/Icon';
 import {
   DropdownMenu,
@@ -226,6 +227,7 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
           <Button
             variant="ghost"
             size="xs"
+            className={wrap ? PRESSED_CLASS : undefined}
             title={t(wrap ? 'markdownRenderer.table.actions.disableWrapTitle' : 'markdownRenderer.table.actions.enableWrapTitle')}
             aria-pressed={wrap}
             onClick={() => useUIStore.getState().setTableCellWrap(!wrap)}
