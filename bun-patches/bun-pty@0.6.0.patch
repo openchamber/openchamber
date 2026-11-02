@@ -25,18 +25,18 @@ index 0000000000000000000000000000000000000000..d25f4fa1a8f36131bca15d75d2ed983b
 +	return bytes.subarray(start).toString("utf8");
 +}
 diff --git a/src/terminal.ts b/src/terminal.ts
-index 9aed54940c49eea9bfe8e000c535fe0b0b0ee964..a65ef82150cb77c3aec8a05ce1d27f2a76d43b6b 100644
+index 1bcce6c88ffb8421681f0088f8add7ba78b90204..c32c9488dbe53b417bac4a50a5e4d18589a5ecf7 100644
 --- a/src/terminal.ts
 +++ b/src/terminal.ts
 @@ -6,6 +6,7 @@ import { EventEmitter } from "./interfaces";
  import type { IPty, IPtyForkOptions, IExitEvent } from "./interfaces";
- import { libraryFilenames } from "./library";
+ import { libraryFilenames, unsupportedBunError } from "./library";
  import { DEFAULT_NAME, childEnv, formatEnv } from "./env";
 +import { INITIAL_OUTPUT_LIMIT_BYTES, keepNewestUtf8 } from "./output";
  import { join, dirname, basename } from "node:path";
  import { existsSync, readFileSync } from "node:fs";
  
-@@ -153,6 +154,9 @@ export class Terminal implements IPty {
+@@ -169,6 +170,9 @@ export class Terminal implements IPty {
  
  	private _readLoop = false;
  	private _closing = false;
@@ -46,7 +46,7 @@ index 9aed54940c49eea9bfe8e000c535fe0b0b0ee964..a65ef82150cb77c3aec8a05ce1d27f2a
  
  	// TextDecoder with streaming mode to properly handle UTF-8 across chunk boundaries
  	// Without this, multi-byte characters (like box-drawing ─) that span chunks become �
-@@ -205,12 +209,37 @@ export class Terminal implements IPty {
+@@ -228,12 +232,37 @@ export class Terminal implements IPty {
  	}
  
  	get onData() {
@@ -85,7 +85,7 @@ index 9aed54940c49eea9bfe8e000c535fe0b0b0ee964..a65ef82150cb77c3aec8a05ce1d27f2a
  	/* ------------- IO methods ------------- */
  
  	write(data: string) {
-@@ -249,13 +278,13 @@ export class Terminal implements IPty {
+@@ -272,13 +301,13 @@ export class Terminal implements IPty {
  				// This prevents corruption when multi-byte chars span chunk boundaries
  				const decoded = this._decoder.decode(buf.subarray(0, n), { stream: true });
  				if (decoded) {
@@ -101,7 +101,7 @@ index 9aed54940c49eea9bfe8e000c535fe0b0b0ee964..a65ef82150cb77c3aec8a05ce1d27f2a
  				}
  				const exitCode = lib.symbols.bun_pty_get_exit_code(this.handle);
  				this._onExit.fire({ exitCode });
-@@ -264,7 +293,7 @@ export class Terminal implements IPty {
+@@ -287,7 +316,7 @@ export class Terminal implements IPty {
  				// error - flush decoder before breaking
  				const remaining = this._decoder.decode();
  				if (remaining) {

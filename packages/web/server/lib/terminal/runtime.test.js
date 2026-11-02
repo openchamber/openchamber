@@ -7,7 +7,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 
-import { createTerminalRuntime } from './runtime.js';
+import { createTerminalRuntime, loadTerminalPtyProvider } from './runtime.js';
 import { createTerminalWsControlFrame, readTerminalWsControlFrame } from './terminal-ws-protocol.js';
 
 // Drives the raw upgrade handler by hand. A `ws` client hides the HTTP response
@@ -211,6 +211,31 @@ describe('terminal runtime', () => {
     });
     return { routes, processes, runtime };
   };
+
+  it.each([
+    [undefined, 'node-pty'],
+    ['1.3.14', 'node-pty'],
+    ['1.4.0-canary.1', 'node-pty'],
+    ['1.4.0', 'bun-pty'],
+    ['1.10.0', 'bun-pty'],
+    ['2.0.0', 'bun-pty'],
+  ])('selects %s Bun terminals through %s before caching the provider', async (version, expectedBackend) => {
+    const spawn = () => {};
+    const importPty = vi.fn(async () => ({ spawn }));
+    const provider = await loadTerminalPtyProvider(version, importPty);
+    expect(provider).toEqual({ backend: expectedBackend, spawn });
+    expect(importPty).toHaveBeenCalledExactlyOnceWith(expectedBackend);
+  });
+
+  it('uses node-pty when bun-pty cannot import on a supported Bun', async () => {
+    const spawn = () => {};
+    const importPty = vi.fn(async (name) => {
+      if (name === 'bun-pty') throw new Error('Native backend unavailable');
+      return { spawn };
+    });
+    expect(await loadTerminalPtyProvider('1.4.0', importPty)).toEqual({ backend: 'node-pty', spawn });
+    expect(importPty.mock.calls).toEqual([['bun-pty'], ['node-pty']]);
+  });
 
   it('replaces only exited action runs and keeps session capacity available across reruns', async () => {
     const harness = createHarness();
