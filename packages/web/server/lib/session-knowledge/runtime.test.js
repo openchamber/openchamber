@@ -81,6 +81,7 @@ const createEntriesStub = ({ fail = new Set() } = {}) => {
     },
     remove: async (sessionId, directory, key) => {
       calls.push(['remove', sessionId, directory, key]);
+      if (fail.has(key)) throw new Error(`remove ${key} failed`);
       held.delete(key);
     },
   };
@@ -91,6 +92,28 @@ const pinnedStore = () => createMetadataStub({
 });
 
 describe('writing the knowledge into a session', () => {
+  test('removes obsolete UI instructions without changing unrelated entries, on every sync', async () => {
+    const instructionEntries = createEntriesStub();
+    instructionEntries.held.set('openchamber.openui', 'Obsolete catalog');
+    instructionEntries.held.set('other.instructions', 'Keep this');
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, isPageRenderingAvailable: async () => true });
+    for (let i = 0; i < 2; i++) {
+      expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
+      expect(instructionEntries.held.has('openchamber.openui')).toBe(false);
+      expect(instructionEntries.held.get('other.instructions')).toBe('Keep this');
+      expect(instructionEntries.held.get(GUIDANCE)).toContain(UI_BLOCKS_GUIDANCE);
+    }
+  });
+
+  test('failed legacy instruction cleanup reports failure while current guidance still updates', async () => {
+    const instructionEntries = createEntriesStub({ fail: new Set(['openchamber.openui']) });
+    instructionEntries.held.set('openchamber.openui', 'Obsolete catalog');
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, isPageRenderingAvailable: async () => true });
+    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(false);
+    expect(instructionEntries.held.has('openchamber.openui')).toBe(true);
+    expect(instructionEntries.held.get(GUIDANCE)).toContain(UI_BLOCKS_GUIDANCE);
+  });
+
   test('puts each source under its own key and removes the empty ones', async () => {
     const instructionEntries = createEntriesStub();
     const runtime = createRuntime({ ...pinnedStore(), instructionEntries });

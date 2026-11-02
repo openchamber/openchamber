@@ -48,7 +48,7 @@
     "changelog-card": "node scripts/changelog-card/generate.mjs",
     "changelog:build": "node scripts/changelog/build.mjs",
     "changelog:check": "node scripts/changelog/build.mjs --check",
-    "postinstall": "node ./fix-deprecation.js && bun run --cwd packages/sdk build && bun run extensions:build && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
+    "postinstall": "node ./fix-deprecation.js && bun run --cwd packages/sdk build && bun run --cwd packages/ui ui-blocks:generate && bun run extensions:build && node ./packages/electron/scripts/ensure-electron.mjs --best-effort",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",
     "start:web": "bun run --cwd packages/web start",
     "pack:web": "bun pm pack --cwd packages/web",

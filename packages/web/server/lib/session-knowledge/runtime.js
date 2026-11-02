@@ -473,6 +473,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
         ...await collect(directory, readPins(session)),
         responseStyleInstruction,
       });
+      // The previous UI implementation stored a separate catalog in old sessions.
+      entries['openchamber.openui'] = '';
       const writes = await Promise.allSettled(Object.entries(entries).map(([key, text]) => (text
         ? instructionEntries.put(sessionId, directory, key, text)
         : instructionEntries.remove(sessionId, directory, key))));

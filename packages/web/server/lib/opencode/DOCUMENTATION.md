@@ -3,6 +3,8 @@
 ## Purpose
 This module provides OpenCode server integration utilities for the web server runtime, including configuration management and provider authentication.
 
+`ui-block-repair.js` observes the existing global event hub, detects explicitly closed `openui-lang` fences and validates them with the generated shared UI parser. Invalid output triggers interruption, an execution-terminal event and `experimental.session.wait` before one concise synthetic continuation. Each task permits at most two repairs; external session writes, new inbox input and stream disconnection cancel pending recovery. Detection requires an observed execution start and supports text parts up to 512 Ki code units. Web, desktop and mobile share their connected server's owner even with no browser present. Isolated-space events are ignored by the host; their own server handles them. Standalone VS Code has no owner. Independent servers attached to one OpenCode instance do not coordinate repair.
+
 Diagnostic logging for the timeline export (`proxy.js` error lines, the lifecycle journal, the local diagnostics route in `core-routes.js`) is described in `../diagnostics/DOCUMENTATION.md`.
 
 ## Entrypoints and structure

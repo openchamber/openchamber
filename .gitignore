@@ -41,6 +41,7 @@ docs/personal/*
 SECURITY_HARDENING_IMPLEMENTATION_PLAN.md
 
 # Build outputs
+packages/web/server/lib/opencode/ui-block-validation.generated.js
 packages/web/server/built-in-extensions/
 packages/web/server/built-in-extensions.previous-*/
 packages/web/server/.builtin-build-*/

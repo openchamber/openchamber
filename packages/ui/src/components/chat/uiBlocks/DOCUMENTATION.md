@@ -9,6 +9,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and copies and image exports keep the source. User messages, reasoning, tool output and documents show the fence as code.
 - The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
 - A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. A block never shows with parts silently dropped.
+- The connected OpenChamber server detects closed invalid programs from live text events and owns automatic repair. Rendering and form submission have no role in triggering it. Standalone VS Code keeps the source fallback.
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.
 - A page takes one answer: a press answers the waiting call at once, and the block freezes.
@@ -18,6 +19,10 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 
 ## Decisions
 
+### Why the server detects invalid blocks
+
+Background tabs can defer mounting a block indefinitely. The server observes live text independently of browsers and validates explicitly closed Markdown fences with the same catalog. It interrupts invalid output, waits for execution cleanup and submits concise correction feedback, at most twice per task. Frontend parsing still draws streaming content and source fallback.
+
 ### Why OpenUI's language and not our own JSON format
 
 The language streams well: the parser returns a partial tree for any prefix, so a block grows while the reply arrives, and its diagnostics name the component, argument and signature. Positional arguments are the risk for weaker models; the catalog keeps argument lists short and close to OpenUI's standard catalog.
@@ -26,9 +31,11 @@ The language streams well: the parser returns a partial tree for any prefix, so 
 
 `@openuidev/react-lang` brings devtools with a second lucide version, and `@openuidev/react-ui` a whole component kit (Radix, d3, Markdown, syntax highlighting) that we would override anyway. Drawing the evaluated tree with our own components keeps the look in our theme and the bundle small.
 
-### Why the server gets generated text and not the catalog
+### Why the server gets generated guidance and validation
 
-`lang-core` has an install-time telemetry `postinstall` script. Bun blocks it, but npm runs it, and `@openchamber/web` is installed with npm. Keeping the package out of the server means users' installs never run it; the server reads a generated copy of the guidance instead.
+`lang-core` has an install-time telemetry `postinstall` script. Bun blocks it, but npm runs it, and `@openchamber/web` is installed with npm. The UI generation command bundles the shared parser into a standalone Node module alongside generated guidance, keeping the dependency out of published server installs.
+
+The validator bundle is an ignored build output, included by the Web package's `server` file entry. Repository installation, Web development, builds, tests and prepack generate it from checked source. Direct server launches from a checkout require `bun run --cwd packages/ui ui-blocks:generate` after changing the catalog or extractor.
 
 ### Why a reply's answer is synthetic input and not a user message
 

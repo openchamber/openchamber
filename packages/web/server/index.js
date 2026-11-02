@@ -76,6 +76,7 @@ import {
   registerServerStatusRoutes,
 } from './lib/opencode/core-routes.js';
 import { registerOpenChamberRoutes } from './lib/opencode/openchamber-routes.js';
+import { createUiBlockRepair } from './lib/opencode/ui-block-repair.js';
 import { createServerUtilsRuntime } from './lib/opencode/server-utils-runtime.js';
 import { createOpenCodeTrust } from './lib/opencode-trust/index.js';
 import { registerSessionProjectRoutes } from './lib/projects/session-directory.js';
@@ -1132,6 +1133,12 @@ const openCodeSessionClient = (directory) => createOpenCodeClient({
   headers: getOpenCodeAuthHeaders(),
   directory,
 });
+const uiBlockRepair = createUiBlockRepair({
+  clientFor: openCodeSessionClient,
+  onStop: (sessionID, directory) => {
+    sessionGoalRuntime.processPayload({ type: 'session.idle', properties: { sessionID, aborted: true } }, directory);
+  },
+});
 
 /**
  * Owns what a session must be told about the project's knowledge. Every sender
@@ -1373,6 +1380,9 @@ void workflowRuntime.start().catch((error) => {
 });
 // Reports wait for OpenCode, which answers once the event hub connects.
 globalMessageStreamHub.subscribeStatus((status) => {
+  if (status.type === 'disconnect') uiBlockRepair.reset();
+});
+globalMessageStreamHub.subscribeStatus((status) => {
   if (status?.type === 'connect') void workflowRuntime.deliverPending();
 });
 
@@ -1434,6 +1444,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
   const directory = typeof event?.directory === 'string' && event.directory && event.directory !== 'global'
     ? event.directory
     : '';
+  const repairingUiBlock = uiBlockRepair.onEvent(event);
   // The hub translates v2 wire events into the server's vocabulary once; these
   // consumers were written against it and stay unaware of the wire shape.
   for (const payload of event?.translated?.() ?? []) {
@@ -1447,7 +1458,8 @@ globalMessageStreamHub.subscribeEvent((event) => {
     turnDurationRecorder.processPayload(payload, directory || payload.properties?.directory || '');
     sessionAssistRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWorkRuntime.processPayload(payload, directory || payload.properties?.directory || '');
-    sessionGoalRuntime.processPayload(payload, directory || payload.properties?.directory || '');
+    // Repair resumes this task; its automatic interruption must not pause the goal.
+    if (!repairingUiBlock) sessionGoalRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     contextObligatoryRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWarmingRuntime.processPayload(payload);
     trackerSessionStatus.processPayload(payload, { spaceId: event?.spaceId ?? null });
@@ -2827,6 +2839,7 @@ async function main(options = {}) {
   relayService.registerRoutes(app);
 
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
+  uiBlockRepair.registerRoutes(app);
 
   // One scanner backs both discovery and the tunnel allowlist, so a port the
   // user can see is exactly a port the tunnel will dial.
