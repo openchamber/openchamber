@@ -21,6 +21,13 @@ This folder owns runtime-independent controls and their Base UI integration, inc
 
 ## Decisions
 
+### Why KeepAlive snapshots before hiding
+
+`onBeforeHide` runs for the outgoing non-null key in React's before-mutation
+snapshot phase. Consumers can capture measurable DOM before Activity or a
+placeholder host hides it. Layout-effect cleanup can already see hidden nodes,
+so it cannot provide the same capture guarantee. Same-key updates do not capture.
+
 ### Why the toolbar folds by trying, not by arithmetic
 
 `ActionToolbar` hides actions from the end of the row through a `data-folded` attribute set on the DOM until the row stops overflowing, then renders the menu from what it hid. Counting fixed 24px slots, as the Files toolbar did before, breaks on anything that is not a button: the save status, the inline go-to-line field, labels in other languages. React never renders `data-folded`, so a render keeps the fit until the next one runs on a resize or a changed set of actions.

@@ -10,10 +10,29 @@ type KeepAliveProps = {
   cacheKey: string | null;
   capacity: number;
   children: React.ReactNode;
+  /** Runs before React hides the outgoing entry, while its DOM is measurable. */
+  onBeforeHide?: () => void;
 };
 
+export class KeepAlive extends React.Component<KeepAliveProps> {
+  getSnapshotBeforeUpdate(previous: KeepAliveProps) {
+    if (previous.cacheKey !== null && previous.cacheKey !== this.props.cacheKey) {
+      previous.onBeforeHide?.();
+    }
+    return null;
+  }
+
+  componentDidUpdate() {
+    // React requires the paired lifecycle for getSnapshotBeforeUpdate.
+  }
+
+  render() {
+    return <RetainedEntries {...this.props} />;
+  }
+}
+
 /** Retains keyed React subtrees. Removing the least-recent entry unmounts it. */
-export function KeepAlive({ cacheKey, capacity, children }: KeepAliveProps) {
+function RetainedEntries({ cacheKey, capacity, children }: KeepAliveProps) {
   if (!Number.isInteger(capacity) || capacity < 1) {
     throw new Error('KeepAlive capacity must be a positive integer');
   }
