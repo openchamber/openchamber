@@ -166,6 +166,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 - The history answer is remembered per repo, branch, and ordered primary source-owner set so discovery polls do not re-query it: a found closed/merged record for `6h`, and "no history yet" for `10m`. Scoping by ordered source owners prevents cache misses and result confusion when searching the same fork branch from different direct-upstream or fork-origin remotes. A found record only changes if a second PR appears on the same head, and while that one is open the open-PR path wins without ever reading this cache.
 - Creating, merging, or closing a PR invalidates both the shared repo pull list and that remembered history.
 - The status read skips the checks summary and the merge-permission lookup for a closed/merged PR: neither is actionable, and both cost extra GitHub calls.
+- Merge-permission refusals are remembered for five minutes per host, account, credential revision and repository. Rate-limit 403s and other failures are not remembered. Storing a refusal removes expired entries and evicts the oldest entry above 1000; a successful check clears that repository's refusal. A new credential revision bypasses an old refusal, while an in-place permission grant waits for expiry unless capacity eviction removes it sooner.
 - A `404` during repo lookups is an expected gap, not a hard error. A `403` skips that remote while another resolves; when none resolves, `/pr/status` answers `403` with GitHub's own message, such as an organization restricting OAuth apps, and the Git view shows it under "Pull request status unavailable". A `404` there keeps the quiet `project: null` answer.
 
 ## Rate limiting
@@ -265,6 +266,10 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 - Repo parser supports scp, `ssh://`, and `https://` remotes for any host, including GitHub Enterprise; `getOctokitOrNull(host)` pairs each Enterprise host with that host's gh token. Remotes on hosts the server never authenticated with are refused before any token is looked up ("Host trust" above), so a gitlab.com (or arbitrary) remote resolves to `repo: null` instead of receiving an enterprise token.
 
 ## Decisions
+
+### Why merge-permission refusals are remembered for five minutes
+
+Non-collaborator permission checks repeatedly return the same 403, producing log noise and an unnecessary request on each status read. A bounded process-local memo suppresses those requests while allowing permission changes to appear after five minutes; rate limits remain transient and are never stored as permission refusals.
 
 ### Why host trust and token invalidation share gh's config directory
 
