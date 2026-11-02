@@ -204,7 +204,7 @@
   "patchedDependencies": {
     "@tanstack/virtual-core@3.19.10": "bun-patches/@tanstack+virtual-core+3.19.10.patch",
     "happy-dom@18.0.1": "bun-patches/happy-dom@18.0.1.patch",
-    "@legendapp/list@3.6.0": "bun-patches/@legendapp%2Flist@3.6.0.patch",
+    "@legendapp/list@3.7.1": "bun-patches/@legendapp%2Flist@3.7.1.patch",
     "@codemirror/view@6.43.15": "bun-patches/@codemirror%2Fview@6.43.15.patch",
     "bun-pty@0.6.0": "bun-patches/bun-pty@0.6.0.patch"
   }
