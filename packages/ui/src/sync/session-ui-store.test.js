@@ -679,6 +679,24 @@ describe('sendMessage captured target', () => {
     expect(selection.getSessionAgentSelection('session-captured')).toBe('review');
     selection.clearSessionSelections('session-captured');
   });
+
+  test('only a successful model-carrying send consumes a live model pick', async () => {
+    const selection = useSelectionStore.getState();
+    selection.pickSessionModel('session-captured', 'provider-a', 'model-a');
+    opencodeClient.sendMessage = async () => { throw new Error('offline'); };
+    await expect(sendWithAgent('plan')).rejects.toThrow('offline');
+    expect(selection.getSessionModelPick('session-captured')).toEqual({ providerId: 'provider-a', modelId: 'model-a' });
+    const shell = spyOn(opencodeClient, 'shellSession').mockResolvedValue(undefined);
+    try {
+      await sendWithAgent('plan', 'shell');
+      expect(selection.getSessionModelPick('session-captured')).not.toBeNull();
+    } finally {
+      shell.mockRestore();
+    }
+    opencodeClient.sendMessage = async () => 'msg';
+    await sendWithAgent('plan');
+    expect(selection.getSessionModelPick('session-captured')).toBeNull();
+  });
 });
 
 describe('slash-command goal objectives', () => {
@@ -2494,6 +2512,47 @@ describe('sendMessage effort record', () => {
   const send = (variant) => useSessionUIStore.getState().sendMessage(
     'hello', PROVIDER, MODEL, AGENT, undefined, undefined, undefined, variant, 'normal',
   );
+
+  test('a successful send settles its captured runtime pick after a runtime switch', async () => {
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeKey = getRuntimeKey();
+    const selection = useSelectionStore.getState();
+    selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+    opencodeClient.sendMessage = async () => {
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://send-other.test', runtimeKey: 'send-other' });
+      selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+      return 'msg';
+    };
+    try {
+      await send(undefined);
+      expect(selection.getSessionModelPick(SESSION)).toEqual({ providerId: PROVIDER, modelId: MODEL });
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+      expect(selection.getSessionModelPick(SESSION)).toBeNull();
+    } finally {
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    }
+  });
+
+  test('a successful send leaves a newer pick of the same model unsent', async () => {
+    const selection = useSelectionStore.getState();
+    selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+    opencodeClient.sendMessage = async () => {
+      selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+      return 'msg';
+    };
+    await send(undefined);
+    expect(selection.getSessionModelPick(SESSION)).toEqual({ providerId: PROVIDER, modelId: MODEL });
+    selection.clearSessionSelections(SESSION);
+  });
+
+  test('a failed send leaves its model pick unsent', async () => {
+    const selection = useSelectionStore.getState();
+    selection.pickSessionModel(SESSION, PROVIDER, MODEL);
+    opencodeClient.sendMessage = async () => { throw new Error('send refused'); };
+    await expect(send(undefined)).rejects.toThrow('send refused');
+    expect(selection.getSessionModelPick(SESSION)).toEqual({ providerId: PROVIDER, modelId: MODEL });
+    selection.clearSessionSelections(SESSION);
+  });
 
   test('keeps an explicit Default across the send that follows it', async () => {
     // What the picker leaves behind: `null` recorded, and a send that carries

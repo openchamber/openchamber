@@ -3597,6 +3597,23 @@ export const useConfigStore = create<ConfigStore>()(
                             return { override: undefined, inherited };
                         };
 
+                        // Only a live unsent pick overrides both an older per-agent
+                        // choice and a pinned model, including discovery gaps.
+                        const livePick = currentSessionId
+                            ? useSelectionStore.getState().getSessionModelPick(currentSessionId)
+                            : null;
+                        const hasLiveModelPick = currentSessionId
+                            ? livePick?.providerId === currentProviderId && livePick.modelId === currentModelId
+                            : hadManualSelection && Boolean(currentProviderId && currentModelId);
+                        if (hasLiveModelPick) {
+                            if (currentSessionId) {
+                                const selection = useSelectionStore.getState();
+                                selection.saveSessionModelSelection(currentSessionId, currentProviderId, currentModelId);
+                                selection.saveAgentModelForSession(currentSessionId, agentName, currentProviderId, currentModelId);
+                            }
+                            return;
+                        }
+
                         // Prefer a session-level manual override for this agent over the
                         // agent's configured default. Re-applying setAgent after subtask
                         // completion / rematerialization must not clobber the override

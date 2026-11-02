@@ -2414,6 +2414,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       // ---- Existing session ----
       const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
+      const settleModelPick = targetSessionId
+        ? useSelectionStore.getState().captureSessionModelPickSettlement(targetSessionId, providerID, modelID, capturedRuntimeKey)
+        : undefined
       const resumeAfterSend = options?.userInitiated && inputMode !== 'shell' && targetSessionId
         ? prepareUserMessageResume(targetSessionId, capturedRuntimeKey)
         : undefined
@@ -2542,6 +2545,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (routed !== "shell" && options?.recordEffort && isCurrentRuntimeInstance()) {
         rememberEffort(providerID, modelID, variant ?? null, effortRevision)
       }
+      if (routed !== "shell") settleModelPick?.()
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
     })

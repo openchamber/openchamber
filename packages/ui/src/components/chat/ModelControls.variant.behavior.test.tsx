@@ -72,6 +72,7 @@ const variantWrites: VariantChoice[] = [];
 const overrideWrites: Array<{ override: VariantChoice; inherited: VariantChoice }> = [];
 /** Every model remembered as the last chat pick. */
 const lastSelectedWrites: string[] = [];
+const pendingModelWrites: string[] = [];
 
 type ConfigState = {
   providers: typeof provider[];
@@ -179,6 +180,7 @@ type SelectionState = {
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null;
   getAgentModelVariantForSession: () => VariantChoice;
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void;
+  pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void;
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void;
   pickSessionAgent: (sessionId: string, agentName: string) => void;
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void;
@@ -217,6 +219,7 @@ const useSelectionStore = create<SelectionState>((set, get) => ({
   getAgentModelForSession: () => ({ providerId: PROVIDER_ID, modelId: MODEL_ID }),
   getAgentModelVariantForSession: () => get().savedVariant,
   saveSessionModelSelection: () => undefined,
+  pickSessionModel: (sessionId, providerId, modelId) => { pendingModelWrites.push(`${sessionId}:${providerId}/${modelId}`); },
   saveSessionAgentSelection: (sessionId, agentName) => set((state) => ({
     sessionAgentSelections: new Map(state.sessionAgentSelections).set(sessionId, agentName),
   })),
@@ -502,6 +505,7 @@ describe('ModelControls effort restore', () => {
     variantWrites.length = 0;
     overrideWrites.length = 0;
     lastSelectedWrites.length = 0;
+    pendingModelWrites.length = 0;
     latestUserChoice = null;
     knownElsewhere = nothingKnownElsewhere();
     setSessionRecord(undefined);
@@ -591,6 +595,7 @@ describe('ModelControls effort restore', () => {
       expect(variantWrites).not.toContain(null);
       // Opening a session is not a pick: the next new session must not inherit its model.
       expect(lastSelectedWrites).toEqual([]);
+      expect(pendingModelWrites).toEqual([]);
       expect(useSelectionStore.getState().savedVariant).toBe('low');
       expect(useConfigStore.getState().currentVariantSelection.override).toBe('low');
     } finally {
@@ -1120,6 +1125,7 @@ describe('ModelControls effort restore', () => {
         await act(async () => dom.container.querySelector<HTMLButtonElement>('.model-controls__model-trigger')?.click());
         const modelButton = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button:not(.model-controls__model-trigger)')).find((button) => button.textContent?.trim() === MODEL_ID);
         await act(async () => modelButton?.click());
+        expect(pendingModelWrites).toContain(`${btwSessionId}:${PROVIDER_ID}/${MODEL_ID}`);
         expect(saveModel.mock.calls.at(-1)).toEqual([btwSessionId, PROVIDER_ID, MODEL_ID]);
         expect(saveAgentModel.mock.calls.at(-1)).toEqual([btwSessionId, 'plan', PROVIDER_ID, MODEL_ID]);
 

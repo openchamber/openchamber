@@ -308,6 +308,7 @@ describe('useConfigStore provider persistence', () => {
     setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
     useSelectionStore.setState({
       sessionModelSelections: new Map(),
+      sessionPickedModels: new Map(),
       sessionAgentSelections: new Map(),
       sessionAgentModelSelections: new Map(),
       lastUsedProvider: null,
@@ -1180,6 +1181,66 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentModelId).toBe('gpt-5.5');
     expect(state.currentVariant).toBe('high');
   });
+
+  test('[issue-5933] a manual model pick survives picking an agent that configures a model', () => {
+    const sessionId = 'ses_5933_manual_model_survives_agent';
+    useSessionUIStore.setState({ currentSessionId: sessionId });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [
+        provider('openai', 'gpt-5.5', ['low', 'high']),
+        provider('anthropic', 'claude-3', ['low', 'high']),
+      ],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
+      settingsDefaultModel: 'openai/gpt-5.5',
+      // Restores also mark the model manual; the pending pick records intent.
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude-3',
+      currentVariant: undefined,
+      selectionSource: 'manual',
+      directoryScoped: {},
+    });
+
+    useSelectionStore.getState().pickSessionModel(sessionId, 'anthropic', 'claude-3');
+    // Picking an agent must not move the session off the model the user chose.
+    useConfigStore.getState().setAgent('plan');
+
+    const state = useConfigStore.getState();
+    expect(state.currentProviderId).toBe('anthropic');
+    expect(state.currentModelId).toBe('claude-3');
+    expect(state.selectionSource).toBe('manual');
+    expect(useSelectionStore.getState().getAgentModelForSession(sessionId, 'plan')).toEqual({
+      providerId: 'anthropic',
+      modelId: 'claude-3',
+    });
+  });
+
+  for (const scenario of ['older override', 'undiscovered pinned model', 'restored selection', 'draft pick']) {
+    test(`[issue-5933] model precedence with ${scenario}`, () => {
+      const sessionId = 'ses_5933_precedence';
+      useSessionUIStore.setState({ currentSessionId: scenario === 'draft pick' ? null : sessionId });
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [provider('anthropic', 'claude-3', ['low', 'high']), provider('openai', 'gpt-5.5')],
+        agents: [testAgent('plan', { model: {
+          providerID: 'openai', modelID: scenario === 'undiscovered pinned model' ? 'not-discovered' : 'gpt-5.5',
+        } })],
+        settingsDefaultModel: 'openai/gpt-5.5',
+        currentProviderId: 'anthropic', currentModelId: 'claude-3', selectionSource: 'manual',
+        currentVariant: 'high', currentVariantSelection: { override: 'high', inherited: 'low' },
+      });
+      const selection = useSelectionStore.getState();
+      if (scenario === 'older override') selection.saveAgentModelForSession(sessionId, 'plan', 'openai', 'gpt-5.5');
+      if (scenario !== 'restored selection') selection.pickSessionModel(sessionId, 'anthropic', 'claude-3');
+      else selection.saveSessionModelSelection(sessionId, 'anthropic', 'claude-3');
+
+      useConfigStore.getState().setAgent('plan');
+
+      expect(useConfigStore.getState().currentModelId).toBe(scenario === 'restored selection' ? 'gpt-5.5' : 'claude-3');
+      expect(useConfigStore.getState().selectionSource).toBe(scenario === 'restored selection' ? 'auto' : 'manual');
+      expect(useConfigStore.getState().currentVariant).toBe(scenario === 'restored selection' ? undefined : 'high');
+    });
+  }
 
   test('[issue-4601] the settings effort stays with the settings model', () => {
     const sessionId = 'ses_4601_settings_effort';

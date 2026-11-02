@@ -33,6 +33,8 @@ const persistedSelectionSchema = z.object({
 
 type SelectionState = {
   sessionModelSelections: Map<string, ModelSelection>
+  /** Runtime-scoped model picks that no send has carried yet. Restores never write here. */
+  sessionPickedModels: Map<string, ModelSelection>
   sessionAgentSelections: Map<string, string>
   /** The agent picked in the composer for a session that no send has carried yet. */
   sessionPickedAgents: Map<string, string>
@@ -46,6 +48,10 @@ type SelectionState = {
 
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void
   getSessionModelSelection: (sessionId: string) => { providerId: string; modelId: string } | null
+  pickSessionModel: (sessionId: string, providerId: string, modelId: string) => void
+  getSessionModelPick: (sessionId: string) => ModelSelection | null
+  /** Call after acceptance; only the captured pick in its runtime can be settled. */
+  captureSessionModelPickSettlement: (sessionId: string, providerId: string, modelId: string, runtimeKey?: string) => () => void
   /** Leaves an unsent pick for another agent in place. */
   saveSessionAgentSelection: (sessionId: string, agentName: string) => void
   getSessionAgentSelection: (sessionId: string) => string | null
@@ -96,6 +102,7 @@ export const useSelectionStore = create<SelectionState>()(
   persist(
     (set, get) => ({
       sessionModelSelections: new Map(),
+      sessionPickedModels: new Map(),
       sessionAgentSelections: new Map(),
       sessionPickedAgents: new Map(),
       sessionFollowedAgents: new Map(),
@@ -113,6 +120,26 @@ export const useSelectionStore = create<SelectionState>()(
         }),
 
       getSessionModelSelection: (sessionId) => get().sessionModelSelections.get(sessionId) ?? null,
+
+      pickSessionModel: (sessionId, providerId, modelId) => set((state) => {
+        const sessionPickedModels = new Map(state.sessionPickedModels)
+        sessionPickedModels.set(variantSessionKey(sessionId), { providerId, modelId })
+        return { sessionPickedModels }
+      }),
+
+      getSessionModelPick: (sessionId) => get().sessionPickedModels.get(variantSessionKey(sessionId)) ?? null,
+
+      captureSessionModelPickSettlement: (sessionId, providerId, modelId, runtimeKey = getRuntimeKey()) => {
+        const key = JSON.stringify([runtimeKey, sessionId])
+        const pick = get().sessionPickedModels.get(key)
+        return () => set((state) => {
+          if (!pick || pick.providerId !== providerId || pick.modelId !== modelId
+            || state.sessionPickedModels.get(key) !== pick) return state
+          const sessionPickedModels = new Map(state.sessionPickedModels)
+          sessionPickedModels.delete(key)
+          return { sessionPickedModels }
+        })
+      },
 
       saveSessionAgentSelection: (sessionId, agentName) =>
         set((s) => {
@@ -208,12 +235,14 @@ export const useSelectionStore = create<SelectionState>()(
         const variantKey = variantSessionKey(sessionId)
         const hadVariant = state.agentModelVariantSelections.has(variantKey)
         if (!hadVariant && !state.sessionModelSelections.has(sessionId)
+          && !state.sessionPickedModels.has(variantKey)
           && !state.sessionAgentSelections.has(sessionId)
           && !state.sessionPickedAgents.has(sessionId)
           && !state.sessionFollowedAgents.has(sessionId)
           && !state.sessionFollowedModels.has(sessionId)
           && !state.sessionAgentModelSelections.has(sessionId)) return state
         const sessionModelSelections = new Map(state.sessionModelSelections)
+        const sessionPickedModels = new Map(state.sessionPickedModels)
         const sessionAgentSelections = new Map(state.sessionAgentSelections)
         const sessionPickedAgents = new Map(state.sessionPickedAgents)
         const sessionFollowedAgents = new Map(state.sessionFollowedAgents)
@@ -221,13 +250,14 @@ export const useSelectionStore = create<SelectionState>()(
         const sessionAgentModelSelections = new Map(state.sessionAgentModelSelections)
         const agentModelVariantSelections = new Map(state.agentModelVariantSelections)
         sessionModelSelections.delete(sessionId)
+        sessionPickedModels.delete(variantKey)
         sessionAgentSelections.delete(sessionId)
         sessionPickedAgents.delete(sessionId)
         sessionFollowedAgents.delete(sessionId)
         sessionFollowedModels.delete(sessionId)
         sessionAgentModelSelections.delete(sessionId)
         agentModelVariantSelections.delete(variantKey)
-        return { sessionModelSelections, sessionAgentSelections, sessionPickedAgents, sessionFollowedAgents, sessionFollowedModels, sessionAgentModelSelections, agentModelVariantSelections }
+        return { sessionModelSelections, sessionPickedModels, sessionAgentSelections, sessionPickedAgents, sessionFollowedAgents, sessionFollowedModels, sessionAgentModelSelections, agentModelVariantSelections }
       }),
 
       saveAgentModelVariantForSession: (sessionId, agentName, providerId, modelId, variant) => set((state) => {

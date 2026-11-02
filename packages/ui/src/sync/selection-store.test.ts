@@ -1,9 +1,11 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { useSelectionStore } from './selection-store';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 beforeEach(() => {
   useSelectionStore.setState({
     sessionModelSelections: new Map(),
+    sessionPickedModels: new Map(),
     sessionAgentSelections: new Map(),
     sessionPickedAgents: new Map(),
     sessionFollowedAgents: new Map(),
@@ -11,6 +13,46 @@ beforeEach(() => {
     sessionAgentModelSelections: new Map(),
     agentModelVariantSelections: new Map(),
   });
+});
+
+test('only explicit model picks grant unsent intent, settled by the matching send or session cleanup', () => {
+  const store = useSelectionStore.getState();
+  store.saveSessionModelSelection('one', 'p', 'restored');
+  expect(store.getSessionModelPick('one')).toBeNull();
+  store.pickSessionModel('one', 'p', 'picked');
+  store.captureSessionModelPickSettlement('one', 'p', 'old')();
+  expect(store.getSessionModelPick('one')).toEqual({ providerId: 'p', modelId: 'picked' });
+  store.captureSessionModelPickSettlement('one', 'p', 'picked')();
+  expect(store.getSessionModelPick('one')).toBeNull();
+  store.pickSessionModel('one', 'p', 'picked');
+  store.clearSessionSelections('one');
+  expect(store.getSessionModelPick('one')).toBeNull();
+});
+
+test('settlement follows its runtime and preserves newer picks, including the same model picked again', () => {
+  const runtimeKey = getRuntimeKey();
+  const apiBaseUrl = getRuntimeApiBaseUrl();
+  const store = useSelectionStore.getState();
+  try {
+    store.pickSessionModel('one', 'p', 'picked');
+    const settle = store.captureSessionModelPickSettlement('one', 'p', 'picked');
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://model-other.test', runtimeKey: 'model-other' });
+    store.pickSessionModel('one', 'p', 'picked');
+    settle();
+    expect(store.getSessionModelPick('one')).toEqual({ providerId: 'p', modelId: 'picked' });
+    switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    expect(store.getSessionModelPick('one')).toBeNull();
+
+    for (const model of ['newer', 'picked']) {
+      store.pickSessionModel('one', 'p', 'picked');
+      const settleOlder = store.captureSessionModelPickSettlement('one', 'p', 'picked');
+      store.pickSessionModel('one', 'p', model);
+      settleOlder();
+      expect(store.getSessionModelPick('one')).toEqual({ providerId: 'p', modelId: model });
+    }
+  } finally {
+    switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+  }
 });
 
 test('named effort and explicit Default survive the persisted round trip', () => {

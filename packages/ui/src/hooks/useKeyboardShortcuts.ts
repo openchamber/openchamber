@@ -355,6 +355,8 @@ export const useKeyboardShortcuts = () => {
     if (!next) return false;
     config.setProvider(next.providerID);
     config.setModel(next.modelID);
+    const sessionId = useSessionUIStore.getState().currentSessionId;
+    if (sessionId) useSelectionStore.getState().pickSessionModel(sessionId, next.providerID, next.modelID);
     state.addRecentModel(next.providerID, next.modelID);
     state.setLastSelectedModel(next.providerID, next.modelID);
   }

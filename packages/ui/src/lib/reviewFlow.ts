@@ -167,6 +167,7 @@ const sendPlainMessage = async (
   const resolved = modelContext ?? resolveModelContext(sessionID);
   if (!resolved) throw new Error('Select a model before sending review flow messages');
   const selection = useSelectionStore.getState();
+  const settleModelPick = selection.captureSessionModelPickSettlement(sessionID, resolved.providerID, resolved.modelID, runtimeKey);
   selection.saveSessionModelSelection(sessionID, resolved.providerID, resolved.modelID);
   if (resolved.agent) {
     selection.saveSessionAgentSelection(sessionID, resolved.agent);
@@ -204,6 +205,7 @@ const sendPlainMessage = async (
       }).then(() => undefined);
     },
   });
+  settleModelPick();
 };
 
 const requestChatForceScrollBottom = (sessionId: string): void => {

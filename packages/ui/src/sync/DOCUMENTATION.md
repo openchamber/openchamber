@@ -443,6 +443,16 @@ within the same project preserves manual choices. Activation continuations
 check the runtime, draft identity, target revision, and manual-selection state
 before applying defaults again.
 
+The runtime/session-keyed `sessionPickedModels` map in `selection-store.ts`
+tracks explicit model picks until a matching successful send, accepted queue
+item, or manual compaction carries them. Each operation captures settlement
+before waiting, including review-flow sends. Success settles the captured
+runtime/session pick even after a runtime switch; a newer pick, including a
+repeat of the same model, survives the older operation. Failure retains the pick.
+History restores never create that intent. This map is
+memory-only; session deletion clears it, and runtime keys isolate server picks.
+Agent selection uses it before old per-agent choices or pinned models.
+
 `selection-store.ts` persists runtime/session-keyed effort overrides alongside model and
 agent choices. Both a named effort and explicit `Default` survive reload, with
 the same 150-session persistence bound as the existing selections. Old payloads
