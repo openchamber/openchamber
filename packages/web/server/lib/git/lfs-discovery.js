@@ -79,7 +79,8 @@ const parseAttributes = (value, limits) => {
   const seen = new Set();
   for (let index = 0; index < fields.length; index += 3) {
     const filePath = validateRepositoryPath(fields[index]);
-    if (fields[index + 1] !== 'filter' || !fields[index + 2]) throw lfsError('Effective attributes output is malformed');
+    // An empty value is valid: `filter=` in `.gitattributes` sets it to "".
+    if (fields[index + 1] !== 'filter') throw lfsError('Effective attributes output is malformed');
     if (fields[index + 2] === 'lfs' && !seen.has(filePath)) {
       seen.add(filePath);
       paths.push(filePath);
