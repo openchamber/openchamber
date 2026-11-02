@@ -570,6 +570,10 @@ export const SETTINGS_REGISTRY = {
   fallbackModel: field({ scope: 'profile', parse: parseNonEmptyString }),
   fallbackVariant: field({ scope: 'profile', parse: parseNonEmptyString }),
   accountSwitchProviders: field({ scope: 'profile', parse: parseStringSet }),
+  // Read by the managed OpenCode retry-policy plugin (server lib/retry-policy).
+  // Zero keeps OpenCode's own wait; the server bounds the value at 15 minutes.
+  retryWaitMaxMs: field({ scope: 'profile', parse: parseIntegerAtLeast(0) }),
+  retryNowEnabled: field({ scope: 'profile', parse: parseBoolean }),
   zenModel: field({ scope: 'profile', parse: parseNonEmptyTrimmedString }),
   // The model-prefs auto-save owns these with its own debounce.
   favoriteModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(64), ui: uiStore('favoriteModels', setUi('favoriteModels'), { autoSave: false }) }),

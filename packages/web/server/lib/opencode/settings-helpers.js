@@ -832,6 +832,14 @@ export const createSettingsHelpers = (dependencies) => {
     if (Array.isArray(candidate.accountSwitchProviders)) {
       result.accountSwitchProviders = normalizeStringArray(candidate.accountSwitchProviders);
     }
+    if (Number.isFinite(candidate.retryWaitMaxMs) && candidate.retryWaitMaxMs >= 0) {
+      // 15 minutes is the same ceiling the retry-policy route enforces.
+      result.retryWaitMaxMs = Math.min(Math.round(candidate.retryWaitMaxMs), 15 * 60 * 1000);
+    }
+    const retryNow = z.boolean().safeParse(candidate.retryNowEnabled);
+    if (retryNow.success) {
+      result.retryNowEnabled = retryNow.data;
+    }
     if (typeof candidate.defaultGitIdentityId === 'string') {
       const trimmed = candidate.defaultGitIdentityId.trim();
       result.defaultGitIdentityId = trimmed.length > 0 ? trimmed : undefined;

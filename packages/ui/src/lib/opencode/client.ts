@@ -38,6 +38,9 @@ import { getSpaceMark, spaceMarkSchema, type SpaceMark } from "@/lib/spaces/spac
 import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { markStartupTrace } from "@/lib/startupTrace"
+
+/** The managed OpenChamber plugin's control command; it wakes a held retry. */
+export const RETRY_NOW_COMMAND = 'openchamber-retry-now'
 import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess } from "./provider-tracker"
 import { normalizePath } from "@/lib/pathNormalization"
 import { PART_SHELLS_HEADER, PART_SHELLS_VERSION } from "./toolContentShells"
@@ -1623,6 +1626,23 @@ class OpencodeService {
         delivery: params.delivery,
       }),
     )
+  }
+
+  /**
+   * Wakes the managed plugin's held provider retry for this session. Unlike
+   * `sendCommand`, it changes no model, agent or context and starts no turn.
+   */
+  async retryNow(params: {
+    runtimeKey?: string
+    id: string
+    directory?: string | null
+  }): Promise<void> {
+    this.assertRuntimeUnchanged(params.runtimeKey)
+    await call("session.command", () => this.clientFor(params.directory).session.command({
+      sessionID: params.id,
+      name: RETRY_NOW_COMMAND,
+      text: "",
+    }))
   }
 
   /** Interrupts the running turn. Resolves false when nothing was running. */

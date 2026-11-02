@@ -10,10 +10,12 @@ import { useAllLiveSessions, useAllSessionStatuses, useDirectorySync } from '@/s
 import { useSessionWorkflowRuns } from '@/lib/workflows/store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useCommandsStore } from '@/stores/useCommandsStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
+import { opencodeClient, RETRY_NOW_COMMAND } from '@/lib/opencode/client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
-import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
+import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { useOpenChildSession } from './useOpenChildSession';
 import { formatCost } from './subagentCost';
@@ -40,6 +42,12 @@ const SubagentDuration: React.FC<{ sessionId: string }> = ({ sessionId }) => {
 export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers);
+  const canRetryNow = useCommandsStore((state) => state.commands.some(
+    (command) => command.name === RETRY_NOW_COMMAND && command.fromOpenCode === true,
+  ));
+  const retryNow = React.useCallback((childSessionId: string, childDirectory: string | null | undefined) => {
+    void opencodeClient.retryNow({ id: childSessionId, directory: childDirectory ?? null }).catch(() => undefined);
+  }, []);
 
   const liveSessions = useAllLiveSessions();
   const statuses = useAllSessionStatuses();
@@ -133,7 +141,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
     // Blockers first, then running rows, then rows whose status is not known
     // yet, then finished ones: an unknown row must not push a working one down.
     const rank = blocked || asked ? 0 : busy ? 1 : finished ? 3 : 2;
-    return { child, blocked, asked, busy, failed, done, rank };
+    return { child, blocked, asked, busy, failed, done, rank, status };
   });
   // Newest first by creation within each rank, never by last activity: an
   // activity order reshuffled the rows on every step, moving them under the
@@ -152,7 +160,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       summary={busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
     >
       <div className="max-h-56 overflow-y-auto">
-        {rows.map(({ child, blocked, asked, busy, failed, done }) => {
+        {rows.map(({ child, blocked, asked, busy, failed, done, status }) => {
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           let icon: IconName = 'time';
           let iconColor: string | undefined;
@@ -201,6 +209,15 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
                   ) : asked ? (
                     <WorkStatusValue tone="warning">{t('chat.workStatus.subagent.askedQuestion')}</WorkStatusValue>
                   ) : busy ? <SubagentDuration sessionId={child.id} /> : null}
+                  {status === 'retry' && canRetryNow ? (
+                    <WorkStatusRowAction
+                      tone="info"
+                      onClick={() => retryNow(child.id, child.directory)}
+                      ariaLabel={t('settings.openchamber.defaults.retryNow')}
+                    >
+                      {t('settings.openchamber.defaults.retryNow')}
+                    </WorkStatusRowAction>
+                  ) : null}
                   {childCost > 0 ? <WorkStatusValue tone="muted">{formatCost(childCost)}</WorkStatusValue> : null}
                 </>
               )}

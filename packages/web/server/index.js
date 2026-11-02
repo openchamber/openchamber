@@ -173,6 +173,7 @@ import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
+import { createRetryPolicyRuntime } from './lib/retry-policy/runtime.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
@@ -374,6 +375,7 @@ const deleteImportedTheme = (...args) => themeRuntime.deleteImportedTheme(...arg
 let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let limitFailoverRuntime = null;
+let retryPolicyRuntime = null;
 let managedConfigRuntime = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
@@ -2321,6 +2323,14 @@ async function main(options = {}) {
     authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
     broadcastUiEvent: (event) => broadcastOpenChamberUiEvent(event),
   });
+  retryPolicyRuntime = createRetryPolicyRuntime({
+    fsPromises,
+    path,
+    instanceDir,
+    readSettings: () => readSettingsFromDiskMigrated(),
+    authorizeRequest: (req) => agentToolRuntime.authorizeRequest(req),
+    announceRetry: (sessionID, metadata) => sessionRuntime.announceRetry(sessionID, metadata),
+  });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,
     path,
@@ -2328,6 +2338,7 @@ async function main(options = {}) {
     env: process.env,
     agentToolRuntime,
     limitFailoverRuntime,
+    retryPolicyRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
@@ -2727,6 +2738,7 @@ async function main(options = {}) {
     setAutoAcceptSession,
     agentToolRuntime,
     limitFailoverRuntime,
+    retryPolicyRuntime,
     desktopUpdater,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
