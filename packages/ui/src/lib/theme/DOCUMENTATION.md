@@ -6,6 +6,14 @@ Keep authored definitions separate from runtime colors. Optional values are mean
 
 `syntax.ts` owns syntax inheritance. Code is highlighted by `@pierre/highlights` for the languages it has a lexer for and by Shiki for the rest, so every palette is built in two formats from the same resolved roles: TextMate rules in `buildSyntaxTokenRules`, and Zed token styles in `lib/shiki/zedThemeFromAppTheme.ts`, whose table maps each Highlights token name to a syntax role. Files, diffs and CodeMirror get concrete colors; chat code gets the CSS-variable form of each, so switching palettes does not require tokenizing code again. Highlights accepts only hex colors, so the Zed builder converts `rgb()` itself and other color functions through a canvas where a document exists. Changes to inheritance must preserve explicit overrides and pass compact round-trip tests.
 
+Files, diffs and the editor highlight under a theme's render name
+(`getThemeRenderName` in `lib/shiki/appThemeRegistry.ts`): its ID plus a digest
+of its colours, also the name inside the TextMate and Zed theme objects. A custom
+theme edited on disk keeps its ID, and @pierre/diffs ignores a second
+registration of a name while the diff and highlighter worker caches key on it,
+so rendering under the bare ID would keep the first version until a restart.
+Pass the render name wherever a theme name reaches Pierre or the workers.
+
 CodeMirror, Shiki/Pierre and chat/tool output use the authored
 `syntax.base.background` directly, exposed as `--syntax-background` in CSS.
 There is no global opacity or canvas-mixing adjustment. Built-in palettes keep
