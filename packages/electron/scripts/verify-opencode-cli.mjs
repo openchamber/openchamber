@@ -1,8 +1,7 @@
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseOpenCodeCliVersion, readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';
+import { readPinnedOpenCodeCliVersion, runOpenCodeCliVersion } from './opencode-cli-version.mjs';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
 import { readPeArchitecture } from './windows-executable.mjs';
 
@@ -10,21 +9,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
 
 const binaryName = () => process.platform === 'win32' ? 'opencode.exe' : 'opencode';
-
-const runVersion = (binaryPath) => {
-  const result = spawnSync(binaryPath, ['--version'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 15000,
-    windowsHide: true,
-  });
-  if (result.status !== 0) {
-    const stderr = result.stderr ? `\n${result.stderr.trim()}` : '';
-    const stdout = result.stdout ? `\n${result.stdout.trim()}` : '';
-    throw new Error(`Failed to run bundled OpenCode CLI: ${binaryPath}${stderr}${stdout}`);
-  }
-  return parseOpenCodeCliVersion(result.stdout);
-};
 
 const assertBinary = (binaryPath, expectedVersion) => {
   if (!fs.existsSync(binaryPath)) {
@@ -51,9 +35,15 @@ const assertBinary = (binaryPath, expectedVersion) => {
       return;
     }
   }
-  const actualVersion = runVersion(binaryPath);
+  const result = runOpenCodeCliVersion(binaryPath);
+  // prepare-opencode-cli.mjs checked the package version on such a host.
+  if (result.hostCannotRun) {
+    console.warn(`[electron] this host's CPU has no AVX and cannot run the bundled OpenCode CLI, version not checked here: ${binaryPath}\n${result.detail}`);
+    return;
+  }
+  const actualVersion = result.version;
   if (actualVersion !== expectedVersion) {
-    throw new Error(`Bundled OpenCode CLI version mismatch at ${binaryPath}: expected ${expectedVersion}, got ${actualVersion || '(empty)'}`);
+    throw new Error(`Bundled OpenCode CLI version mismatch at ${binaryPath}: expected ${expectedVersion}, got ${actualVersion || '(none)'}\n${result.detail}`);
   }
   console.log(`[electron] verified bundled OpenCode CLI ${actualVersion}: ${binaryPath}`);
 };

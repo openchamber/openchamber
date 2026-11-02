@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +20,35 @@ export const readPinnedOpenCodeCliVersion = () => {
     throw new Error(`packages/electron/package.json must pin opencodeCli.version to an exact version, got: ${version || '(missing)'}`);
   }
   return version;
+};
+
+const hostLacksAvx = () => {
+  if (process.platform !== 'darwin' || process.arch !== 'x64') return false;
+  const result = spawnSync('sysctl', ['-n', 'hw.optional.avx1_0'], { encoding: 'utf8' });
+  return result.status === 0 && result.stdout.trim() === '0';
+};
+
+/**
+ * Runs `opencode --version`. `hostCannotRun` marks the one host known to be
+ * unable to run the binary at all: OpenCode 2.2.2 and later, built on Bun
+ * 1.4.4, die with SIGILL on a CPU without AVX, the baseline build too
+ * (anomalyco/opencode#60421), and the macOS Intel release runner is such a
+ * host. A SIGILL anywhere else is a broken binary. `detail` carries the exit
+ * and output for an error message.
+ */
+export const runOpenCodeCliVersion = (binaryPath) => {
+  const result = spawnSync(binaryPath, ['--version'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 15000,
+    windowsHide: true,
+  });
+  const output = [result.stderr, result.stdout].map((text) => String(text || '').trim()).filter(Boolean).join('\n');
+  return {
+    version: result.status === 0 ? parseOpenCodeCliVersion(result.stdout) || null : null,
+    hostCannotRun: (result.signal === 'SIGILL' || result.status === 132) && hostLacksAvx(),
+    detail: `${result.error ? result.error.message : `exit ${result.status ?? result.signal}`}${output ? `\n${output}` : ''}`,
+  };
 };
 
 /** OpenCode 2.x answers `--version` with `opencode v2.0.2`; 1.x printed a bare version. */

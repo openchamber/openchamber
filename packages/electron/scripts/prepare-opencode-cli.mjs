@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
-import { parseOpenCodeCliVersion, readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';
+import { readPinnedOpenCodeCliVersion, runOpenCodeCliVersion } from './opencode-cli-version.mjs';
 import { readPeArchitecture } from './windows-executable.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -58,14 +58,7 @@ const outputBinaryPath = (binaryName) => path.join(outputDir, binaryName);
 
 const readBinaryVersion = (binaryPath) => {
   if (!fs.existsSync(binaryPath)) return null;
-  const result = spawnSync(binaryPath, ['--version'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 15000,
-    windowsHide: true,
-  });
-  if (result.status !== 0) return null;
-  return parseOpenCodeCliVersion(result.stdout) || null;
+  return runOpenCodeCliVersion(binaryPath).version;
 };
 
 const readPackageVersion = (extractDir) => {
@@ -163,18 +156,27 @@ const main = async () => {
   fs.copyFileSync(extractedBinary, outputBinary);
   ensureExecutable(outputBinary);
 
-  if (!runsOnHost) {
+  const preparedWithoutRunning = (reason) => {
     const packageVersion = readPackageVersion(extractDir);
     if (packageVersion !== version) {
       throw new Error(`Prepared OpenCode CLI package version mismatch: expected ${version}, got ${packageVersion || 'unknown'}`);
     }
-    console.log(`[electron] prepared OpenCode CLI ${version} (@opencode/cli-${artifact.target}, not run on this ${process.arch} host): ${outputBinary}`);
+    console.log(`[electron] prepared OpenCode CLI ${version} (@opencode/cli-${artifact.target}, ${reason}): ${outputBinary}`);
+  };
+
+  if (!runsOnHost) {
+    preparedWithoutRunning(`not run on this ${process.arch} host`);
     return;
   }
 
-  const preparedVersion = readBinaryVersion(outputBinary);
-  if (preparedVersion !== version) {
-    throw new Error(`Prepared OpenCode CLI version mismatch: expected ${version}, got ${preparedVersion || 'unknown'}`);
+  const prepared = runOpenCodeCliVersion(outputBinary);
+  if (prepared.hostCannotRun) {
+    console.warn(`[electron] this host's CPU has no AVX and cannot run the OpenCode CLI, so its package version is checked instead:\n${prepared.detail}`);
+    preparedWithoutRunning('this host CPU has no AVX');
+    return;
+  }
+  if (prepared.version !== version) {
+    throw new Error(`Prepared OpenCode CLI version mismatch: expected ${version}, got ${prepared.version || 'unknown'}\n${prepared.detail}`);
   }
 
   console.log(`[electron] prepared OpenCode CLI ${version}: ${outputBinary}`);
