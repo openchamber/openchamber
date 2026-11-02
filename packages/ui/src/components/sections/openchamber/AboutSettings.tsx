@@ -305,7 +305,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     }
     void update.checkForUpdates();
   };
-  // The chosen Canary wears the colours of its icon: the violet tile and the yellow bird.
+  // The chosen Canary wears the colours of its icon: the blue tile and the yellow bird.
   const CANARY_COLOURS = 'bg-[var(--brand-canary)] text-[var(--brand-canary-foreground)] hover:bg-[var(--brand-canary)] hover:text-[var(--brand-canary-foreground)]';
   const updateChannelControl = updateChannel && (
     <SettingsChipGroup
