@@ -33,7 +33,7 @@ import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
 import { useI18n } from '@/lib/i18n';
-import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
+import type { Message, ToolInput, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 
 /** The shared frame every notice row sits in, so they line up with messages. */
@@ -160,7 +160,8 @@ type SyntheticMessage = Extract<Message, { role: 'synthetic' }>;
  * for, so it reads like one and opens its child session the same way.
  */
 const toSubagentToolPart = (message: SyntheticMessage, run: SubagentRun, startedAt: number): ToolPartType => {
-    const input = { agent: run.agent ?? 'subagent', description: run.description ?? '' };
+    const input: ToolInput = { description: run.description ?? '' };
+    if (run.agent) input.agent = run.agent;
     const metadata = { sessionID: run.childSessionID };
     const end = message.time.created;
     const base = {

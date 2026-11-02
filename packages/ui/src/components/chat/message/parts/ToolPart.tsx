@@ -1735,8 +1735,15 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         () => (presentation ? renderGuestToolHeader(presentation, { input, output: stateOutput, metadata }) : null),
         [input, metadata, presentation, stateOutput],
     );
-    const description = guestHeader?.subtitle ?? builtInDescription;
-    const displayName = guestHeader?.title ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
+    const requestedAgent = isTaskTool ? subagentAgent(input) : undefined;
+    const displayName = guestHeader?.title
+        ?? requestedAgent
+        ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
+    const description = guestHeader?.subtitle ?? (
+        requestedAgent && displayName === requestedAgent && !subagentDescription(input)
+            ? null
+            : builtInDescription
+    );
 
     // Opened, the body already carries the whole error and output.
     const failureDetail = isError && !isExpanded ? failureReason : undefined;
@@ -1924,7 +1931,13 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                 role="button"
                 tabIndex={0}
             >
-                <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
+                <div className={cn(
+                    'flex gap-1.5',
+                    isMultiFileApplyPatch && 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5',
+                    !isMultiFileApplyPatch && 'items-center',
+                    isTaskTool && 'min-w-0 max-w-[70%]',
+                    !isMultiFileApplyPatch && !isTaskTool && 'flex-shrink-0',
+                )}>
                     {isMultiFileApplyPatch ? (
                         <>
                             <div className="flex h-5 flex-shrink-0 items-center gap-1.5">
@@ -1995,11 +2008,11 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 <MinDurationShineText
                                     active={Boolean(isActive && !isError)}
                                     minDurationMs={300}
-                                    className={cn(TOOL_ROW_TITLE_CLASS, 'flex-shrink-0')}
+                                    className={cn(TOOL_ROW_TITLE_CLASS, isTaskTool ? 'min-w-0' : 'flex-shrink-0')}
                                     style={titleStyle}
                                     title={displayName}
                                 >
-                                    {displayName}
+                                    {isTaskTool ? <bdi dir="auto" className="block truncate oc-ui-start-align">{displayName}</bdi> : displayName}
                                 </MinDurationShineText>
                                 {quickOpenTarget ? (
                                     <button
@@ -2017,7 +2030,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                     </button>
                                 ) : null}
                                 {taskSessionId ? (
-                                    <OpenSubtaskButton sessionId={taskSessionId} agent={subagentAgent(input)} isMobile={isMobile} />
+                                    <OpenSubtaskButton sessionId={taskSessionId} agent={requestedAgent} isMobile={isMobile} />
                                 ) : null}
                             </div>
                             {showsDuration && typeof effectiveTimeStart === 'number' && !header?.durationUnknown ? (
