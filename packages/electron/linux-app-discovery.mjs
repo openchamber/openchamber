@@ -269,7 +269,7 @@ export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = '
       const spec = buildCommandFromDesktopExec(terminalEntry, directory);
       if (spec) specs.push(spec);
     }
-    specs.push({ program: 'xdg-terminal-exec', args: ['--working-directory', directory] });
+    specs.push({ program: 'xdg-terminal-exec', args: [`--dir=${directory}`] });
     if (commandExists('gnome-terminal', env)) {
       specs.push({ program: 'gnome-terminal', args: [`--working-directory=${directory}`] });
     }

@@ -192,12 +192,12 @@ try {
   assert(terminalFileSpecs[0]?.program === 'ghostty', 'terminal desktop entry should be preferred when present');
   assert(terminalFileSpecs[0]?.args.join('|') === '--working-directory=/tmp/My Project|--open-uri=/tmp/My Project', `terminal file target should use dirname, got ${terminalFileSpecs[0]?.args.join('|')}`);
   assert(terminalFileSpecs[1]?.program === 'xdg-terminal-exec', 'terminal specs should include xdg-terminal-exec fallback after desktop entry');
-  assert(terminalFileSpecs[1]?.args.join('|') === '--working-directory|/tmp/My Project', `terminal fallback should use file dirname, got ${terminalFileSpecs[1]?.args.join('|')}`);
+  assert(terminalFileSpecs[1]?.args.join('|') === '--dir=/tmp/My Project', `terminal fallback should use file dirname, got ${terminalFileSpecs[1]?.args.join('|')}`);
 
   const fallbackTerminalSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'terminal', appName: 'Terminal', targetKind: 'project', entries, env });
   assert(fallbackTerminalSpecs.length >= 1, 'missing terminal desktop entry should include xdg-terminal-exec fallback');
   assert(fallbackTerminalSpecs[0]?.program === 'xdg-terminal-exec', 'missing terminal entry should use xdg-terminal-exec first');
-  assert(fallbackTerminalSpecs[0]?.args.join('|') === '--working-directory|/tmp/My Project', `xdg-terminal-exec fallback should keep working directory args, got ${fallbackTerminalSpecs[0]?.args.join('|')}`);
+  assert(fallbackTerminalSpecs[0]?.args.join('|') === '--dir=/tmp/My Project', `xdg-terminal-exec fallback should keep working directory args, got ${fallbackTerminalSpecs[0]?.args.join('|')}`);
   assert(!fallbackTerminalSpecs.some((spec) => (spec.args || []).some((arg) => arg.includes('helper-script'))), 'non-terminal entry using a terminal launcher must not be launched for the generic terminal appId');
 
   const ptyxisEntry = parseDesktopEntry([
