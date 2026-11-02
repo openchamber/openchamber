@@ -6,6 +6,7 @@ import { z } from 'zod';
 import {
   JEV_TIMEOUT_MS,
   ROUTING_INSTRUCTIONS,
+  SAFETY_CRITERIA,
   SAFETY_INSTRUCTIONS,
   SAFETY_KINDS,
 } from './defaults.js';
@@ -32,7 +33,7 @@ export const buildPermissionRequest = (permission) => ({
     },
   },
   questions: {
-    ask: { type: 'noul', instructions: SAFETY_INSTRUCTIONS },
+    ask: { type: 'noul', instructions: SAFETY_INSTRUCTIONS, criteria: SAFETY_CRITERIA },
     kind: { type: 'choice', instructions: 'What is the most significant effect of this action?', criteria: SAFETY_KINDS },
   },
 });
