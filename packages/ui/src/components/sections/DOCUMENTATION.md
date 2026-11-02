@@ -179,6 +179,15 @@ the list again on every visit and after every credential write, a read
 started earlier never replaces a later one, and a snapshot from another
 runtime is ignored.
 
+### Why runtime-only MCP rows wait for the config read
+
+The MCP grid adds runtime-reported servers only after the directory's first
+successful config read, matching configured servers by name so they never appear
+twice. Showing runtime rows earlier would make configured servers flash as
+read-only while their config loads; a failed initial read therefore keeps
+runtime-only rows hidden until a read succeeds. These rows expose neither open
+nor delete because no config entry backs them.
+
 ### MCP OAuth
 
 A remote MCP server with OAuth enabled is registered by OpenCode as an
