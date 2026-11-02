@@ -458,12 +458,29 @@ agent choices. Both a named effort and explicit `Default` survive reload, with
 the same 150-session persistence bound as the existing selections. Old payloads
 without effort entries remain valid; malformed effort entries grant no authority.
 Session deletion clears these entries. A saved effort choice precedes older
-message history so a reload cannot undo an unsent picker change, unless the
-session record has since switched to another model and effort. The store also
+message history so a reload cannot undo a saved picker change. While a live model
+pick is pending, it and its effort win over external switches. Otherwise the
+session record can switch to another model and effort. The store also
 persists, per session, the session-record agent and model the composer last
-followed; a different record value is a newer switch and replaces the pick
+followed; a different record value is a newer switch and replaces the saved selection
 (Auto excepted), while an unchanged one keeps an unsent pick
 (`packages/ui/src/stores/DOCUMENTATION.md`).
+
+Extension prompts sent into an existing session use its current composer selection
+when it is active, including an unsent agent pick. For another target they use
+its saved selection and follow newer switches on the loaded session record,
+then fall back to loaded message history and app send defaults. The same memory-only
+pending model tracker used by the composer gives an unsent pick priority over
+external record switches and per-agent models, with its saved effort. Successful
+extension sends settle that pick through the shared `sendMessage` settlement;
+failed sends retain it. Once consumed, later external switches apply again.
+Background captures reconcile the observed record through `selection-store.ts`.
+Successful sends also advance its followed model and agent baseline to the sent
+selection, so a later switch back to the original value is still detected
+without reopening the chat. Failed sends leave that sent baseline unchanged.
+Picker changes make no session API writes. Explicit Default
+effort remains `null` when sent so the saved choice is not erased. An extension
+starting a new session still captures the app defaults before creating it.
 
 A picker change records the chosen level for that model in the profile
 (`lastUsedEfforts`, `lib/modelEfforts.ts`) immediately, including an explicit

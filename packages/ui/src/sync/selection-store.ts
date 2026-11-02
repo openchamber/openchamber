@@ -8,6 +8,7 @@ import { persist } from "zustand/middleware"
 import { z } from "zod"
 import { createDeferredSafeJSONStorage } from "@/stores/utils/safeStorage"
 import { getRuntimeKey } from "@/lib/runtime-switch"
+import { isAutoModel } from "@/lib/routing/autoModel"
 
 type ModelSelection = { providerId: string; modelId: string }
 type LastUsedProvider = { providerID: string; modelID: string }
@@ -82,6 +83,8 @@ type SelectionState = {
    */
   isSessionModelSwitched: (sessionId: string, model: string) => boolean
   markSessionModelFollowed: (sessionId: string, model: string) => void
+  /** A successful send establishes the baseline for later external switches. */
+  markSessionSelectionSent: (sessionId: string, providerId: string, modelId: string, agent?: string, variant?: string | null) => void
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
   clearSessionSelections: (sessionId: string) => void
@@ -213,6 +216,13 @@ export const useSelectionStore = create<SelectionState>()(
         followed.set(sessionId, model)
         return { sessionFollowedModels: followed }
       }),
+
+      markSessionSelectionSent: (sessionId, providerId, modelId, agent, variant) => {
+        if (!isAutoModel(providerId, modelId)) {
+          get().markSessionModelFollowed(sessionId, `${providerId}/${modelId}#${variant ?? ''}`)
+        }
+        if (agent) get().followSessionAgent(sessionId, agent)
+      },
 
       saveAgentModelForSession: (sessionId, agentName, providerId, modelId) =>
         set((s) => {
