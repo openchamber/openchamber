@@ -468,6 +468,27 @@ export const createOpenChamberControlService = (dependencies) => {
     };
   };
 
+  // Only validate a named model so tasks with a removed model stay editable.
+  const assertNamedModelKnown = async (projectID, input, task) => {
+    if (input.model === undefined) return;
+    const parsed = parseModel(input.model);
+    const directory = await scheduledTaskService.resolveExecutionDirectory(projectID, task.targetSessionId);
+    const client = await getClient(directory);
+    const catalog = await client.model.list();
+    const entries = Array.isArray(catalog.data) ? catalog.data : [];
+    if (entries.length === 0) return;
+    // Same matcher as the session routes' `findCatalogModel`: a catalog entry
+    // may carry a display override in `id`, and the `modelID` is the upstream
+    // name the fire path dispatches and the UI's model strings carry, so
+    // either form names a model that will run.
+    const known = entries
+      .some((model) => model.providerID === parsed.providerID
+        && (model.id === parsed.modelID || model.modelID === parsed.modelID));
+    if (!known) {
+      throw new OpenChamberControlError(`unknown model: ${parsed.providerID}/${parsed.modelID}`, 400);
+    }
+  };
+
   // /api/session/active is global in v2 and reports only `{ type: 'running' }`.
   // The action contract stays busy/idle, so running is reported as busy.
   const activeSessions = async (client) => {
@@ -967,13 +988,17 @@ export const createOpenChamberControlService = (dependencies) => {
           case 'schedule.list':
             return { scheduler: await scheduledTaskService.status(), tasks: await scheduledTaskService.list(projectID) };
           case 'schedule.create': {
-            const result = await scheduledTaskService.upsert(projectID, buildScheduledTask(input));
+            const task = buildScheduledTask(input);
+            await assertNamedModelKnown(projectID, input, task);
+            const result = await scheduledTaskService.upsert(projectID, task);
             return { task: result.task, created: result.created };
           }
           case 'schedule.update': {
             const existing = (await scheduledTaskService.list(projectID)).find((task) => task.id === taskID);
             if (!existing) throw new OpenChamberControlError(`Scheduled task not found: ${taskID}`, 404);
-            const result = await scheduledTaskService.upsert(projectID, patchScheduledTask(existing, input));
+            const task = patchScheduledTask(existing, input);
+            await assertNamedModelKnown(projectID, input, task);
+            const result = await scheduledTaskService.upsert(projectID, task);
             return { task: result.task, updated: true };
           }
           case 'schedule.run':
