@@ -1,3 +1,24 @@
+## [2.6.0] - 2026-11-02
+
+### New
+
+- Composer: Cmd+Up (Ctrl+Up on Windows and Linux) opens a searchable list of your earlier prompts (thanks to @mattv8).
+
+### Improvements
+
+- Chat: long sessions open faster and long answers draw only what is on screen.
+- Composer: the model, agent and thinking pickers are calmer, the model list opens fast with many models, and the thinking level is remembered per model (thanks to @Hayston1001).
+- Chat: the line above the composer says what the agent is doing in your language.
+
+### Fixes
+
+- Chats work without an open workspace (thanks to @cemarta7).
+- Providers: saving a custom model keeps its limits, image input and reasoning levels (thanks to @yulia-ivashko).
+- Chat: Alt+Enter inserts a new line (thanks to @Cyneric).
+- Chat: a single tilde no longer strikes text through (thanks to @gaojunran), and inline code no longer breaks inside a word (thanks to @bashrusakh).
+- Chat: the $ skill list says it is loading while skills are read, and the @ list no longer jumps while you type.
+- Composer: a forked mention no longer sends its file twice (thanks to @xhang1108).
+
 ## [2.5.3] - 2026-10-28
 
 ### New
