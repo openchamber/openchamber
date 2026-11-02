@@ -156,25 +156,16 @@ const main = async () => {
   fs.copyFileSync(extractedBinary, outputBinary);
   ensureExecutable(outputBinary);
 
-  const preparedWithoutRunning = (reason) => {
+  if (!runsOnHost) {
     const packageVersion = readPackageVersion(extractDir);
     if (packageVersion !== version) {
       throw new Error(`Prepared OpenCode CLI package version mismatch: expected ${version}, got ${packageVersion || 'unknown'}`);
     }
-    console.log(`[electron] prepared OpenCode CLI ${version} (@opencode/cli-${artifact.target}, ${reason}): ${outputBinary}`);
-  };
-
-  if (!runsOnHost) {
-    preparedWithoutRunning(`not run on this ${process.arch} host`);
+    console.log(`[electron] prepared OpenCode CLI ${version} (@opencode/cli-${artifact.target}, not run on this ${process.arch} host): ${outputBinary}`);
     return;
   }
 
   const prepared = runOpenCodeCliVersion(outputBinary);
-  if (prepared.hostCannotRun) {
-    console.warn(`[electron] this host's CPU has no AVX and cannot run the OpenCode CLI, so its package version is checked instead:\n${prepared.detail}`);
-    preparedWithoutRunning('this host CPU has no AVX');
-    return;
-  }
   if (prepared.version !== version) {
     throw new Error(`Prepared OpenCode CLI version mismatch: expected ${version}, got ${prepared.version || 'unknown'}\n${prepared.detail}`);
   }

@@ -36,11 +36,6 @@ const assertBinary = (binaryPath, expectedVersion) => {
     }
   }
   const result = runOpenCodeCliVersion(binaryPath);
-  // prepare-opencode-cli.mjs checked the package version on such a host.
-  if (result.hostCannotRun) {
-    console.warn(`[electron] this host's CPU has no AVX and cannot run the bundled OpenCode CLI, version not checked here: ${binaryPath}\n${result.detail}`);
-    return;
-  }
   const actualVersion = result.version;
   if (actualVersion !== expectedVersion) {
     throw new Error(`Bundled OpenCode CLI version mismatch at ${binaryPath}: expected ${expectedVersion}, got ${actualVersion || '(none)'}\n${result.detail}`);
