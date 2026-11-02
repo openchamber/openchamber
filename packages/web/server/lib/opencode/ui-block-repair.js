@@ -12,58 +12,39 @@ export function createUiBlockRepair({ clientFor, onStop }) {
     const state = sessions.get(sessionId);
     if (!state) return;
     sessions.delete(sessionId);
-    state.operation?.abort();
+    state.controller.abort();
     // Admission cannot be recalled. A user's stop must follow any admission already sent.
     return state.delivery?.catch(() => {});
   };
   const reset = () => { for (const id of sessions.keys()) cancel(id); };
 
   const repair = async (sessionId, state, errors) => {
-    // Interrupt successor output immediately, even while its admission response
-    // is pending. Serialize only the next admission, not the interruption.
-    if (state.operation) {
-      state.pending = errors;
-      state.phase = 'settling';
-      state.parts.clear();
-      state.interruption = clientFor(state.directory).session.interrupt({ sessionID: sessionId }, {
-        signal: AbortSignal.any([state.operation.signal, AbortSignal.timeout(30_000)]),
-      });
-      state.interruption.catch(() => {
-        if (sessions.get(sessionId) !== state) return;
-        onStop?.(sessionId, state.directory);
-        cancel(sessionId);
-      });
-      return;
-    }
-    const alreadyIdle = state.phase === 'idle';
-    const operation = new AbortController();
-    state.operation = operation;
-    state.pending = null;
+    const previousDelivery = state.delivery;
+    const terminal = Promise.withResolvers();
+    state.operation = terminal;
     state.attempts += 1;
     state.phase = 'settling';
     state.parts.clear();
-    const inputId = createMessageId(Date.now());
-    state.inputId = inputId;
-    const current = () => sessions.get(sessionId) === state && !operation.signal.aborted;
-    const options = { signal: AbortSignal.any([operation.signal, AbortSignal.timeout(30_000)]) };
-    const terminal = Promise.withResolvers();
-    state.terminal = terminal;
+    const current = () => sessions.get(sessionId) === state;
+    const options = { signal: AbortSignal.any([state.controller.signal, AbortSignal.timeout(30_000)]) };
     const aborted = () => terminal.resolve();
     options.signal.addEventListener('abort', aborted, { once: true });
-    if (alreadyIdle) terminal.resolve();
     try {
       const client = clientFor(state.directory);
-      // Claim ownership before yielding; another closed block cannot submit a second repair.
-      if (state.interruption) { await state.interruption; state.interruption = null; }
-      else if (!alreadyIdle) await client.session.interrupt({ sessionID: sessionId }, options);
+      // Interrupt each bad successor immediately. Only its next admission waits
+      // for the preceding admission's HTTP response.
+      await client.session.interrupt({ sessionID: sessionId }, options);
       if (!current()) return;
       await client.experimental.session.wait({ sessionID: sessionId }, options);
       // HTTP completion and event delivery have independent ordering. Wait for
       // this execution's terminal event before admitting its successor.
       await terminal.promise;
+      await previousDelivery;
       options.signal.throwIfAborted();
       if (!current()) return;
       state.phase = 'delivering';
+      const inputId = createMessageId(Date.now());
+      state.inputId = inputId;
       // Do not abort admission with the task: Stop must wait for its response
       // before reaching OpenCode, or the newly admitted execution could escape.
       state.delivery = client.session.synthetic({
@@ -81,17 +62,16 @@ export function createUiBlockRepair({ clientFor, onStop }) {
       }
     } finally {
       options.signal.removeEventListener('abort', aborted);
-      state.delivery = null;
-      state.operation = null;
-      state.terminal = null;
-      if (current()) {
-        if (state.pending) void repair(sessionId, state, state.pending);
-        else if (state.phase === 'idle') sessions.delete(sessionId);
+      // An older admission may finish after its successor has started repair.
+      if (state.operation === terminal) {
+        state.delivery = null;
+        state.operation = null;
+        if (current() && state.phase === 'idle') sessions.delete(sessionId);
       }
     }
   };
 
-  const inspect = (sessionId, state, part, ended) => {
+  const inspect = (sessionId, state, part, key, ended) => {
     if (!part.text.includes('openui-lang')) return;
     try {
       for (const block of closedUiBlocks(part.text, ended)) {
@@ -106,7 +86,7 @@ export function createUiBlockRepair({ clientFor, onStop }) {
       }
     } catch {
       record('validation_failed');
-      part.disabled = true;
+      state.parts.delete(key);
     }
   };
 
@@ -124,7 +104,7 @@ export function createUiBlockRepair({ clientFor, onStop }) {
     }
     if (type === 'session.execution.started') {
       if (!state) {
-        state = { directory: null, attempts: 0, parts: new Map(), operation: null, terminal: null, pending: null, inputId: null, delivery: null };
+        state = { directory: null, attempts: 0, parts: new Map(), controller: new AbortController(), operation: null, inputId: null, delivery: null };
         sessions.set(id, state);
       }
       // Admission acknowledgement may arrive after the successor starts streaming.
@@ -135,8 +115,8 @@ export function createUiBlockRepair({ clientFor, onStop }) {
     if (!state) return;
     if (type === 'session.execution.succeeded'
       || (type === 'session.execution.interrupted' && state.phase === 'settling' && data.reason !== 'shutdown')) {
-      const repairing = state.phase === 'settling' || state.pending !== null;
-      if (state.operation) { state.phase = 'idle'; state.parts.clear(); state.terminal?.resolve(); }
+      const repairing = state.phase === 'settling';
+      if (state.operation) { state.phase = 'idle'; state.parts.clear(); state.operation.resolve(); }
       else cancel(id);
       return repairing;
     }
@@ -148,23 +128,22 @@ export function createUiBlockRepair({ clientFor, onStop }) {
     const key = `${data.assistantMessageID}:text:${data.ordinal}`;
     if (type === 'session.text.started') {
       state.directory = directory;
-      state.parts.set(key, { text: '', lineStart: 0, checkedThrough: 0, disabled: false });
+      state.parts.set(key, { text: '', lineStart: 0, checkedThrough: 0 });
       return;
     }
     const part = state.parts.get(key);
     const ended = type === 'session.text.ended';
     if (ended) state.parts.delete(key);
-    if (!part || part.disabled) return;
+    if (!part) return;
     if (!ended && type !== 'session.text.delta') return;
     if (ended && !data.text.startsWith(part.text)) { record('source_mismatch'); return; }
     part.text = ended ? data.text : part.text + data.delta;
     if (part.text.length > MAX_TEXT) {
-      part.disabled = true;
-      part.text = '';
+      state.parts.delete(key);
       record('text_limit');
       return;
     }
-    if (ended) inspect(id, state, part, true);
+    if (ended) inspect(id, state, part, key, true);
     else {
       // Cheap incremental line scan. Markdown parsing runs only at possible fence
       // closures, never on every token or on ordinary prose-only answers.
@@ -174,7 +153,7 @@ export function createUiBlockRepair({ clientFor, onStop }) {
         if (/(?:`{3,}|~{3,})[ \t]*\r?$/.test(part.text.slice(part.lineStart, end))) candidate = true;
         part.lineStart = end + 1;
       }
-      if (candidate) inspect(id, state, part, false);
+      if (candidate) inspect(id, state, part, key, false);
     }
   };
 

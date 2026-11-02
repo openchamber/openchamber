@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
+import { setImmediate as tick } from 'node:timers/promises';
 import { createUiBlockRepair } from './ui-block-repair.js';
 
 const source = 'root = Stack([missing])';
 const text = `Before\n\n\`\`\`openui-lang\n${source}\n\`\`\`\nTrailing answer still streaming`;
-const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
-function setup({ interrupted = true, deliver } = {}) {
+function setup({ deliver } = {}) {
   const calls = [];
   const submissions = [];
   let settle;
   const idle = new Promise((resolve) => { settle = resolve; });
   const client = {
     session: {
-      interrupt: async () => { calls.push('interrupt'); return { interrupted }; },
+      interrupt: async () => { calls.push('interrupt'); },
       synthetic: async (input) => { calls.push(input); submissions.push(input); await deliver?.(input); },
     },
     experimental: { session: { wait: async () => { calls.push('wait'); await idle; } } },
@@ -40,7 +40,7 @@ describe('event-owned UI block repair', () => {
   });
 
   test('EOF closure repairs even when execution succeeds before interruption', async () => {
-    const { calls, delta, event, settle, repair } = setup({ interrupted: false });
+    const { calls, delta, event, settle, repair } = setup();
     delta('```openui-lang\nroot = Stack([])\n```\n');
     expect(calls).toEqual([]);
     event('session.text.started', { assistantMessageID: 'msg_test', ordinal: 0 });
@@ -95,7 +95,12 @@ describe('event-owned UI block repair', () => {
     finishDelivery();
     await tick();
     expect(harness.calls.filter((call) => call === 'interrupt')).toHaveLength(2);
-    if (completed) expect(harness.submissions).toHaveLength(2);
+    if (!completed) {
+      expect(harness.submissions).toHaveLength(1);
+      harness.event('session.execution.interrupted', { reason: 'user' });
+      await tick();
+    }
+    expect(harness.submissions).toHaveLength(2);
     harness.repair.reset();
   });
 });
