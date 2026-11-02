@@ -229,6 +229,37 @@ test('a failed OAuth server offers a fresh sign-in on its detail page', async ()
   }
 });
 
+test('a connected OAuth server offers Authorize on its detail page', async () => {
+  // Connected does not prove user authorization: the tools may still wait on
+  // the consent this sign-in collects.
+  const linearSignIn: IntegrationInfo = {
+    id: 'mcp_0123456789abcdef',
+    name: 'linear',
+    metadata: { source: 'mcp' },
+    methods: [{ id: 'mcp_0123456789abcdef', type: 'oauth', label: 'Sign in to Linear' }],
+    connections: [],
+  };
+  const lists = [opencodeClient.getSdkClient(), opencodeClient.getScopedSdkClient(useDirectoryStore.getState().currentDirectory ?? '')]
+    .map((client) => spyOn(client.integration, 'list').mockImplementation(async () => ({ location: { directory: '/repo' }, data: [linearSignIn] })));
+  try {
+    useMcpConfigStore.setState({
+      mcpServers: [{ name: 'linear', type: 'remote', url: 'https://mcp.linear.app/mcp', scope: 'user' }],
+    });
+    useMcpStore.setState({
+      byDirectory: { [useDirectoryStore.getState().currentDirectory ?? '__global__']: { linear: { name: 'linear', status: { status: 'connected' } } } },
+    });
+    await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
+    const linearCard = findClickable([...browser.document.body.querySelectorAll('[role="button"], button')], 'Linear');
+    if (!linearCard) throw new Error('Linear card missing');
+    await act(async () => linearCard.click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(browser.document.body.textContent?.includes('Authorize')).toBe(true);
+    expect(browser.document.body.textContent?.includes('Waiting for sign-in')).toBe(false);
+  } finally {
+    for (const list of lists) list.mockRestore();
+  }
+});
+
 test('a same-named skill outside the catalog folder does not count as installed', async () => {
   useSkillsStore.setState({
     skills: [

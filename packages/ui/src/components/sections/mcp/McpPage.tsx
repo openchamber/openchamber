@@ -22,6 +22,7 @@ import {
 } from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { McpOAuthSignIn } from './McpOAuthSignIn';
+import { getMcpOAuthMethods } from './mcpOAuthIntegration';
 import { useMcpOAuthIntegration } from './useMcpOAuthIntegration';
 import { MCP_DRAFT_OAUTH_UNSET, normalizeMcpServerName, readCarriedOAuth, type McpOAuthCarried } from './mcpDraft';
 import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
@@ -1023,7 +1024,16 @@ export const McpPage: React.FC = () => {
    * starts on its own and shows only its progress in the status card.
    */
   const runtimeFailed = selectedMcpName ? readMcpStatusName(mcpStatus[selectedMcpName]) === 'failed' : false;
-  const failedOAuthIntegration = useMcpOAuthIntegration(selectedMcpName ?? '', currentDirectory, runtimeFailed);
+  // The integration decides whether a sign-in exists, not the runtime status:
+  // a connected transport can still serve tools that wait on the user's
+  // authorization, so a configured remote OAuth server loads its integration
+  // whatever status reports (#5934).
+  const oauthConfigured = selectedServer?.type === 'remote' && selectedServer.oauth !== false;
+  const oauthIntegration = useMcpOAuthIntegration(
+    selectedMcpName ?? '',
+    currentDirectory,
+    runtimeFailed || oauthConfigured,
+  );
   const [signInAgain, setSignInAgain] = React.useState<{ server: string; run: number } | null>(null);
   React.useEffect(() => {
     setSignInAgain(null);
@@ -1153,7 +1163,13 @@ export const McpPage: React.FC = () => {
     : runtimeStatus ? readMcpStatusName(runtimeStatus) : runtimeDiagnostic?.status;
   const effectiveStatusError = runtimeStatus ? readMcpStatusError(runtimeStatus) : runtimeDiagnostic?.error;
   const isConnected = readMcpStatusName(runtimeStatus) === 'connected';
-  const offersSignInAgain = effectiveStatusName === 'failed' && failedOAuthIntegration !== null;
+  const offersSignInAgain = effectiveStatusName === 'failed' && oauthIntegration !== null;
+  // An OAuth entry on a connected server still needs user authorization:
+  // authorize it here instead of only on needs_auth or failed (#5934).
+  const offersAuthorize = Boolean(oauthIntegration)
+    && !offersSignInAgain
+    && effectiveStatusName !== 'needs_auth'
+    && effectiveStatusName !== 'blocked';
   const signInAgainRun = signInAgain?.server === selectedMcpName ? signInAgain.run : 0;
 
   const runtimeDescription = getStatusDescription(effectiveStatusName, tUnsafe, effectiveStatusError);
@@ -1218,6 +1234,17 @@ export const McpPage: React.FC = () => {
               {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
             </Button>
           )}
+          {offersAuthorize && (
+            <Button
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => setSignInAgain({ server: selectedMcpName, run: signInAgainRun + 1 })}
+              disabled={!enabled}
+            >
+              {t('settings.mcp.page.actions.authorize')}
+            </Button>
+          )}
           {isConnected && (
             <Button
               variant="ghost"
@@ -1240,8 +1267,8 @@ export const McpPage: React.FC = () => {
           <SettingsLegacyFormatNote legacy={selectedServer.legacy === true} path={selectedServer.path} />
         )}
 
-        {/* Runtime Status - Simplified for connected, expanded for errors */}
-        {!isNewServer && shouldShowFullStatusCard(effectiveStatusName) && (
+        {/* Runtime Status - Simplified for connected, expanded for errors; a started authorize flow needs the card too */}
+        {!isNewServer && (shouldShowFullStatusCard(effectiveStatusName) || signInAgainRun > 0) && (
           <SettingsSection divider={false}>
             <div className={cn('rounded-lg p-3', statusCardClass(effectiveStatusName))}>
               <div className="space-y-4">
@@ -1269,22 +1296,14 @@ export const McpPage: React.FC = () => {
                   </p>
                 </div>
 
-                {effectiveStatusName === 'needs_auth' && selectedMcpName && (
-                  <McpOAuthSignIn
-                    serverName={selectedMcpName}
-                    directory={currentDirectory}
-                    onConnected={handleOAuthConnected}
-                  />
-                )}
-
-                {offersSignInAgain && signInAgainRun > 0 && (
+                {selectedMcpName && (effectiveStatusName === 'needs_auth' || signInAgainRun > 0) && (
                   <McpOAuthSignIn
                     key={signInAgainRun}
                     serverName={selectedMcpName}
                     directory={currentDirectory}
                     onConnected={handleOAuthConnected}
-                    autoStart
-                    showStartButton={false}
+                    autoStart={signInAgainRun > 0}
+                    showStartButton={signInAgainRun === 0 || getMcpOAuthMethods(oauthIntegration ?? undefined).length > 1}
                   />
                 )}
 
