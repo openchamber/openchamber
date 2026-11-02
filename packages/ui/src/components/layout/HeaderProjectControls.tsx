@@ -1,6 +1,8 @@
 import React from 'react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { Icon } from '@/components/icon/Icon';
 import { useUIStore } from '@/stores/useUIStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -16,13 +18,15 @@ import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
  * The header's view of the shown project action: one button that runs or
  * stops it, wearing the action's icon while idle, the preview globe while it
  * serves a page, and the other actions on right click. The action's name is
- * in the tooltip.
+ * in the tooltip, above the shortcut that opens every action.
  */
 const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ buttonClassName }) => {
   const { t } = useI18n();
   const runner = useProjectActions();
   const openContextPreview = useUIStore((state) => state.openContextPreview);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const allActionsShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('open_project_actions', shortcutOverrides), '');
 
   const shown = runner?.available ? runner.shown : null;
   const shownRun = shown && runner ? runner.runOf(shown) : null;
@@ -80,7 +84,14 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
               </button>
             </TooltipTrigger>
           </ContextMenuTrigger>
-          <TooltipContent side="bottom">{label}</TooltipContent>
+          <TooltipContent side="bottom">
+            <div className="flex flex-col gap-0.5">
+              <span>{label}</span>
+              <span className="typography-micro text-muted-foreground">
+                <TooltipLabelWithShortcut label={t('projectActions.header.allActions')} shortcut={allActionsShortcut} />
+              </span>
+            </div>
+          </TooltipContent>
         </Tooltip>
         <ContextMenuContent className="w-60 max-h-[70vh] overflow-y-auto">
           <ContextMenuItem className="flex items-center gap-2" onClick={runner.openSettings}>

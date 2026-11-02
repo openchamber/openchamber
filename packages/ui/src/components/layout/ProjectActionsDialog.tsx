@@ -68,6 +68,7 @@ export const ProjectActionsDialog: React.FC = () => {
         showCloseButton={false}
       >
         <Command
+          loop
           value={highlighted}
           onValueChange={setHighlighted}
           className="[&_[cmdk-group]]:px-2 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]]:typography-meta"
