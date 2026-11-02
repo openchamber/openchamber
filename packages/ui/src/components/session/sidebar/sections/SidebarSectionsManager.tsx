@@ -46,6 +46,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsInSidebarOrder } from '../list/useProjectsInSidebarOrder';
 import { keepRowInList, ROW_DRAG_AUTO_SCROLL, ROW_SORT_TRANSITION, useRowDragSensors } from '../rowDrag';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   canAddSidebarSection,
   closeSectionsManager,
@@ -174,7 +175,7 @@ const SectionList: React.FC = () => {
     saveSidebarSections(arrayMove(sections, from, to));
   };
   return (
-    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
+    <ScrollableOverlay outerClassName="min-h-0" className="flex flex-col gap-3 p-3" disableHorizontal>
       <div className="flex items-center justify-between gap-2">
         <span className="typography-ui-label font-medium text-foreground">{t('sessions.sidebar.sections.title')}</span>
         {/* A new section starts from a preset: the common ones by name, a group
@@ -225,7 +226,7 @@ const SectionList: React.FC = () => {
           ))}
         </div>
       ) : null}
-    </div>
+    </ScrollableOverlay>
   );
 };
 
@@ -448,7 +449,7 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
   };
   return (
     <form className="flex min-h-0 flex-col" onSubmit={(event) => { event.preventDefault(); if (name && hasConditions) commitSectionDraft(); }}>
-      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
+      <ScrollableOverlay outerClassName="min-h-0" className="flex flex-col gap-3 p-3" disableHorizontal>
         <div className="flex items-center gap-1">
           <Button type="button" variant="ghost" size="icon" className="size-6" aria-label={t('sessions.sidebar.sections.back')} onClick={discardSectionDraft}>
             <Icon name="arrow-left-s" className="size-4" />
@@ -634,7 +635,7 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
             <Switch size="sm" checked={draft.hideWhenEmpty} onCheckedChange={(hideWhenEmpty) => updateSectionDraft({ ...draft, hideWhenEmpty })} />
           </label>
         </div>
-      </div>
+      </ScrollableOverlay>
       {/* The count and the actions stay in reach while the conditions scroll. */}
       <div className="flex shrink-0 items-center gap-2 px-3 pb-3 pt-2">
         <span className="min-w-0 flex-1 truncate typography-micro text-muted-foreground">{countLabel}</span>

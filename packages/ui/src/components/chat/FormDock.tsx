@@ -25,6 +25,7 @@ import { FormMarkdown } from './FormMarkdown';
 import { serializeFormAnswerAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from './formSerializers';
 import { formDraftScope, loadFormDraft, saveFormDraft, dropFormDraft } from './formDrafts';
 import { noteLocalFormCancelled } from '@/sync/recoverable-questions';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
     type FormValues,
     buildFormAnswer,
@@ -365,10 +366,12 @@ const FormDockPanel: React.FC<{
                             {t('chat.formCard.recoveredNotice')}
                         </div>
                     ) : null}
-                    <div
+                    <ScrollableOverlay
                         ref={bodyRef}
-                        className="max-h-[50vh] overflow-y-auto overscroll-contain px-1.5"
-                        style={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(120, availableMaxHeight - 96) }}
+                        outerClassName="max-h-[50vh]"
+                        outerStyle={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(120, availableMaxHeight - 96) }}
+                        className="overscroll-contain px-1.5"
+                        disableHorizontal
                     >
                         {currentField ? (
                             currentField.type === 'external' ? (
@@ -401,7 +404,7 @@ const FormDockPanel: React.FC<{
                                 />
                             )
                         ) : null}
-                    </div>
+                    </ScrollableOverlay>
 
                     <div className="flex items-center gap-1.5 px-3 pb-2 pt-1">
                         <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => void handleDismiss()}>

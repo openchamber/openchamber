@@ -23,6 +23,8 @@ Object.assign(globalThis, {
     XMLSerializer: browser.XMLSerializer,
     IntersectionObserver: browser.IntersectionObserver,
     ResizeObserver: browser.ResizeObserver,
+    requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
+    cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
     customElements: browser.customElements,
 });
 const requests: string[] = [];

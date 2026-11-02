@@ -10,6 +10,7 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
 import type { Session } from '@/lib/opencode/model';
@@ -238,7 +239,7 @@ const BulkConfirmDialog: React.FC<{
           <DialogTitle>{request?.title}</DialogTitle>
           <DialogDescription>{request?.description}</DialogDescription>
         </DialogHeader>
-        <ul className="max-h-64 overflow-y-auto">{request?.items.map(itemLine)}</ul>
+        <ScrollableOverlay as="ul" outerClassName="max-h-64" disableHorizontal>{request?.items.map(itemLine)}</ScrollableOverlay>
         {request && request.leftOut.length > 0 ? (
           <div className="flex flex-col gap-1">
             <button
@@ -250,7 +251,7 @@ const BulkConfirmDialog: React.FC<{
               <Icon name="arrow-right-s" className={cn('size-3.5 transition-transform', showLeftOut && 'rotate-90 rtl:-rotate-90')} />
               {t('overview.bulk.leftOut', { count: request.leftOut.length })}
             </button>
-            {showLeftOut ? <ul className="max-h-40 overflow-y-auto">{request.leftOut.map(itemLine)}</ul> : null}
+            {showLeftOut ? <ScrollableOverlay as="ul" outerClassName="max-h-40" disableHorizontal>{request.leftOut.map(itemLine)}</ScrollableOverlay> : null}
           </div>
         ) : null}
         <DialogFooter>
@@ -702,7 +703,7 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
   ));
 
   return (
-    <div className="h-full overflow-y-auto" style={mobile ? { paddingBottom: 'calc(1rem + var(--oc-safe-area-bottom, 0px))' } : undefined}>
+    <ScrollableOverlay outerClassName="h-full" style={mobile ? { paddingBottom: 'calc(1rem + var(--oc-safe-area-bottom, 0px))' } : undefined} disableHorizontal>
       <div className={cn('mx-auto flex w-full flex-col', mobile ? 'gap-5 px-2 pt-4' : 'max-w-[52rem] gap-6 px-8 py-8')}>
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-2">
           {counts.length === 0 ? (
@@ -723,7 +724,7 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
       </div>
       {confirmDialog}
       {bulkDialog}
-    </div>
+    </ScrollableOverlay>
   );
 }
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /** A JSON body pretty-printed; anything else as the provider sent it. */
 const formatResponseBody = (body: string): string => {
@@ -33,9 +34,9 @@ export const ErrorResponseDetails: React.FC<{ body: string; className?: string }
         {open ? t('chat.errorDetails.hide') : t('chat.errorDetails.show')}
       </Button>
       {open ? (
-        <pre className="mt-1 max-h-60 overflow-auto rounded-md bg-muted/30 px-2 py-1 typography-meta font-mono text-muted-foreground whitespace-pre-wrap break-all">
+        <ScrollableOverlay as="pre" outerClassName="mt-1 max-h-60 rounded-md bg-muted/30" className="px-2 py-1 typography-meta font-mono text-muted-foreground whitespace-pre-wrap break-all" disableHorizontal>
           {formatResponseBody(body)}
-        </pre>
+        </ScrollableOverlay>
       ) : null}
     </div>
   );

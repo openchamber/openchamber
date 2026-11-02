@@ -30,6 +30,7 @@ import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { useI18n } from '@/lib/i18n';
 import type { BranchIntegrationRemoteBranch, BranchIntegrationTarget } from './branchIntegration';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type OperationType = 'merge' | 'rebase';
 
@@ -78,7 +79,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
   const [branchSearch, setBranchSearch] = React.useState('');
   const searchInputRef = React.useRef<HTMLInputElement>(null);
-  const logContainerRef = React.useRef<HTMLDivElement>(null);
+  const logContainerRef = React.useRef<HTMLElement>(null);
 
   const isDisabled = disabled || isOperating;
   const targetBranchLabel = currentBranch || t('gitView.branch.currentBranchFallback');
@@ -176,9 +177,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
 
   const renderOperating = () => (
     <div className="space-y-3">
-      <div
+      <ScrollableOverlay
         ref={logContainerRef}
-        className="rounded-lg oc-tile p-3 max-h-48 overflow-y-auto"
+        outerClassName="max-h-48 rounded-lg oc-tile"
+        className="p-3"
+        disableHorizontal
       >
         <div className="space-y-2">
           {operationLogs.map((log, index) => (
@@ -211,7 +214,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             </div>
           ))}
         </div>
-      </div>
+      </ScrollableOverlay>
 
       {operationCompleted ? (
         mode === 'dialog' ? (

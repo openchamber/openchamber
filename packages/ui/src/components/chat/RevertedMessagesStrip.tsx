@@ -11,6 +11,7 @@ import { useDirectorySync } from '@/sync/sync-context';
 import { readSubagentRun } from '@/lib/opencode/subagent-run';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { getPromptPreviewText } from './lib/messagePreview';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
     EMPTY_REVERTED_MESSAGE_DOCK_STATE,
     buildRevertedMessageDockState,
@@ -145,7 +146,7 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
                 {restoreButton}
             </div>
             {expanded ? (
-                <div id={listId} className="max-h-40 overflow-y-auto overscroll-contain">
+                <ScrollableOverlay id={listId} outerClassName="max-h-40" className="overscroll-contain" disableHorizontal>
                     {items.map((item) => (
                         <div key={item.id} className={ROW_CLASS}>
                             {/* Lines the text up with the header label after its icon. */}
@@ -153,7 +154,7 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
                             <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{item.text}</span>
                         </div>
                     ))}
-                </div>
+                </ScrollableOverlay>
             ) : null}
         </div>
     );

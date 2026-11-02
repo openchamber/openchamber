@@ -22,7 +22,6 @@ import {
     useRecoveredQuestions,
 } from '@/sync/sync-context';
 import { useStreamingStore } from '@/sync/streaming';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { destroyBtwSession, filterBtwTailMessages, promoteBtwSession, type BtwSessionRef } from '@/lib/btw';
 import type { BtwPanelState } from './useBtwPanelState';
 import { ChatSurfaceProvider } from '../ChatSurfaceContext';
@@ -31,6 +30,7 @@ import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
 import { FormCard } from '../FormCard';
 import { SessionErrorNotice } from '../SessionErrorNotice';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
@@ -440,14 +440,17 @@ const BtwMessages: React.FC<{
     }
 
     return (
-        <ScrollShadow
+        <ScrollableOverlay
             ref={bodyRef}
             onScroll={onBodyScroll}
-            size={32}
+            useScrollShadow
+            scrollShadowSize={32}
             data-scroll-shadow="true"
             data-selection-menu-boundary="true"
-            className="max-h-[min(55vh,520px)] min-h-0 overflow-y-auto px-3 py-1"
-            style={maxHeight !== undefined ? { maxHeight } : undefined}
+            outerClassName="max-h-[min(55vh,520px)] min-h-0"
+            outerStyle={maxHeight !== undefined ? { maxHeight } : undefined}
+            className="px-3 py-1"
+            disableHorizontal
         >
             <div ref={contentRef}>
                 {data.messageRecords.map((record, index) => (
@@ -494,7 +497,7 @@ const BtwMessages: React.FC<{
                     <span>{t('chat.btw.working')}</span>
                 </div>
             </div>
-        </ScrollShadow>
+        </ScrollableOverlay>
     );
 };
 

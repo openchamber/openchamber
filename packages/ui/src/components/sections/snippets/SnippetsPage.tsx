@@ -17,6 +17,7 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import { SnippetAliasesField } from './SnippetAliasesField';
 import type { Snippet } from '@/types/snippet';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface SnippetForm {
   name: string;
@@ -275,7 +276,7 @@ const SnippetEditor: React.FC<{ snippet: Snippet | null; draft: SnippetDraft | n
             className="font-mono typography-meta"
           />
         ) : (
-          <div className="oc-tile flex min-h-[240px] flex-1 flex-col overflow-auto rounded-[var(--radius-xl)] px-3 py-2.5">
+          <ScrollableOverlay outerClassName="oc-tile min-h-[240px] flex-1 rounded-[var(--radius-xl)]" className="flex flex-col px-3 py-2.5">
             {preview.status === 'ready' && preview.text ? (
               <pre className="whitespace-pre-wrap break-words font-mono typography-meta text-foreground">{preview.text}</pre>
             ) : (
@@ -285,7 +286,7 @@ const SnippetEditor: React.FC<{ snippet: Snippet | null; draft: SnippetDraft | n
                   : preview.status === 'ready' ? t('settings.snippets.page.preview.empty') : null}
               </p>
             )}
-          </div>
+          </ScrollableOverlay>
         )}
         <div className="pt-3">
           <Button onClick={handleSave} disabled={!canSave} size="xs" className="!font-normal">

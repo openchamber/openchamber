@@ -3,6 +3,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Dialog,
   DialogContent,
@@ -795,7 +796,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
   /** The rail: back to browsing, then every installed integration with its state. */
   const renderRail = (): React.ReactNode => (
     <aside className="flex w-56 shrink-0 flex-col border-e border-edge">
-      <div className="flex-1 overflow-y-auto p-2">
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="p-2" disableHorizontal>
         <button
           type="button"
           onClick={() => showEntry(null)}
@@ -837,7 +838,7 @@ export function IntegrationsCatalogView(): React.ReactNode {
             </button>
           );
         })}
-      </div>
+      </ScrollableOverlay>
     </aside>
   );
 
@@ -1165,15 +1166,17 @@ export function IntegrationsCatalogView(): React.ReactNode {
     <div className="absolute inset-0 z-10 flex bg-background">
       {renderRail()}
 
-      <main
+      <ScrollableOverlay
+        as="main"
         ref={scrollerRef}
-        className="min-w-0 flex-1 overflow-y-auto"
+        outerClassName="min-w-0 flex-1"
         onScroll={(event) => {
           if (!selectedId) browseScrollTopRef.current = event.currentTarget.scrollTop;
         }}
+        disableHorizontal
       >
         {selectedEntry ? renderDetail(selectedEntry) : renderBrowse()}
-      </main>
+      </ScrollableOverlay>
 
       {confirm ? (
         <Dialog open onOpenChange={(next) => { if (!next) setConfirm(null); }}>

@@ -9,6 +9,7 @@ import type { CIRun } from '@/lib/source-control/types';
 import { cn } from '@/lib/utils';
 
 import { formatElapsedDuration, isFailedConclusion, type CheckRunExpansion } from './checkRunState';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 
 const CheckRunDetails: React.FC<{
@@ -40,9 +41,9 @@ const CheckRunDetails: React.FC<{
         </div>
       ) : null}
       {run.output?.text ? (
-        <div className="rounded oc-tile-inset px-2 py-2 typography-micro text-muted-foreground whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+        <ScrollableOverlay outerClassName="max-h-48 rounded oc-tile-inset" className="px-2 py-2 typography-micro text-muted-foreground whitespace-pre-wrap break-words" disableHorizontal>
           {run.output.text}
-        </div>
+        </ScrollableOverlay>
       ) : null}
 
       {annotations.length > 0 ? (

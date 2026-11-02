@@ -2,6 +2,7 @@ import React from 'react';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ActionToolbar } from '@/components/ui/action-toolbar';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
@@ -915,7 +916,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
             <div className="relative h-full">
               <div className="h-full">
                 {mdViewMode === 'preview' ? (
-                  <div className="h-full overflow-auto p-3" ref={setPreviewContainer}>
+                  <>
+                  <div className="overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-3" ref={setPreviewContainer}>
                     {/* Same comment-on-selection as a markdown file preview. */}
                     <FilePreviewCommentMenu
                       containerRef={previewRef}
@@ -935,6 +937,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                       <SimpleMarkdownRenderer content={content} documentAssets={markdownDocumentAssets} className="typography-markdown-body" frontmatter="properties" enableFileReferences={false} />
                     </ErrorBoundary>
                   </div>
+                  <OverlayScrollbar containerRef={previewRef} />
+                  </>
                 ) : (
                   <div className="relative h-full" ref={editorWrapperRef}>
                     <CodeMirrorEditor

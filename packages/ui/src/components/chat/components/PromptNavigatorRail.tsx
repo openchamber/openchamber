@@ -10,6 +10,7 @@ import { useSourceControlDescriptorOf, type SourceControlDescriptorOf } from '@/
 import { cn } from '@/lib/utils';
 import { getMessagePreview } from '../lib/messagePreview';
 import { useChatColumnActions } from '../chatColumnSession';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type PromptEntry = {
     turnId: string;
@@ -343,16 +344,18 @@ export function PromptNavigatorRail({
                             <span className="truncate">{loadMoreLabel}</span>
                         </button>
                     ) : null}
-                    <div
+                    <ScrollableOverlay
                         ref={listRef}
                         role="listbox"
                         tabIndex={-1}
                         aria-label={t('chat.promptNavigator.aria')}
                         aria-activedescendant={highlightedPrompt ? rowId(highlightedPrompt.turnId) : undefined}
                         // Positioned, so row offsets are measured within the list.
-                        className="relative min-h-0 overflow-y-auto overscroll-contain p-1 outline-none"
+                        outerClassName="min-h-0"
+                        className="relative overscroll-contain p-1 outline-none"
                         onKeyDown={handleKeyDown}
                         onBlur={handleListBlur}
+                        disableHorizontal
                     >
                         {prompts.map((prompt, index) => {
                             const isActive = index === activeIndex;
@@ -389,7 +392,7 @@ export function PromptNavigatorRail({
                                 </div>
                             );
                         })}
-                    </div>
+                    </ScrollableOverlay>
                 </div>
             ) : (
                 <button

@@ -15,6 +15,7 @@ import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileCo
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
 import { MobileConnectionHeaders } from './MobileConnectionHeaders';
 import { buildMobileHeaderValues, createMobileHeaderDrafts, type MobileHeaderDraft } from './mobileRequestHeaders';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const isRelayOnlyConnection = (connection: { candidates: ReadonlyArray<{ kind: string }> }): boolean =>
   !connection.candidates.some((c) => c.kind === 'direct');
@@ -175,7 +176,7 @@ export const MobileInstancesSurface: React.FC<{
   if (pendingConnection) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <form className="flex-1 overflow-y-auto px-5 py-4" onSubmit={handlePasswordSubmit}>
+        <ScrollableOverlay as="form" outerClassName="flex-1 min-h-0" className="px-5 py-4" onSubmit={handlePasswordSubmit} disableHorizontal>
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-3 rounded-[18px] border border-edge bg-surface-elevated px-3.5 py-3">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
@@ -206,7 +207,7 @@ export const MobileInstancesSurface: React.FC<{
               {t('mobile.connect.cancelPassword')}
             </Button>
           </div>
-        </form>
+        </ScrollableOverlay>
       </div>
     );
   }
@@ -217,7 +218,7 @@ export const MobileInstancesSurface: React.FC<{
     {isCompletingScan ? <MobileQrConnectionLoading /> : null}
     {debugOpen ? <MobileConnectionDebugPanel onClose={() => setDebugOpen(false)} /> : null}
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-5 py-4" disableHorizontal>
         <div className="space-y-6">
           {connections.length > 0 ? (
             <div {...debugLongPress} className="overflow-hidden rounded-[18px] border border-edge bg-surface-elevated">
@@ -417,7 +418,7 @@ export const MobileInstancesSurface: React.FC<{
             </form>
           )}
         </div>
-      </div>
+      </ScrollableOverlay>
     </div>
     </>
   );

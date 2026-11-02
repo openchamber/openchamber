@@ -8,6 +8,7 @@ import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormaliza
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 // Mounted only inside the open Add project dialog, once per runtime/opening.
 export function OpenCodeProjectImport({ busy, onBusyChange }: { busy: boolean; onBusyChange: (busy: boolean) => void }) {
@@ -74,9 +75,9 @@ export function OpenCodeProjectImport({ busy, onBusyChange }: { busy: boolean; o
   return (
     <section className="mb-2 space-y-2 px-2 pt-1" aria-label={t('directoryExplorerDialog.import.title')}>
       <p className="typography-ui-label">{t('directoryExplorerDialog.import.count', { count: paths.length })}</p>
-      <ul className="max-h-24 overflow-auto typography-meta">
+      <ScrollableOverlay as="ul" outerClassName="max-h-24" className="typography-meta" disableHorizontal>
         {paths.map((path) => <li key={path} dir="ltr" className="truncate" title={path}>{path}</li>)}
-      </ul>
+      </ScrollableOverlay>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" className="max-w-full max-sm:min-h-11" disabled={busy} title={t('directoryExplorerDialog.import.title')} onClick={() => void finish(true)}>
           <span className="truncate">{t('directoryExplorerDialog.import.title')}</span>

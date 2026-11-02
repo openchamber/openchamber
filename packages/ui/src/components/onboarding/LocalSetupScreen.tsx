@@ -9,6 +9,7 @@ import { restartDesktopApp } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/v2/install | bash';
 const WINDOWS_INSTALL_COMMAND = 'npm install -g @opencode/cli';
@@ -30,7 +31,7 @@ type LocalSetupScreenProps = {
 function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCopy: () => void; copyTitle: string }) {
   return (
     <div className="flex items-center justify-center gap-3">
-      <code className="flex-1 min-w-0 text-start overflow-x-auto whitespace-nowrap">
+      <ScrollableOverlay as="code" outerClassName="overlay-scrollbar-wrapper--no-gutter flex-1 min-w-0" fillContainer={false} className="text-start whitespace-nowrap">
         {windows ? (
           <span style={{ color: 'var(--syntax-keyword)' }}>{WINDOWS_INSTALL_COMMAND}</span>
         ) : (
@@ -42,7 +43,7 @@ function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCo
             <span style={{ color: 'var(--syntax-keyword)' }}>bash</span>
           </>
         )}
-      </code>
+      </ScrollableOverlay>
       <button
         onClick={onCopy}
         className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"

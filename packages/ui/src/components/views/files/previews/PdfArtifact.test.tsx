@@ -8,6 +8,7 @@ Object.assign(globalThis, {
   window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage,
   Node: browser.Node, Element: browser.Element, HTMLElement: browser.HTMLElement,
   ResizeObserver: browser.ResizeObserver, IntersectionObserver: browser.IntersectionObserver, IS_REACT_ACT_ENVIRONMENT: true,
+  requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser),
 });
 // React DOM and the i18n store read the DOM when imported, so it goes in first.
 const { createRoot } = await import('react-dom/client');

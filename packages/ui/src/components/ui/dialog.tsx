@@ -4,6 +4,7 @@ import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { cn } from "@/lib/utils"
 import { useI18n } from '@/lib/i18n'
 import { Icon } from "@/components/icon/Icon";
+import { PopupOverlayScrollbar } from "@/components/ui/AttachedOverlayScrollbar";
 import { DockedPanelSurfaceContext } from "@/hooks/usePageColors";
 
 let openDialogCount = 0;
@@ -98,8 +99,10 @@ function DialogContent({
 }: DialogContentProps) {
   const { t } = useI18n()
   const popupRef = React.useRef<HTMLDivElement | null>(null)
+  const [popup, setPopup] = React.useState<HTMLDivElement | null>(null)
   const setPopupRef = React.useCallback((node: HTMLDivElement | null) => {
     popupRef.current = node
+    setPopup(node)
     if (typeof ref === "function") ref(node)
     else if (ref) ref.current = node
   }, [ref])
@@ -130,7 +133,7 @@ function DialogContent({
             // The canvas tone, like the Settings window: in themes whose
             // elevated surface is lighter, a dialog would otherwise read as a
             // grey slab over the dimmed app.
-            "oc-window-corners relative pointer-events-auto outline-none bg-background flex flex-col w-full max-w-lg max-h-full gap-4 p-5 oc-modal-shadow overflow-y-auto pwa-dialog-content origin-center",
+            "oc-window-corners relative pointer-events-auto outline-none bg-background flex flex-col w-full max-w-lg max-h-full gap-4 p-5 oc-modal-shadow overflow-y-auto overlay-scrollbar-target pwa-dialog-content origin-center",
             "transition-all duration-150 ease-out",
             "data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]",
             "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",
@@ -157,6 +160,7 @@ function DialogContent({
           </BaseDialog.Close>
         )}
         </BaseDialog.Popup>
+        <PopupOverlayScrollbar scroller={popup} />
       </div>
     </DialogPortal>
   )

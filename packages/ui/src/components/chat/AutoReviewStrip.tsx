@@ -9,6 +9,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { selectAutoReviewRun, useAutoReviewStore, type AutoReviewRun } from '@/stores/useAutoReviewStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSessionSelection } from './chatColumnSession';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type SettledStatus = Exclude<AutoReviewRun['status'], 'running'>;
 
@@ -141,9 +142,9 @@ export const AutoReviewStrip = memo(() => {
         </Button>
       </div>
       {unfolded ? (
-        <div id={disputeId} className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words ps-8 pe-3 pb-2 text-sm text-muted-foreground">
+        <ScrollableOverlay id={disputeId} outerClassName="max-h-48" className="whitespace-pre-wrap break-words ps-8 pe-3 pb-2 text-sm text-muted-foreground" disableHorizontal>
           {run.dispute}
-        </div>
+        </ScrollableOverlay>
       ) : null}
     </div>
   );

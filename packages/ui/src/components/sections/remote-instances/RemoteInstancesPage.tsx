@@ -78,6 +78,7 @@ import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
 import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
 import { Spinner } from '@/components/ui/spinner';
 import { useSshConfirmation } from './useSshConfirmation';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const randomPort = (): number => {
   return Math.floor(20000 + Math.random() * 30000);
@@ -2090,7 +2091,7 @@ export const RemoteInstancesPage: React.FC = () => {
                 ) : filteredImportCandidates.length === 0 ? (
                   <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.page.addDialog.searchEmpty')}</p>
                 ) : (
-                  <div className="max-h-[45vh] overflow-auto">
+                  <ScrollableOverlay outerClassName="max-h-[45vh]">
                     {filteredImportCandidates.map((candidate) => (
                       <div key={`${candidate.source}:${candidate.host}`} className="flex items-center justify-between gap-3 border-b border-[var(--surface-subtle)] py-2.5 last:border-b-0">
                         <div className="min-w-0">
@@ -2111,7 +2112,7 @@ export const RemoteInstancesPage: React.FC = () => {
                         </Button>
                       </div>
                     ))}
-                  </div>
+                  </ScrollableOverlay>
                 )}
               </div>
             ) : (
@@ -3047,9 +3048,9 @@ export const RemoteInstancesPage: React.FC = () => {
           ) : logDialogError ? (
             <div className="typography-meta text-[var(--status-error)]">{logDialogError}</div>
           ) : (
-            <pre className="max-h-[55vh] overflow-auto oc-tile-inset rounded-md p-3 typography-micro text-foreground whitespace-pre-wrap break-words">
+            <ScrollableOverlay as="pre" outerClassName="max-h-[55vh] oc-tile-inset rounded-md" className="p-3 typography-micro text-foreground whitespace-pre-wrap break-words" disableHorizontal>
               {logDialogLines.length > 0 ? logDialogLines.join('\n') : t('settings.remoteInstances.page.logsDialog.empty')}
-            </pre>
+            </ScrollableOverlay>
           )}
         </DialogContent>
       </Dialog>

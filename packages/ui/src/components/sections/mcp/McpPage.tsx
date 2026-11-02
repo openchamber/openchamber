@@ -65,6 +65,7 @@ import { Icon } from "@/components/icon/Icon";
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { useI18n } from '@/lib/i18n';
 import type { McpServerStatus } from '@/lib/opencode/model';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /** A stored millisecond value as the form shows it; empty means "not set". */
 const msField = (value: number | undefined): string =>
@@ -230,7 +231,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
           <summary className="typography-micro text-muted-foreground cursor-pointer select-none hover:text-foreground">
             {preview(value.length)}
           </summary>
-          <div className="mt-1 rounded-md bg-[var(--surface-elevated)] px-3 py-2 overflow-x-auto">
+          <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter mt-1 rounded-md bg-[var(--surface-elevated)]" fillContainer={false} className="px-3 py-2">
             <code className="typography-micro text-foreground/80 whitespace-pre">
               {value.map((a, i) => (
                 <span key={i} className="block">
@@ -239,7 +240,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({
                 </span>
               ))}
             </code>
-          </div>
+          </ScrollableOverlay>
         </details>
       )}
     </div>

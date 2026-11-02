@@ -2,6 +2,7 @@ import React from 'react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
@@ -58,7 +59,7 @@ export const FontArtifact: React.FC<{
       ) : status === 'loading' ? (
         <ContentLoadingState label={t('filesView.artifact.state.loading')} />
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto p-4" style={{ fontFamily: `"${family}"` }}>
+        <ScrollableOverlay outerClassName="min-h-0 flex-1" className="p-4" style={{ fontFamily: `"${family}"` }}>
           <div className="flex flex-col gap-4">
             {SAMPLE_SIZES.map((size) => (
               <div key={size} className="flex items-baseline gap-3">
@@ -72,7 +73,7 @@ export const FontArtifact: React.FC<{
               {GLYPH_ROWS.map((row) => <div key={row} className="break-all leading-relaxed">{row}</div>)}
             </div>
           </div>
-        </div>
+        </ScrollableOverlay>
       )}
     </div>
   );

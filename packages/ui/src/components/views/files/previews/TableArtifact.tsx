@@ -1,6 +1,7 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
@@ -46,7 +47,7 @@ export const TableArtifact: React.FC<{
     [table],
   );
   const totalColumnChars = columnChars.reduce((sum, chars) => sum + chars, 0);
-  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const scrollRef = React.useRef<HTMLElement>(null);
   const virtualizer = useVirtualizer({
     count: table.rows.length,
     getScrollElement: () => scrollRef.current,
@@ -74,7 +75,7 @@ export const TableArtifact: React.FC<{
       {table.columnCount === 0 ? (
         <div className="p-3 typography-ui text-muted-foreground">{t('filesView.artifact.table.empty')}</div>
       ) : (
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
+        <ScrollableOverlay ref={scrollRef} outerClassName="min-h-0 flex-1">
           {/* A fixed layout only holds with an explicit table width; without it
               one long value widens its column past the cap. */}
           <table
@@ -126,7 +127,7 @@ export const TableArtifact: React.FC<{
               {paddingBottom > 0 ? <tr aria-hidden="true" style={{ height: paddingBottom }} /> : null}
             </tbody>
           </table>
-        </div>
+        </ScrollableOverlay>
       )}
     </div>
   );

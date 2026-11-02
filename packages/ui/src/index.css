@@ -2034,7 +2034,10 @@ diffs-container {
   background: transparent;
 }
 
-.markdown-content [data-streamdown="table-wrapper"] > div:has(> table) {
+/* The frame goes on the scroller, or on the overlay wrapper around it, so the
+   overlay thumb sits inside the frame. */
+.markdown-content [data-streamdown="table-wrapper"] > div:has(> table),
+.markdown-content [data-streamdown="table-wrapper"] > .overlay-scrollbar-wrapper {
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 0.5rem;
   background: var(--surface-elevated);

@@ -19,6 +19,7 @@ import { useOpenChildSession } from './useOpenChildSession';
 import { formatCost } from './subagentCost';
 import { computeRollup } from './useSubagentCostRollup';
 import type { State } from '@/sync/types';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type Props = {
   sessionId: string | null;
@@ -151,7 +152,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       defaultExpanded
       summary={busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
     >
-      <div className="max-h-56 overflow-y-auto">
+      <ScrollableOverlay outerClassName="max-h-56" disableHorizontal>
         {rows.map(({ child, blocked, asked, busy, failed, done }) => {
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           let icon: IconName = 'time';
@@ -207,7 +208,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
             />
           );
         })}
-      </div>
+      </ScrollableOverlay>
     </WorkStatusCollapsibleSection>
   );
 };

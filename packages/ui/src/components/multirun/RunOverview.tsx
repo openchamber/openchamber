@@ -94,9 +94,9 @@ function PromptCaption({ prompt, expanded, onToggle }: { prompt: string; expande
   return (
     <div className="flex min-w-0 flex-1 items-start gap-1">
       {expanded ? (
-        <div className="max-h-64 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-[var(--surface-muted)] px-2 py-1.5 typography-meta text-foreground">
+        <ScrollableOverlay outerClassName="max-h-64 min-w-0 flex-1 rounded-md bg-[var(--surface-muted)]" className="whitespace-pre-wrap break-words px-2 py-1.5 typography-meta text-foreground" disableHorizontal>
           {prompt}
-        </div>
+        </ScrollableOverlay>
       ) : (
         <span ref={lineRef} className="min-w-0 flex-1 truncate typography-meta text-muted-foreground">{prompt}</span>
       )}

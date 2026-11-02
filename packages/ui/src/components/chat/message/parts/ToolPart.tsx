@@ -19,7 +19,7 @@ import { findShellCancellation, findShellCompletion, readBackgroundShellID, read
 import { opencodeClient } from '@/lib/opencode/client';
 import type { State } from '@/sync/types';
 import { useUIStore } from '@/stores/useUIStore';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Text } from '@/components/ui/text';
@@ -516,45 +516,41 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
     }, [followKey]);
 
     return (
-        <div className={cn('w-full min-w-0 flex-none overflow-hidden', outerClassName)}>
-            <ScrollShadow
-                ref={scrollRef}
-                // Tool output boxes are short (often 240px), so the 48px default
-                // fade would hide a couple of lines at each edge.
-                size={24}
-                data-scrollable="true"
-                onWheelCapture={(event) => {
-                    if (followKey !== undefined && event.deltaY < 0) {
-                        isFollowingRef.current = false;
-                    }
-                }}
-                onScroll={(event) => {
-                    if (followKey === undefined) {
-                        return;
-                    }
-                    const element = event.currentTarget;
-                    const distanceToEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
-                    // Output can grow between an automatic scroll and its event.
-                    // A larger bottom gap alone does not mean the reader moved up.
-                    if (distanceToEnd <= 2) {
-                        isFollowingRef.current = true;
-                    } else if (element.scrollTop < lastScrollTopRef.current - 1) {
-                        isFollowingRef.current = false;
-                    }
-                    lastScrollTopRef.current = element.scrollTop;
-                }}
-                className={cn(
-                    'tool-output-surface w-full min-w-0',
-                    maxHeightClass,
-                    disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
-                    className,
-                )}
-            >
-                <div className="w-full min-w-0">
-                    {children}
-                </div>
-            </ScrollShadow>
-        </div>
+        <ScrollableOverlay
+            ref={scrollRef}
+            outerClassName={cn('w-full min-w-0 flex-none', maxHeightClass, outerClassName)}
+            useScrollShadow
+            // Tool output boxes are short (often 240px), so the 48px default
+            // fade would hide a couple of lines at each edge.
+            scrollShadowSize={24}
+            disableHorizontal={disableHorizontal}
+            data-scrollable="true"
+            onWheelCapture={(event) => {
+                if (followKey !== undefined && event.deltaY < 0) {
+                    isFollowingRef.current = false;
+                }
+            }}
+            onScroll={(event) => {
+                if (followKey === undefined) {
+                    return;
+                }
+                const element = event.currentTarget;
+                const distanceToEnd = element.scrollHeight - element.scrollTop - element.clientHeight;
+                // Output can grow between an automatic scroll and its event.
+                // A larger bottom gap alone does not mean the reader moved up.
+                if (distanceToEnd <= 2) {
+                    isFollowingRef.current = true;
+                } else if (element.scrollTop < lastScrollTopRef.current - 1) {
+                    isFollowingRef.current = false;
+                }
+                lastScrollTopRef.current = element.scrollTop;
+            }}
+            className={cn('tool-output-surface min-w-0', className)}
+        >
+            <div className="w-full min-w-0">
+                {children}
+            </div>
+        </ScrollableOverlay>
     );
 };
 

@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { summarizeHunkFiles } from '@/lib/walkthrough/model';
 import { changedPathName } from '@/components/views/git/changesTree';
@@ -119,10 +120,12 @@ export const WalkthroughToc = memo(function WalkthroughToc({
     activeRef.current?.scrollIntoView({ block: 'nearest' });
   }, [activeStopId]);
 
-  return (
-    <nav
-      className={cn('flex flex-col overflow-y-auto', page ? 'min-h-0 flex-1 px-3 py-3' : 'shrink-0 border-e border-edge p-2')}
-      style={page ? undefined : { width }}
+  const contents = (
+    <ScrollableOverlay
+      as="nav"
+      outerClassName="min-h-0 flex-1"
+      className={cn('flex flex-col', page ? 'px-3 py-3' : 'p-2')}
+      disableHorizontal
     >
       {view.walkthrough.focus && (
         <p className={cn('px-2 pb-3 pt-1 text-muted-foreground', page ? 'typography-ui-label' : 'typography-meta')}>{view.walkthrough.focus}</p>
@@ -153,6 +156,13 @@ export const WalkthroughToc = memo(function WalkthroughToc({
           {t('walkthrough.toc.uncovered', { count: view.uncoveredHunks.length })}
         </p>
       )}
-    </nav>
+    </ScrollableOverlay>
+  );
+
+  if (page) return contents;
+  return (
+    <div className="flex shrink-0 flex-col border-e border-edge" style={{ width }}>
+      {contents}
+    </div>
   );
 });

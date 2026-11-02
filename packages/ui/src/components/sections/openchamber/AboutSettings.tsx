@@ -21,6 +21,7 @@ import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeSta
 import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   SettingsChipGroup,
   SettingsSection,
@@ -372,7 +373,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           {t('settings.openchamber.about.serviceManagerUpdate', { version: describeVersion(info?.version || '') })}
         </p>
         <div className="flex items-center gap-2 oc-tile-inset rounded-md p-1 ps-3">
-          <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground">{command}</code>
+          <ScrollableOverlay as="code" outerClassName="overlay-scrollbar-wrapper--no-gutter flex-1 min-w-0" fillContainer={false} className="whitespace-nowrap font-mono text-sm text-foreground">{command}</ScrollableOverlay>
           <Button
             type="button"
             variant="ghost"

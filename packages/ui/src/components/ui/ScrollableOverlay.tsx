@@ -8,6 +8,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   hideDelayMs?: number;
   as?: React.ElementType;
   outerClassName?: string;
+  /** Style of the outer frame, for a size given as a value (a max height from a prop). */
+  outerStyle?: React.CSSProperties;
   scrollbarClassName?: string;
   disableHorizontal?: boolean;
   observeMutations?: boolean;
@@ -31,6 +33,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
   ({
     className,
     outerClassName,
+    outerStyle,
     children,
     style,
     minThumbSize,
@@ -60,6 +63,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
           preventOverscroll && "overscroll-none",
           outerClassName
         )}
+        style={outerStyle}
       >
         {useScrollShadow ? (
           <ScrollShadow

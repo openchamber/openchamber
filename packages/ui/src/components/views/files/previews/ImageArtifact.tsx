@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
@@ -344,12 +345,12 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
         {!failed && !natural ? (
           <ContentLoadingState label={t('filesView.artifact.state.loading')} className="pointer-events-none absolute inset-0" />
         ) : null}
-        <div
+        <ScrollableOverlay
           ref={viewportRef}
           tabIndex={neighbors ? 0 : undefined}
+          outerClassName={cn('min-h-0 flex-1', failed && 'hidden')}
           className={cn(
-            'min-h-0 flex-1 overflow-auto outline-none',
-            failed && 'hidden',
+            'outline-none',
             canPan && (dragging ? 'cursor-grabbing' : 'cursor-grab'),
           )}
           onPointerDown={handlePointerDown}
@@ -388,7 +389,7 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
               />
             ) : null}
           </div>
-        </div>
+        </ScrollableOverlay>
         {neighbors ? (
           <>
             <button

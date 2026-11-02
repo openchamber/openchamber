@@ -3,6 +3,7 @@ import React from 'react';
 
 import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { toast } from '@/components/ui';
+import { AttachedOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
 import { Button } from '@/components/ui/button';
 import { KnowledgeCard } from './KnowledgeCard';
 import { KnowledgeEntryView } from './KnowledgeEntryView';
@@ -199,6 +200,7 @@ const MemoryView: React.FC<{
   }, [bodyDraft, entry.body, entry.title, titleDraft]);
 
   const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+  const [bodyScroller, setBodyScroller] = React.useState<HTMLTextAreaElement | null>(null);
   const emojiPicker = useEmojiPicker(bodyRef);
   const commitRef = React.useRef<() => void>(() => {});
   commitRef.current = () => {
@@ -251,15 +253,21 @@ const MemoryView: React.FC<{
           dir="auto"
           className="w-full flex-shrink-0 bg-transparent typography-ui-header font-semibold text-foreground outline-none focus-visible:outline-none"
         />
-        <textarea
-          ref={bodyRef}
-          value={bodyDraft}
-          onChange={(event) => setBodyDraft(event.target.value.slice(0, AGENT_MEMORY_BODY_MAX_LENGTH))}
-          onBlur={() => commitRef.current()}
-          aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editBody')}
-          dir="auto"
-          className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent typography-ui-label leading-relaxed text-foreground outline-none focus-visible:outline-none"
-        />
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <textarea
+            ref={(node) => {
+              bodyRef.current = node;
+              setBodyScroller(node);
+            }}
+            value={bodyDraft}
+            onChange={(event) => setBodyDraft(event.target.value.slice(0, AGENT_MEMORY_BODY_MAX_LENGTH))}
+            onBlur={() => commitRef.current()}
+            aria-label={t('rightSidebar.contextNotesTodo.memory.actions.editBody')}
+            dir="auto"
+            className="min-h-0 w-full flex-1 resize-none overflow-y-auto bg-transparent typography-ui-label leading-relaxed text-foreground outline-none focus-visible:outline-none"
+          />
+          <AttachedOverlayScrollbar scroller={bodyScroller} disableHorizontal />
+        </div>
         {emojiPicker}
       </div>
     </KnowledgeEntryView>

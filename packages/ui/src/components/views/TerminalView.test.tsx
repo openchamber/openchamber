@@ -150,7 +150,7 @@ mock.module('@/components/ui/sortable-tabs-strip', () => ({
     )),
   ),
 }));
-mock.module('@/lib/i18n', () => ({ useI18n: () => i18n }));
+mock.module('@/lib/i18n', () => ({ useI18n: () => i18n, isRightToLeft: () => false }));
 
 const { TerminalView } = await import('./TerminalView');
 

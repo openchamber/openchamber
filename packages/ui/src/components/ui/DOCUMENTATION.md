@@ -16,6 +16,8 @@ This folder owns runtime-independent controls and their Base UI integration, inc
 - Icon actions over a document (the Files editor, a plan, a page, image or diagram in the chat, diff headers) use `ToolbarButton` from `action-toolbar.tsx`: 24px, a 14px icon, colour-only hover, the selection fill while a toggle is on, faded while disabled. A toggle keeps one icon and one label naming the option; the fill says whether it is on.
 - `ActionToolbar` takes the actions a document has, which depend on what the document is and never on its mode, so a mode switch moves no button. Its groups sit apart by space; with `fold`, unpinned actions move into "More actions" from the end of the row while it does not fit, after `start` gave up its width.
 - `Textarea` offers emoji on `:` in both modes (`components/emoji/`, placed by `components/inline-picker/`); its forwarded ref is the textarea element itself.
+- Every scroller a user sees draws the app's overlay scrollbar, never the native one: `ScrollableOverlay` for a scroller the caller renders, `AttachedOverlayScrollbar` for one a library creates (CodeMirror's `.cm-scroller`), `PopupOverlayScrollbar` for a popup that scrolls itself (`DialogContent`, `DropdownMenuContent`, `ContextMenuContent`, the framed `Textarea`). A new `overflow-auto` element goes through one of them. Only fallback screens after a crash keep the native bar, so they depend on nothing that may have failed.
+- `OverlayScrollbar` draws a thumb only on an axis whose computed overflow is `auto` or `scroll`: a scroller its owner switched to `hidden`, or a menu left at `visible`, overflows without scrolling and shows none.
 
 ## Decisions
 
@@ -26,6 +28,10 @@ This folder owns runtime-independent controls and their Base UI integration, inc
 ### Why hover dismissal follows the opening reason
 
 Base UI 1.4 has no opening DOM event when a caller changes the controlled `open` prop, so it treats that popup as hover-dismissible. Filtering can shrink it away from a stationary pointer and close it during typing. The shared dropdown root cancels that hover close unless a trigger-hover event opened the menu, preserving explicit hover menus without caller-specific workarounds.
+
+### Why a scrolling popup gets a sibling frame and not a wrapper
+
+A dialog window and a menu are their own scroll containers: Base UI renders the popup, and callers size, pad and lay it out through its `className`. A thumb placed inside it would scroll away with the content, and wrapping the content in `ScrollableOverlay` would move every caller's padding, gap and overflow classes onto a new element. `PopupOverlayScrollbar` instead renders next to the popup in the same positioned parent and keeps a frame on the popup's `offsetTop/Left/Width/Height`. Offsets ignore the open and close scale, so the frame lands where the popup comes to rest; client rects read during the opening animation were 2% small.
 
 ### Why the height morph watches content and leaves the position to Base UI
 

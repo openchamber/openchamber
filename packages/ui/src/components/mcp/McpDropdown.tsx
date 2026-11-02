@@ -22,6 +22,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { toast } from 'sonner';
 import { useMcpDirectory } from './useMcpDirectory';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 // Matches the work-status MCP section: a status read boots the directory's
 // whole stdio fleet, so gated surfaces reuse a fresh one inside this window
@@ -129,7 +130,7 @@ export const McpDropdownContent: React.FC<{ active: boolean }> = ({ active }) =>
         </div>
       </div>
 
-      <div className="max-h-64 overflow-y-auto px-3 py-2.5">
+      <ScrollableOverlay outerClassName="max-h-64" className="px-3 py-2.5" disableHorizontal>
         <div className={cn(sortedNames.length > 0 && 'p-1.5')}>
         {sortedNames.map((serverName) => {
           const serverStatus = status?.[serverName];
@@ -196,7 +197,7 @@ export const McpDropdownContent: React.FC<{ active: boolean }> = ({ active }) =>
           </div>
         )}
         </div>
-      </div>
+      </ScrollableOverlay>
     </div>
   );
 };

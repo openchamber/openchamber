@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { getLongErrorPreview } from './longErrorPreview';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface LongErrorTextProps {
   text: string;
@@ -33,13 +34,14 @@ export const LongErrorText: React.FC<LongErrorTextProps> = ({ text, children, bu
     <div aria-live="off">
       {/* The full text scrolls inside its own box, so "Show less" stays right under it.
           tabIndex lets keyboard users scroll that box. */}
-      <div
+      <ScrollableOverlay
         id={contentId}
         tabIndex={expanded ? 0 : undefined}
-        className={expanded ? 'max-h-96 overflow-y-auto' : undefined}
+        outerClassName={expanded ? 'max-h-96' : undefined}
+        disableHorizontal
       >
         {children(expanded ? text : preview)}
-      </div>
+      </ScrollableOverlay>
       <Button
         variant="link"
         size="xs"

@@ -3,6 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { ChangedPathLabel } from '@/components/views/git/ChangedPathLabel';
 import { Button } from '@/components/ui/button';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { groupHunksByFile } from '@/lib/walkthrough/model';
@@ -217,7 +218,7 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   onFindWordRequest,
 }: WalkthroughStreamProps) {
   const { t } = useI18n();
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLElement | null>(null);
   const [uncoveredOpen, setUncoveredOpen] = useState(false);
 
   // Set while a click-driven jump is in flight. Without it the observer reports
@@ -318,11 +319,12 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   );
 
   return (
-    <div
+    <ScrollableOverlay
       ref={scrollRef}
-      className="min-h-0 flex-1 overflow-y-auto"
+      outerClassName="min-h-0 flex-1"
       data-diff-virtual-root
       data-diff-virtual-content
+      disableHorizontal
     >
       {summary && (
         <p className="typography-ui-label px-4 pt-4 text-muted-foreground">{summary}</p>
@@ -396,6 +398,6 @@ export const WalkthroughStream = memo(function WalkthroughStream({
             ))}
         </section>
       )}
-    </div>
+    </ScrollableOverlay>
   );
 });

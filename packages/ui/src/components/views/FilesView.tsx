@@ -19,6 +19,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -4583,10 +4584,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // Above the scroller, so an editor opened far down the file is on screen.
   // The fullscreen overlay shows it instead while it is open: one editor at a time.
   const wholeFileCommentPanel = wholeFileComment.editor || wholeFileComment.cards ? (
-    <div className="max-h-[50%] shrink-0 overflow-y-auto border-b border-edge-muted">
+    <ScrollableOverlay outerClassName="max-h-[50%] shrink-0 border-b border-edge-muted" disableHorizontal>
       {wholeFileComment.editor}
       {wholeFileComment.cards}
-    </div>
+    </ScrollableOverlay>
   ) : null;
 
   const fileViewer = (
@@ -4818,7 +4819,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 </div>
               }
             >
-              <div className="h-full overflow-auto">
+              <div className="h-full">
                 <JsonTreeView
                   className="h-full"
                   jsonString={fileContent}
@@ -4833,7 +4834,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           ) : selectedFile && isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="relative h-full min-h-0">
               <div
-                className="oc-file-preview h-full overflow-auto p-3 outline-none"
+                className="oc-file-preview overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-3 outline-none"
                 // Focusable so Cmd/Ctrl+F reaches the find bar: the keybind only
                 // fires when the event target sits inside this container, and a
                 // plain div never holds focus. -1 keeps it out of the tab order.
@@ -4874,6 +4875,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                   </div>
                 </ErrorBoundary>
               </div>
+              <OverlayScrollbar containerRef={mdPreviewContainerRef} />
               {!isFullscreen && (
                 <MarkdownPreviewSearch
                   containerRef={mdPreviewContainerRef}
@@ -5122,7 +5124,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             // highlighted by the search it drives.
             <div className="relative h-full min-h-0">
             <div
-              className="oc-file-preview h-full overflow-auto p-4 outline-none"
+              className="oc-file-preview overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-4 outline-none"
               tabIndex={-1}
               onMouseDown={focusMdPreviewContainer}
               ref={setFullscreenMarkdownScroller}
@@ -5162,6 +5164,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 </div>
               </ErrorBoundary>
             </div>
+              <OverlayScrollbar containerRef={mdFullscreenPreviewContainerRef} />
               <MarkdownPreviewSearch
                 containerRef={mdFullscreenPreviewContainerRef}
                 open={mdPreviewFindOpen}

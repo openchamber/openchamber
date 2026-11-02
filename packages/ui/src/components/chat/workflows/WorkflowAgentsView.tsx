@@ -21,6 +21,7 @@ import {
 } from '@/lib/workflows/model';
 import { WorkflowAnswerBlock } from './WorkflowAnswerBlock';
 import { workflowAgentLook } from './workflowRunPresentation';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type PhaseGroup = ReturnType<typeof groupWorkflowAgentsByPhase>[number];
 
@@ -50,7 +51,7 @@ const PhaseStrip: React.FC<{ run: WorkflowRun; groups: PhaseGroup[] }> = ({ run,
   const titled = groups.filter((group) => group.title !== null);
   if (titled.length === 0) return null;
   return (
-    <div className="flex gap-1.5 overflow-x-auto pb-1">
+    <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter" fillContainer={false} className="flex gap-1.5 pb-1">
       {titled.map((group) => {
         const total = group.agents.length;
         const span = phaseSpan(group.agents);
@@ -76,7 +77,7 @@ const PhaseStrip: React.FC<{ run: WorkflowRun; groups: PhaseGroup[] }> = ({ run,
           </div>
         );
       })}
-    </div>
+    </ScrollableOverlay>
   );
 };
 
@@ -123,7 +124,7 @@ const AgentDetails: React.FC<{ run: WorkflowRun; agent: WorkflowAgent; onOpenSes
               {t('workflows.panel.agent.prompt')}
             </button>
             {promptOpen ? (
-              <pre dir="auto" className="mt-1 max-h-72 overflow-y-auto whitespace-pre-wrap break-words font-mono typography-micro text-foreground">{detail.prompt}</pre>
+              <ScrollableOverlay as="pre" dir="auto" outerClassName="mt-1 max-h-72" className="whitespace-pre-wrap break-words font-mono typography-micro text-foreground" disableHorizontal>{detail.prompt}</ScrollableOverlay>
             ) : null}
           </section>
         </>
@@ -233,7 +234,7 @@ export const WorkflowAgentsView: React.FC<{ run: WorkflowRun; directory: string 
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <ScrollableOverlay outerClassName="min-h-0 flex-1" className="px-3 py-3" disableHorizontal>
         <PhaseStrip run={run} groups={groups} />
         {groups.map((group) => {
           if (group.agents.length === 0) return null;
@@ -277,7 +278,7 @@ export const WorkflowAgentsView: React.FC<{ run: WorkflowRun; directory: string 
             </section>
           );
         })}
-      </div>
+      </ScrollableOverlay>
       <div className="flex shrink-0 flex-wrap items-center gap-x-1.5 border-t border-edge px-3 py-2 typography-micro text-muted-foreground">
         <span className="tabular-nums" dir="auto">{t('workflows.panel.summary.agents', { done, total: run.agents.length })}</span>
         {run.startedAt !== undefined ? (

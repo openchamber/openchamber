@@ -1,7 +1,6 @@
 import * as React from 'react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -41,6 +40,7 @@ import { useAllLiveSessions } from '@/sync/sync-context';
 import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 import { DatePicker, TimePill } from '@/components/ui/date-time';
 import { useCalendarPreferences } from '@/components/ui/useCalendarPreferences';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 // Mirrors the composer's footer icon toggles (PermissionAutoAcceptButton /
 // SessionGoalButton) so the state reads the same in both places.
@@ -1224,13 +1224,14 @@ export function ScheduledTaskEditorDialog(props: {
           </div>
         </header>
 
-        <ScrollShadow
-          className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges]"
-          size={64}
-          hideTopShadow
+        <ScrollableOverlay
+          outerClassName="flex-1 min-h-0"
+          useScrollShadow
+          scrollShadowSize={64}
+          hideTopScrollShadow
         >
           <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 pb-5">{formBody}</div>
-        </ScrollShadow>
+        </ScrollableOverlay>
 
         <div className="shrink-0 px-4 sm:px-6 py-3">
           <div className="mx-auto w-full max-w-2xl">{footerRow}</div>

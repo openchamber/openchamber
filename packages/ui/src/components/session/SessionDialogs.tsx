@@ -31,6 +31,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const renderToastDescription = (text?: string) =>
     text ? <span className="oc-title-rest">{text}</span> : undefined;
@@ -851,9 +852,13 @@ export const SessionDialogs: React.FC = () => {
                             </DialogTitle>
                             {deleteDialogDescription && <DialogDescription>{deleteDialogDescription}</DialogDescription>}
                         </DialogHeader>
-                        <div className={cn(isWorktreeDelete && 'flex-1 min-h-0 overflow-y-auto space-y-2')}>
-                            {deleteDialogBody}
-                        </div>
+                        {isWorktreeDelete ? (
+                            <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-2" disableHorizontal>
+                                {deleteDialogBody}
+                            </ScrollableOverlay>
+                        ) : (
+                            <div>{deleteDialogBody}</div>
+                        )}
                         <DialogFooter className="mt-2 gap-2 pt-1 pb-1">{deleteDialogActions}</DialogFooter>
                     </DialogContent>
                 </Dialog>

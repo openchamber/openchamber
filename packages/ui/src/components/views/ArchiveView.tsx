@@ -3,6 +3,7 @@ import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
@@ -416,9 +417,11 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
             <p className="px-4 typography-micro text-muted-foreground">{countLabel}</p>
           ) : null}
         </div>
-        <div
-          className="min-h-0 flex-1 overflow-y-auto pt-1"
+        <ScrollableOverlay
+          outerClassName="min-h-0 flex-1"
+          className="pt-1"
           style={{ paddingBottom: 'calc(0.5rem + var(--oc-safe-area-bottom, 0px))' }}
+          disableHorizontal
         >
           {worktreeGroups.length > 0 ? (
             <div className={cn('space-y-2 px-3', visibleSessions.length > 0 && 'pb-3')}>
@@ -440,7 +443,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
             ? emptyState
             : visibleSessions.map((session, index) => renderMobileSessionRow(session, index, visibleSessions, false))}
           {showMoreButton}
-        </div>
+        </ScrollableOverlay>
         {archiveActions.dialog}
       </div>
     );
@@ -584,7 +587,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
       <div className="flex min-h-0 flex-1">
         {/* Directory filter panel */}
         <div className="flex w-64 flex-shrink-0 flex-col border-e border-edge">
-          <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
+          <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-0.5 p-2" disableHorizontal>
             {renderDirectoryItem(
               '__all__',
               t('sessions.archivePage.all'),
@@ -602,7 +605,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
               bucket.sessions.length > 0 ? bucket.sessions : undefined,
               bucket.kind === 'space',
             ))}
-          </div>
+          </ScrollableOverlay>
         </div>
 
         {/* Session list */}
@@ -620,7 +623,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3">
+          <ScrollableOverlay outerClassName="min-h-0 flex-1" className="px-6 py-3" disableHorizontal>
             <div className="mx-auto w-full max-w-3xl space-y-0.5">
               {/* Each archived worktree is a tile holding its sessions; the loose sessions follow. */}
               {worktreeGroups.length > 0 ? (
@@ -643,7 +646,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
                 : visibleSessions.map((session, index) => renderSessionRow(session, index, visibleSessions))}
               {showMoreButton}
             </div>
-          </div>
+          </ScrollableOverlay>
         </div>
       </div>
       {archiveActions.dialog}

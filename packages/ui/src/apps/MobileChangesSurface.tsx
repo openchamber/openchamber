@@ -9,7 +9,6 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ChangesPanel, type ChangesGroupConfig } from '@/components/views/git/ChangesPanel';
 import { BranchSelector } from '@/components/views/git/BranchSelector';
 import { ChangedPathLabel } from '@/components/views/git/ChangedPathLabel';
@@ -100,6 +99,7 @@ import { commitAndSwitchBranch } from './mobileDirtySwitch';
 import { useCommitCelebration } from '@/components/views/git/useCommitCelebration';
 import { useGitCleanLine } from '@/components/views/git/useGitCleanLine';
 import { normalizePath } from '@/lib/pathNormalization';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -1631,8 +1631,11 @@ const MobileDiffDetail: React.FC<{
         ) : isImageFile(path) && !diff.fileDiff ? (
           <MobileChangesState icon message={t('mobile.changes.diffDetail.imageUnavailable')} />
         ) : (
-          <ScrollShadow
-            className="h-full overflow-y-auto overflow-x-hidden p-3"
+          <ScrollableOverlay
+            outerClassName="h-full"
+            className="p-3"
+            useScrollShadow
+            disableHorizontal
             data-diff-virtual-root
             data-diff-virtual-content
           >
@@ -1651,7 +1654,7 @@ const MobileDiffDetail: React.FC<{
               pendingContextExpansion={pendingContextExpansion}
               contextLoading={contextLoading}
             />
-          </ScrollShadow>
+          </ScrollableOverlay>
         )}
       </div>
     </div>
@@ -1663,7 +1666,7 @@ type ComparisonFileListItem = { path: string; status: string; insertions: number
 const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSelect: (path: string) => void }> = ({ files, onSelect }) => {
   const { t } = useI18n();
   return (
-    <ScrollShadow className="h-full overflow-y-auto overflow-x-hidden px-3 py-2">
+    <ScrollableOverlay outerClassName="h-full" className="px-3 py-2" useScrollShadow disableHorizontal>
       <ul aria-label={t('gitView.changes.changedFilesAria')} className="flex flex-col gap-1">
         {files.map((file) => {
           const statusLabel = file.status === 'A' ? t('diffView.change.new')
@@ -1683,6 +1686,6 @@ const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSe
           </li>;
         })}
       </ul>
-    </ScrollShadow>
+    </ScrollableOverlay>
   );
 };

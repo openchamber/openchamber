@@ -12,7 +12,8 @@ Object.assign(globalThis, { window: browser, document: browser.document, navigat
   SVGElement: browser.SVGElement, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,
   Event: browser.Event,
   Range: browser.Range,
-  XMLSerializer: browser.XMLSerializer, IntersectionObserver: browser.IntersectionObserver, ResizeObserver: browser.ResizeObserver });
+  XMLSerializer: browser.XMLSerializer, IntersectionObserver: browser.IntersectionObserver, ResizeObserver: browser.ResizeObserver,
+  requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser) });
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
 const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };

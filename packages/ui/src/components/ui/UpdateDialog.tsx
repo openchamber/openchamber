@@ -425,9 +425,9 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 <span>{t('updateDialog.fallback.updateViaTerminal')}</span>
               </div>
               <div className="flex items-center gap-2 p-1 ps-3 bg-surface-elevated/50 rounded-md border border-border">
-                <code className="flex-1 font-mono text-sm text-foreground overflow-x-auto whitespace-nowrap">
+                <ScrollableOverlay as="code" outerClassName="overlay-scrollbar-wrapper--no-gutter flex-1 min-w-0" fillContainer={false} className="font-mono text-sm text-foreground whitespace-nowrap">
                   {updateCommand}
-                </code>
+                </ScrollableOverlay>
                 <button
                   onClick={handleCopyCommand}
                   className={cn(

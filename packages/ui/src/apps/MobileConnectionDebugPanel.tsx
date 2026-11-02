@@ -6,6 +6,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 
 import { formatMobileConnectDebugEntry, getMobileConnectDebugEntries, getMobileConnectDebugText } from './mobileConnectionDebug';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 // Hidden diagnostics surface for device-only connection bugs: renders the
 // in-memory connection event trail with one-tap copy, so a user on a release
@@ -41,7 +42,7 @@ export const MobileConnectionDebugPanel: React.FC<{ onClose: () => void }> = ({ 
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3">
+      <ScrollableOverlay outerClassName="min-h-0 flex-1" className="px-4 py-3" disableHorizontal>
         {entries.length === 0 ? (
           <p className="typography-small text-muted-foreground">{t('mobile.connectionDebug.empty')}</p>
         ) : (
@@ -49,7 +50,7 @@ export const MobileConnectionDebugPanel: React.FC<{ onClose: () => void }> = ({ 
             {entries.map(formatMobileConnectDebugEntry).join('\n')}
           </pre>
         )}
-      </div>
+      </ScrollableOverlay>
     </div>
   );
 };
