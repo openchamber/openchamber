@@ -2,7 +2,7 @@
 
 Build extensions for [OpenChamber](https://openchamber.dev). An extension can show a panel on the right-hand rail or run actions in the background without a panel. It can read the current project and session, show toasts, put text in the chat box, attach a task to a session, and, once the user approves it, start sessions and send prompts. This package is the contract between the extension and the app.
 
-Full guide: [Build an extension](https://openchamber.dev/docs/sdk/). Reference: [Host API](https://openchamber.dev/docs/sdk/host/) and [UI kit](https://openchamber.dev/docs/sdk/ui/). Extensions with a local process: [GUEST_SERVICES.md](./GUEST_SERVICES.md).
+Full guide: [Build an extension](https://docs.openchamber.dev/sdk/). Reference: [Host API](https://docs.openchamber.dev/sdk/host/) and [UI kit](https://docs.openchamber.dev/sdk/ui/). Extensions with a local process: [GUEST_SERVICES.md](./GUEST_SERVICES.md).
 
 Extensions load in OpenChamber web and desktop. VS Code and mobile do not load them yet.
 
@@ -44,7 +44,7 @@ bunx openchamber-guest-bundle panel/main.ts panel/main.js
 
 Then install the folder from Settings → Extensions → Add. Folder installs run from your folder, so edit, rebuild, and reload. A `.zip` or an https git or zip link is copied into OpenChamber's data folder instead; ship the built files only. Git installs can update from Settings → Extensions when the repository's `version` is newer than the installed one, so bump `version` to ship an update; `https://…/panel.git#v1` pins a tag or branch.
 
-A complete three-file example is on the [Build an extension](https://openchamber.dev/docs/sdk/) page. Six examples are at [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples).
+A complete three-file example is on the [Build an extension](https://docs.openchamber.dev/sdk/) page. Six examples are at [github.com/openchamber/openchamber/tree/main/packages/sdk/examples](https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples).
 
 ## Manifest
 
@@ -222,7 +222,7 @@ host.onItem((item) => {
 });
 ```
 
-Every method, its limits, and the error codes are on the [Host API](https://openchamber.dev/docs/sdk/host/) page.
+Every method, its limits, and the error codes are on the [Host API](https://docs.openchamber.dev/sdk/host/) page.
 
 ## Popovers outside the extension frame
 
