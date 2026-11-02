@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { hasFileStatChanged, openFilePollStep } from './fileStatChange';
+import { fileStatSnapshotForRequestedPath, hasFileStatChanged, openFilePollStep } from './fileStatChange';
 
 const step = (overrides: Partial<Parameters<typeof openFilePollStep>[0]>) => openFilePollStep({
   stat: 'found',
@@ -38,6 +38,19 @@ describe('openFilePollStep (issue 4477)', () => {
 
   test('a failed file that is still missing keeps its error without a reload', () => {
     expect(step({ stat: 'missing', showsFailure: true, sawMissing: true })).toBe('show-missing');
+  });
+});
+
+describe('fileStatSnapshotForRequestedPath', () => {
+  test('keeps the requested path when the server answers with a resolved symlink path', () => {
+    expect(fileStatSnapshotForRequestedPath('/repo/docs/plan.md', {
+      size: 120,
+      mtimeMs: 1700000000000,
+    })).toEqual({
+      path: '/repo/docs/plan.md',
+      size: 120,
+      mtimeMs: 1700000000000,
+    });
   });
 });
 

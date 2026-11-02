@@ -34,7 +34,7 @@ import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButt
 import { useZoneInteractive } from '@/components/layout/zoneInteractiveContext';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { createFileContentPoller } from './fileContentPoller';
-import { hasFileStatChanged, openFilePollStep } from './fileStatChange';
+import { fileStatSnapshotForRequestedPath, hasFileStatChanged, openFilePollStep, type FileStatSnapshot } from './fileStatChange';
 import { pendingFileNavigationStep } from './pendingFileNavigation';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -155,12 +155,6 @@ type FileNode = {
   type: 'file' | 'directory';
   extension?: string;
   relativePath?: string;
-};
-
-type FileStatSnapshot = {
-  path: string;
-  size: number;
-  mtimeMs?: number;
 };
 
 type SelectedLineRange = {
@@ -1727,11 +1721,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (files.statFile) {
       const options = resolveFileReadOptions(path);
       const result = await files.statFile(path, { ...options, directory: root || undefined });
-      return {
-        path: result.path,
-        size: result.size,
-        mtimeMs: result.mtimeMs,
-      };
+      return fileStatSnapshotForRequestedPath(normalizePath(path), result);
     }
     return null;
   }, [files, resolveFileReadOptions, root]);
