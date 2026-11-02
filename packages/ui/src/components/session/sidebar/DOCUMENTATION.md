@@ -923,7 +923,11 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   and draft rows take the same faint hover fill; archive and folder
   headers take none, so a pointer moving down the
   sidebar tells sessions from their containers. Show more, empty and
-  status rows carry the level whose text they line up with.
+  status rows carry the level whose text they line up with. Reveal controls
+  and group status rows also carry the group's detailed flag, so both desktop
+  and phone align them with two-line titles in a detailed project root.
+  Chats, worktree contents and archive rows keep the tree column; flat rows
+  keep their gutterless inset.
 - A row's `depth` is its tree level as above, not its parentage. Do not read
   `depth > 0` as "this is a subagent".
 - The existing `ScrollableOverlay` is the sole scroll owner. The shared row

@@ -139,13 +139,13 @@ export const MobileSessionList: React.FC<SessionProjectListProps> = ({ model, vi
         return <MobileShowControl
           more={row.more}
           fewer={row.fewer}
-          indent={row.flat ? FLAT_TEXT_INSET_PX : geometry.textLeft(row.depth ?? 0)}
+          indent={row.flat ? FLAT_TEXT_INSET_PX : row.detailed ? geometry.detailedLeft(row.depth ?? 0) : geometry.textLeft(row.depth ?? 0)}
           onShow={(control) => applyShowControl(row, control, { model, actions })}
         />;
       case 'status':
         return <MobileStatusRow
           row={row}
-          indent={row.flat ? FLAT_TEXT_INSET_PX : geometry.textLeft(row.depth ?? 0)}
+          indent={row.flat ? FLAT_TEXT_INSET_PX : row.detailed ? geometry.detailedLeft(row.depth ?? 0) : geometry.textLeft(row.depth ?? 0)}
           onRetry={() => retryGroupStatus(row, childStores)}
           onGrantAccess={() => { void grantGroupAccess(row, childStores); }}
         />;

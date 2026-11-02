@@ -536,10 +536,39 @@ describe('buildSessionSidebarRowModel', () => {
   test('Chats keep the tree slot', () => {
     const input = args([]);
     input.chatGroup = group(Array.from({ length: 5 }, (_, index) => node(`chat-${index}`)), { id: 'managed-chats' });
+    input.detailedZoneRows = true;
     const rows = buildSessionSidebarRowModel(input).rows;
 
     expect([...new Set(rows.flatMap((row) => (row.kind === 'session' ? [row.renderContext] : [])))]).toEqual(['tree-chat']);
-    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false });
+    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false, detailed: false });
+  });
+
+  test('the reveal control takes the column of the rows it closes', () => {
+    const nodes = Array.from({ length: 20 }, (_, index) => node(`session-${index}`));
+    const input = args([project([group(nodes)])]);
+    input.sessionBatchSize = 7;
+    const control = () => {
+      const row = buildSessionSidebarRowModel(input).rows.find((candidate) => candidate.kind === 'show-control');
+      return row?.kind === 'show-control' ? row : null;
+    };
+
+    expect(control()).toMatchObject({ detailed: false });
+
+    input.detailedZoneRows = true;
+    expect(control()).toMatchObject({ detailed: true });
+  });
+
+  test('a detailed project failure takes the title column with or without retained sessions', () => {
+    for (const retained of [false, true]) {
+      const input = args([project([group(retained ? [node('retained')] : [])])]);
+      input.detailedZoneRows = true;
+      input.groupStatusByKey = new Map([['project-a:main', { state: 'load-failed', directory: '/repo', canGrantAccess: false }]]);
+      const status = () => buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'status');
+
+      expect(status()).toMatchObject({ groupKey: 'project-a:main', depth: 0, detailed: true, status: { state: 'load-failed' } });
+      input.detailedZoneRows = false;
+      expect(status()).toMatchObject({ detailed: false });
+    }
   });
 
   test('Chats failure stays visible beside retained sessions', () => {
