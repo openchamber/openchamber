@@ -470,7 +470,7 @@ already zero-height. `scripts/legend-list-padding.test.mjs` checks the
 installed version for it. Chat padding and scroll policies do not compensate
 for it.
 
-The Bun patch for `@legendapp/list@3.6.0` floors `roundSize` to the device
+The Bun patch for `@legendapp/list@3.7.1` floors `roundSize` to the device
 pixel grid instead of eighth pixels, mirroring upstream LegendApp/legend-list#536.
 Rows the list has not measured yet are placed at the average measured height;
 with eighth-pixel precision their positions are fractional, the browser rounds
