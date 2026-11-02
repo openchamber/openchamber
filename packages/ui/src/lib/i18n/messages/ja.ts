@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -191,6 +192,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ja,
   ...consoleBudgetsI18n.ja,
   ...imageToolI18n.ja,
+  ...agentStatusI18n.ja,
   ...snippetsI18n.ja,
   ...sidebarWorkI18n.ja,
   ...sidebarSectionsI18n.ja,
@@ -2427,7 +2429,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '低優先度',
   'chat.statusRow.actions.stopGeneratingAria': '生成を停止',
   'chat.statusRow.tasksTitle': 'タスク',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model}: {status}',
   'chat.statusRow.summary.activeLeft': '{active}アクティブ · {left}残り',
   'chat.revertIndicator.redo': 'やり直し',
   'chat.revertIndicator.redoAria': 'やり直し — 元に戻したメッセージを復元',

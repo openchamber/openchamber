@@ -59,3 +59,24 @@ export const netDeletionLine = (
     description: line.description,
   };
 };
+
+/**
+ * One block of reasoning in this many gets a joke in place of "thinking": the
+ * model thinks in nearly every step, and a joke shown every time stops being one.
+ */
+export const THINKING_LINE_ODDS = 4;
+
+const hashSeed = (value: string): number => {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  return Math.abs(hash);
+};
+
+/**
+ * The joke for a block of reasoning, keyed on its part id so it stays while
+ * the block runs; null for the ordinary "thinking".
+ */
+export const thinkingLine = (copy: EasterEggCopy, seed: string): string | null => {
+  if (hashSeed(seed) % THINKING_LINE_ODDS !== 0) return null;
+  return pick(copy.thinking, hashSeed(`${seed}:line`));
+};

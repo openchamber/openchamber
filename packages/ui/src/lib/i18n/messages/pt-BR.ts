@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -201,6 +202,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['pt-BR'],
   ...consoleBudgetsI18n['pt-BR'],
   ...imageToolI18n['pt-BR'],
+  ...agentStatusI18n['pt-BR'],
   ...snippetsI18n['pt-BR'],
   ...sidebarWorkI18n['pt-BR'],
   ...sidebarSectionsI18n['pt-BR'],
@@ -2400,7 +2402,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.statusRow.todo.priority.low": "Prioridade baixa",
   "chat.statusRow.actions.stopGeneratingAria": "Parar a geração",
   "chat.statusRow.tasksTitle": "Tarefas",
-  "chat.statusRow.modelStatus": "{model} · {status}",
+  "chat.statusRow.modelStatus": "{model} {status}",
   "chat.statusRow.summary.activeLeft": "{active} ativas · {left} restantes",
   "chat.revertIndicator.redo": "Refazer",
   "chat.revertIndicator.redoAria": "Refazer — restaurar mensagens revertidas",

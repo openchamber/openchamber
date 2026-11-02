@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -201,6 +202,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.uk,
   ...consoleBudgetsI18n.uk,
   ...imageToolI18n.uk,
+  ...agentStatusI18n.uk,
   ...snippetsI18n.uk,
   ...sidebarWorkI18n.uk,
   ...sidebarSectionsI18n.uk,
@@ -2400,7 +2402,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.statusRow.todo.priority.low": "Низький пріоритет",
   "chat.statusRow.actions.stopGeneratingAria": "Припинити генерацію",
   "chat.statusRow.tasksTitle": "завдання",
-  "chat.statusRow.modelStatus": "{model} · {status}",
+  "chat.statusRow.modelStatus": "{model} {status}",
   "chat.statusRow.summary.activeLeft": "Активних: {active} · залишилось: {left}",
   "chat.revertIndicator.redo": "Повторити",
   "chat.revertIndicator.redoAria": "Повторити — відновити відкочені повідомлення",

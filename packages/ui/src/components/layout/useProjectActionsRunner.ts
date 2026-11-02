@@ -1082,7 +1082,7 @@ export const useProjectActionsRunner = ({
     await runAction(action);
   }, [runAction, stableProjectRef]);
 
-  // A running action wins over an idle pick: the row is where it gets stopped,
+  // A running action wins over an idle pick: the button is where it gets stopped,
   // so it must not hide behind whichever action was chosen last.
   const runOf = React.useCallback((entry: OpenChamberProjectAction): ProjectActionRun | null => (
     projectActionRuns[toProjectActionRunKey(executionDirectoryFor(entry), entry.id)] ?? null

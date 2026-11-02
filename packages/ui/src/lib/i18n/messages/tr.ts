@@ -24,6 +24,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -129,6 +130,7 @@ export const dict = {
   ...heapSnapshotI18n.tr,
   ...consoleBudgetsI18n.tr,
   ...imageToolI18n.tr,
+  ...agentStatusI18n.tr,
   ...snippetsI18n.tr,
   ...sidebarWorkI18n.tr,
   ...sidebarSectionsI18n.tr,
@@ -2289,7 +2291,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'Düşük öncelik',
   'chat.statusRow.actions.stopGeneratingAria': 'Üretmeyi durdur',
   'chat.statusRow.tasksTitle': 'Görevler',
-  'chat.statusRow.modelStatus': '{model}: {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} etkin · {left} kaldı',
   'chat.revertIndicator.redo': 'Yinele',
   'chat.revertIndicator.redoAria': 'Yinele — geri alınan mesajları geri yükle',

@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -201,6 +202,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.es,
   ...consoleBudgetsI18n.es,
   ...imageToolI18n.es,
+  ...agentStatusI18n.es,
   ...snippetsI18n.es,
   ...sidebarWorkI18n.es,
   ...sidebarSectionsI18n.es,
@@ -2400,7 +2402,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.statusRow.todo.priority.low": "Prioridad baja",
   "chat.statusRow.actions.stopGeneratingAria": "Detener la generación",
   "chat.statusRow.tasksTitle": "Tareas",
-  "chat.statusRow.modelStatus": "{model} · {status}",
+  "chat.statusRow.modelStatus": "{model} {status}",
   "chat.statusRow.summary.activeLeft": "{active} activas · {left} restantes",
   "chat.revertIndicator.redo": "Rehacer",
   "chat.revertIndicator.redoAria": "Rehacer — restaurar mensajes revertidos",

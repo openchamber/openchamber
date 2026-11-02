@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -191,6 +192,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-TW'],
   ...consoleBudgetsI18n['zh-TW'],
   ...imageToolI18n['zh-TW'],
+  ...agentStatusI18n['zh-TW'],
   ...snippetsI18n['zh-TW'],
   ...sidebarWorkI18n['zh-TW'],
   ...sidebarSectionsI18n['zh-TW'],
@@ -2407,7 +2409,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '低優先級',
   'chat.statusRow.actions.stopGeneratingAria': '停止生成',
   'chat.statusRow.tasksTitle': '任務',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model}{status}',
   'chat.statusRow.summary.activeLeft': '{active} 個活躍 · 剩餘 {left} 個',
   'chat.revertIndicator.redo': '重做',
   'chat.revertIndicator.redoAria': '重做 — 恢復已收回的訊息',

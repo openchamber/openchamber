@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -191,6 +192,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ko,
   ...consoleBudgetsI18n.ko,
   ...imageToolI18n.ko,
+  ...agentStatusI18n.ko,
   ...snippetsI18n.ko,
   ...sidebarWorkI18n.ko,
   ...sidebarSectionsI18n.ko,
@@ -2431,7 +2433,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '낮은 우선순위',
   'chat.statusRow.actions.stopGeneratingAria': '생성 중지',
   'chat.statusRow.tasksTitle': '작업',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model}: {status}',
   'chat.statusRow.summary.activeLeft': '{active}개 활성 · {left}개 남음',
   'chat.revertIndicator.redo': '다시 실행',
   'chat.revertIndicator.redoAria': '다시 실행 — 되돌린 메시지 복원',

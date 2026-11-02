@@ -14,8 +14,9 @@ import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 
 /**
  * The header's view of the shown project action: one button that runs or
- * stops it, the preview globe while it serves a page, and the other actions
- * on right click. The action's name is in the tooltip.
+ * stops it, wearing the action's icon while idle, the preview globe while it
+ * serves a page, and the other actions on right click. The action's name is
+ * in the tooltip.
  */
 const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ buttonClassName }) => {
   const { t } = useI18n();
@@ -71,7 +72,11 @@ const HeaderProjectActionComponent: React.FC<{ buttonClassName: string }> = ({ b
                 className={cn(buttonClassName, menuOpen && 'text-foreground')}
                 aria-label={label}
               >
-                <ProjectActionRunIndicator run={shownRun} showIdle large />
+                {/* Idle, the button wears the action's own icon, so it shows
+                    which action a click starts; running, its stop. */}
+                {shownRun
+                  ? <ProjectActionRunIndicator run={shownRun} large />
+                  : <Icon name={resolveProjectActionIconName(shown)} className="size-4" />}
               </button>
             </TooltipTrigger>
           </ContextMenuTrigger>

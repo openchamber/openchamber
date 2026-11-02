@@ -24,6 +24,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -2357,7 +2358,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'أولوية منخفضة',
   'chat.statusRow.actions.stopGeneratingAria': 'إيقاف التوليد',
   'chat.statusRow.tasksTitle': 'المهام',
-  'chat.statusRow.modelStatus': '{model}: {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} نشطة · {left} متبقية',
   'chat.revertIndicator.redo': 'إعادة',
   'chat.revertIndicator.redoAria': 'إعادة — استعادة الرسائل التي تم التراجع عنها',
@@ -3868,6 +3869,7 @@ export const dict = {
   ...heapSnapshotI18n.ar,
   ...consoleBudgetsI18n.ar,
   ...imageToolI18n.ar,
+  ...agentStatusI18n.ar,
   ...snippetsI18n.ar,
   ...sidebarWorkI18n.ar,
   ...sidebarSectionsI18n.ar,

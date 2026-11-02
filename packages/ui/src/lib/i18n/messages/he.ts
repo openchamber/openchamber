@@ -24,6 +24,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -2357,7 +2358,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'עדיפות נמוכה',
   'chat.statusRow.actions.stopGeneratingAria': 'עצור יצירה',
   'chat.statusRow.tasksTitle': 'משימות',
-  'chat.statusRow.modelStatus': '{model} במצב {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} פעילות · {left} נותרו',
   'chat.revertIndicator.redo': 'בצע שוב',
   'chat.revertIndicator.redoAria': 'בצע שוב — שחזור ההודעות שבוטלו',
@@ -3868,6 +3869,7 @@ export const dict = {
   ...heapSnapshotI18n.he,
   ...consoleBudgetsI18n.he,
   ...imageToolI18n.he,
+  ...agentStatusI18n.he,
   ...snippetsI18n.he,
   ...sidebarWorkI18n.he,
   ...sidebarSectionsI18n.he,

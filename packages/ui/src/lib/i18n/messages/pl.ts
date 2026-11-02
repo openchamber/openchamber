@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -191,6 +192,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.pl,
   ...consoleBudgetsI18n.pl,
   ...imageToolI18n.pl,
+  ...agentStatusI18n.pl,
   ...snippetsI18n.pl,
   ...sidebarWorkI18n.pl,
   ...sidebarSectionsI18n.pl,
@@ -1017,7 +1019,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': 'Niski priorytet',
   'chat.statusRow.actions.stopGeneratingAria': 'Zatrzymaj generowanie',
   'chat.statusRow.tasksTitle': 'Zadania',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} aktywne · {left} pozostało',
   'chat.revertIndicator.redo': 'Ponów',
   'chat.revertIndicator.redoAria': 'Ponów — przywróć cofnięte wiadomości',

@@ -19,7 +19,7 @@ import type { EasterEggCopy } from './copy/types';
 import { copy as uk } from './copy/uk';
 import { copy as zhCN } from './copy/zh-CN';
 import { copy as zhTW } from './copy/zh-TW';
-import { draftMomentAt, draftTitleLine, gitCleanLine, netDeletionLine, NET_DELETION_THRESHOLD, pushLine } from './lines';
+import { draftMomentAt, draftTitleLine, gitCleanLine, netDeletionLine, NET_DELETION_THRESHOLD, pushLine, thinkingLine, THINKING_LINE_ODDS } from './lines';
 
 const COPIES = {
   en, de, fr, nl, 'zh-CN': zhCN, 'zh-TW': zhTW, uk, es, 'pt-BR': ptBR, ko, pl, ja, tr, ar, he,
@@ -128,6 +128,18 @@ describe('lines', () => {
     expect(pushLine(he, at(10, 30, 19), 'he-IL', 0)).toBeNull();
   });
 
+  test('about one block of reasoning in four gets a joke, the same one while it runs', () => {
+    const seeds = Array.from({ length: 2000 }, (_, index) => `prt_${index.toString(36)}`);
+    const joked = seeds.filter((seed) => thinkingLine(en, seed) !== null);
+    expect(joked.length / seeds.length).toBeGreaterThan(1 / THINKING_LINE_ODDS - 0.05);
+    expect(joked.length / seeds.length).toBeLessThan(1 / THINKING_LINE_ODDS + 0.05);
+    for (const seed of joked.slice(0, 20)) {
+      expect(en.thinking).toContain(thinkingLine(en, seed) ?? '');
+      expect(thinkingLine(en, seed)).toBe(thinkingLine(en, seed));
+    }
+    expect(thinkingLine({ ...en, thinking: [] }, joked[0] ?? '')).toBeNull();
+  });
+
   test('only a clear net deletion gets a line, in the right plural', () => {
     expect(netDeletionLine(en, { insertions: 5, deletions: 5 + NET_DELETION_THRESHOLD - 1 }, 'en-US', 0)).toBeNull();
     expect(netDeletionLine(en, { insertions: 3, deletions: 415 }, 'en-US', 0)?.title).toBe('412 lines retired.');
@@ -147,6 +159,8 @@ describe('every locale', () => {
       expect(copy.draftTitle.everyday.length).toBeGreaterThan(0);
       expect(copy.gitClean.everyday.length).toBeGreaterThan(0);
       expect(copy.netDeletionCommit.length).toBeGreaterThan(0);
+      expect(copy.thinking.length).toBeGreaterThan(0);
+      for (const line of copy.thinking) expect(`${locale}: ${line}`).not.toContain('{');
       for (const line of Object.values(copy.draftTitle).flat()) expect(`${locale}: ${line}`).toContain('{project}');
       expect(copy.push.smallHours.length).toBeGreaterThan(0);
       for (const { title } of copy.push.smallHours) expect(`${locale}: ${title}`).toContain('{time}');

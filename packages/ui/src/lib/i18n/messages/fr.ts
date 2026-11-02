@@ -24,6 +24,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -190,6 +191,7 @@ export const dict = {
   ...heapSnapshotI18n.fr,
   ...consoleBudgetsI18n.fr,
   ...imageToolI18n.fr,
+  ...agentStatusI18n.fr,
   ...snippetsI18n.fr,
   ...sidebarWorkI18n.fr,
   ...sidebarSectionsI18n.fr,
@@ -2161,7 +2163,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'Faible priorité',
   'chat.statusRow.actions.stopGeneratingAria': 'Arrêter de générer',
   'chat.statusRow.tasksTitle': 'Tâches',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} actif · {left} restant',
   'chat.revertIndicator.redo': 'Refaire',
   'chat.revertIndicator.redoAria': 'Rétablir : restaurer les messages annulés',

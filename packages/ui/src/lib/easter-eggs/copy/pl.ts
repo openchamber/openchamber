@@ -52,6 +52,20 @@ export const copy: EasterEggCopy = {
       { title: '{time}, wypchnięte.', description: 'Kod jest bezpieczny. Można odetchnąć.' },
     ],
   },
+  thinking: [
+    'główkuje',
+    'patrzy w sufit',
+    'radzi się gumowej kaczuszki',
+    'waży każdy token',
+    'rozmawia ze sobą',
+    'szuka dziury w całym',
+    'drapie się po głowie',
+    'dzieli włos na czworo',
+    'miesza w kotle pomysłów',
+    'szuka końca nitki',
+    'myśli, czy za dużo nie myśli',
+    'gotuje ocean',
+  ],
   netDeletionCommit: [
     {
       title: { one: '{count} linia na emeryturze.', few: '{count} linie na emeryturze.', many: '{count} linii na emeryturze.', other: '{count} linii na emeryturze.' },
