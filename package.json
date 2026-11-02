@@ -142,7 +142,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@xenova/transformers": "^2.17.2",
     "@zumer/snapdom": "^2.12.8",
-    "bun-pty": "0.5.1",
+    "bun-pty": "0.6.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -203,9 +203,9 @@
   },
   "patchedDependencies": {
     "@tanstack/virtual-core@3.19.10": "bun-patches/@tanstack+virtual-core+3.19.10.patch",
-    "bun-pty@0.5.1": "bun-patches/bun-pty@0.5.1.patch",
     "happy-dom@18.0.1": "bun-patches/happy-dom@18.0.1.patch",
     "@legendapp/list@3.6.0": "bun-patches/@legendapp%2Flist@3.6.0.patch",
-    "@codemirror/view@6.43.15": "bun-patches/@codemirror%2Fview@6.43.15.patch"
+    "@codemirror/view@6.43.15": "bun-patches/@codemirror%2Fview@6.43.15.patch",
+    "bun-pty@0.6.0": "bun-patches/bun-pty@0.6.0.patch"
   }
 }

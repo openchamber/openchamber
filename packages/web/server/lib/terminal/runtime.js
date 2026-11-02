@@ -181,6 +181,16 @@ const appendHistory = (history, text) => {
   if (history.head > 128) { history.chunks = history.chunks.slice(history.head); history.head = 0; }
 };
 
+export async function loadTerminalPtyProvider(bunVersion = globalThis.Bun?.version, importPty = (name) => import(name)) {
+  // bun-pty 0.6 imports on older Bun, including early 1.4.0 canaries, but cannot spawn there.
+  const [bunMajor, bunMinor] = (bunVersion ?? '').split('.').map(Number);
+  if ((bunMajor > 1 || (bunMajor === 1 && bunMinor >= 4)) && !bunVersion.startsWith('1.4.0-')) {
+    try { const pty = await importPty('bun-pty'); return { spawn: pty.spawn, backend: 'bun-pty' }; } catch { /* fall through */ }
+  }
+  const pty = await importPty('node-pty');
+  return { spawn: pty.spawn, backend: 'node-pty' };
+}
+
 export function createTerminalRuntime({
   app, server, fs, path, uiAuthController, buildAugmentedPath, searchPathFor, isExecutable,
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
@@ -201,13 +211,7 @@ export function createTerminalRuntime({
 
   const getPtyProvider = async () => {
     if (!ptyProviderPromise) {
-      ptyProviderPromise = loadPtyProvider ? loadPtyProvider() : (async () => {
-        if (typeof globalThis.Bun !== 'undefined') {
-          try { const pty = await import('bun-pty'); return { spawn: pty.spawn, backend: 'bun-pty' }; } catch { /* fall through */ }
-        }
-        const pty = await import('node-pty');
-        return { spawn: pty.spawn, backend: 'node-pty' };
-      })();
+      ptyProviderPromise = (loadPtyProvider ?? loadTerminalPtyProvider)();
     }
     return ptyProviderPromise;
   };
