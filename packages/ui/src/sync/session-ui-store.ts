@@ -2507,6 +2507,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? { sessionId: targetSessionId, agent: effectiveAgent }
         : null
       if (carriedPick) useSelectionStore.getState().settleSessionAgentPick(carriedPick.sessionId, carriedPick.agent)
+      const settleSentSelection = targetSessionId
+        ? useSelectionStore.getState().captureSessionSelectionSentSettlement(targetSessionId, providerID, modelID, effectiveAgent, variant)
+        : undefined
       const routed = await routeMessage({
         runtimeKey: capturedRuntimeKey,
         sessionId: targetSessionId || "",
@@ -2547,9 +2550,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       }
       if (routed !== "shell") {
         settleModelPick?.()
-        if (targetSessionId && isCurrentRuntimeInstance()) {
-          useSelectionStore.getState().markSessionSelectionSent(targetSessionId, providerID, modelID, effectiveAgent, variant)
-        }
+        if (isCurrentRuntimeInstance()) settleSentSelection?.()
       }
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)

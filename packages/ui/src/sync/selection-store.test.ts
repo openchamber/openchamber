@@ -10,6 +10,8 @@ beforeEach(() => {
     sessionPickedAgents: new Map(),
     sessionFollowedAgents: new Map(),
     sessionFollowedModels: new Map(),
+    sessionFollowedAgentRevisions: new Map(),
+    sessionFollowedModelRevisions: new Map(),
     sessionAgentModelSelections: new Map(),
     agentModelVariantSelections: new Map(),
   });

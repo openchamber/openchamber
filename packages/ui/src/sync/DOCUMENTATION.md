@@ -476,8 +476,11 @@ extension sends settle that pick through the shared `sendMessage` settlement;
 failed sends retain it. Once consumed, later external switches apply again.
 Background captures reconcile the observed record through `selection-store.ts`.
 Successful sends also advance its followed model and agent baseline to the sent
-selection, so a later switch back to the original value is still detected
-without reopening the chat. Failed sends leave that sent baseline unchanged.
+selection when its memory-only per-session follow revision has not advanced
+since the send left. Agent and model revisions advance independently on changed
+followed values, so even an external switch away and back supersedes a pending
+send. This still detects a later switch back to the original
+value without reopening the chat. Failed sends leave that sent baseline unchanged.
 Picker changes make no session API writes. Explicit Default
 effort remains `null` when sent so the saved choice is not erased. An extension
 starting a new session still captures the app defaults before creating it.

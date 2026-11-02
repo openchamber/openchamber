@@ -680,6 +680,64 @@ describe('sendMessage captured target', () => {
     selection.clearSessionSelections('session-captured');
   });
 
+  test.each(['agent', 'model'])('a successful send preserves a followed %s round trip while it was out', async (field) => {
+    const selection = useSelectionStore.getState();
+    selection.clearSessionSelections('session-captured');
+    selection.followSessionAgent('session-captured', 'build');
+    selection.markSessionModelFollowed('session-captured', 'provider-a/original#');
+    selection.pickSessionAgent('session-captured', 'plan');
+    let finish;
+    let started;
+    const leaving = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = () => new Promise((resolve) => {
+      finish = resolve;
+      started();
+    });
+
+    const sending = sendWithAgent('plan');
+    await leaving;
+    if (field === 'agent') {
+      selection.followSessionAgent('session-captured', 'plan');
+      selection.followSessionAgent('session-captured', 'build');
+    } else {
+      selection.markSessionModelFollowed('session-captured', 'provider-a/model-a#');
+      selection.markSessionModelFollowed('session-captured', 'provider-a/original#');
+    }
+    finish('msg');
+    await sending;
+
+    expect(selection.getSessionAgentSelection('session-captured')).toBe(field === 'agent' ? 'build' : 'plan');
+    expect(selection.isSessionModelSwitched('session-captured', field === 'model'
+      ? 'provider-a/original#' : 'provider-a/model-a#')).toBe(false);
+    selection.clearSessionSelections('session-captured');
+  });
+
+  test('a successful send preserves a model followed while it was out', async () => {
+    const selection = useSelectionStore.getState();
+    selection.clearSessionSelections('session-captured');
+    selection.markSessionModelFollowed('session-captured', 'provider-a/original#');
+    selection.pickSessionModel('session-captured', 'provider-a', 'model-a');
+    let finish;
+    let started;
+    const leaving = new Promise((resolve) => { started = resolve; });
+    opencodeClient.sendMessage = () => new Promise((resolve) => {
+      finish = resolve;
+      started();
+    });
+
+    const sending = sendWithAgent('plan');
+    await leaving;
+    selection.markSessionModelFollowed('session-captured', 'provider-b/external#high');
+    finish('msg');
+    await sending;
+
+    expect(selection.getSessionModelPick('session-captured')).toBeNull();
+    expect(selection.isSessionModelSwitched('session-captured', 'provider-b/external#high')).toBe(false);
+    expect(selection.isSessionModelSwitched('session-captured', 'provider-a/model-a#')).toBe(true);
+    expect(selection.getSessionAgentSelection('session-captured')).toBe('plan');
+    selection.clearSessionSelections('session-captured');
+  });
+
   test('only a successful model-carrying send consumes a live model pick', async () => {
     const selection = useSelectionStore.getState();
     selection.pickSessionModel('session-captured', 'provider-a', 'model-a');

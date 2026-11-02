@@ -202,6 +202,51 @@ test('a background agent switch retains the session model, not an older model fo
   }
 });
 
+['agent', 'model'].forEach((field) => test(`a background guest prompt preserves a followed ${field} round trip while sending`, async () => {
+  const sessionId = 'guest-followed-round-trip';
+  const selection = useSelectionStore.getState();
+  const ui = useSessionUIStore.getState();
+  const config = useConfigStore.getState();
+  useConfigStore.setState({ isConnected: true });
+  const record: Session = { ...created, id: sessionId, agent: 'build', model: { providerID: 'p', id: 'M1' } };
+  spyOn(syncRefs, 'getDirectoryState').mockReturnValue({ ...INITIAL_STATE, session: [record] });
+  spyOn(opencodeClient, 'getSession').mockResolvedValue(record);
+  spyOn(sessionActions, 'optimisticSend').mockImplementation(async (input) => { await input.send('message', []); });
+  let finish!: (message: string) => void;
+  let started!: () => void;
+  const leaving = new Promise<void>((resolve) => { started = resolve; });
+  spyOn(opencodeClient, 'sendMessage').mockImplementation(() => new Promise<string>((resolve) => {
+    finish = resolve;
+    started();
+  }));
+  selection.followSessionAgent(sessionId, 'build');
+  selection.markSessionModelFollowed(sessionId, 'p/M1#');
+  selection.pickSessionAgent(sessionId, 'plan');
+  selection.saveSessionModelSelection(sessionId, 'p', 'M2');
+  selection.pickSessionModel(sessionId, 'p', 'M2');
+  useSessionUIStore.setState({ currentSessionId: 'another-chat' });
+  try {
+    const sending = promptGuestSession({ request: { text: 'Synthetic prompt', send: true }, sessionId,
+      directory: '/synthetic', busy: false, compose: () => {}, t: (key) => key });
+    await leaving;
+    if (field === 'agent') {
+      selection.followSessionAgent(sessionId, 'plan');
+      selection.followSessionAgent(sessionId, 'build');
+    } else {
+      selection.markSessionModelFollowed(sessionId, 'p/M2#');
+      selection.markSessionModelFollowed(sessionId, 'p/M1#');
+    }
+    finish('message');
+    expect(await sending).toEqual({ ok: true, result: { sent: 'sent' } });
+    expect(selection.getSessionAgentSelection(sessionId)).toBe(field === 'agent' ? 'build' : 'plan');
+    expect(selection.isSessionModelSwitched(sessionId, field === 'model' ? 'p/M1#' : 'p/M2#')).toBe(false);
+  } finally {
+    selection.clearSessionSelections(sessionId);
+    useSessionUIStore.setState({ currentSessionId: ui.currentSessionId });
+    useConfigStore.setState(config);
+  }
+}));
+
 [['M3', 'M4'], ['M3', 'M1'], ['M1', 'M1']].forEach(([beforeSendModel, externalModel]) => test(`a background guest prompt carries an unsent model over ${beforeSendModel}, then follows an external switch to ${externalModel}`, async () => {
   const sessionId = 'guest-unsent-model';
   const selection = useSelectionStore.getState();
