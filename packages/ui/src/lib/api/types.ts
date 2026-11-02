@@ -1925,6 +1925,8 @@ export interface SourceControlAPI {
    * when the instance belongs on another provider's card.
    */
   authSetToken(identity: SourceControlIdentity, token: string, options?: { username?: string }): Promise<SourceControlAuthStatus>;
+  /** Stores the instance's separate SSH address, or removes it with null. Providers without one answer unsupported. */
+  authSetSshUrl(identity: SourceControlIdentity, sshUrl: string | null): Promise<{ sshUrl: string | null }>;
   authDisconnect(identity: SourceControlIdentity, accountId: string): Promise<{ removed: boolean }>;
   authActivate(identity: SourceControlIdentity, accountId: string): Promise<SourceControlAuthStatus>;
   authSetCliDisabled(identity: SourceControlIdentity, disabled: boolean): Promise<{ disabled: boolean }>;

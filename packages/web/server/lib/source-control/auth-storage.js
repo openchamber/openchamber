@@ -5,11 +5,17 @@ import { isPlainObject, isString } from '../shared/guards.js';
 import { withSourceControlFileLock } from './file-lock.js';
 import { normalizeOriginInstance } from './origin-instance.js';
 import { isExtensionProviderId, isProviderId } from './provider-id.js';
+import { normalizeSshUrl } from './ssh-url.js';
 
 const AUTH_VERSION = 3;
 // Version 3 plus one origin-keyed section per further provider (Gitea and
 // whatever follows). Written only while such a section holds something.
 const EXTRA_SECTIONS_VERSION = 4;
+// Version 4 plus an optional `sshUrl` on an origin-keyed instance, where a
+// provider's SSH clone host differs from its web address. Written only while
+// an instance holds one. An older build cannot read a file that carries one,
+// so the address is the only reason a file leaves version 4.
+const INSTANCE_SSH_URL_VERSION = 5;
 // The two sections every version-3 file carries; any other provider id is an
 // extra section.
 const BUILT_IN_SECTIONS = ['gitlab', 'github'];
@@ -87,18 +93,24 @@ function parseGitHubCredential(value, host) {
   return runtimeGitHubCredential({ ...value, user });
 }
 
-function parseProviderInstances(rawInstances, { parseInstanceKey, parseCredentialFor }) {
+function parseProviderInstances(rawInstances, { parseInstanceKey, parseCredentialFor, allowSshUrl = false }) {
   if (!isPlainObject(rawInstances)) throw invalidState();
   const instances = {};
   for (const [rawKey, rawInstance] of Object.entries(rawInstances)) {
     const key = parseInstanceKey(rawKey);
     if (key !== rawKey || !isPlainObject(rawInstance)
-      || !exactKeys(rawInstance, ['activeCredentialId', 'credentials', 'cliDisabled', 'cliActive'])
+      || !exactKeys(rawInstance, ['activeCredentialId', 'credentials', 'cliDisabled', 'cliActive'], allowSshUrl ? ['sshUrl'] : [])
       || (rawInstance.activeCredentialId !== null && !validText(rawInstance.activeCredentialId))
       || !Array.isArray(rawInstance.credentials)
       || Object.prototype.toString.call(rawInstance.cliDisabled) !== '[object Boolean]'
       || Object.prototype.toString.call(rawInstance.cliActive) !== '[object Boolean]'
       || (rawInstance.cliDisabled && rawInstance.cliActive)) throw invalidState();
+    if (rawInstance.sshUrl !== undefined) {
+      let normalized;
+      try { normalized = normalizeSshUrl(rawInstance.sshUrl); }
+      catch { throw invalidState(); }
+      if (normalized !== rawInstance.sshUrl) throw invalidState();
+    }
     const credentials = rawInstance.credentials.map((credential) => parseCredentialFor(credential, key));
     if (new Set(credentials.map((credential) => credential.credentialId)).size !== credentials.length) throw invalidState();
     if (rawInstance.activeCredentialId !== null
@@ -109,6 +121,7 @@ function parseProviderInstances(rawInstances, { parseInstanceKey, parseCredentia
       cliDisabled: rawInstance.cliDisabled,
       cliActive: rawInstance.cliActive,
     };
+    if (rawInstance.sshUrl !== undefined) instances[key].sshUrl = rawInstance.sshUrl;
   }
   return instances;
 }
@@ -150,9 +163,9 @@ function parseVersionTwo(value) {
 // version 3 shape in memory but stays version 2 on disk until a GitHub
 // Enterprise credential is stored: earlier releases read only version 2, so
 // a user who never added an enterprise host can still go back to one.
-function parseSection(value, parser) {
+function parseSection(value, parser, allowSshUrl = false) {
   if (!isPlainObject(value) || !exactKeys(value, ['instances'])) throw invalidState();
-  return { instances: parseProviderInstances(value.instances, parser) };
+  return { instances: parseProviderInstances(value.instances, { ...parser, allowSshUrl }) };
 }
 
 // Version 4 is version 3 plus extra sections keyed by provider id. An id is
@@ -161,19 +174,26 @@ function parseSection(value, parser) {
 // section no provider asks for is written back untouched, whatever its shape,
 // so an older or newer provider set never loses another's credentials, and a
 // section that does not parse fails only its own provider's calls.
-function parseVersionThreeOrFour(value) {
+//
+// Version 5 is version 4 plus an optional `sshUrl` on an instance, so a
+// provider whose SSH clone host differs from its web address can recognise
+// remotes there. A version 3 or 4 file refuses that field: it names something
+// those releases would drop.
+function parseVersionThreeToFive(value) {
   if (!isPlainObject(value) || !exactKeys(value, ['version', 'providers'])
-    || ![AUTH_VERSION, EXTRA_SECTIONS_VERSION].includes(value.version) || !isPlainObject(value.providers)) throw invalidState();
+    || ![AUTH_VERSION, EXTRA_SECTIONS_VERSION, INSTANCE_SSH_URL_VERSION].includes(value.version)
+    || !isPlainObject(value.providers)) throw invalidState();
   const extraIds = Object.keys(value.providers).filter((id) => !BUILT_IN_SECTIONS.includes(id));
   if (!BUILT_IN_SECTIONS.every((id) => Object.hasOwn(value.providers, id))
     || (value.version === AUTH_VERSION && extraIds.length)
     || extraIds.some((id) => !isProviderId(id) || !isPlainObject(value.providers[id]))) throw invalidState();
+  const allowSshUrl = value.version === INSTANCE_SSH_URL_VERSION;
   const providers = {
-    gitlab: parseSection(value.providers.gitlab, gitlabInstanceParser),
-    github: parseSection(value.providers.github, githubInstanceParser),
+    gitlab: parseSection(value.providers.gitlab, gitlabInstanceParser, allowSshUrl),
+    github: parseSection(value.providers.github, githubInstanceParser, allowSshUrl),
   };
   for (const id of extraIds) providers[id] = { raw: value.providers[id] };
-  return { version: AUTH_VERSION, providers };
+  return { version: value.version, providers };
 }
 
 function serializeOriginSection(section) {
@@ -200,6 +220,7 @@ function serializeOriginSection(section) {
       cliDisabled: instance.cliDisabled,
       cliActive: instance.cliActive,
     };
+    if (instance.sshUrl) instances[origin].sshUrl = instance.sshUrl;
   }
   return instances;
 }
@@ -212,7 +233,7 @@ const isEmptyRawSection = (raw) => exactKeys(raw, ['instances'])
  * newer one can still go back to a release that reads only the older:
  * version 2 while only GitLab holds anything, version 3 once a GitHub
  * Enterprise host is stored, version 4 only while an extra section is not
- * empty.
+ * empty, version 5 once any instance holds a separate SSH address.
  */
 function serializeState(state) {
   const instances = serializeOriginSection(state.providers.gitlab);
@@ -239,6 +260,7 @@ function serializeState(state) {
       cliDisabled: instance.cliDisabled,
       cliActive: instance.cliActive,
     };
+    if (instance.sshUrl) githubInstances[host].sshUrl = instance.sshUrl;
   }
   const extras = {};
   for (const [id, section] of Object.entries(state.providers)) {
@@ -249,23 +271,29 @@ function serializeState(state) {
     }
     if (Object.keys(section.instances).length) extras[id] = { instances: serializeOriginSection(section) };
   }
-  if (Object.keys(extras).length) {
-    return {
-      version: EXTRA_SECTIONS_VERSION,
-      providers: { gitlab: { instances }, github: { instances: githubInstances }, ...extras },
-    };
-  }
+  const providers = { gitlab: { instances }, github: { instances: githubInstances }, ...extras };
+  // Every instance in the document decides the version, including the ones a
+  // section kept as read carries: an extra section this process never parsed
+  // still holds the `sshUrl` the parser refuses below version 5, so choosing
+  // the version from the parsed sections alone would write a file this store
+  // then cannot read.
+  const hasSshUrl = Object.values(providers).some((section) => isPlainObject(section.instances)
+    && Object.values(section.instances).some((instance) => isPlainObject(instance) && instance.sshUrl !== undefined));
+  if (hasSshUrl) return { version: INSTANCE_SSH_URL_VERSION, providers };
+  if (Object.keys(extras).length) return { version: EXTRA_SECTIONS_VERSION, providers };
   if (Object.keys(githubInstances).length === 0) return { version: 2, providers: { gitlab: { instances } } };
-  return { version: AUTH_VERSION, providers: { gitlab: { instances }, github: { instances: githubInstances } } };
+  return { version: AUTH_VERSION, providers };
 }
 
 function publicInstance(instance) {
-  return {
+  const result = {
     activeAccountId: instance.activeCredentialId,
     accounts: instance.credentials,
     cliDisabled: instance.cliDisabled,
     cliActive: instance.cliActive,
   };
+  if (instance.sshUrl) result.sshUrl = instance.sshUrl;
+  return result;
 }
 
 // A token this close to expiring is renewed before it is handed out, so a
@@ -309,7 +337,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     if (value.version === 2) {
       return { version: AUTH_VERSION, providers: { ...parseGitLabSection(value.providers), github: { instances: {} } } };
     }
-    return parseVersionThreeOrFour(value);
+    return parseVersionThreeToFive(value);
   };
   const transaction = (operation) => {
     const next = transactions.then(() => withSourceControlFileLock(`${filePath}.lock`, operation, { fsImpl, waitMs: lockWaitMs }));
@@ -337,7 +365,7 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       ?? null;
   };
   const retainInstance = (instances, key, instance) => {
-    if (!instance.credentials.length && !instance.cliDisabled && !instance.cliActive) delete instances[key];
+    if (!instance.credentials.length && !instance.cliDisabled && !instance.cliActive && !instance.sshUrl) delete instances[key];
     else instances[key] = instance;
   };
 
@@ -350,7 +378,9 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
   const sectionInstances = (state, provider) => {
     if (!Object.hasOwn(state.providers, provider)) return {};
     const section = state.providers[provider];
-    if (section.raw !== undefined) state.providers[provider] = parseSection(section.raw, originInstanceParser(provider));
+    if (section.raw !== undefined) {
+      state.providers[provider] = parseSection(section.raw, originInstanceParser(provider), state.version === INSTANCE_SSH_URL_VERSION);
+    }
     return state.providers[provider].instances;
   };
   const writableInstances = (state, provider) => {
@@ -418,6 +448,14 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
    */
   const originSection = (provider) => Object.freeze({
     listInstances: () => read((state) => Object.keys(sectionInstances(state, provider))),
+    /** Every instance's separate SSH address, in one read. */
+    listSshUrls: () => read((state) => {
+      const urls = {};
+      for (const [origin, instance] of Object.entries(sectionInstances(state, provider))) {
+        if (instance.sshUrl) urls[origin] = instance.sshUrl;
+      }
+      return urls;
+    }),
     listAccounts: (origin) => read((state) => sectionInstances(state, provider)[origin]?.credentials ?? []),
     /**
      * Renews an OAuth credential now, whatever its expiry says. For a request
@@ -498,6 +536,18 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       credential.invalidReason = validText(reason) ? reason : 'unauthorized';
       chooseActive(instance);
       return { changed: true, value: true };
+    }),
+    /** Stores the instance's separate SSH address, or removes it when null. */
+    setSshUrl: (origin, sshUrl) => mutate((state) => {
+      if (sshUrl !== null && !validText(sshUrl)) throw invalidState();
+      const instances = writableInstances(state, provider);
+      const instance = instances[origin] ?? emptyInstance();
+      const next = sshUrl ?? undefined;
+      const changed = instance.sshUrl !== next;
+      if (next) instance.sshUrl = next;
+      else delete instance.sshUrl;
+      retainInstance(instances, origin, instance);
+      return { changed, value: next ?? null };
     }),
     setCliDisabled: (origin, disabled) => mutate((state) => {
       const instances = writableInstances(state, provider);

@@ -609,6 +609,30 @@ export function registerProviderRoutes(app, {
       }
     });
 
+    const takesSshUrl = descriptor.settings.some((field) => field.key === 'sshUrl');
+    target.post(authPaths('/auth/ssh-url'), async (req, res) => {
+      let impl;
+      try {
+        impl = await loadImplementation(id);
+        if (!takesSshUrl || !(impl.auth.setSshUrl instanceof Function)) return unsupportedCapability(res);
+        let instance;
+        try { instance = requestInstance(req); }
+        catch (error) { return res.status(400).json({ error: error.message }); }
+        const value = req.body?.sshUrl;
+        if (value !== undefined && value !== null && !isString(value)) {
+          return res.status(400).json({ error: 'sshUrl must be a string' });
+        }
+        return res.json(await impl.auth.setSshUrl({ instance, sshUrl: isString(value) ? value : null }));
+      } catch (error) {
+        const lockResponse = sendAuthStorageError(res, error);
+        if (lockResponse) return lockResponse;
+        const answered = sendProviderResponse(res, error);
+        if (answered) return answered;
+        const kind = impl ? impl.classifyFailure(error) : 'provider-error';
+        return res.status(errorStatus(kind)).json({ error: error?.message || `Failed to save ${label} SSH URL` });
+      }
+    });
+
     target.post(authPaths('/auth/activate'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
