@@ -486,6 +486,19 @@ agent together with the model `setAgent` resolved for it. Only
 clear the pick. An effort picked in a draft is a choice of its own: those same
 paths leave the draft alone while `currentVariantSelection.override` is set.
 
+A live unsent model pick survives changing the agent,
+before either an older per-agent override or the new agent's pinned-model
+catalog lookup can replace it. `selectionSource: 'manual'` alone grants no such
+precedence because restoring a session writes that source too.
+
+### Why only an unsent model pick overrides a pinned model
+
+An explicit model pick describes the next message's model. Switching agents
+keeps that intent, including while the pinned model is absent from discovery.
+A model restored from the session lets the newly selected agent apply its
+pinned model. Treating every manual source as live intent would prevent that
+normal agent selection from working. Picker changes make no session API writes.
+
 An open session's agent goes both ways. A pick applies to the session when the
 next message is sent (`switchAgent` before the prompt). Until then it is the
 session's unsent pick (`useSelectionStore.pickSessionAgent`, persisted): the

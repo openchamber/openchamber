@@ -1631,6 +1631,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const queueRuntimeKey = getRuntimeKey();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
+        const settleModelPick = useSelectionStore.getState().captureSessionModelPickSettlement(
+            queueSessionId, currentProviderId, currentModelId, queueRuntimeKey,
+        );
         // Queueing is the same user intent as sending, so an archived session
         // comes back once the queue accepts the message, not at delivery.
         const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
@@ -1761,6 +1764,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (queueSessionId && currentAgentName) {
             useSelectionStore.getState().settleSessionAgentPick(queueSessionId, currentAgentName);
         }
+        if (inputMode !== 'shell') settleModelPick();
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
     }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, availableSkills, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, setLinkedReferencesFor, updateLinkedReferencesFor, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t, readSessionMentionsBeforeSend, sessionMentionsIn]);
