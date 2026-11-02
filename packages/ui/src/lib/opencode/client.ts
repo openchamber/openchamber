@@ -2041,7 +2041,7 @@ class OpencodeService {
     return deniesAnyProvider(entries)
   }
 
-  /** The `integration.use` statements OpenCode's config applies to MCP servers and skills in a directory. */
+  /** The `mcp.use` and `skill.use` statements OpenCode's config applies to MCP servers and skills in a directory. */
   async getIntegrationPolicies(directory?: string | null): Promise<IntegrationPolicy[]> {
     const entries = await call("config.get", () => this.clientFor(this.resolveDirectory(directory)).config.get())
     return readIntegrationPolicies(entries)

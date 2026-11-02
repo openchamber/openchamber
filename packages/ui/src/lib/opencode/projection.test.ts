@@ -386,6 +386,29 @@ describe("integration policies", () => {
     ])
     expect(isIntegrationDenied(policies, "mcp:github")).toBe(true)
   })
+
+  test("reads the skill.use and mcp.use statements OpenCode decodes the legacy prefix into", () => {
+    // OpenCode 2.2.3+ serves `integration.use` `skill:<id>` as `skill.use` `<id>`.
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "skill.use", resource: "gemini-imagen", effect: "deny" },
+        { action: "mcp.use", resource: "github*", effect: "deny" },
+        { action: "skill.use", resource: "review", effect: "allow" },
+      ] } },
+    ])
+    expect(findIntegrationPolicy(policies, "skill:gemini-imagen")).toEqual({ resource: "skill:gemini-imagen", effect: "deny", path: "/repo/opencode.json" })
+    expect(isIntegrationDenied(policies, "mcp:github-enterprise")).toBe(true)
+    expect(isIntegrationDenied(policies, "skill:review")).toBe(false)
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
+
+  test("ignores an integration.use statement without an mcp: or skill: prefix, which decides providers and accounts", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "*", effect: "deny" }] } },
+    ])
+    expect(policies).toEqual([])
+    expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
 })
 
 describe("projectAgent", () => {

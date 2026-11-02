@@ -940,7 +940,7 @@ switches off; Settings lists it with an "Off" mark. Everything the chat offers,
 attaches or resolves (`/` and `$` pickers, the send path, `/name` routing in
 `session-ui-store`, draft starters, the session context count) reads
 `selectAvailableSkillsForDirectory`, which drops the skills whose deciding
-`integration.use` statement is a deny (`skillSwitch.ts`). The statements come
+`skill.use` statement is a deny (`skillSwitch.ts`). The statements come
 from OpenCode's `/api/config`, read beside each skills load into
 `policiesByDirectory`. A failed read keeps the last ones, so an outage never
 turns a switched-off skill back on; a directory whose statements were never

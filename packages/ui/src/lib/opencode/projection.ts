@@ -573,14 +573,28 @@ export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
 }
 
 /**
- * One `integration.use` statement: `resource` is `mcp:<server>` or `skill:<id>`,
- * with `*` and `?` wildcards; `path` is the config file it is written in, null
- * for config that has no file.
+ * One MCP server or skill statement: `resource` is `mcp:<server>` or
+ * `skill:<id>`, with `*` and `?` wildcards; `path` is the config file it is
+ * written in, null for config that has no file.
  */
 export type IntegrationPolicy = { resource: string; effect: "allow" | "deny"; path: string | null }
 
 /**
- * The `integration.use` statements of every config document, in the order
+ * The `mcp:<server>` or `skill:<id>` resource a statement decides, or null for
+ * any other statement. OpenCode serves `mcp.use` and `skill.use` with the bare
+ * name; it decodes the legacy `integration.use` with a `mcp:` or `skill:`
+ * prefix into them (`ConfigPolicy.Info` upstream), and any other
+ * `integration.use` decides providers and accounts, not these.
+ */
+function integrationResource(policy: { action: string; resource: string }): string | null {
+  if (policy.action === "mcp.use") return `mcp:${policy.resource}`
+  if (policy.action === "skill.use") return `skill:${policy.resource}`
+  if (policy.action === "integration.use" && /^(mcp|skill):/.test(policy.resource)) return policy.resource
+  return null
+}
+
+/**
+ * The MCP server and skill statements of every config document, in the order
  * OpenCode decides by (`ManagedPolicy.statements` upstream): documents
  * reversed, so the last matching statement wins. Statements from a connected
  * OpenCode Console workspace are not part of `/api/config`.
@@ -589,10 +603,10 @@ export function readIntegrationPolicies(entries: readonly ConfigEntry[]): Integr
   return entries
     .filter(isDocument)
     .reverse()
-    .flatMap((entry) => documentPolicies(entry)
-      .flatMap((policy) => (policy.action === "integration.use"
-        ? [{ resource: policy.resource, effect: policy.effect, path: entry.path ?? null }]
-        : [])))
+    .flatMap((entry) => documentPolicies(entry).flatMap((policy) => {
+      const resource = integrationResource(policy)
+      return resource === null ? [] : [{ resource, effect: policy.effect, path: entry.path ?? null }]
+    }))
 }
 
 /** OpenCode's `Wildcard.match`: `*` is any run, `?` one character, a trailing ` *` also matches nothing. */

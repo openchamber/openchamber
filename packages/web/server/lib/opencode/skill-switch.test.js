@@ -11,7 +11,8 @@ let globalConfig;
 let workspace;
 let projectDir;
 
-const deny = (id) => ({ action: 'integration.use', resource: `skill:${id}`, effect: 'deny' });
+const deny = (id) => ({ action: 'skill.use', resource: id, effect: 'deny' });
+const legacyDeny = (id) => ({ action: 'integration.use', resource: `skill:${id}`, effect: 'deny' });
 
 function writeText(filePath, text) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -75,6 +76,19 @@ describe('setSkillEnabled', () => {
     expect(read(globalConfig)).toEqual({});
     expect(read(parent)).toEqual({ policies: [wildcard] });
     expect(read(project)).toEqual({ policies: [deny('other')] });
+  });
+
+  it('keeps a skill switched off before 2.6.0 off without a second deny, and turns it back on', async () => {
+    write(globalConfig, { policies: [legacyDeny('gemini-imagen')] });
+    const { setSkillEnabled } = await loadSkillSwitch();
+
+    expect(setSkillEnabled({ id: 'gemini-imagen', enabled: false, scope: 'user', directory: projectDir }))
+      .toEqual({ changed: [] });
+    expect(read(globalConfig)).toEqual({ policies: [legacyDeny('gemini-imagen')] });
+
+    expect(setSkillEnabled({ id: 'gemini-imagen', enabled: true, scope: 'user', directory: projectDir }))
+      .toEqual({ changed: [globalConfig] });
+    expect(read(globalConfig)).toEqual({});
   });
 
   it('skips a file it cannot parse when turning on, and refuses to write over it when turning off', async () => {
