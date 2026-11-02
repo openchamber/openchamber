@@ -155,6 +155,73 @@ test('terminal specs pass the directory to xdg-terminal-exec with a flag it unde
   assert.deepEqual(fallback.args, ['--dir=/tmp/project']);
 });
 
+test('the generic terminal prefers the system default terminal over a guessed entry', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-terminal-bin-'));
+  try {
+    await fs.writeFile(path.join(root, 'xdg-terminal-exec'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const entry = parseEntryAt(`[Desktop Entry]
+Type=Application
+Name=ddterm
+Exec=/usr/bin/ddterm
+Icon=utilities-terminal
+Categories=TerminalEmulator;`, 'ddterm');
+    const specs = buildLinuxOpenSpecs({
+      targetPath: '/tmp/project',
+      appId: 'terminal',
+      appName: 'Terminal',
+      targetKind: 'project',
+      entries: [entry],
+      env: { PATH: root },
+    });
+    assert.equal(specs[0].program, 'xdg-terminal-exec');
+    assert.deepEqual(specs[0].args, ['--dir=/tmp/project']);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('without xdg-terminal-exec the guessed terminal entry still leads the chain', () => {
+  const entry = parseEntryAt(`[Desktop Entry]
+Type=Application
+Name=ddterm
+Exec=/usr/bin/ddterm
+Icon=utilities-terminal
+Categories=TerminalEmulator;`, 'ddterm');
+  const specs = buildLinuxOpenSpecs({
+    targetPath: '/tmp/project',
+    appId: 'terminal',
+    appName: 'Terminal',
+    targetKind: 'project',
+    entries: [entry],
+    env: TEST_ENV,
+  });
+  assert.equal(specs[0].program, '/usr/bin/ddterm');
+});
+
+test('a specifically chosen terminal is not replaced by the system default', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-terminal-bin-'));
+  try {
+    await fs.writeFile(path.join(root, 'xdg-terminal-exec'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const entry = parseEntryAt(`[Desktop Entry]
+Type=Application
+Name=Ghostty
+Exec=ghostty --working-directory=%f
+Icon=ghostty
+Categories=TerminalEmulator;`, 'ghostty');
+    const specs = buildLinuxOpenSpecs({
+      targetPath: '/tmp/project',
+      appId: 'ghostty',
+      appName: 'Ghostty',
+      targetKind: 'project',
+      entries: [entry],
+      env: { PATH: root },
+    });
+    assert.equal(specs[0].program, 'ghostty');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('entries mixing ASCII and non-ASCII still match through their ASCII part', () => {
   const entry = parseEntryAt(`[Desktop Entry]
 Type=Application

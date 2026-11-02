@@ -265,11 +265,17 @@ export const buildLinuxOpenSpecs = ({ targetPath, appId, appName, targetKind = '
     const terminalEntry = appId === 'terminal'
       ? entries.find(isTerminalEmulatorEntry) || null
       : findEntry(entries, appId, appName);
+    const preferDefaultTerminal = appId === 'terminal' && commandExists('xdg-terminal-exec', env);
+    if (preferDefaultTerminal) {
+      specs.push({ program: 'xdg-terminal-exec', args: [`--dir=${directory}`] });
+    }
     if (terminalEntry) {
       const spec = buildCommandFromDesktopExec(terminalEntry, directory);
       if (spec) specs.push(spec);
     }
-    specs.push({ program: 'xdg-terminal-exec', args: [`--dir=${directory}`] });
+    if (!preferDefaultTerminal) {
+      specs.push({ program: 'xdg-terminal-exec', args: [`--dir=${directory}`] });
+    }
     if (commandExists('gnome-terminal', env)) {
       specs.push({ program: 'gnome-terminal', args: [`--working-directory=${directory}`] });
     }
