@@ -1574,6 +1574,11 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   ) : !disabled ? <NoteToggle onOpen={() => setNoteOpen(true)} /> : null;
   const slot = slotPlace && noteElement ? { ...slotPlace, element: noteElement } : null;
   const canSendChosen = host.kind === 'reply' && !sent && chosen.size > 0 && (chosen.size < decisions.length || failed);
+  // Only a press answers a page, so a waiting form the agent gave no button
+  // gets one; without it the user could not answer at all.
+  const sendButton = host.kind === 'page' && complete && decisions.length === 0 && Boolean(host.submit || sent)
+    ? { label: host.answered?.button ?? t('chat.uiBlock.send'), variant: 'primary' }
+    : null;
   const fallback = (
     <div className="flex flex-col gap-1">
       <div className="typography-meta text-[var(--status-error)]">{t('chat.uiBlock.invalid')}</div>
@@ -1593,6 +1598,11 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         </FormContext.Provider>
       </BlockErrorBoundary>
       {showNote && !slot && noteElement ? <div className="mt-2">{noteElement}</div> : null}
+      {sendButton ? (
+        <FormContext.Provider value={form}>
+          <div className="mt-2"><Button props={sendButton} /></div>
+        </FormContext.Provider>
+      ) : null}
       {/* A block that sends keeps one line for what happened, so the reply does not jump. */}
       {decisions.length > 0 && host.kind === 'reply' && (host.submit || sent) ? (
         <div className="mt-1 flex min-h-6 items-center gap-2 typography-meta text-muted-foreground" aria-live="polite" data-export-ignore>

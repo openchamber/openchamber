@@ -66,6 +66,8 @@ A Callout is a tinted banner only for a warning or an error, with its title in t
 
 A form an agent waits on (`openchamber_render` with `ui` and `awaitAnswer`) shows "Add a note" whether or not the agent asked for one. Users pick an option that is close but not exact and need to add conditions to it ("the minimal fix, with a regression test"); the question tool only takes an option or free text instead of it. Agents do not reliably add such a field themselves, so the form does. The note sits before the form's last run of buttons (`noteSlot`), so it is written before one of them is pressed, and reaches the agent as `data.note` and as the last line of the summary.
 
+For the same reason a waiting form with no Button gets a "Send" button after the note. Only a press answers a page, and an agent that wrote two Choices and no Button left the user with a form that could not be sent while the agent waited on it.
+
 In a reply each decision card takes its own note. Its toggle is an icon at the end of the card's buttons, so a card is no taller until the user wants a note; the note opens above the buttons, and "Answer with the note only" takes the icon's place at once, disabled until the note has text, so the row does not shift while typing. A note alone answers the card: the user can say "not like this, ask the author first" without picking an option that does not fit.
 
 ### Why a titled card is one decision whatever its buttons' values say
