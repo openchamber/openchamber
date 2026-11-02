@@ -25,6 +25,11 @@ other.
   by the scheduled-task service. An empty update clears the target. Create
   without a model inherits the target selection; an explicit agent overrides
   it. A task without a target still requires a model.
+  `schedule.create` and `schedule.update` also accept the isolation fields
+  `runInWorktree`, `baseBranch` and `cleanupWorktree`, the same choices the
+  editor stores for a git project's task. All three are refused together with
+  an existing-session target, because that session's own directory wins and
+  the fields would otherwise be stored and ignored.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against
