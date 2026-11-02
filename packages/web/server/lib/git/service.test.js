@@ -5688,7 +5688,6 @@ describe('parseRemoteListing', () => {
       '',
     ].join('\r\n');
     expect(parseRemoteListing(['bare', 'mirror', 'origin'], listing)).toEqual([
-      { name: 'bare', fetchUrl: 'bare', pushUrl: 'bare' },
       { name: 'mirror', fetchUrl: 'https://example.com/a b.git', pushUrl: 'https://example.com/a b.git' },
       { name: 'origin', fetchUrl: 'git@github.com:owner/repo.git', pushUrl: 'git@github.com:owner/push.git' },
     ]);
@@ -5709,7 +5708,6 @@ describe('parseRemoteListing', () => {
       '',
     ].join('\n');
     expect(parseRemoteListing(['bare', 'future', 'mirror', 'origin'], listing)).toEqual([
-      { name: 'bare', fetchUrl: 'bare', pushUrl: 'bare' },
       { name: 'future', fetchUrl: 'https://example.com/f.git', pushUrl: 'https://example.com/f.git' },
       { name: 'mirror', fetchUrl: 'https://example.com/repo.git', pushUrl: 'https://example.com/repo.git' },
       { name: 'origin', fetchUrl: 'git@github.com:owner/repo.git', pushUrl: 'git@github.com:owner/repo.git' },
@@ -5735,6 +5733,7 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
     });
 
     expect(remotes).toEqual(expected);
+    expect(remotes.map(({ name }) => name)).toEqual(['origin', 'rewritten']);
     expect(remotes.find((remote) => remote.name === 'rewritten')?.fetchUrl).toBe('https://github.com/other/repo.git');
     expect(remotes.find((remote) => remote.name === 'origin')?.pushUrl).toBe('git@github.com:owner/push.git');
   });
@@ -5752,6 +5751,75 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
       name: 'origin',
       fetchUrl: 'git@github.com:owner/repo.git',
       pushUrl: 'git@github.com:owner/repo.git',
+    });
+  });
+
+  it('leaves out a remote with no fetch URL, such as a git-annex special remote (#5995)', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['remote', 'add', 'origin', 'https://github.com/owner/repo.git']);
+    runGit(repository, ['config', 'remote.storage.annex-externaltype', 'example']);
+    runGit(repository, ['config', 'remote.storage.annex-uuid', '00000000-0000-0000-0000-000000000000']);
+    runGit(repository, ['config', 'remote.pushonly.pushurl', 'https://example.com/push.git']);
+
+    expect(await getRepositoryRemoteUrls(repository)).toEqual([{
+      name: 'origin',
+      fetchUrl: 'https://github.com/owner/repo.git',
+      pushUrl: 'https://github.com/owner/repo.git',
+    }]);
+  });
+
+  // The wrapper fails selected commands and delegates every other read to Git.
+  describe.skipIf(process.platform === 'win32')('when git remote -v fails', () => {
+    it.each([
+      { scenario: 'keeps configured fetch remotes', hasFetchUrl: true, configFailure: false },
+      { scenario: 'treats config exit 1 as no matching URL keys', hasFetchUrl: false, configFailure: false },
+      { scenario: 'preserves the fail-loud fallback on other config failures', hasFetchUrl: true, configFailure: true },
+    ])('$scenario', async ({ hasFetchUrl, configFailure }) => {
+      const repository = createTempDir();
+      runGit(repository, ['init', '-b', 'main']);
+      if (hasFetchUrl) {
+        runGit(repository, ['remote', 'add', 'up.stream', 'https://github.com/owner/repo.git']);
+        runGit(repository, ['config', 'remote.up.stream.pushurl', 'git@github.com:owner/push.git']);
+      }
+      runGit(repository, ['config', 'remote.storage.annex-uuid', '00000000-0000-0000-0000-000000000000']);
+      runGit(repository, ['config', 'remote.pushonly.pushurl', 'https://example.com/push.git']);
+
+      const wrapperDirectory = createTempDir();
+      const invocations = path.join(wrapperDirectory, 'invocations');
+      const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+      fs.writeFileSync(path.join(wrapperDirectory, 'git'), `#!/bin/sh
+echo "$*" >> "${invocations}"
+if [ "$1" = remote ] && [ "$2" = -v ]; then exit 2; fi
+${configFailure ? 'if [ "$1" = config ]; then exit 2; fi' : ''}
+exec "${realGit}" "$@"
+`);
+      fs.chmodSync(path.join(wrapperDirectory, 'git'), 0o755);
+      vi.stubEnv('PATH', `${wrapperDirectory}${path.delimiter}${process.env.PATH || ''}`);
+
+      let remotes;
+      try {
+        remotes = await getRepositoryRemoteUrls(repository);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+
+      const fetchRemote = {
+        name: 'up.stream',
+        fetchUrl: 'https://github.com/owner/repo.git',
+        pushUrl: 'git@github.com:owner/push.git',
+      };
+      expect(remotes).toEqual(configFailure ? [
+        { name: 'pushonly', fetchUrl: 'pushonly', pushUrl: 'https://example.com/push.git' },
+        { name: 'storage', fetchUrl: 'storage', pushUrl: 'storage' },
+        fetchRemote,
+      ] : hasFetchUrl ? [fetchRemote] : []);
+      const commands = fs.readFileSync(invocations, 'utf8').trim().split('\n');
+      expect(commands).toContain('remote -v');
+      expect(commands).toContain('config --name-only --get-regexp ^remote\\..*\\.url$');
+      if (!configFailure) {
+        expect(commands.some((command) => command.startsWith('remote get-url') && /(?:storage|pushonly)$/.test(command))).toBe(false);
+      }
     });
   });
 });
