@@ -28,6 +28,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 // One composer owns microphone capture and its keyboard confirmation in a window.
 let recordingOwner: HTMLSpanElement | null = null;
@@ -479,20 +480,21 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                         <div aria-hidden="true" data-dictation-glass="true" className="oc-surface-floating pointer-events-none absolute inset-0 -z-10" />
                     ) : null}
                     {topAccessory}
-                    <div
+                    <ScrollableOverlay
                         ref={transcriptAreaRef}
+                        // min-h-0 (not a fixed min height): the mobile composer is shorter than
+                        // 52px of text area + footer, and a fixed min pushed the action row 4px
+                        // below the real footer. The area must shrink to whatever space the
+                        // underlying composer actually has.
+                        outerClassName="flex-1 min-h-0"
                         className={cn(
-                            // Text paddings match the composer textarea, plus the
-                            // 4px (pt-1) attachment-chips row that always renders
-                            // above it: desktop 16+4px, mobile 10+4px from the top.
-                            // min-h-0 (not a fixed min height): the mobile composer
-                            // is shorter than 52px of text area + footer, and a
-                            // fixed min pushed the action row 4px below the real
-                            // footer. The area must shrink to whatever space the
-                            // underlying composer actually has.
-                            'flex-1 min-h-0 overflow-y-auto px-3',
+                            // Text paddings match the composer textarea, plus the 4px (pt-1)
+                            // attachment-chips row that always renders above it: desktop 16+4px,
+                            // mobile 10+4px from the top.
+                            'px-3',
                             isMobile ? 'pt-3.5 pb-2.5' : 'pt-5 pb-2',
                         )}
+                        disableHorizontal
                     >
                         {/* Measured for the composer-growth report — keep all
                             transcript/placeholder/error content inside. */}
@@ -517,7 +519,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                                 </p>
                             ) : null}
                         </div>
-                    </div>
+                    </ScrollableOverlay>
                     <div
                         className={cn('flex flex-shrink-0 items-center gap-x-3', footerPaddingClass)}
                         style={footerHeight ? { height: footerHeight } : undefined}

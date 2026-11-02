@@ -25,6 +25,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { WorkflowAgentsView } from './WorkflowAgentsView';
 import { WorkflowAnswerBlock } from './WorkflowAnswerBlock';
 import { useWorkflowRunAction, workflowRunLook } from './workflowRunPresentation';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type View = 'agents' | 'log' | 'result' | 'script';
 
@@ -153,10 +154,10 @@ const ScriptView: React.FC<{ detail: WorkflowRunDetail | null; failed: boolean }
       {hasArgs ? (
         <section>
           <h4 className="typography-micro font-medium text-muted-foreground">{t('workflows.panel.script.args')}</h4>
-          <pre dir="ltr" className="oc-tile mt-1 overflow-x-auto rounded-lg px-3 py-2 font-mono typography-micro text-foreground">{JSON.stringify(args, null, 2)}</pre>
+          <ScrollableOverlay as="pre" dir="ltr" outerClassName="overlay-scrollbar-wrapper--no-gutter oc-tile mt-1 rounded-lg" fillContainer={false} className="px-3 py-2 font-mono typography-micro text-foreground">{JSON.stringify(args, null, 2)}</ScrollableOverlay>
         </section>
       ) : null}
-      <pre dir="ltr" className="oc-tile overflow-x-auto rounded-lg px-3 py-2 font-mono typography-micro leading-relaxed text-foreground">{detail.script}</pre>
+      <ScrollableOverlay as="pre" dir="ltr" outerClassName="overlay-scrollbar-wrapper--no-gutter oc-tile rounded-lg" fillContainer={false} className="px-3 py-2 font-mono typography-micro leading-relaxed text-foreground">{detail.script}</ScrollableOverlay>
     </div>
   );
 };
@@ -497,11 +498,11 @@ const WorkflowRunView: React.FC<{
       {view === 'agents' ? (
         <div className="min-h-0 flex-1"><WorkflowAgentsView key={run.id} run={run} directory={directory} /></div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <ScrollableOverlay outerClassName="min-h-0 flex-1" disableHorizontal>
           {view === 'log' ? <LogView run={run} detail={detail} /> : null}
           {view === 'result' ? <ResultView run={run} detail={detail} failed={failed} /> : null}
           {view === 'script' ? <ScriptView detail={detail} failed={failed} /> : null}
-        </div>
+        </ScrollableOverlay>
       )}
     </div>
   );

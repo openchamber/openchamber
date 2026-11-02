@@ -1,6 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { NewSpaceDialog } from '@/components/session/spaces/NewSpaceDialog';
 import { SpaceRow } from '@/components/session/spaces/SpaceRow';
@@ -27,7 +28,7 @@ export function SpacesView(): React.ReactNode {
 
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-background">
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-6 py-4" disableHorizontal>
         <div className="mx-auto w-full max-w-4xl space-y-4">
           {/* One header row: the list's title and the way to add to it. */}
           <SettingsSection
@@ -52,7 +53,7 @@ export function SpacesView(): React.ReactNode {
             ) : null}
           </SettingsSection>
         </div>
-      </div>
+      </ScrollableOverlay>
       {creating ? <NewSpaceDialog open onOpenChange={(open) => { if (!open) setCreating(false); }} project={{ id: project.id, path: project.path }} /> : null}
     </div>
   );

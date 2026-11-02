@@ -49,6 +49,8 @@ import { SessionMenuItemHint } from '@/components/session/SessionMenuItemHint';
 import { MoveChatToProjectDialog } from '@/components/session/MoveChatToProjectDialog';
 import { HeaderSessionArchiveMenuItem } from './HeaderSessionArchiveMenuItem';
 import { HeaderSessionMarkDoneMenuItem } from './HeaderSessionMarkDoneMenuItem';
+import { HeaderContextUsage } from './HeaderContextUsage';
+import { HeaderProjectControls } from './HeaderProjectControls';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { getInlineStartSide, useI18n } from '@/lib/i18n';
@@ -1316,6 +1318,14 @@ export const Header: React.FC = () => {
         {/* Spacing comes from the gap only, so whichever control ends up last
             sits on the header's own right padding with no trailing margin. */}
         <div className="flex shrink-0 items-center gap-2">
+          {/* What people check or press all through a session sits here in
+              every layout: the side panels come and go, these stay put. */}
+          {!isVSCode && !activeSurfaceHeader ? (
+            <>
+              <HeaderContextUsage buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
+              <HeaderProjectControls buttonClassName={DESKTOP_HEADER_ICON_BUTTON_CLASS} />
+            </>
+          ) : null}
           {showMiniChatHeaderAction ? (
             <Tooltip>
               <TooltipTrigger asChild>

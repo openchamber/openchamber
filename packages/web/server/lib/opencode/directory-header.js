@@ -25,7 +25,7 @@ export const directoryHeaderForOpenCode = (value, marked = false) => {
       return value;
     }
   }
-  if (path.startsWith('//')) return path.replace(/\//g, '\\');
+  if (/^\/\/[^/]/.test(path)) return path.replace(/\//g, '\\');
   if (marked) return path;
   return value;
 };

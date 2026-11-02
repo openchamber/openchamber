@@ -17,6 +17,7 @@ test('manual reconnect preserves secure headers through success and password can
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
     getComputedStyle: dom.getComputedStyle.bind(dom),
+    requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom),
     HTMLElement: dom.HTMLElement, Element: dom.Element, Node: dom.Node, Event: dom.Event, CustomEvent: dom.CustomEvent,
     IS_REACT_ACT_ENVIRONMENT: true,
     Capacitor: {

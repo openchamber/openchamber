@@ -36,7 +36,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -61,6 +60,7 @@ import { getProjectLabel, normalizePath } from './mobilePaths';
 import { MobileSessionList } from './mobileSidebar/MobileSessionList';
 import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSidebarActions } from './mobileSidebar/mobileSidebarState';
 import { useEdgeSwipe } from './useEdgeSwipe';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -501,7 +501,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           </div>
         ) : null}
         {editingOrder ? (
-          <ScrollShadow className="min-h-0 flex-1 overflow-y-auto pb-4">
+          <ScrollableOverlay outerClassName="min-h-0 flex-1" className="pb-4" useScrollShadow disableHorizontal>
             <div className="flex flex-col gap-2 px-3 py-2">
               <p className="px-1 typography-micro text-muted-foreground">{t('mobile.sessions.editOrderHint')}</p>
               <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleReorderDragEnd}>
@@ -512,7 +512,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 </SortableContext>
               </DndContext>
             </div>
-          </ScrollShadow>
+          </ScrollableOverlay>
         ) : null}
         {/* Mounted while reordering too, so the list comes back as it was. */}
         <div className={cn('flex min-h-0 flex-1 flex-col', (editingOrder || empty) && 'hidden')}>

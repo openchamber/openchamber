@@ -20,6 +20,7 @@ import { clearSessionGoal, setSessionGoal } from '@/lib/sessionGoalActions';
 import { useI18n } from '@/lib/i18n';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useUIStore } from '@/stores/useUIStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface SessionGoalDialogProps {
   open: boolean;
@@ -149,7 +150,7 @@ function SessionGoalDialogBody({ mobile, onOpenChange, sessionId, directory }: S
           )}
 
           {isCompleted ? (
-            <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words typography-meta text-muted-foreground">{objectiveContent ?? goal.objective}</p>
+            <ScrollableOverlay as="p" outerClassName="max-h-48" className="whitespace-pre-wrap break-words typography-meta text-muted-foreground" disableHorizontal>{objectiveContent ?? goal.objective}</ScrollableOverlay>
           ) : (
             <>
               <div className="space-y-1">

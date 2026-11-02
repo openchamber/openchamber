@@ -2,7 +2,7 @@
 
 ## Ownership
 
-This module owns the small jokes the app tells at ordinary moments: the rotating new-session heading, the line under "Working tree clean", the toast for a late-night or Friday-evening push, the toast for a commit that deletes clearly more than it adds, and the calendar that switches some of them on Halloween and New Year. It picks lines; the components that show them (`components/chat/useDraftHeading.ts`, `GitEmptyState`, `GitView`) decide where. The celebration overlay lives in `components/ui/FireworksAnimation.tsx`, `fireworksShows.ts` and `holidayOrnaments.tsx`; it asks the calendar's `celebrationOf` which holiday or season a push or merge falls on. The About dialog's seven-tap logo animation is `components/ui/LevitatingLogo.tsx`.
+This module owns the small jokes the app tells at ordinary moments: the rotating new-session heading, the line under "Working tree clean", the toast for a late-night or Friday-evening push, the toast for a commit that deletes clearly more than it adds, the occasional joke the status row says instead of "thinking", and the calendar that switches some of them on Halloween and New Year. It picks lines; the components that show them (`components/chat/useDraftHeading.ts`, `GitEmptyState`, `GitView`, `hooks/useAgentStatusLabel.ts`) decide where. The celebration overlay lives in `components/ui/FireworksAnimation.tsx`, `fireworksShows.ts` and `holidayOrnaments.tsx`; it asks the calendar's `celebrationOf` which holiday or season a push or merge falls on. The About dialog's seven-tap logo animation is `components/ui/LevitatingLogo.tsx`.
 
 ## Invariants
 
@@ -26,6 +26,10 @@ The dictionaries need the same keys in every locale, and the jokes do not transl
 ### Why a net-deletion threshold
 
 A commit that removes one line more than it adds is every other commit. The line shows from `NET_DELETION_THRESHOLD` lines net, so it stays a surprise.
+
+### Why a thinking joke shows for one block in four
+
+The model reasons in nearly every step of a turn, so a joke in place of every "thinking" is the same handful of lines many times an hour, and it stops being funny. `THINKING_LINE_ODDS` gives about one reasoning block in four a line. The pick is keyed on the reasoning part's id, so a block keeps its line while it runs and the next block draws again.
 
 ### Why the draft heading is picked per draft id
 

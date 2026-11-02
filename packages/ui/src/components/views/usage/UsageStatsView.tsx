@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { SettingsChipGroup } from '@/components/sections/shared/SettingsSection';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
@@ -121,7 +122,7 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
   }, [intlLocale]);
 
   return (
-    <div className={cn('h-full overflow-y-auto', className)}>
+    <ScrollableOverlay outerClassName={cn('h-full', className)} disableHorizontal>
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-4 py-4 sm:px-6">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <SettingsChipGroup
@@ -200,7 +201,7 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
           </div>
         )}
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 }
 

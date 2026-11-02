@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n } from '@/lib/i18n';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { formatArtifactSize } from './artifactMeta';
@@ -103,7 +104,7 @@ const PdfPages: React.FC<{
     | { status: 'failed'; unreadable: boolean }
     | { status: 'ready'; doc: PdfDocument; sizes: PageSize[] }
   >({ status: 'loading' });
-  const [scroller, setScroller] = React.useState<HTMLDivElement | null>(null);
+  const [scroller, setScroller] = React.useState<HTMLElement | null>(null);
   const [width, setWidth] = React.useState(0);
 
   React.useEffect(() => {
@@ -161,10 +162,11 @@ const PdfPages: React.FC<{
           {t('common.loading')}
         </div>
       ) : (
-        <div
+        <ScrollableOverlay
           ref={setScroller}
-          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--surface-background)]"
+          outerClassName="min-h-0 flex-1 bg-[var(--surface-background)]"
           style={{ padding: PAGE_GAP_PX }}
+          disableHorizontal
         >
           <div className="flex flex-col items-center" style={{ gap: PAGE_GAP_PX }}>
             {width > 0 && state.sizes.map((size, index) => (
@@ -179,7 +181,7 @@ const PdfPages: React.FC<{
               />
             ))}
           </div>
-        </div>
+        </ScrollableOverlay>
       )}
     </div>
   );

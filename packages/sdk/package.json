@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/sdk",
-  "version": "2.5.3",
+  "version": "2.6.0",
   "description": "Contract for OpenChamber guests: manifest parse and iframe host bridge.",
   "private": false,
   "license": "MIT",

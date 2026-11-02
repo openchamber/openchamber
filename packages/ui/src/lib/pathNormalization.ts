@@ -53,11 +53,13 @@ export const getNormalizedParentDirectory = (directory: string): string | null =
 export const normalizeTerminalDirectory = (value: string): string => normalizePath(value) ?? '';
 
 /**
- * Directory form Windows OpenCode resolves. The stored key keeps a UNC path as
- * `//host/share/...`; that host collapses the leading pair, so a session
- * created with it is recorded under `/host/share/...`. The backslash form is
- * the location it keeps. Other paths are unchanged.
+ * The directory as OpenCode is sent it. The UI keeps a Windows network share
+ * as `//server/share`; OpenCode on Windows reads any path that starts with
+ * "/" as POSIX and collapses it to `/server/share`, a folder that does not
+ * exist. Backslashes keep it a UNC path there. A path that starts with
+ * exactly two slashes only comes from a UNC path: POSIX servers and OpenCode
+ * collapse a leading `//` to `/` before the UI ever sees it.
  */
 export const toOpenCodeDirectory = (directory: string): string => (
-  directory.startsWith('//') ? directory.replace(/\//g, '\\') : directory
+  /^\/\/[^/]/.test(directory) ? directory.replace(/\//g, '\\') : directory
 );

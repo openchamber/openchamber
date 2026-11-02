@@ -13,9 +13,15 @@ name: Canary
 
 on:
   schedule:
-    # Nightly, and only when main moved since the last Canary.
+    # Nightly, and only when main moved since the last Canary (a manual run
+    # too, unless it is forced).
     - cron: '0 3 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: Build even when main has not moved since the last Canary
+        type: boolean
+        default: false
 
 concurrency:
   group: canary
@@ -46,7 +52,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          EVENT: ${{ github.event_name }}
+          FORCE: ${{ inputs.force || false }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
@@ -68,7 +74,9 @@ jobs:
           # like any mobile build (mobile-release.yml).
           echo "release=$NEXT" >> "$GITHUB_OUTPUT"
           echo "build_number=$(( $(date -u +%s) / 60 ))" >> "$GITHUB_OUTPUT"
-          if [ "$EVENT" = "schedule" ] && [ "$SHA" = "$PUBLISHED" ]; then
+          # A manual run too: the same commit again would offer an update with
+          # nothing in it. `force` rebuilds it anyway.
+          if [ "$FORCE" != "true" ] && [ "$SHA" = "$PUBLISHED" ]; then
             echo "main has not moved since the last Canary ($SHA)."
             echo "build=false" >> "$GITHUB_OUTPUT"
           else

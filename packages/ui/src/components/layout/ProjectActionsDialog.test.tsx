@@ -105,6 +105,19 @@ describe('project actions dialog', () => {
     expect(items()[1]?.getAttribute('data-disabled')).toBe('true');
   });
 
+  test('arrow keys wrap around the list in both directions', async () => {
+    await render(runner(dev));
+    const press = async (key: string) => {
+      await act(async () => {
+        document.querySelector('[cmdk-root]')?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      });
+    };
+    await press('ArrowUp');
+    expect(highlighted()?.getAttribute('data-value')).toBe('__configure_project_actions__');
+    await press('ArrowDown');
+    expect(highlighted()?.getAttribute('aria-label')).toBe('Run Dev');
+  });
+
   test('the last item opens the project action settings', async () => {
     await render(runner(dev));
     await act(async () => items().at(-1)?.click());

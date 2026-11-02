@@ -38,6 +38,7 @@ import { toast } from '@/components/ui';
 import { saveFile } from './parts/saveFile';
 import { MermaidLoadFailure, getMermaidDataUrlSourcePromise, isCurrentMermaidLoadRequest, isMermaidLoadFailure, nextMermaidLoadRequestId } from './toolOutputDialogMermaid';
 import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -1037,7 +1038,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                     </div>
                 </div>
                 <div className="flex-1 min-h-0 rounded-xl oc-tile overflow-hidden">
-                    <div className="tool-output-surface h-full max-h-[75vh] overflow-y-auto px-3 pe-4">
+                    <ScrollableOverlay outerClassName="h-full max-h-[75vh]" className="tool-output-surface px-3 pe-4" disableHorizontal>
                         {popup.metadata?.input && typeof popup.metadata.input === 'object' &&
                             Object.keys(popup.metadata.input).length > 0 &&
                             popup.metadata?.tool !== 'patch' ? (() => {
@@ -1195,7 +1196,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                             <div className="typography-meta">{t('chat.toolOutputDialog.noOutputProduced')}</div>
                         </div>
                     )}
-                    </div>
+                    </ScrollableOverlay>
                 </div>
             </DialogContent>
         </Dialog>

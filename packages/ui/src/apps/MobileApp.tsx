@@ -88,6 +88,7 @@ import { useEdgeSwipe } from './useEdgeSwipe';
 import { useMobileChatInsets } from '@/lib/mobileChatInsets';
 import { useNativePushRegistration } from './useNativePushRegistration';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   IPAD_LEFT_SIDEBAR_WIDTH,
   IPAD_RIGHT_SIDEBAR_WIDTH,
@@ -766,9 +767,9 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             title={t('mobile.menu.update')}
           >
             <ErrorBoundary>
-              <div className="h-full overflow-auto px-5 py-4">
+              <ScrollableOverlay outerClassName="h-full" className="px-5 py-4" disableHorizontal>
                 <AboutSettings initialUpdateDialogOpen />
-              </div>
+              </ScrollableOverlay>
             </ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}

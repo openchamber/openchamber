@@ -24,6 +24,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -190,6 +191,7 @@ export const dict = {
   ...heapSnapshotI18n.nl,
   ...consoleBudgetsI18n.nl,
   ...imageToolI18n.nl,
+  ...agentStatusI18n.nl,
   ...snippetsI18n.nl,
   ...sidebarWorkI18n.nl,
   ...sidebarSectionsI18n.nl,
@@ -473,6 +475,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Kies eerst een project',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Kan geplande taken niet laden',
   'sessions.scheduledTasks.dialog.toast.saved': 'Geplande taak opgeslagen',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'De taak draait nu op de nieuwe plek, maar de oude kopie kon niet worden verwijderd. Verwijder die daar, zodat de taak niet twee keer draait.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Kan taak niet bijwerken',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Geplande taak verwijderd',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Kan taak niet verwijderen',
@@ -2430,7 +2433,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'Lage prioriteit',
   'chat.statusRow.actions.stopGeneratingAria': 'Genereren stoppen',
   'chat.statusRow.tasksTitle': 'Taken',
-  'chat.statusRow.modelStatus': '{model} is {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} actief · {left} over',
   'chat.revertIndicator.redo': 'Opnieuw',
   'chat.revertIndicator.redoAria': 'Opnieuw — teruggedraaide berichten herstellen',
@@ -3017,7 +3020,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'Projecticoon gevonden',
   'openInApp.actions.open': 'Openen',
   'openInApp.actions.openInAria': 'Openen in {app}',
-  'openInApp.actions.chooseAppAria': 'Kies de app om te openen',
   'openInApp.actions.copyPath': 'Pad kopiëren',
   'openInApp.actions.refreshApps': 'Apps vernieuwen',
   'openInApp.toast.pathCopied': 'Pad naar het klembord gekopieerd',

@@ -626,7 +626,7 @@ export const ContextPanelContent: React.FC = () => {
 
                   {isExpanded && (
                     <div className="border-t border-[var(--surface-subtle)] p-0">
-                      <div className="group relative max-h-[26rem] w-full overflow-auto bg-[var(--surface-background)]">
+                      <ScrollableOverlay outerClassName="max-h-[26rem] bg-[var(--surface-background)]" className="group relative" disableHorizontal>
                         <div className="absolute top-1 inset-e-2 z-10 opacity-0 transition-opacity group-hover:opacity-100">
                           <button
                             type="button"
@@ -653,7 +653,7 @@ export const ContextPanelContent: React.FC = () => {
                           }}
                           wrap
                         />
-                      </div>
+                      </ScrollableOverlay>
                     </div>
                   )}
                 </div>

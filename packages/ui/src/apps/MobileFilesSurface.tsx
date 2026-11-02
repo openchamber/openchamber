@@ -12,7 +12,6 @@ import {
 
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { Input } from '@/components/ui/input';
-import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from '@/components/icon/Icon';
 import { useFileTreeUpload } from '@/components/views/files/useFileTreeUpload';
@@ -29,6 +28,7 @@ import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 // The full desktop file editor, loaded on demand — it's a heavy chunk and only
 // needed once a file is actually opened.
@@ -341,7 +341,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
         </div>
       </div>
 
-      <ScrollShadow className="min-h-0 flex-1 overflow-y-auto px-4 pb-3">
+      <ScrollableOverlay outerClassName="min-h-0 flex-1" className="px-4 pb-3" useScrollShadow disableHorizontal>
         {directoryError ? (
           <MobileFilesState message={directoryError} />
         ) : query.trim() ? (
@@ -363,7 +363,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
             ))}
           </div>
         )}
-      </ScrollShadow>
+      </ScrollableOverlay>
     </div>
   );
 };

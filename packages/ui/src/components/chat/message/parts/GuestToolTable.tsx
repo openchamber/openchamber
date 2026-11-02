@@ -3,6 +3,7 @@ import type { JsonValue } from '@openchamber/sdk';
 
 import { useI18n } from '@/lib/i18n';
 import { readPath, stringifyTemplateValue } from '@/lib/guests/tool-presentation';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /** Rows drawn for an `output: "table"` rule; the rest is a count line. */
 const GUEST_TOOL_TABLE_ROWS_MAX = 200;
@@ -29,7 +30,7 @@ export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns })
 
     return (
         <div className="flex w-fit max-w-full flex-col gap-1">
-            <div className="oc-tile overflow-x-auto rounded-lg">
+            <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter oc-tile rounded-lg" fillContainer={false}>
                 <table className="w-max border-collapse text-sm">
                     <thead>
                         <tr className="border-b border-edge">
@@ -52,7 +53,7 @@ export const GuestToolTable: React.FC<GuestToolTableProps> = ({ rows, columns })
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </ScrollableOverlay>
             {hiddenCount > 0 ? (
                 <div className="typography-micro text-muted-foreground">
                     {t('chat.toolPart.moreRows', { count: hiddenCount })}

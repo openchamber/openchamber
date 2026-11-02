@@ -11,6 +11,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { useOpenChildSession } from './useOpenChildSession';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type Props = {
   sessionId: string | null;
@@ -66,7 +67,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
         defaultExpanded
         summary={openRuns > 0 ? `${openRuns}/${runs.length}` : runs.length}
       >
-        <div className="max-h-72 overflow-y-auto">
+        <ScrollableOverlay outerClassName="max-h-72" disableHorizontal>
           {newestFirst.map((run) => {
             const look = workflowRunLook(run.state);
             const busy = pending === run.id;
@@ -93,7 +94,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
               />
             );
           })}
-        </div>
+        </ScrollableOverlay>
       </WorkStatusCollapsibleSection>
     );
   }
@@ -154,7 +155,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
       defaultExpanded
       summary={openRuns > 0 ? `${openRuns}/${runs.length}` : runs.length}
     >
-      <div className="max-h-72 overflow-y-auto">
+      <ScrollableOverlay outerClassName="max-h-72" disableHorizontal>
         {newestFirst.map((run) => {
           const look = workflowRunLook(run.state);
           const expanded = isWorkflowRunOpen(run) !== toggled.has(run.id);
@@ -183,7 +184,7 @@ export const WorkStatusWorkflowsSection: React.FC<Props> = ({ sessionId, directo
             </React.Fragment>
           );
         })}
-      </div>
+      </ScrollableOverlay>
     </WorkStatusCollapsibleSection>
   );
 };

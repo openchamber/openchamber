@@ -34,6 +34,7 @@ import { readContextPart } from '@/lib/messages/contextParts';
 import UserContextPart from './UserContextPart';
 import { SessionMentionChipsContext, withSessionMentionChips, type SessionMentionChips } from './sessionMentionChips';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -397,7 +398,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({
                             <summary className="cursor-pointer text-muted-foreground">
                                 {t('chat.message.terminalContext', { terminal: context.terminalLabel, start: context.startLine, end: context.endLine })}
                             </summary>
-                            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[var(--surface-foreground)]">{context.text}</pre>
+                            <ScrollableOverlay as="pre" outerClassName="mt-2 max-h-48" className="whitespace-pre-wrap font-mono text-[var(--surface-foreground)]" disableHorizontal>{context.text}</ScrollableOverlay>
                         </details>
                     ))}
                 </div>

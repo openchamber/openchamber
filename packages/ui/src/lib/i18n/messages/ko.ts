@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -191,6 +192,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ko,
   ...consoleBudgetsI18n.ko,
   ...imageToolI18n.ko,
+  ...agentStatusI18n.ko,
   ...snippetsI18n.ko,
   ...sidebarWorkI18n.ko,
   ...sidebarSectionsI18n.ko,
@@ -474,6 +476,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '먼저 프로젝트를 선택하세요',
   'sessions.scheduledTasks.dialog.toast.loadFailed': '예약 작업 로드 실패',
   'sessions.scheduledTasks.dialog.toast.saved': '예약 작업 저장됨',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': '작업이 이제 새 위치에서 실행되지만 이전 사본을 삭제하지 못했습니다. 작업이 두 번 실행되지 않도록 해당 위치에서 삭제하세요.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': '작업 업데이트 실패',
   'sessions.scheduledTasks.dialog.toast.deleted': '예약 작업 삭제됨',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': '작업 삭제 실패',
@@ -2430,7 +2433,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '낮은 우선순위',
   'chat.statusRow.actions.stopGeneratingAria': '생성 중지',
   'chat.statusRow.tasksTitle': '작업',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model}: {status}',
   'chat.statusRow.summary.activeLeft': '{active}개 활성 · {left}개 남음',
   'chat.revertIndicator.redo': '다시 실행',
   'chat.revertIndicator.redoAria': '다시 실행 — 되돌린 메시지 복원',
@@ -3017,7 +3020,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconDiscovered': '프로젝트 아이콘을 찾았습니다',
   'openInApp.actions.open': '열기',
   'openInApp.actions.openInAria': '{app}에서 열기',
-  'openInApp.actions.chooseAppAria': '열 앱 선택',
   'openInApp.actions.copyPath': '경로 복사',
   'openInApp.actions.refreshApps': '앱 새로고침',
   'openInApp.toast.pathCopied': '경로를 클립보드에 복사했습니다',

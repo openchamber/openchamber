@@ -10,6 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GitStashEntry } from '@/lib/api/types';
 import { applyGitStash, countGitStashFiles, dropGitStash, listGitStashes, popGitStash, stashGitChanges } from '@/lib/gitApi';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface StashesDialogProps {
   open: boolean;
@@ -156,7 +157,7 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('gitView.stashes.searchPlaceholder')} className="ps-8" />
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal>
           {isLoading ? (
             <div className="flex items-center justify-center py-10 text-muted-foreground"><Icon name="loader-4" className="size-5 animate-spin" /></div>
           ) : filtered.length === 0 ? (
@@ -182,7 +183,7 @@ export const StashesDialog: React.FC<StashesDialogProps> = ({
               </div>
             </div>
           ))}
-        </div>
+        </ScrollableOverlay>
       </DialogContent>
     </Dialog>
   );

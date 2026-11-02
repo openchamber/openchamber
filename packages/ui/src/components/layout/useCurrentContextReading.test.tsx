@@ -7,10 +7,10 @@ import type { Message, Session } from '@/lib/opencode/model'
 import { useSessionUIStore } from '@/sync/session-ui-store'
 import { SyncProvider, useDirectoryStore } from '@/sync/sync-context'
 import { installHookTestDom } from '../session/sidebar/test-utils/testDom'
-import { ContextUsageRingIcon } from './ContextRailUsage'
+import { useCurrentContextReading } from './useCurrentContextReading'
 import { useProjectsStore } from '@/stores/useProjectsStore'
 
-// The rail ring sits beside the transcript for the whole session, so a
+// The header's context readout is on screen for the whole session, so a
 // streamed step that leaves the context reading unchanged must not render it.
 
 const CURRENT_DIR = '/workspace'
@@ -57,12 +57,17 @@ const assistant = (id: string, total: number): Message => ({
 let store: ReturnType<typeof useDirectoryStore> | null = null
 let renders = 0
 
+const ReadingProbe = () => {
+  useCurrentContextReading()
+  return null
+}
+
 const StoreProbe = () => {
   store = useDirectoryStore(DIR, { bootstrap: false })
   return null
 }
 
-describe('ContextUsageRingIcon', () => {
+describe('useCurrentContextReading', () => {
   let dom: ReturnType<typeof installHookTestDom>
   let root: Root
   let restoreSpies: Array<() => void>
@@ -97,8 +102,8 @@ describe('ContextUsageRingIcon', () => {
     await act(async () => root.render(
       <SyncProvider sdk={createSdk()} directory="">
         <StoreProbe />
-        <React.Profiler id="ring" onRender={() => { renders += 1 }}>
-          <ContextUsageRingIcon />
+        <React.Profiler id="reading" onRender={() => { renders += 1 }}>
+          <ReadingProbe />
         </React.Profiler>
       </SyncProvider>,
     ))
@@ -115,7 +120,7 @@ describe('ContextUsageRingIcon', () => {
     dom.restore()
   })
 
-  test('streamed steps with the same reading do not render the ring', async () => {
+  test('streamed steps with the same reading do not render the reader', async () => {
     await seed([session(1)], [assistant('msg_1', 50_000)])
     const settled = renders
     expect(settled).toBeGreaterThan(0)

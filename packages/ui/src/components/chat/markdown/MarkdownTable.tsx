@@ -14,6 +14,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type TableFormat = 'csv' | 'tsv' | 'md';
 const copyFormats = ['csv', 'tsv', 'md'] as const;
@@ -262,7 +263,7 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
           </DropdownMenu>
         </div>
       )}
-      <div className="min-w-0 overflow-x-auto">
+      <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter min-w-0" fillContainer={false}>
         <table {...props} ref={ref} data-streamdown="table"
           data-oc-table-layout={widths ? 'fixed' : settled ? 'natural' : 'pending'}
           style={widths ? { ...props.style, width: widths.reduce((sum, width) => sum + width, 0), tableLayout: 'fixed' } : props.style}
@@ -270,7 +271,7 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
           {columns && <colgroup>{columns}</colgroup>}
           <TableColumns.Provider value={cellWrap}>{children}</TableColumns.Provider>
         </table>
-      </div>
+      </ScrollableOverlay>
     </div>
   );
 }

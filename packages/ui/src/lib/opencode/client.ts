@@ -426,7 +426,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
   }
   return OpenCode.make({
     baseUrl: toOpencodeClientRoot(config.baseUrl),
-    headers: config.directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(config.directory) } : undefined,
+    headers: config.directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(toOpenCodeDirectory(config.directory)) } : undefined,
     // A folder whose configuration runs code is refused until the user trusts
     // it (lib/opencodeTrust.ts). The request waits for the answer and goes out
     // again once trust is saved; a declined one returns the refusal.
@@ -757,7 +757,7 @@ class OpencodeService {
     return (sessionID) => cleanup(async ({ fetch, baseUrl }) => {
       const client = OpenCode.make({
         baseUrl: ensureAbsoluteBaseUrl(baseUrl || "/"),
-        headers: directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(directory) } : undefined,
+        headers: directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(toOpenCodeDirectory(directory)) } : undefined,
         fetch,
       })
       try {
@@ -1056,7 +1056,7 @@ class OpencodeService {
     const client = directory ? this.getScopedSdkClient(directory) : this.client
     const response = await call("session.list", () =>
       client.session.list({
-        directory,
+        directory: directory ? toOpenCodeDirectory(directory) : undefined,
         limit: options.limit ?? DEFAULT_SESSION_PAGE_LIMIT,
         order: options.order,
         search: options.search,
@@ -1128,7 +1128,7 @@ class OpencodeService {
   async moveSession(id: string, toDirectory: string, options?: { delivery?: SessionInboxDelivery }): Promise<void> {
     const directory = this.normalizeCandidatePath(toDirectory) ?? toDirectory
     await call("session.move", () =>
-      this.client.session.move({ sessionID: id, directory, delivery: options?.delivery }),
+      this.client.session.move({ sessionID: id, directory: toOpenCodeDirectory(directory), delivery: options?.delivery }),
     )
   }
 

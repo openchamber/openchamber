@@ -24,6 +24,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -190,6 +191,7 @@ export const dict = {
   ...heapSnapshotI18n.en,
   ...consoleBudgetsI18n.en,
   ...imageToolI18n.en,
+  ...agentStatusI18n.en,
   ...snippetsI18n.en,
   ...sidebarWorkI18n.en,
   ...sidebarSectionsI18n.en,
@@ -473,6 +475,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Choose a project first',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Failed to load scheduled tasks',
   'sessions.scheduledTasks.dialog.toast.saved': 'Scheduled task saved',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'The task now runs in its new place, but the old copy could not be deleted. Delete it there so the task doesn\'t run twice.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Failed to update task',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Scheduled task deleted',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Failed to delete task',
@@ -3017,7 +3020,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'Project icon discovered',
   'openInApp.actions.open': 'Open',
   'openInApp.actions.openInAria': 'Open in {app}',
-  'openInApp.actions.chooseAppAria': 'Choose app to open',
   'openInApp.actions.copyPath': 'Copy Path',
   'openInApp.actions.refreshApps': 'Refresh Apps',
   'openInApp.toast.pathCopied': 'Path copied to clipboard',

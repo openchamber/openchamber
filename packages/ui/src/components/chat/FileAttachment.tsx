@@ -23,6 +23,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 import type { ToolPopupContent } from './message/types';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const FileAttachmentButton = memo(() => {
   const { t } = useI18n();
@@ -713,7 +714,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
         )}
 
         {imageFiles.length > 0 && (
-          <div className="overflow-x-auto -mx-1 px-1 py-0.5 scrollbar-thin">
+          <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter -mx-1 w-auto" className="px-1 py-0.5" fillContainer={false}>
             <div className="flex snap-x snap-mandatory gap-2">
               {imageFiles.map((file, index) => {
                 const filename = resolveDisplayName(file) || 'Image';
@@ -754,7 +755,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
                 );
               })}
             </div>
-          </div>
+          </ScrollableOverlay>
         )}
       </div>
     );

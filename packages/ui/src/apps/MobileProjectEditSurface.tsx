@@ -22,6 +22,7 @@ import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type MobileEditableProject = {
   id: string;
@@ -204,7 +205,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
         }
       >
         {project ? (
-          <div className="h-full space-y-6 overflow-y-auto px-4 pb-8 pt-2">
+          <ScrollableOverlay outerClassName="h-full" className="space-y-6 px-4 pb-8 pt-2" disableHorizontal>
             {/* Icon preview */}
             <div className="flex justify-center pt-2">
               <span
@@ -304,7 +305,6 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                     type="button"
                     onClick={() => setIcon(i.key)}
                     aria-label={i.label}
-                    title={i.label}
                     className={cn(
                       'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
                       icon === i.key ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-edge hover:border-edge',
@@ -355,7 +355,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
 
             {/* Isolated spaces: while the feature's switch is on; the phone is never VS Code. */}
             {isGitRepo && isolatedSpacesEnabled ? <MobileProjectSpaces projectPath={project.path} /> : null}
-          </div>
+          </ScrollableOverlay>
         ) : null}
       </MobileFullscreenSurface>
 

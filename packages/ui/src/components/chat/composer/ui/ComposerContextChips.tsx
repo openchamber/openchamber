@@ -44,6 +44,7 @@ import { useInputStore } from '@/sync/input-store';
 import { GlassPopupMotion } from './GlassPopupMotion';
 import { fileWithDiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { isWholeFileComment } from '@/components/comments/wholeFileComment';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
@@ -444,9 +445,10 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                     className="oc-glass-popover oc-glass-floating overflow-hidden rounded-xl"
                     style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
                 >
-                    <div
-                        className="divide-y divide-[var(--interactive-border)] overflow-y-auto"
-                        style={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                    <ScrollableOverlay
+                        outerStyle={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                        className="divide-y divide-[var(--interactive-border)]"
+                        disableHorizontal
                     >
                         {openGroup.drafts.map((draft, index) => (
                             <DraftPreviewEntry
@@ -470,7 +472,7 @@ function ComposerContextChipsView({ draftTarget, colors, previewHost }: Composer
                                 attachmentFilenames={attachmentFilenames}
                             />
                         ))}
-                    </div>
+                    </ScrollableOverlay>
                 </div>
                 </GlassPopupMotion>
                 </div>

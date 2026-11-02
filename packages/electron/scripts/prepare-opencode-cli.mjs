@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
-import { parseOpenCodeCliVersion, readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';
+import { readPinnedOpenCodeCliVersion, runOpenCodeCliVersion } from './opencode-cli-version.mjs';
 import { readPeArchitecture } from './windows-executable.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -58,14 +58,7 @@ const outputBinaryPath = (binaryName) => path.join(outputDir, binaryName);
 
 const readBinaryVersion = (binaryPath) => {
   if (!fs.existsSync(binaryPath)) return null;
-  const result = spawnSync(binaryPath, ['--version'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: 15000,
-    windowsHide: true,
-  });
-  if (result.status !== 0) return null;
-  return parseOpenCodeCliVersion(result.stdout) || null;
+  return runOpenCodeCliVersion(binaryPath).version;
 };
 
 const readPackageVersion = (extractDir) => {
@@ -172,9 +165,9 @@ const main = async () => {
     return;
   }
 
-  const preparedVersion = readBinaryVersion(outputBinary);
-  if (preparedVersion !== version) {
-    throw new Error(`Prepared OpenCode CLI version mismatch: expected ${version}, got ${preparedVersion || 'unknown'}`);
+  const prepared = runOpenCodeCliVersion(outputBinary);
+  if (prepared.version !== version) {
+    throw new Error(`Prepared OpenCode CLI version mismatch: expected ${version}, got ${prepared.version || 'unknown'}\n${prepared.detail}`);
   }
 
   console.log(`[electron] prepared OpenCode CLI ${version}: ${outputBinary}`);

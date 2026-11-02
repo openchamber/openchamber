@@ -34,6 +34,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
 import { resolveTimelineIsAtEnd } from './lib/scroll/timelineScrollAnchoring';
+import { estimateTimelineRowSize, type RowSizeMetrics } from './lib/turns/rowSizeEstimate';
 import { onNavigationRelease } from './lib/scroll/timelineScrollIntent';
 import { isReasoningRevealTarget } from './search/reasoningReveal';
 import {
@@ -695,6 +696,30 @@ const timelineItemType = (item: RenderRow): string => item.kind;
 
 const renderTimelineItem = ({ item }: { item: RenderRow }) => <TimelineRow row={item} />;
 
+// Where message text wraps: the chat column's content box. Read from a
+// column in the list when there is one, else from the column's own rule
+// (`.chat-message-column` in typography.css: 48rem unless the layout is wide,
+// about 1 to 1.5rem of padding on each side).
+const readColumnWidth = (scroller: HTMLElement | null): number => {
+    const column = scroller?.querySelector<HTMLElement>('.chat-message-column');
+    if (column && column.clientWidth > 0) {
+        const style = getComputedStyle(column);
+        return column.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    }
+    const width = scroller?.clientWidth || window.innerWidth;
+    const wide = Boolean(scroller?.closest('.wide-chat-layout'));
+    return Math.min(width, wide ? width : 768) - (width >= 1024 ? 48 : 32);
+};
+
+// A touch device: raised tap targets (mobile.css) and native scroll momentum.
+const isTouchLayout = (): boolean => {
+    const root = document.documentElement;
+    return root.classList.contains('mobile-pointer') && !root.classList.contains('desktop-runtime');
+};
+
+// A tool, reasoning or file line: 36 px where touch targets are raised, 32 px elsewhere.
+const readToolLineHeight = (): number => (isTouchLayout() ? 36 : 32);
+
 type TimelineListProps = {
     rows: RenderRow[];
     stickyRowIndices: number[] | undefined;
@@ -708,6 +733,8 @@ type TimelineListProps = {
     listFooter?: React.ReactNode;
     scrollContainerProps?: TimelineScrollContainerProps;
     rowContext: TimelineRowContextValue;
+    showReasoningTraces: boolean;
+    collapsibleThinkingBlocks: boolean;
 };
 
 const TimelineList = React.memo(({
@@ -723,12 +750,51 @@ const TimelineList = React.memo(({
     listFooter,
     scrollContainerProps,
     rowContext,
+    showReasoningTraces,
+    collapsibleThinkingBlocks,
 }: TimelineListProps) => {
     const listRef = React.useRef<LegendListRef | null>(null);
     const isAtEndRef = React.useRef(true);
+    const [touchLayout] = React.useState(isTouchLayout);
+
+    // Each row is placed at an estimate of its own height until measured
+    // (`rowSizeEstimate.ts`).
+    const sizeMetricsRef = React.useRef<RowSizeMetrics>({ columnWidth: 0, lineHeight: 32, showReasoningTraces, collapsibleThinkingBlocks });
+    sizeMetricsRef.current.showReasoningTraces = showReasoningTraces;
+    sizeMetricsRef.current.collapsibleThinkingBlocks = collapsibleThinkingBlocks;
+    const sizeMetrics = React.useCallback((): RowSizeMetrics => {
+        const metrics = sizeMetricsRef.current;
+        if (metrics.columnWidth <= 0) {
+            metrics.columnWidth = Math.round(readColumnWidth(listRef.current?.getScrollableNode() ?? null));
+            metrics.lineHeight = readToolLineHeight();
+        }
+        return metrics;
+    }, []);
+    // The list asks again on every pass over rows it has not measured; a row
+    // whose content did not change keeps its object (`buildTimelineRows`).
+    const estimatesRef = React.useRef(new WeakMap<RenderRow, { metrics: string; size: number | undefined }>());
+    const estimateRowSize = React.useCallback((row: RenderRow): number | undefined => {
+        const metrics = sizeMetrics();
+        const signature = `${metrics.columnWidth}|${metrics.lineHeight}|${metrics.showReasoningTraces}|${metrics.collapsibleThinkingBlocks}`;
+        const cached = estimatesRef.current.get(row);
+        if (cached && cached.metrics === signature) return cached.size;
+        const size = estimateTimelineRowSize(row, metrics);
+        estimatesRef.current.set(row, { metrics: signature, size });
+        return size;
+    }, [sizeMetrics]);
+    const [scrollerNode, setScrollerNode] = React.useState<HTMLElement | null>(null);
+    React.useEffect(() => {
+        if (!scrollerNode) return;
+        const observer = new ResizeObserver(() => {
+            sizeMetricsRef.current.columnWidth = Math.round(readColumnWidth(scrollerNode));
+        });
+        observer.observe(scrollerNode);
+        return () => observer.disconnect();
+    }, [scrollerNode]);
 
     const setListRef = React.useCallback((list: LegendListRef | null) => {
         listRef.current = list;
+        setScrollerNode(list?.getScrollableNode() ?? null);
         registerList(list);
     }, [registerList]);
 
@@ -795,6 +861,7 @@ const TimelineList = React.memo(({
                 getItemType={timelineItemType}
                 renderItem={renderTimelineItem}
                 estimatedItemSize={TIMELINE_ESTIMATED_ENTRY_SIZE}
+                getEstimatedItemSize={estimateRowSize}
                 initialScrollAtEnd
                 // Chat rows own internal state (expanded tool calls, reveal
                 // animations); recycling a container into a different row would
@@ -813,7 +880,10 @@ const TimelineList = React.memo(({
                 // Keep size compensation active while reading history, including
                 // when scrolling mounts older rows above the viewport. A pinned
                 // reader is held on the end by the owning hook instead.
-                maintainVisibleContentPosition={{ data: true, size: endPinningReleased }}
+                // On touch, a correction for rows measured above the reader
+                // waits until the scroll stops (the scroll documentation, "A
+                // row is placed at an estimate").
+                maintainVisibleContentPosition={{ data: true, size: endPinningReleased, deferSizeWhileScrolling: touchLayout }}
                 onScroll={handleScroll}
                 onMetricsChange={onListMetricsChange}
                 stickyHeaderIndices={stickyRowIndices}
@@ -852,6 +922,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
     const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    const collapsibleThinkingBlocks = useUIStore((state) => state.collapsibleThinkingBlocks);
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const defaultActivityExpanded = activityRenderMode === 'summary';
     const reviewTransferDirection = useGlobalSessionsStore((state) => {
@@ -1488,6 +1559,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     scrollContainerProps={scrollContainerProps}
                     rowContext={rowContext}
                     endPinningReleased={endPinningReleased}
+                    showReasoningTraces={showReasoningTraces}
+                    collapsibleThinkingBlocks={collapsibleThinkingBlocks}
                 />
         </FadeInDisabledProvider>
     );

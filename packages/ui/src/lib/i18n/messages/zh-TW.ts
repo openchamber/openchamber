@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -191,6 +192,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-TW'],
   ...consoleBudgetsI18n['zh-TW'],
   ...imageToolI18n['zh-TW'],
+  ...agentStatusI18n['zh-TW'],
   ...snippetsI18n['zh-TW'],
   ...sidebarWorkI18n['zh-TW'],
   ...sidebarSectionsI18n['zh-TW'],
@@ -499,6 +501,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '請先選擇一個專案',
   'sessions.scheduledTasks.dialog.toast.loadFailed': '載入排程任務失敗',
   'sessions.scheduledTasks.dialog.toast.saved': '排程任務已儲存',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': '任務現在會在新位置執行，但無法刪除舊副本。請在原位置將其刪除，以免任務執行兩次。',
   'sessions.scheduledTasks.dialog.toast.updateFailed': '更新任務失敗',
   'sessions.scheduledTasks.dialog.toast.deleted': '排程任務已刪除',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': '刪除任務失敗',
@@ -2406,7 +2409,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '低優先級',
   'chat.statusRow.actions.stopGeneratingAria': '停止生成',
   'chat.statusRow.tasksTitle': '任務',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model}{status}',
   'chat.statusRow.summary.activeLeft': '{active} 個活躍 · 剩餘 {left} 個',
   'chat.revertIndicator.redo': '重做',
   'chat.revertIndicator.redoAria': '重做 — 恢復已收回的訊息',
@@ -2993,7 +2996,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconDiscovered': '專案圖示已發現',
   'openInApp.actions.open': '開啟',
   'openInApp.actions.openInAria': '在 {app} 中開啟',
-  'openInApp.actions.chooseAppAria': '選擇要開啟的應用程式',
   'openInApp.actions.copyPath': '複製路徑',
   'openInApp.actions.refreshApps': '重新整理應用程式',
   'openInApp.toast.pathCopied': '路徑已複製到剪貼簿',

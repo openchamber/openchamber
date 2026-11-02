@@ -25,6 +25,7 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -201,6 +202,7 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['pt-BR'],
   ...consoleBudgetsI18n['pt-BR'],
   ...imageToolI18n['pt-BR'],
+  ...agentStatusI18n['pt-BR'],
   ...snippetsI18n['pt-BR'],
   ...sidebarWorkI18n['pt-BR'],
   ...sidebarSectionsI18n['pt-BR'],
@@ -483,6 +485,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.error.chooseProjectFirst": "Escolha um projeto primeiro",
   "sessions.scheduledTasks.dialog.toast.loadFailed": "Não foi possível carregar tarefas agendadas",
   "sessions.scheduledTasks.dialog.toast.saved": "Tarefa agendada salva",
+  "sessions.scheduledTasks.dialog.toast.moveLeftOriginal": "A tarefa agora é executada no novo local, mas a cópia antiga não pôde ser excluída. Exclua-a lá para que a tarefa não seja executada duas vezes.",
   "sessions.scheduledTasks.dialog.toast.updateFailed": "Não foi possível atualizar a tarefa",
   "sessions.scheduledTasks.dialog.toast.deleted": "Tarefa agendada excluída",
   "sessions.scheduledTasks.dialog.toast.deleteFailed": "Não foi possível excluir a tarefa",
@@ -2399,7 +2402,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.statusRow.todo.priority.low": "Prioridade baixa",
   "chat.statusRow.actions.stopGeneratingAria": "Parar a geração",
   "chat.statusRow.tasksTitle": "Tarefas",
-  "chat.statusRow.modelStatus": "{model} · {status}",
+  "chat.statusRow.modelStatus": "{model} {status}",
   "chat.statusRow.summary.activeLeft": "{active} ativas · {left} restantes",
   "chat.revertIndicator.redo": "Refazer",
   "chat.revertIndicator.redoAria": "Refazer — restaurar mensagens revertidas",
@@ -2974,7 +2977,6 @@ export const dict: Record<I18nKey, string> = {
   "projectEditDialog.toast.iconDiscovered": "Ícone do projeto descoberto",
   "openInApp.actions.open": "Abrir",
   "openInApp.actions.openInAria": "Abrir em {app}",
-  "openInApp.actions.chooseAppAria": "Escolher aplicativo para abrir",
   "openInApp.actions.copyPath": "Copiar caminho",
   "openInApp.actions.refreshApps": "Atualizar aplicativos",
   "openInApp.toast.pathCopied": "Caminho copiado para a área de transferência",
