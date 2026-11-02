@@ -92,30 +92,10 @@ const pinnedStore = () => createMetadataStub({
 });
 
 describe('writing the knowledge into a session', () => {
-  test('removes obsolete UI instructions without changing unrelated entries, on every sync', async () => {
+  test('puts each source under its own key and removes the empty ones', async () => {
     const instructionEntries = createEntriesStub();
     instructionEntries.held.set('openchamber.openui', 'Obsolete catalog');
     instructionEntries.held.set('other.instructions', 'Keep this');
-    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, isPageRenderingAvailable: async () => true });
-    for (let i = 0; i < 2; i++) {
-      expect(await runtime.sync('ses_a', DIRECTORY)).toBe(true);
-      expect(instructionEntries.held.has('openchamber.openui')).toBe(false);
-      expect(instructionEntries.held.get('other.instructions')).toBe('Keep this');
-      expect(instructionEntries.held.get(GUIDANCE)).toContain(UI_BLOCKS_GUIDANCE);
-    }
-  });
-
-  test('failed legacy instruction cleanup reports failure while current guidance still updates', async () => {
-    const instructionEntries = createEntriesStub({ fail: new Set(['openchamber.openui']) });
-    instructionEntries.held.set('openchamber.openui', 'Obsolete catalog');
-    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, isPageRenderingAvailable: async () => true });
-    expect(await runtime.sync('ses_a', DIRECTORY)).toBe(false);
-    expect(instructionEntries.held.has('openchamber.openui')).toBe(true);
-    expect(instructionEntries.held.get(GUIDANCE)).toContain(UI_BLOCKS_GUIDANCE);
-  });
-
-  test('puts each source under its own key and removes the empty ones', async () => {
-    const instructionEntries = createEntriesStub();
     const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
 
     expect(await runtime.sync('ses_a', DIRECTORY, 'Keep replies short.')).toBe(true);
@@ -127,6 +107,8 @@ describe('writing the knowledge into a session', () => {
     // No tool: no guidance and no branch, so those keys are cleared.
     expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, GUIDANCE]);
     expect(instructionEntries.calls).toContainEqual(['remove', 'ses_a', DIRECTORY, CHECKOUT]);
+    expect(instructionEntries.held.has('openchamber.openui')).toBe(false);
+    expect(instructionEntries.held.get('other.instructions')).toBe('Keep this');
   });
 
   test('an unpinned note takes its entry away', async () => {
@@ -188,12 +170,15 @@ describe('writing the knowledge into a session', () => {
     expect(calls.filter((call) => call[2] === RESPONSE_STYLE).map((call) => call[3])).toEqual(['old style', 'new style']);
   });
 
-  test('one entry that will not write does not hold back the others', async () => {
-    const instructionEntries = createEntriesStub({ fail: new Set([PINNED]) });
-    const runtime = createRuntime({ ...pinnedStore(), instructionEntries });
+  test.each([PINNED, 'openchamber.openui'])('failed write or removal of %s does not hold back other entries', async (key) => {
+    const instructionEntries = createEntriesStub({ fail: new Set([key]) });
+    instructionEntries.held.set(key, 'Retained after failure');
+    const runtime = createRuntime({ ...pinnedStore(), instructionEntries, isPageRenderingAvailable: async () => true });
 
     expect(await runtime.sync('ses_a', DIRECTORY)).toBe(false);
     expect(instructionEntries.held.get(MEMORY)).toContain('Uses bun');
+    expect(instructionEntries.held.get(key)).toBe('Retained after failure');
+    expect(instructionEntries.held.get(GUIDANCE)).toContain(UI_BLOCKS_GUIDANCE);
   });
 
   test('never throws, so a send goes out without its background', async () => {
