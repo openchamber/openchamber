@@ -225,6 +225,32 @@ type RoutingSafetySkippedEvent = { type: 'routing-safety-skipped' } & z.infer<ty
 export type PermissionPolicySyncEvent = Extract<SyncEvent, { type: 'openchamber.permission-auto-accept' | 'openchamber.permission-left-for-user' }>;
 type PermissionPolicyEvent = { type: 'permission-policy'; event: PermissionPolicySyncEvent };
 
+/**
+ * OpenChamber's own session announcements the sync layer applies: a page
+ * waiting for an answer, a pending recap, a workflow run, an archive. The main
+ * event stream carries them only over the WebSocket; over SSE it is OpenCode's
+ * own stream, so this stream is where every transport hears them.
+ */
+const CONTROL_STREAM_SYNC_TYPES = new Set([
+  'openchamber:page-waiting',
+  'openchamber:page-settled',
+  'openchamber:session-assist',
+  'openchamber:session-archived',
+  'openchamber:workflow-run',
+  'openchamber:workflow-run-removed',
+]);
+export type ControlStreamSyncEvent = Extract<SyncEvent, {
+  type: 'openchamber.page-waiting' | 'openchamber.page-settled' | 'openchamber.session-assist' | 'session.patched'
+    | 'openchamber.workflow-run' | 'openchamber.workflow-run-removed';
+}>;
+type ControlStreamSyncEnvelope = { type: 'control-sync'; event: ControlStreamSyncEvent };
+
+const isControlStreamSyncEvent = (event: SyncEvent): event is ControlStreamSyncEvent => (
+  event.type === 'openchamber.page-waiting' || event.type === 'openchamber.page-settled'
+  || event.type === 'openchamber.session-assist' || event.type === 'session.patched'
+  || event.type === 'openchamber.workflow-run' || event.type === 'openchamber.workflow-run-removed'
+);
+
 /** Followed pull requests, merge requests or issues whose state the server saw move. */
 type TrackedItemsChangedEvent = { type: 'tracked-items-changed'; records: z.infer<typeof trackedItemRecordsSchema> };
 
@@ -259,6 +285,7 @@ type OpenChamberEvent =
   | AutoReviewUpdatedEvent
   | PrWatchUpdatedEvent
   | PermissionPolicyEvent
+  | ControlStreamSyncEnvelope
   /** Which sessions the server keeps warm, as a full snapshot. */
   | { type: 'session-warming'; snapshot: SessionWarmingSnapshot }
   /** The host follows this space's queue again; what changed in a gap is read from the space. */
@@ -500,6 +527,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     for (const { event } of classified.events) {
       if (event.type !== 'openchamber.permission-auto-accept' && event.type !== 'openchamber.permission-left-for-user') continue;
       for (const listener of listeners) listener({ type: 'permission-policy', event });
+    }
+    return;
+  }
+
+  if (CONTROL_STREAM_SYNC_TYPES.has(envelope.type)) {
+    const classified = classifyStreamPayload(envelope, undefined);
+    if (classified.kind !== 'events') return;
+    for (const { event } of classified.events) {
+      if (!isControlStreamSyncEvent(event)) continue;
+      for (const listener of listeners) listener({ type: 'control-sync', event });
     }
     return;
   }

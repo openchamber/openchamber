@@ -54,6 +54,26 @@ export const useGlobalBlockingRequestsStore = create<GlobalBlockingRequestsState
   bySession: new Map(),
 }));
 
+/**
+ * The pages that stopped waiting between two states of the index, as
+ * `sessionID:pageID`: answered, settled by the host's snapshot after a missed
+ * end, or gone with their session.
+ */
+export const settledPageKeys = (
+  previous: ReadonlyMap<string, PendingBlockingRequests>,
+  next: ReadonlyMap<string, PendingBlockingRequests>,
+): string[] => {
+  const settled: string[] = [];
+  for (const [sessionId, entry] of previous) {
+    if (entry.pages.length === 0) continue;
+    const remaining = next.get(sessionId)?.pages;
+    if (remaining === entry.pages) continue;
+    const kept = new Set(remaining?.map((page) => page.id));
+    for (const page of entry.pages) if (!kept.has(page.id)) settled.push(`${sessionId}:${page.id}`);
+  }
+  return settled;
+};
+
 export const resetGlobalBlockingRequests = (): void => {
   pageSnapshotObservers.clear();
   useGlobalBlockingRequestsStore.setState({ bySession: new Map() });
