@@ -71,7 +71,7 @@ import {
     sendImplementationResponseToReviewer,
     sendReviewFeedbackToOriginal,
 } from '@/lib/reviewFlow';
-import { useProviderLogo } from '@/hooks/useProviderLogo';
+import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentColors } from '@/hooks/useAgentColors';
 import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
 import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
@@ -291,7 +291,6 @@ interface MessageBodyProps {
     footerModelName?: string;
     footerAgentName?: string;
     footerVariant?: string;
-    isDarkTheme?: boolean;
     /** Actions installed extensions contribute for this message's role; rendered after the built-ins. */
     extraActions?: MessageExtraAction[];
     /** The session whose agent sent this user message, linked at the foot of the bubble. */
@@ -1211,7 +1210,6 @@ const AssistantMessageBody = React.memo(({
     footerModelName,
     footerAgentName,
     footerVariant,
-    isDarkTheme = false,
     extraActions,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
@@ -1222,7 +1220,6 @@ const AssistantMessageBody = React.memo(({
     const messageTextContentRef = React.useRef<HTMLDivElement>(null);
     const isTouchContext = Boolean(hasTouchInput ?? isMobile);
     const alwaysShowMessageActions = Boolean(alwaysShowActions ?? isMobile);
-    const { src: footerLogoSrc, onError: handleFooterLogoError, hasLogo: footerHasLogo } = useProviderLogo(footerProviderID ?? null);
     const awaitingMessageCompletion = !isMessageCompleted;
 
     const visibleParts = React.useMemo(() => {
@@ -2283,15 +2280,12 @@ const AssistantMessageBody = React.memo(({
                                 <Tooltip>
                                     <TooltipTrigger asChild>
                                         <span className="flex min-w-0 shrink items-center gap-1.5">
-                                            {footerHasLogo && footerLogoSrc ? (
-                                                <img
-                                                    src={footerLogoSrc}
+                                            {footerProviderID ? (
+                                                <ProviderLogo
+                                                    providerId={footerProviderID}
                                                     alt=""
+                                                    fallback={<AgentModelIcon agentName={footerAgentName} />}
                                                     className="h-[13px] w-[13px] flex-shrink-0"
-                                                    style={{
-                                                        filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
-                                                    }}
-                                                    onError={handleFooterLogoError}
                                                 />
                                             ) : (
                                                 <AgentModelIcon agentName={footerAgentName} />

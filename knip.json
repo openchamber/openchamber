@@ -33,6 +33,7 @@
     "packages/web": {
       "entry": [
         "bin/cli.js",
+        "server/lib/opencode/login-shell-env.js",
         "src/mobile-main.tsx",
         "src/mini-chat-main.tsx",
         "src/main.tsx",
