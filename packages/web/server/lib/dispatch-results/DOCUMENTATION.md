@@ -27,7 +27,8 @@ terminal has no session to deliver into.
   `createMessageId`.
 - `runtime.test.js` — delivery, waiting on running sessions and subagents,
   archived and deleted parents, a deleted dispatched session, idempotent
-  retries, unknown versus idle, restart, a corrupt file.
+  retries, one result for several sends into one run, unknown versus idle,
+  restart, a corrupt file.
 
 Wiring: created in `server/index.js` after the message queue, handed to the
 control service as `dispatchResults`, stopped by
@@ -102,6 +103,27 @@ A failed read retries with backoff (2 s doubling to 60 s).
   retry after a crash or a lost response cannot deliver twice; 409 counts as
   delivered. 404 means the parent is gone and the entry is dropped. A deleted
   parent's entries also go on its `session.deleted` event.
+
+## One result per run and parent
+
+Every entry ready in a tick reads the same newest run, so entries of one
+parent that are still without an id share one minted id and one delivery,
+then all go. A parent that sends several prompts into a running session hears
+back once, with the run that took them all. Another parent watching the same
+session gets its own result. An entry that already holds an id from an earlier
+attempt keeps it and delivers alone.
+
+### Why one shared result and not one receipt per send
+
+The prompts steer into one run, which produces one answer; a receipt per send
+put the same answer into the parent's context once per prompt (eight times in
+#6109).
+
+### Why an entry with an id is never grouped
+
+Its id may already have landed with an earlier run whose response was lost.
+Grouping a newer entry under that id would make OpenCode answer 409 for the
+newer run, and its result would be dropped as delivered.
 
 ## Runtime parity
 
