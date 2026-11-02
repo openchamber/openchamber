@@ -115,6 +115,12 @@ Another registered project owns its exact checkout. Chats targets must remain
 inside the chats scope. Missing targets return 404; archived or foreign targets
 return 409, including through Run now.
 
+`resolveExecutionDirectory` on the task service returns the project checkout
+or Chats root after scope ID normalization. For a target task it reuses
+`existing-session.js` target validation and returns the session's own directory.
+The control actions use this directory for named-model catalog checks, so a
+target in a linked worktree uses that worktree's configuration.
+
 Target discovery asks the same rule rather than reproducing it:
 `POST /api/projects/:projectId/scheduled-tasks/targets/eligible` takes the
 candidate sessions the editor already holds (at most 500 per request; the

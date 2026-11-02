@@ -22,9 +22,19 @@ other.
   change, the id and run state stay, and a task driven by a loop file is
   refused (the file is its source).
   `schedule.create` and `schedule.update` accept `targetSessionId`, validated
-  by the scheduled-task service. An empty update clears the target. Create
+  by the scheduled-task service. An empty `targetSessionId` on update clears
+  the target. Create
   without a model inherits the target selection; an explicit agent overrides
-  it. A task without a target still requires a model.
+  it. A task without a target still requires a model. When a call names a
+  model, it is checked against the execution directory's catalog first. The
+  scheduled-task service resolves the project checkout or Chats root through
+  its storage/public ID mapping. A target task uses the target session's own
+  directory, including a stored target omitted from an update. Clearing a target
+  returns to the project catalog. An unknown id is a 400; an empty catalog
+  stands down because a cold location's first read is not evidence of absence.
+  Only the model the call names is checked, so an update that names no model
+  validates nothing. This server runs for web, Electron, hosted mobile and
+  Capacitor clients; the VS Code extension does not run it.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against
@@ -377,3 +387,21 @@ them, where it says who sent which message.
 The existing `openchamber:chats` id lets agents choose from `projects.list`
 without changing the current-directory default or treating a reserved word as
 a filesystem path. Chats remains outside the registered project list on disk.
+
+### Why schedule create and update check the named model against the catalog
+
+A dead model id otherwise saves successfully and fails only when the task
+fires. Validation runs before storage using the scheduled-task service's scope
+resolution and `existing-session.js` target validation. Worktree and Chats
+catalogs can differ from the caller's catalog.
+
+An empty catalog stands down under the same rule as session selection checks.
+Only a newly named model is checked, so tasks with removed models remain
+editable and disableable. The matcher accepts the catalog `id` and upstream
+`modelID`, which can differ for display overrides. Catalog read failures still
+fail the action. Partial catalogs retain the same risk as session selection
+validation.
+
+This check covers the control actions only. Agent and variant validation,
+the UI editor, loop-file validation and changes to target-session pinning
+remain outside this fix for #5950.
