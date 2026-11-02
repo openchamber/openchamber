@@ -6177,6 +6177,27 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
       getRangeDiff(repository, { base: 'remotes/origin/never-fetched', head: 'next' })
     ).rejects.toThrow(/is not available locally/);
   });
+
+  it('fetches an unfetched remote base branch before comparing, as for a stacked pull request', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+    // The parent branch of the stack is on the remote, but this clone never fetched it.
+    runGit(repository, ['checkout', '-b', 'parent']);
+    fs.writeFileSync(path.join(repository, 'parent.txt'), 'parent\n');
+    runGit(repository, ['add', 'parent.txt']);
+    runGit(repository, ['commit', '-m', 'parent']);
+    runGit(repository, ['push', 'origin', 'parent']);
+    runGit(repository, ['update-ref', '-d', 'refs/remotes/origin/parent']);
+    runGit(repository, ['checkout', '-b', 'child']);
+    runGit(repository, ['branch', '-D', 'parent']);
+    fs.writeFileSync(path.join(repository, 'child.txt'), 'child\n');
+    runGit(repository, ['add', 'child.txt']);
+    runGit(repository, ['commit', '-m', 'child']);
+
+    const files = await getRangeFiles(repository, { base: 'origin/parent', head: 'child' });
+
+    expect(files.map((file) => file.path)).toEqual(['child.txt']);
+    expect(await getRangeDiff(repository, { base: 'origin/parent', head: 'child' })).not.toContain('parent.txt');
+  });
 });
 
 describe('parseBranchCreationSource', () => {
