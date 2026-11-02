@@ -486,6 +486,7 @@ export const SETTINGS_REGISTRY = {
   fileEditorKeymap: field({ scope: 'profile', parse: parseFileEditorKeymap, ui: uiStore('fileEditorKeymap', (v) => useUIStore.getState().setFileEditorKeymap(v)) }),
   fileEditorVimMappings: field({ scope: 'profile', parse: parseTextUpTo(10_000), ui: uiStore('fileEditorVimMappings', (v) => useUIStore.getState().setFileEditorVimMappings(v)) }),
   autoSaveEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('autoSaveEnabled', (v) => useUIStore.getState().setAutoSaveEnabled(v)) }),
+  fileEditorWrapLines: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('fileEditorWrapLines', (v) => useUIStore.getState().setFileEditorWrapLines(v)) }),
   confirmFileTreeMove: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('confirmFileTreeMove', (v) => useUIStore.getState().setConfirmFileTreeMove(v)) }),
   fileTreeSide: field({ scope: 'profile', surfaces: ['web', 'desktop'], parse: parseOneOf(['left', 'right']), ui: uiStore('fileTreeSide', (v) => useUIStore.getState().setFileTreeSide(v)) }),
   layoutAnimations: field({ scope: 'profile', surfaces: ['web', 'desktop'], parse: parseBoolean, ui: uiStore('layoutAnimations', (v) => useUIStore.getState().setLayoutAnimations(v)) }),

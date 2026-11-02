@@ -798,7 +798,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   const [showMobilePageContent, setShowMobilePageContent] = React.useState(false);
-  const [wrapLines, setWrapLines] = React.useState(true);
+  const wrapLines = useUIStore((state) => state.fileEditorWrapLines);
+  const setWrapLines = useUIStore((state) => state.setFileEditorWrapLines);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   // The canvas lives in one place at a time (docked or fullscreen), so moving
   // it carries unsaved edits over through the draft, as the source toggle does.

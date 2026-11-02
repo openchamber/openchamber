@@ -1030,6 +1030,8 @@ interface UIStore {
   autoDeleteEnabled: boolean;
   /** Global file-editor autosave. Default true for backward compatibility. */
   autoSaveEnabled: boolean;
+  /** Long lines in the Files editor and viewer wrap instead of scrolling sideways. */
+  fileEditorWrapLines: boolean;
   /** Ask before a drag in the files tree moves a file or folder. */
   confirmFileTreeMove: boolean;
   /**
@@ -1357,6 +1359,7 @@ interface UIStore {
   setMergedWorktreeCleanupEnabled: (value: boolean) => void;
   setWorktreeArchiveOnDoneEnabled: (value: boolean) => void;
   setAutoSaveEnabled: (value: boolean) => void;
+  setFileEditorWrapLines: (value: boolean) => void;
   setConfirmFileTreeMove: (value: boolean) => void;
   setLayoutAnimations: (value: boolean) => void;
   setOpenLinksInBrowserPanel: (value: boolean) => void;
@@ -1613,6 +1616,7 @@ export const useUIStore = create<UIStore>()(
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoSaveEnabled: true,
+        fileEditorWrapLines: true,
         confirmFileTreeMove: true,
         layoutAnimations: true,
         openLinksInBrowserPanel: false,
@@ -2749,6 +2753,10 @@ export const useUIStore = create<UIStore>()(
           set({ autoSaveEnabled: value });
         },
 
+        setFileEditorWrapLines: (value) => {
+          set({ fileEditorWrapLines: value });
+        },
+
         setConfirmFileTreeMove: (value) => {
           set({ confirmFileTreeMove: value });
         },
@@ -3853,6 +3861,7 @@ export const useUIStore = create<UIStore>()(
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoSaveEnabled: state.autoSaveEnabled,
+          fileEditorWrapLines: state.fileEditorWrapLines,
           confirmFileTreeMove: state.confirmFileTreeMove,
           layoutAnimations: state.layoutAnimations,
           openLinksInBrowserPanel: state.openLinksInBrowserPanel,

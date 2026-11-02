@@ -903,7 +903,7 @@ describe('settings registry gate', () => {
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
-    fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
+    fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, fileEditorWrapLines: false, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
     largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
@@ -1009,6 +1009,7 @@ describe('settings registry gate', () => {
       codeBlockLineWrap: true,
       streamingAutoFollowEnabled: false,
       autoSaveEnabled: false,
+      fileEditorWrapLines: false,
     })).toEqual({
       providerOrder: ['b', 'a'],
       diffWrapLines: true,
@@ -1018,6 +1019,7 @@ describe('settings registry gate', () => {
       codeBlockLineWrap: true,
       streamingAutoFollowEnabled: false,
       autoSaveEnabled: false,
+      fileEditorWrapLines: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
   });

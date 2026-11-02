@@ -494,6 +494,9 @@
     "autoSaveEnabled": {
       "scope": "profile"
     },
+    "fileEditorWrapLines": {
+      "scope": "profile"
+    },
     "confirmFileTreeMove": {
       "scope": "profile"
     },
