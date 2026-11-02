@@ -7,7 +7,7 @@ description: GitHub、GitLab、Gitea、Forgejo、Gerrit を接続し、OpenChamb
 
 プロジェクトがあるホストのアカウントを接続すると、OpenChamber はその Issue とプルリクエストを一覧し、そこからセッションを開始し、プルリクエストの作成、レビュー、マージを代わりに行えます。組み込みのホストは 5 つです。GitHub（GitHub Enterprise を含む）、GitLab（セルフマネージドの GitLab を含む）、Gitea、Forgejo（Codeberg を含む）、Gerrit です。[拡張機能](/ja/extensions/#git-ホストとしての拡張機能) で別のホストを追加することもできます。
 
-OpenChamber がどのホストと通信するかは、プロジェクトのリモートで決まります。`origin` が gitlab.com にあるプロジェクトでは、ボード、ブランチのプルリクエストバッジ、Git パネルに GitLab アカウントが使われます。`github.com-work` のような `~/.ssh/config` のホストエイリアスにあるリモートは、どのホストにも対応付けられません。
+OpenChamber がどのホストと通信するかは、プロジェクトのリモートで決まります。`origin` が gitlab.com にあるプロジェクトでは、ボード、ブランチのプルリクエストバッジ、Git パネルに GitLab アカウントが使われます。`github.com-work` のような `~/.ssh/config` のホストエイリアスにあるリモートは、どのホストにも対応付けられません。Gitea と Forgejo は、SSH 設定がインスタンスのウェブアドレスを指すエイリアスに対応付けます。インスタンスの SSH クローンアドレスを **Settings → Integrations** に入力すると、そのアドレスにあるリモートも対応付けます。
 
 用語はホストに合わせて変わります。GitLab ではマージリクエスト、Gerrit では変更と呼びます。
 

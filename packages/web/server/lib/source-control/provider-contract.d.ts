@@ -279,9 +279,22 @@ export interface ProviderImplementation {
     invalidateAccount?(input: { instance: string; accountId: string; persisted?: boolean; renew?: boolean }): Promise<boolean>;
     readCurrentAccountId(input: { instance: string }): Promise<string | null>;
     listInstances(): Promise<string[]>;
+    /** The instance's separate SSH address, where the provider keeps one. */
+    readSshUrl?(input: { instance: string }): Promise<string | null>;
+    listSshHosts?(): Promise<Array<{ instance: string; sshUrl: string }>>;
+    setSshUrl?(input: { instance: string; sshUrl: string | null }): Promise<{ sshUrl: string | null }>;
     listConnectedAccounts(): Promise<ConnectedAccount[]>;
-    /** `port` is the remote's web port when the remote is an HTTP(S) URL; absent for an SSH remote. */
-    ownsHost(input: { host: string; port?: number; knownInstances: string[] }): string | null;
+    /**
+     * `port` is the remote's web port when it is an HTTP(S) URL; `sshPort` is
+     * its SSH port, defaulting to 22. An SSH remote names no web port.
+     */
+    ownsHost(input: {
+      host: string;
+      port?: number;
+      sshPort?: number;
+      knownInstances: string[];
+      knownSshHosts?: Array<{ instance: string; sshUrl: string }>;
+    }): string | null;
   };
   transport: {
     readCredential(input: { instance: string; credentialId: string; credentialRevision?: number }): Promise<TransportCredential | null>;

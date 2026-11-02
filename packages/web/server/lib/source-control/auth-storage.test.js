@@ -278,16 +278,91 @@ describe('source-control auth storage', () => {
   it('refuses a version 3 file with an extra section and a version 4 file with an invalid id or a missing built-in section', async () => {
     const { filePath, store } = await makeStore();
     const section = { instances: {} };
+    const origin = 'https://gitlab.example.com';
+    const withSshUrl = { instances: { [origin]: {
+      activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false, sshUrl: 'ssh://git.example.com',
+    } } };
     for (const value of [
       { version: 3, providers: { gitlab: section, github: section, gitea: section } },
       { version: 4, providers: { gitlab: section, github: section, 'Not An Id': section } },
       { version: 4, providers: { gitlab: section, gitea: section } },
-      { version: 5, providers: { gitlab: section, github: section } },
+      { version: 4, providers: { gitlab: withSshUrl, github: section } },
+      { version: 6, providers: { gitlab: section, github: section } },
     ]) {
       await fs.writeFile(filePath, JSON.stringify(value), 'utf8');
       await expect(store.listInstances()).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_AUTH' });
       expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(value);
     }
+  });
+
+  it('stores an instance SSH URL in a version 5 file and keeps it without accounts', async () => {
+    const { filePath, store } = await makeStore();
+    const origin = 'https://gitlab.example.com';
+
+    await expect(store.setSshUrl(origin, 'ssh://git.example.com:2222')).resolves.toBe('ssh://git.example.com:2222');
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual({
+      version: 5,
+      providers: { gitlab: { instances: { [origin]: {
+        activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false, sshUrl: 'ssh://git.example.com:2222',
+      } } }, github: { instances: {} } },
+    });
+    await expect(store.readInstance(origin)).resolves.toMatchObject({ sshUrl: 'ssh://git.example.com:2222', accounts: [] });
+
+    await expect(store.setSshUrl(origin, 'ssh://git.example.com')).resolves.toBe('ssh://git.example.com');
+    await expect(store.setSshUrl(origin, null)).resolves.toBeNull();
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual({
+      version: 2, providers: { gitlab: { instances: {} } },
+    });
+  });
+
+  it('round trips an SSH address on a GitHub Enterprise instance', async () => {
+    const { filePath, store } = await makeStore();
+    const host = 'github.example.com';
+    const sshUrl = 'ssh://ghe-ssh.example.com:2222';
+    await fs.writeFile(filePath, JSON.stringify({
+      version: 5,
+      providers: {
+        gitlab: { instances: {} },
+        github: { instances: { [host]: {
+          activeCredentialId: null, credentials: [], cliDisabled: false, cliActive: false, sshUrl,
+        } } },
+      },
+    }), 'utf8');
+
+    await store.github.setCliDisabled(host, true);
+
+    const written = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(written.version).toBe(5);
+    expect(written.providers.github.instances[host].sshUrl).toBe(sshUrl);
+  });
+
+  it('keeps version 5 while an unparsed extra section carries an SSH address, and returns to version 4 once it is cleared', async () => {
+    const { filePath } = await makeStore();
+    const origin = 'https://gitea.example.com';
+    const sshUrl = 'ssh://giteassh.example.com:2222';
+    const first = createSourceControlAuthStore({ filePath });
+    const credential = await first.section('gitea').setAccount(origin, { token: 'gitea-pat', user: { id: 5, login: 'five' }, source: 'pat' });
+    await first.section('gitea').setSshUrl(origin, sshUrl);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toMatchObject({ version: 5 });
+
+    // The gitea section is still unparsed here, so only its raw shape can tell
+    // a write through another section that the address is still in the file.
+    const second = createSourceControlAuthStore({ filePath });
+    await second.github.setCliDisabled('github.example.com', true);
+    const written = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    expect(written.version).toBe(5);
+    expect(written.providers.gitea.instances[origin].sshUrl).toBe(sshUrl);
+
+    const third = createSourceControlAuthStore({ filePath });
+    const reopened = await third.section('gitea').readInstance(origin);
+    expect(reopened.sshUrl).toBe(sshUrl);
+    expect(reopened.accounts).toMatchObject([{ id: credential.id }]);
+
+    await third.section('gitea').setSshUrl(origin, null);
+    expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toMatchObject({ version: 4 });
+    const cleared = await createSourceControlAuthStore({ filePath }).section('gitea').readInstance(origin);
+    expect(cleared.sshUrl).toBeUndefined();
+    expect(cleared.accounts).toMatchObject([{ id: credential.id }]);
   });
 
   it('treats missing files as empty and rejects malformed or unsupported files without rewriting them', async () => {

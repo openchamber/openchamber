@@ -1257,6 +1257,22 @@ describe('createWebSourceControlAPI', () => {
     }));
   });
 
+  it('saves an instance SSH address and returns the stored value', async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ sshUrl: 'ssh://giteassh.example.com:2222' }));
+
+    await expect(api.authSetSshUrl(
+      { provider: 'gitea', instance: 'https://gitea.example.com/' },
+      'ssh://git@giteassh.example.com:2222',
+    )).resolves.toEqual({ sshUrl: 'ssh://giteassh.example.com:2222' });
+
+    expect(runtimeFetchMock).toHaveBeenCalledWith('/api/source-control/gitea/auth/ssh-url', expect.objectContaining({
+      method: 'POST',
+      query: new URLSearchParams({ instance: 'https://gitea.example.com' }),
+      body: JSON.stringify({ sshUrl: 'ssh://git@giteassh.example.com:2222' }),
+    }));
+  });
+
   it('parses provider-neutral GitLab merge request context without GitHub identities', async () => {
     const gitlab: SourceControlIdentity = { provider: 'gitlab', instance: 'gitlab.example.com' };
     runtimeFetchMock.mockResolvedValueOnce(Response.json({

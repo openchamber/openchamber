@@ -71,6 +71,12 @@ export const giteaDescriptor = Object.freeze({
   identity: Object.freeze({ noReplyEmail: null }),
   settings: Object.freeze([
     Object.freeze({ key: 'instance', type: 'instance-url', secret: false, scope: 'instance' }),
+    // Gitea's SSH clone host is set apart from its web address (`SSH_DOMAIN`).
+    // The address is optional and belongs to the instance, so every account on
+    // it recognises the same remotes. `instance-url` keeps the published field
+    // a kind older clients already know and ignore; the client draws it from
+    // its id, not its kind.
+    Object.freeze({ key: 'sshUrl', type: 'instance-url', secret: false, scope: 'instance' }),
     Object.freeze({ key: 'token', type: 'personal-access-token', secret: true, scope: 'instance' }),
   ]),
   instances: Object.freeze({ legacyFlow: null }),
