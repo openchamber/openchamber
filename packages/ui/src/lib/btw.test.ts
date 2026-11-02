@@ -9,7 +9,7 @@ type ForkOptions = { before?: string; directory?: string | null };
 // Stands in for the 404 OpenCode answers when a fork's `before` names a record it does not hold.
 const forkBeforeNotFound = new Error('session.fork failed (404): message not found');
 let forkSessionImpl: (sessionId: string, options?: ForkOptions) => Promise<Session>;
-let getSessionMessagesImpl: (id: string, options?: { limit?: number }, directory?: string | null) => Promise<MessagePage>;
+let getSessionMessagesImpl: (id: string, options?: { limit?: number; order?: 'asc' | 'desc'; cursor?: string }, directory?: string | null) => Promise<MessagePage>;
 let sendMessageImpl: (...args: unknown[]) => Promise<unknown>;
 let deleteSessionImpl: (sessionId: string) => Promise<boolean>;
 let updateSessionTitleImpl: (sessionId: string, title: string) => Promise<void>;
@@ -25,13 +25,15 @@ const currentSessionSwitches: string[] = [];
 const metadataPatches: Array<{ sessionId: string; result: Record<string, unknown> }> = [];
 const parentSyncMessages: Message[] = [];
 const sessionMessageReads: string[] = [];
+const parentTailReads: Array<{ limit?: number; order?: 'asc' | 'desc'; directory?: string | null }> = [];
 
 mock.module('@/lib/opencode/client', () => ({
   isOpencodeNotFound: (error: Error) => error === forkBeforeNotFound,
   opencodeClient: {
     forkSession: (sessionId: string, options?: ForkOptions) => forkSessionImpl(sessionId, options),
-    getSessionMessages: (id: string, options?: { limit?: number }, directory?: string | null) => {
+    getSessionMessages: (id: string, options?: { limit?: number; order?: 'asc' | 'desc'; cursor?: string }, directory?: string | null) => {
       sessionMessageReads.push(id);
+      if (id === 'parent-1') parentTailReads.push({ limit: options?.limit, order: options?.order, directory });
       return getSessionMessagesImpl(id, options, directory);
     },
   },
@@ -94,6 +96,15 @@ const record = (id: string, created = 1): { info: Message; parts: Part[] } => ({
   parts: [],
 });
 
+// The server returns `order: 'desc'` pages newest-first.
+const tailPage = (messages: Message[]): MessagePage => page([...messages].reverse().map((info) => ({ info, parts: [] })));
+
+const stubParentTail = (messages: Message[]): void => {
+  getSessionMessagesImpl = (id, options) => id === 'parent-1' && options?.order === 'desc'
+    ? Promise.resolve(tailPage(messages))
+    : Promise.resolve(page([record('msg-boundary')]));
+};
+
 // SAFETY: `findLastCompletedAssistantMessageID` reads only `id`, `role`,
 // `time` and `finish`, which are the fields spelled out here.
 const assistantMessage = (id: string, completed?: number, finish: string | undefined = completed === undefined ? undefined : 'stop') =>
@@ -102,6 +113,10 @@ const assistantMessage = (id: string, completed?: number, finish: string | undef
 // SAFETY: same narrow read as `assistantMessage`.
 const userMessage = (id: string) =>
   ({ id, sessionID: 'parent-1', role: 'user', time: { created: 1 } }) as Message;
+
+// SAFETY: `transcriptCutAfterMessage` only compares the record's `id`.
+const idleMessage = (id: string) =>
+  ({ id, sessionID: 'parent-1', role: 'idle', time: { created: 1 }, outcome: 'succeeded' }) as Message;
 
 const startInput = {
   parentSessionId: 'parent-1',
@@ -121,6 +136,7 @@ beforeEach(() => {
   metadataPatches.length = 0;
   parentSyncMessages.splice(0, parentSyncMessages.length, assistantMessage('msg-finished', 10), userMessage('msg-pending'));
   sessionMessageReads.length = 0;
+  parentTailReads.length = 0;
   writtenModes.length = 0;
   useUIStore.setState({ permissionDefaultMode: 'auto' });
   usePermissionStore.setState({ setSessionMode: async (sessionId, mode) => { writtenModes.push([sessionId, mode]); } });
@@ -261,29 +277,152 @@ describe('startBtwSession', () => {
     expect(childStoreSessions.map((s) => s.id)).toEqual(['fork-1']);
   });
 
-  test('rejects an unbounded fork when the server has a prompt missing from the idle local history, then allows retry', async () => {
+  test('forks an idle parent at the record that closes its last answer', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    stubParentTail([userMessage('msg-1'), assistantMessage('msg-2', 10), idleMessage('msg-3')]);
+    let boundary: string | undefined;
+    forkSessionImpl = (_sessionId, options) => {
+      boundary = options?.before;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    await startBtwSession(startInput);
+
+    expect(boundary).toBe('msg-3');
+    expect(parentTailReads).toEqual([{ limit: 50, order: 'desc', directory: '/project' }]);
+    expect(metadataPatches.map((patch) => patch.sessionId)).toEqual(['fork-1', 'parent-1']);
+  });
+
+  test('bounds the fork before a turn the loaded window has not received', async () => {
     parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
     const serverMessages = [...parentSyncMessages, userMessage('msg-3'), assistantMessage('msg-4')];
-    const boundaries: Array<string | undefined> = [];
+    stubParentTail(serverMessages);
     let inherited: Message[] = [];
     forkSessionImpl = (_sessionId, options) => {
-      boundaries.push(options?.before);
+      expect(options?.before).toBe('msg-3');
       const cut = serverMessages.findIndex((message) => message.id === options?.before);
       inherited = cut < 0 ? serverMessages : serverMessages.slice(0, cut);
       return Promise.resolve(makeSession('fork-1', '/project'));
     };
 
-    await expect(startBtwSession(startInput)).rejects.toThrow('No safe transcript boundary to fork from');
-    expect(boundaries).toEqual([]);
-    expect(inherited).toEqual([]);
-    expect(metadataPatches).toEqual([]);
-    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
-
-    parentSyncMessages.push(serverMessages[2], serverMessages[3]);
     await startBtwSession(startInput);
 
-    expect(boundaries).toEqual(['msg-3']);
     expect(inherited.map((message) => message.id)).toEqual(['msg-1', 'msg-2']);
+  });
+
+  test('refuses an unbounded fork when the server tail no longer holds the answer', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    stubParentTail([userMessage('msg-8'), assistantMessage('msg-9', 10)]);
+    let attempts = 0;
+    forkSessionImpl = () => {
+      attempts += 1;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    await expect(startBtwSession(startInput)).rejects.toThrow('No safe transcript boundary to fork from');
+    expect(attempts).toBe(0);
+    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+  });
+
+  test('refuses an unbounded fork when the answer is the last record in the tail', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    stubParentTail([userMessage('msg-1'), assistantMessage('msg-2', 10)]);
+    let attempts = 0;
+    forkSessionImpl = () => {
+      attempts += 1;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    await expect(startBtwSession(startInput)).rejects.toThrow('No safe transcript boundary to fork from');
+    expect(attempts).toBe(0);
+  });
+
+  test('propagates a failed tail read without forking', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    getSessionMessagesImpl = (id) => id === 'parent-1'
+      ? Promise.reject(new Error('tail read failed'))
+      : Promise.resolve(page([record('msg-boundary')]));
+    let attempts = 0;
+    forkSessionImpl = () => {
+      attempts += 1;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    await expect(startBtwSession(startInput)).rejects.toThrow('tail read failed');
+    expect(attempts).toBe(0);
+    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+  });
+
+  test('finds the cut across descending server pages', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    const firstPage = [assistantMessage('msg-9', 10), userMessage('msg-8')];
+    const secondPage = [idleMessage('msg-7'), assistantMessage('msg-2', 10), userMessage('msg-1')];
+    const cursors: Array<string | undefined> = [];
+    getSessionMessagesImpl = (id, options) => {
+      if (id !== 'parent-1') return Promise.resolve(page([record('msg-boundary')]));
+      cursors.push(options?.cursor);
+      const items = (options?.cursor ? secondPage : firstPage).map((info) => ({ info, parts: [] }));
+      return Promise.resolve({ items, cursor: options?.cursor ? {} : { next: 'older-page' } });
+    };
+    let boundary: string | undefined;
+    forkSessionImpl = (_sessionId, options) => {
+      boundary = options?.before;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    await startBtwSession(startInput);
+
+    expect(cursors).toEqual([undefined, 'older-page']);
+    expect(boundary).toBe('msg-7');
+  });
+
+  test('stops when the server repeats a cursor', async () => {
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    let reads = 0;
+    getSessionMessagesImpl = (id) => {
+      if (id !== 'parent-1') return Promise.resolve(page([record('msg-boundary')]));
+      reads += 1;
+      return Promise.resolve({ items: [{ info: userMessage('msg-8'), parts: [] }], cursor: { next: 'same-page' } });
+    };
+    let attempts = 0;
+    forkSessionImpl = () => {
+      attempts += 1;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    await expect(startBtwSession(startInput)).rejects.toThrow('No safe transcript boundary to fork from');
+    expect(reads).toBe(2);
+    expect(attempts).toBe(0);
+  });
+
+  test('a runtime round trip during the cut read cannot authorize a fork', async () => {
+    const { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
+    const runtimeKey = getRuntimeKey();
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    let finishRead = (_value: MessagePage) => {};
+    const response = new Promise<MessagePage>((resolve) => { finishRead = resolve; });
+    let readStarted: () => void = () => {};
+    const reading = new Promise<void>((resolve) => { readStarted = resolve; });
+    getSessionMessagesImpl = () => {
+      readStarted();
+      return response;
+    };
+    let attempts = 0;
+    forkSessionImpl = () => {
+      attempts += 1;
+      return Promise.resolve(makeSession('fork-1', '/project'));
+    };
+
+    const starting = startBtwSession(startInput);
+    await reading;
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://btw-other-test.invalid', runtimeKey: 'other-during-cut-read' });
+    switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+    finishRead(page([{ info: idleMessage('msg-idle'), parts: [] }, { info: assistantMessage('msg-2', 10), parts: [] }]));
+
+    await expect(starting).rejects.toThrow('runtime changed');
+    expect(attempts).toBe(0);
+    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
   });
 
   test('does not copy an unfinished first turn', async () => {
@@ -642,13 +781,13 @@ describe('pending BTW preparation', () => {
 
 
 test('switching runtime during snippet expansion invalidates preparation', async () => {
-  const { getRuntimeKey, initializeRuntimeEndpoint } = await import('@/lib/runtime-switch');
+  const { getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
   const panels = useBtwStore.getState();
   panels.setPanelState('parent-1', { pending: true });
   let finish = () => {};
   const expansion = new Promise<void>((resolve) => { finish = resolve; });
   const preparing = preparePendingBtwSend('parent-1', getRuntimeKey(), () => expansion);
-  initializeRuntimeEndpoint({ apiBaseUrl: 'https://btw-test.invalid', runtimeKey: 'changed-during-preparation' });
+  switchRuntimeEndpoint({ apiBaseUrl: 'https://btw-test.invalid', runtimeKey: 'changed-during-preparation' });
   finish();
   expect(await preparing).toBeNull();
   expect(useBtwStore.getState().byParent).toEqual({});

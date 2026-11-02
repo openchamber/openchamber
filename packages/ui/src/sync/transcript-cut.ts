@@ -4,7 +4,7 @@ import { readSubagentRun } from "@/lib/opencode/subagent-run"
 import { readDispatchedSessionResult } from "@/lib/opencode/dispatched-session"
 import { readWorkflowReport } from "@/lib/workflows/report"
 import { isOpencodeNotFound, opencodeClient } from "@/lib/opencode/client"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
 
 export async function forkAtTranscriptCut(
   sessionID: string,
@@ -67,4 +67,48 @@ export function transcriptCutAfterMessage(messages: readonly Message[], messageI
   if (index < 0) throw new Error("Fork source message is not loaded")
   const boundary = messages.slice(index + 1).find(isTurnBoundary)
   return boundary ? transcriptCutForMessage(messages, boundary.id) : undefined
+}
+
+/** Records read per page when the loaded window holds no later turn boundary. */
+const CUT_READ_PAGE_LIMIT = 50
+
+/**
+ * The cut after `messageID` when the loaded window holds no later turn
+ * boundary. The records that follow an answer before the next turn belong to
+ * its own turn (the idle marker, switch records), so cutting at the first one
+ * keeps the answer and still gives the fork an explicit bound.
+ *
+ * Descending pages walk back until the answer appears; the record newer than
+ * it is the exclusive cut, even across a page boundary. `undefined` means the
+ * server no longer holds the answer or holds no record after it, and an
+ * unbounded fork would copy records the caller did not choose.
+ */
+export async function transcriptCutAfterMessageInServerTail(
+  sessionID: string,
+  messageID: string,
+  directory: string | null | undefined,
+  expectedRuntimeKey: string,
+): Promise<string | undefined> {
+  if (getRuntimeKey() !== expectedRuntimeKey) throw new Error("runtime changed")
+  const isCurrent = captureRuntimeInstance()
+  let before: string | undefined
+  let cursor: string | undefined
+  const seenCursors = new Set<string>()
+  for (;;) {
+    if (!isCurrent()) throw new Error("runtime changed")
+    const page = await opencodeClient.getSessionMessages(
+      sessionID,
+      cursor ? { cursor } : { limit: CUT_READ_PAGE_LIMIT, order: "desc" },
+      directory,
+    )
+    if (!isCurrent()) throw new Error("runtime changed")
+    for (const { info } of page.items) {
+      if (info.id === messageID) return before
+      before = info.id
+    }
+    const next = page.cursor.next
+    if (!next || seenCursors.has(next)) return undefined
+    seenCursors.add(next)
+    cursor = next
+  }
 }

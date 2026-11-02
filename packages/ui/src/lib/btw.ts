@@ -9,7 +9,7 @@ import { useBtwStore } from '@/stores/useBtwStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { getSyncChildStores, getSyncMessages, registerSessionDirectory } from '@/sync/sync-refs';
-import { forkAtTranscriptCut, transcriptCutAfterMessage } from '@/sync/transcript-cut';
+import { forkAtTranscriptCut, transcriptCutAfterMessage, transcriptCutAfterMessageInServerTail } from '@/sync/transcript-cut';
 import { Binary } from '@/sync/binary';
 import type { ContextPartMetadata } from '@/lib/messages/contextParts';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -214,9 +214,17 @@ export async function startBtwSession(input: StartBtwInput): Promise<Session> {
     const parentMessages = getSyncMessages(input.parentSessionId, input.directory);
     const forkPointMessageID = findLastCompletedAssistantMessageID(parentMessages);
     if (!forkPointMessageID) throw new Error('No completed turn to fork from');
-    const before = transcriptCutAfterMessage(parentMessages, forkPointMessageID);
-    // The server can already have a new turn that this window has not received.
-    // Only an explicit `before` bounds the fork even when local history is idle.
+    const before = transcriptCutAfterMessage(parentMessages, forkPointMessageID)
+      // The loaded window can end at the answer while the server already holds
+      // its idle marker or a turn this window has not received. Read the
+      // server's pages so the fork keeps an explicit cut instead of copying
+      // either in.
+      ?? await transcriptCutAfterMessageInServerTail(
+        input.parentSessionId,
+        forkPointMessageID,
+        input.directory,
+        expectedRuntimeKey,
+      );
     if (!before) throw new Error('No safe transcript boundary to fork from');
     const forked = await forkAtTranscriptCut(input.parentSessionId, before, input.directory, expectedRuntimeKey);
 
