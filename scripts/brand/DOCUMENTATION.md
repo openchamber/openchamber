@@ -13,7 +13,7 @@ The logo has four drawings, each for a kind of place:
 | In-app logo: the open shell in one colour | Every splash, About, sign-in, empty states, README |
 | Glyph: cube outline and two roof rings, one colour | macOS menu bar, favicon, VS Code activity bar and title buttons, model picker sprite, Android notification and themed icon, iOS Control Center |
 
-OpenChamber Canary, the nightly build, has its own icons in `packages/electron/resources/icons-canary`, drawn by `canary.mjs`: the release cube on a violet tile with a yellow canary at its base. Its Icon Composer document `AppIcon.icon` is the master and is edited in Icon Composer; the Windows and Linux icon (the rendered document cut out of its tile, its violet deepened, with the black outline of the icon without a tile), the `.ico` (violet pixel cubes below 32 px, each with a round pixel chick kept as text in `raster.mjs`), the menu bar templates (the glyph with the bird's silhouette, in every state) and `Assets.car`/`icon.icns` come from it.
+OpenChamber Canary, the nightly build, has its own icons in `packages/electron/resources/icons-canary`, drawn by `canary.mjs`: the release cube on a blue tile with a yellow canary at its side. Its Icon Composer document `AppIcon.icon` is the master and is edited in Icon Composer; the Windows and Linux icon (the rendered document cut out of its tile, with the black outline of the icon without a tile and a matching outline around the bird), the `.ico` (blue pixel cubes below 32 px, each with a round pixel chick kept as text in `raster.mjs`), the menu bar templates (the glyph with the canary redrawn per pixel, kept as text in `canary.mjs`, standing over its lower right corner with a thin clear gap around it, in every state) and `Assets.car`/`icon.icns` come from it.
 
 The macOS menu bar animation lives in `packages/electron/tray.mjs`; this module only draws its frames. `OpenChamberLogo.tsx` renders the in-app logo from the generated `openChamberLogoArt.ts` and owns its loading animation.
 
@@ -47,6 +47,6 @@ The release Dock icon is glass rendered by the system. A flat drawing next to it
 
 Its bird and glass were drawn in Icon Composer, and the look that was approved is the one Icon Composer renders. Redrawing it as vector art would change it. The other Canary files are cut from that rendering, so a change to the document is one edit and one run, like the release icons.
 
-### Why Canary's Windows and Linux violet is deeper than the document's
+### Why Canary's Windows and Linux icon keeps the document's colours
 
-On macOS the cube sits on a saturated violet tile, and the icon reads as violet. Cut out of the tile, the same light glass faces and white edges looked pale on Windows. `canary.mjs` deepens the violet of the icon without a tile and of its pixel cubes (`VIOLET_DEEPENING`), and leaves the document, so macOS keeps the approved look. Changing the document's colours instead would change the Dock icon too.
+An earlier violet Canary had light glass faces that looked pale once cut out of the tile, so `canary.mjs` deepened their violet for Windows and Linux. The blue document fills the cube's faces with the tile's blue, and the cut-out reads as blue without a correction, so the icon without a tile and the pixel cubes take the document's colours as they are.

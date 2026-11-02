@@ -2,14 +2,40 @@
   "fill-specializations": [
     {
       "value": {
-        "automatic-gradient": "srgb:0.42000,0.33000,0.86000,1.00000"
+        "linear-gradient": [
+          "srgb:0.20000,0.40000,0.87000,1.00000",
+          "srgb:0.11000,0.29000,0.76000,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 0.7
+          }
+        }
       }
     },
     {
-      "appearance": "dark",
       "value": {
-        "solid": "srgb:0.07000,0.05000,0.12000,1.00000"
-      }
+        "linear-gradient": [
+          "srgb:0.18000,0.18000,0.19000,1.00000",
+          "srgb:0.08000,0.08000,0.09000,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 0.7
+          }
+        }
+      },
+      "appearance": "dark"
     }
   ],
   "groups": [
@@ -54,8 +80,8 @@
     {
       "layers": [
         {
-          "image-name": "tier2.png",
-          "name": "tier2",
+          "image-name": "ttier2.png",
+          "name": "ttier2",
           "glass-specializations": [
             {
               "value": true
@@ -63,6 +89,10 @@
           ],
           "opacity-specializations": [
             {
+              "value": 0.85
+            },
+            {
+              "appearance": "dark",
               "value": 0.85
             }
           ],
@@ -72,9 +102,141 @@
               "value": {
                 "scale": 1.15,
                 "translation-in-points": [
-                  -0.6499999999998636,
+                  -0.65,
                   -3.25
                 ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.86000,0.91000,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.86000,0.91000,1.00000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "ttier1.png",
+          "name": "ttier1",
+          "glass-specializations": [
+            {
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 0.85
+            },
+            {
+              "appearance": "dark",
+              "value": 0.85
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.65000,0.76000,0.96000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.65000,0.76000,0.96000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "ttier0.png",
+          "name": "ttier0",
+          "glass-specializations": [
+            {
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 0.85
+            },
+            {
+              "appearance": "dark",
+              "value": 0.85
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.45000,0.60000,0.92000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.45000,0.60000,0.92000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "tier2.png",
+          "name": "tier2",
+          "glass-specializations": [
+            {
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 0
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
               }
             }
           ]
@@ -89,7 +251,7 @@
           ],
           "opacity-specializations": [
             {
-              "value": 0.85
+              "value": 0
             }
           ],
           "position-specializations": [
@@ -98,9 +260,16 @@
               "value": {
                 "scale": 1.15,
                 "translation-in-points": [
-                  -0.6499999999998636,
+                  -0.65,
                   -3.25
                 ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
               }
             }
           ]
@@ -115,7 +284,7 @@
           ],
           "opacity-specializations": [
             {
-              "value": 0.85
+              "value": 0
             }
           ],
           "position-specializations": [
@@ -124,9 +293,16 @@
               "value": {
                 "scale": 1.15,
                 "translation-in-points": [
-                  -0.6499999999998636,
+                  -0.65,
                   -3.25
                 ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
               }
             }
           ]
@@ -149,10 +325,6 @@
           "glass-specializations": [
             {
               "value": true
-            },
-            {
-              "appearance": "dark",
-              "value": false
             }
           ],
           "opacity-specializations": [
@@ -166,7 +338,7 @@
               "value": {
                 "scale": 1.15,
                 "translation-in-points": [
-                  -0.6499999999998636,
+                  -0.65,
                   -3.25
                 ]
               }
@@ -174,9 +346,41 @@
           ],
           "fill-specializations": [
             {
-              "appearance": "dark",
               "value": {
-                "solid": "srgb:0.80000,0.76000,1.00000,1.00000"
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
+              }
+            }
+          ]
+        },
+        {
+          "image-name": "roof.png",
+          "name": "roof",
+          "glass-specializations": [
+            {
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 1
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.96000,0.96000,0.97000,1.00000"
               }
             }
           ]
@@ -189,6 +393,65 @@
       "translucency": {
         "enabled": true,
         "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "faces.png",
+          "name": "faces",
+          "glass-specializations": [
+            {
+              "value": false
+            },
+            {
+              "appearance": "dark",
+              "value": true
+            }
+          ],
+          "opacity-specializations": [
+            {
+              "value": 0
+            },
+            {
+              "appearance": "dark",
+              "value": 0.9
+            }
+          ],
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 1.15,
+                "translation-in-points": [
+                  -0.65,
+                  -3.25
+                ]
+              }
+            }
+          ],
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.11000,0.29000,0.76000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:0.11000,0.29000,0.76000,1.00000"
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.2
       }
     }
   ],

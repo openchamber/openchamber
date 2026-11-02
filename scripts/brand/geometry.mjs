@@ -288,7 +288,7 @@ const layer = (name, { glass, opacity = [{ value: 1 }], fill }) => ({
  * The Icon Composer document. Light Default: light tile, flat grey shell
  * lines and grey tiers. Dark: near-black tile, white glass shell, opaque grey
  * tiers. Clear and Tinted (the `tinted` appearance): white glass shell, opaque
- * tiers in the Canary's violets, which the system turns into separate tones.
+ * tiers in violets, which the system turns into separate tones.
  * Layers hidden in an appearance keep glass off there, or they still show.
  */
 export const appIconDocument = () => {

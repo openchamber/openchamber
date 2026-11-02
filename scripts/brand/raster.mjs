@@ -51,16 +51,16 @@ const PIXEL_COLORS = {
   singleTier: [0xb8, 0xba, 0xc0],
 };
 
-/** The Canary cube: violet glass, as in its app icon; no bird at these sizes. */
+/** The Canary cube: blue glass, as in its app icon, with the pixel chick at its lower right. */
 export const CANARY_PIXEL_COLORS = {
-  leftWall: [0x7a, 0x68, 0xdc],
-  rightWall: [0x6b, 0x58, 0xd4],
-  roof: [0x55, 0x42, 0xc4],
-  edge: [0xf7, 0xf5, 0xff],
+  leftWall: [0x40, 0x62, 0xcc],
+  rightWall: [0x33, 0x54, 0xc2],
+  roof: [0x24, 0x44, 0xb0],
+  edge: [0xf5, 0xf8, 0xff],
   outline: [0, 0, 0],
-  tiers: [[0x8c, 0x7b, 0xea], [0xb3, 0xa7, 0xf4], [0xe6, 0xe0, 0xfd]],
-  singleTier: [0xc4, 0xba, 0xf7],
-  bird: [0xff, 0xd2, 0x1f],
+  tiers: [[0x78, 0x98, 0xed], [0xa2, 0xbb, 0xf4], [0xe0, 0xea, 0xff]],
+  singleTier: [0xa8, 0xc0, 0xf5],
+  bird: [0xff, 0xdd, 0x00],
   birdLight: [0xff, 0xf0, 0x7a],
   birdOrange: [0xf0, 0x9a, 0x2a],
 };
@@ -68,7 +68,8 @@ export const CANARY_PIXEL_COLORS = {
 /**
  * Canary's bird for the pixel cubes: a round chick facing left, one design at
  * three levels of detail, standing at the lower right over the cube (Iuliia's
- * pick, 2026-10-30; a slender canary did not read at these sizes). K black,
+ * pick, 2026-10-30; a slender canary did not read at these sizes, and the
+ * icon's canary redrawn per pixel did not either, 2026-11-02). K black,
  * Y yellow, L light yellow, O orange, '.' leaves the cube. Windows shows the
  * 24 px frame on the taskbar and in the tray at 150%, 16 and 20 at 100%.
  */
