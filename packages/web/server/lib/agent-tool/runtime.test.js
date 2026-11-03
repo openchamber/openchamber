@@ -70,7 +70,7 @@ describe('agent tool action allowlist', () => {
 
   it('asks for the task name in the language of the user', () => {
     const workName = OPENCHAMBER_CONTROL_ACTION_DEFINITIONS.find(({ action }) => action === 'work.name');
-    expect(workName.description).toContain("in the language of the user's latest message");
+    expect(workName.description).toContain("in the user's latest language");
   });
 
   it.each([
