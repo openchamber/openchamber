@@ -548,6 +548,13 @@ export const isDesktopShell = (): boolean => {
   return isElectronShell();
 };
 
+/** Native visibility includes minimized and tray-hidden windows, independently of focus. */
+export const getDesktopWindowVisibility = async (): Promise<boolean | null> => {
+  if (!isDesktopShell()) return null;
+  const parsed = z.object({ visible: z.boolean() }).safeParse(await invokeDesktop('desktop_get_current_window_state'));
+  return parsed.success ? parsed.data.visible : null;
+};
+
 /**
  * Raises the desktop window.
  *

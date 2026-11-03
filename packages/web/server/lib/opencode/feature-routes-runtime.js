@@ -116,6 +116,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
   });
 
   let themeFolderWatch = null;
+  let stopGuestPackageWatch = () => {};
   let quotaProviders = null;
   const getQuotaProviders = async () => {
     if (!quotaProviders) {
@@ -768,7 +769,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       persistPath: extensionsPersistPath(openchamberDataDir),
       emitChanged: () => announceChange('openchamber:tracker-providers-changed'),
     });
-    registerGuestRoutes(app, {
+    stopGuestPackageWatch();
+    ({ stopPackageWatch: stopGuestPackageWatch } = registerGuestRoutes(app, {
       openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService,
       // One failing listener never skips the other: a browser role that
       // fails to hand back still lets the Git host be withdrawn.
@@ -793,7 +795,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       onGuestsChanged: () => announceChange('openchamber:guests-changed'),
       watchFolderInstalls: true,
       surfaceViewerHeaders, trackers,
-    });
+    }));
     // The providers extensions served before the restart, before any request reads the list.
     await extensionSourceControlProviders.reconcile().catch((error) => {
       console.warn('Failed to load extension Git hosts:', error?.message ?? error);
@@ -944,9 +946,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     createChangeRequestWorktree,
     /** Writes the Git credential helper's endpoint file; a no-op until the Git routes are registered. */
     publishRepositoryCredentialEndpoint: async () => { await gitRepositoryCredentialRuntime?.publish(); },
-    stopThemeFolderWatch: () => {
+    /** Both folder watches: the themes folder and the extensions installed from a folder. */
+    stopFolderWatches: () => {
       themeFolderWatch?.stop();
       themeFolderWatch = null;
+      stopGuestPackageWatch();
+      stopGuestPackageWatch = () => {};
     },
   };
 };

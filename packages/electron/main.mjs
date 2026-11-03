@@ -17,6 +17,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
+import { attachWindowVisibility, isNativeWindowVisible } from './window-visibility.mjs';
 import { createTrayController } from './tray.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
@@ -2642,6 +2643,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   browserWindow.on('blur', () => {
     state.focusedWindowIds.delete(browserWindow.id);
   });
+  attachWindowVisibility(browserWindow, emitToWindow);
 
   // Traffic lights disappear during dock-restore animation when using
   // titleBarStyle:'hidden' + custom trafficLightPosition. macOS caches a
@@ -5367,7 +5369,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { maximized: false };
 
     case 'desktop_get_current_window_state':
-      return { maximized: Boolean(browserWindow && !browserWindow.isDestroyed() && browserWindow.isMaximized()) };
+      return {
+        maximized: Boolean(browserWindow && !browserWindow.isDestroyed() && browserWindow.isMaximized()),
+        visible: isNativeWindowVisible(browserWindow),
+      };
 
     case 'desktop_set_locale': {
       if (typeof args.locale === 'string') {
@@ -6049,6 +6054,12 @@ const focusMainWindowWithSession = async (sessionId, directory) => {
 
 const dispatchTrayAction = async (action) => {
   if (!action || typeof action !== 'object') return;
+
+  if (action.type === 'menu-opened') {
+    const target = state.mainWindow;
+    if (target && !target.isDestroyed()) emitToWindow(target, 'openchamber:tray-action', action);
+    return;
+  }
 
   if (action.type === 'quit') {
     app.quit();

@@ -25,7 +25,6 @@ import { useDirectoryStore as useAppDirectoryStore } from '@/stores/useDirectory
 import { isChatDirectoryForHome } from '@/lib/chatDirectories';
 import { useSessionMessageRecordsForExport } from '@/sync/use-sync';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { archiveUndoToastOptions, collectSessionMoveDescendants, collectSessionSubtreeIds } from '@/components/session/sidebar/sessions/sessionSubtreeActions';
@@ -152,7 +151,6 @@ export const Header: React.FC = () => {
     const pathSegments = activeProject.path.split(/[\\/]/).filter(Boolean);
     return pathSegments[pathSegments.length - 1] ?? null;
   }, [activeProject]);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
 
   const { isMobile } = useDeviceInfo();
   const headerRef = React.useRef<HTMLElement | null>(null);
@@ -238,11 +236,6 @@ export const Header: React.FC = () => {
     setWorkStatusPanelEnabled(!workStatusPanelEnabled);
   }, [setWorkStatusOverlayOpen, setWorkStatusPanelEnabled, workStatusOverlayOpen, workStatusPanelEnabled, workStatusPanelFits]);
 
-  useQuotaAutoRefresh();
-
-  React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
 
 
   const currentSessionSnapshot = currentSessionId

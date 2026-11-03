@@ -277,6 +277,7 @@ const notificationPropertiesSchema = z.object({
 });
 
 type OpenChamberEvent =
+  | { type: 'terminal-sessions-changed' }
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   /** `connectionId` names this connection on the server; absent from servers before tracked items. */
   | { type: 'event-stream-ready'; connectionId: string | null }
@@ -476,6 +477,10 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
+  if (envelope.type === 'openchamber:terminal-sessions-changed') {
+    for (const listener of listeners) listener({ type: 'terminal-sessions-changed' });
+    return;
+  }
   if (envelope.type === 'openchamber:notification') {
     const parsed = notificationPropertiesSchema.safeParse(envelope.properties);
     if (parsed.success) {

@@ -1,19 +1,20 @@
+import { createFolderChangeWatch } from '../fs/folder-change-watch.js';
+
 const POLL_MS = 1000;
 
 /**
  * Watches the custom themes folder and calls `onChange()` when its theme files
- * were added, removed or rewritten and then held still for one poll, so a file
+ * were added, removed or rewritten and then held still for one check, so a file
  * caught mid-write is never announced.
  *
- * It polls `readdir` and `stat` like the extension folder watch: a folder
- * watcher goes silent on Linux and Windows when the folder it watched is
- * deleted and made again, and the themes folder may not exist yet.
+ * Folder signals trigger checks. A slow safety poll reopens the watcher after
+ * folder recreation; unavailable watchers retain the fast polling cadence.
  *
  * The first look is taken at once, before any client reads the themes, so a
  * change right after start is compared against it and announced. `ready`
  * settles when that look is done.
  */
-export const createThemeFolderWatch = ({ fsPromises, path, themesDir, onChange, pollMs = POLL_MS, logger = console }) => {
+export const createThemeFolderWatch = ({ fsPromises, path, themesDir, onChange, pollMs = POLL_MS, logger = console, fsWatch, timers }) => {
   const fingerprint = async () => {
     const names = await fsPromises.readdir(themesDir).catch(() => []);
     const themes = names.filter((name) => name.toLowerCase().endsWith('.json')).sort();
@@ -24,42 +25,5 @@ export const createThemeFolderWatch = ({ fsPromises, path, themesDir, onChange, 
     return themes.map((name, index) => `${name}=${stamps[index]}`).join('\n');
   };
 
-  let reported = null;
-  let seen = null;
-  let polling = false;
-  let stopped = false;
-
-  const poll = async () => {
-    if (polling) return;
-    polling = true;
-    try {
-      const current = await fingerprint();
-      if (reported === null) {
-        reported = current;
-        seen = current;
-        return;
-      }
-      const settled = current === seen;
-      seen = current;
-      if (!settled || current === reported || stopped) return;
-      reported = current;
-      onChange();
-    } finally {
-      polling = false;
-    }
-  };
-
-  const check = () => poll().catch((error) => logger.warn('[themes] Failed to check the themes folder:', error?.message ?? error));
-  const ready = check();
-  const timer = setInterval(check, pollMs);
-  timer.unref?.();
-
-  return {
-    ready,
-    check,
-    stop: () => {
-      stopped = true;
-      clearInterval(timer);
-    },
-  };
+  return createFolderChangeWatch({ root: themesDir, fingerprint, onChange, pollMs, logger, fsWatch, timers });
 };

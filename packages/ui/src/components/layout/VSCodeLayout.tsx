@@ -685,14 +685,14 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   const quotaDisplayMode = useQuotaStore((state) => state.displayMode);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
-  const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
 
-  useQuotaAutoRefresh();
-
+  const [quotaOpen, setQuotaOpen] = React.useState(false);
+  useQuotaAutoRefresh(Boolean(showRateLimits) && quotaOpen);
   React.useEffect(() => {
-    void loadQuotaSettings();
-  }, [loadQuotaSettings]);
+    if (!showRateLimits) setQuotaOpen(false);
+  }, [showRateLimits]);
+
 
   const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId ?? null);
 
@@ -809,11 +809,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       )}
       {showRateLimits && (
         <DropdownMenu
-          onOpenChange={(open) => {
-            if (open && quotaResults.length === 0) {
-              fetchAllQuotas();
-            }
-          }}
+          onOpenChange={setQuotaOpen}
         >
           <DropdownMenuTrigger asChild>
             <button

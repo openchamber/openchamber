@@ -2325,6 +2325,36 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().providers.map((entry) => entry.id)).toEqual(['plugin']);
   });
 
+  test('fresh provider and agent triggers during a fresh read share a post-call replacement', async () => {
+    const providers = deferred<TestProviderResponse>();
+    const agents = deferred<TestAgent[]>();
+    const newProviders = deferred<TestProviderResponse>();
+    const newAgents = deferred<TestAgent[]>();
+    let providerReads = 0;
+    let agentReads = 0;
+    getProvidersForConfigImpl = () => ++providerReads === 1 ? providers.promise : newProviders.promise;
+    listAgentsImpl = () => ++agentReads === 1 ? agents.promise : newAgents.promise;
+    const providerBefore = getProvidersCalls;
+    const agentBefore = listAgentsCalls;
+    const triggers = Array.from({ length: 8 }, () => [
+      useConfigStore.getState().loadProviders({ directory: DIRECTORY, fresh: true }),
+      useConfigStore.getState().loadAgents({ directory: DIRECTORY, fresh: true }),
+    ]).flat();
+    providers.resolve(providerResponse('old'));
+    agents.resolve([{ name: 'build', mode: 'primary' }]);
+    await Promise.all(triggers.slice(0, 2));
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    expect(getProvidersCalls - providerBefore).toBe(2);
+    expect(listAgentsCalls - agentBefore).toBe(2);
+    newProviders.resolve(providerResponse('live'));
+    newAgents.resolve([{ name: 'new-build', mode: 'primary' }]);
+    await Promise.all(triggers);
+    expect(getProvidersCalls - providerBefore).toBe(2);
+    expect(listAgentsCalls - agentBefore).toBe(2);
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.providers[0]?.id).toBe('live');
+    expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.agents[0]?.name).toBe('new-build');
+  });
+
   test('a directory whose providers never loaded is read once more on its own', async () => {
     let calls = 0;
     getProvidersForConfigImpl = async () => {

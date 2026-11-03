@@ -12,6 +12,8 @@
  */
 
 import type { CatalogKind } from "@/lib/opencode/events";
+import { opencodeClient } from "@/lib/opencode/client";
+import { captureRuntimeInstance } from "@/lib/runtime-switch";
 import { notifyCredentialChanged } from "@/lib/opencode/integration-catalog";
 import { getConfigDirectory, invalidateAgentsLoadCache, useAgentsStore } from "@/stores/useAgentsStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
@@ -25,7 +27,7 @@ import { refreshWebSearchIfLoaded } from "@/stores/useWebSearchStore";
 
 const SOURCE = "catalogRefresh";
 
-const refreshAgents = async (eventDirectories: readonly string[] = []): Promise<void> => {
+const agentRefreshDirectories = (eventDirectories: readonly string[]): Array<string | null> => {
   const ambientDirectory = getConfigDirectory();
   const scopedDirectories = Array.from(new Set(
     eventDirectories
@@ -33,21 +35,21 @@ const refreshAgents = async (eventDirectories: readonly string[] = []): Promise<
       .filter((directory) => directory.length > 0 && directory !== "global" && directory !== ambientDirectory),
   ));
 
-  invalidateAgentsLoadCache();
-  invalidateConfigAgentsLoad();
-  for (const directory of scopedDirectories) {
-    invalidateAgentsLoadCache(directory);
-    invalidateConfigAgentsLoad(directory);
-  }
+  return [ambientDirectory, ...scopedDirectories];
+};
+
+const refreshAgentDirectory = async (directory: string | null): Promise<void> => {
+  invalidateAgentsLoadCache(directory);
+  invalidateConfigAgentsLoad(directory);
 
   await Promise.allSettled([
-    useAgentsStore.getState().loadAgents(),
-    useConfigStore.getState().loadAgents({ source: SOURCE, fresh: true }),
-    ...scopedDirectories.flatMap((directory) => [
-      useAgentsStore.getState().loadAgents(directory),
-      useConfigStore.getState().loadAgents({ directory, source: SOURCE, fresh: true }),
-    ]),
+    useAgentsStore.getState().loadAgents(directory),
+    useConfigStore.getState().loadAgents({ directory, source: SOURCE, fresh: true }),
   ]);
+};
+
+const refreshAgents = async (eventDirectories: readonly string[] = []): Promise<void> => {
+  await Promise.all(agentRefreshDirectories(eventDirectories).map(refreshAgentDirectory));
 };
 
 const refreshCommands = async (): Promise<void> => {
@@ -79,7 +81,6 @@ const refreshPlugins = async (): Promise<void> => {
 // with the catalog OpenCode just replaced.
 const refreshProviders = async (): Promise<void> => {
   const config = useConfigStore.getState();
-  config.invalidateModelMetadataCache();
   await config.loadProviders({ source: SOURCE, fresh: true });
 };
 
@@ -95,8 +96,11 @@ const refreshProviders = async (): Promise<void> => {
 const PROVIDER_REREAD_AFTER_CREDENTIAL_MS = 5000;
 
 const refreshProvidersAfterCredentialChange = async (): Promise<void> => {
+  const sdk = opencodeClient.getSdkClient();
+  const isCurrent = captureRuntimeInstance();
   await refreshProviders();
   await new Promise((resolve) => setTimeout(resolve, PROVIDER_REREAD_AFTER_CREDENTIAL_MS));
+  if (!isCurrent() || sdk !== opencodeClient.getSdkClient()) return;
   await refreshProviders();
 };
 
@@ -106,28 +110,14 @@ const refreshProvidersAfterCredentialChange = async (): Promise<void> => {
  * account. That is also what covers a switch made in OpenCode's own TUI or by
  * another client, which no OpenChamber screen can see.
  *
- * Every tracker the user selected is re-read, because the event does not name
- * the provider and threading that through the event, the sync layer and this
- * table costs more than the extra requests on an action a person performs a few
- * times a day.
+ * Old-account samples are invalidated even while hidden. Only a visible quota
+ * readout asks providers for replacement samples.
  */
 const refreshUsageAfterCredentialChange = async (): Promise<void> => {
-  const { results, dropdownProviderIds, fetchQuotas } = useQuotaStore.getState();
-  // Only the trackers this store already shows. Gating on `results` rather than
-  // on the instance-level load flag is what makes this work in the VS Code
-  // extension: that layout fetches quotas on open and never calls
-  // `ensureLoadedForRuntime`, so `loadedRuntimeKey` stays null there and gating
-  // on it silently skipped every refresh. With nothing fetched there is nothing
-  // on screen to update, and `dropdownProviderIds` is still its default of every
-  // tracker rather than the user's selection.
-  const shown = new Set(results.map((result) => result.providerId));
-  const targets = dropdownProviderIds.filter((providerId) => shown.has(providerId));
-  if (targets.length === 0) return;
-  // `invalidate` because a credential event means the last sample can belong to
-  // the account just left; keeping it would show that account's numbers as the
-  // new one's.
-  await fetchQuotas(targets, { invalidate: true });
+  await useQuotaStore.getState().refreshAfterCredentialChange();
 };
+
+const refreshCredentialReaders = async (): Promise<void> => notifyCredentialChanged();
 
 /** The lists a catalog kind invalidates, in the order they are re-read. */
 export function catalogRefreshTasks(
@@ -158,7 +148,7 @@ export function catalogRefreshTasks(
         refreshProvidersAfterCredentialChange,
         refreshWebSearchIfLoaded,
         refreshUsageAfterCredentialChange,
-        async () => notifyCredentialChanged(),
+        refreshCredentialReaders,
       ];
     // A config file can carry any of them (a provider declared in
     // opencode.json included), and OpenChamber's own plugin injection lives
@@ -178,7 +168,73 @@ export async function refreshStoresForCatalogKind(
   kind: CatalogKind,
   eventDirectories: readonly string[] = [],
 ): Promise<void> {
-  const tasks = catalogRefreshTasks(kind, eventDirectories);
-  if (tasks.length === 0) return;
-  await Promise.allSettled(tasks.map((task) => task()));
+  return refreshStoresForCatalogKinds(new Map([[kind, eventDirectories]]));
+}
+
+// Entries live only for the duration of a refresh. SDK identity isolates
+// reconnects; the captured instance also rejects an A -> B -> A switch before
+// the SDK reconnects.
+type RefreshTask = () => Promise<void>;
+type RefreshRequest = { promise: Promise<void>; isCurrent: () => boolean; revision: number };
+const inFlightRefreshes = new WeakMap<object, Map<string | RefreshTask, Map<string, RefreshRequest>>>();
+
+export async function refreshStoresForCatalogKinds(
+  reloads: ReadonlyMap<CatalogKind, readonly string[]>,
+): Promise<void> {
+  const sdk = opencodeClient.getSdkClient();
+  const inFlight = inFlightRefreshes.get(sdk) ?? new Map<string | RefreshTask, Map<string, RefreshRequest>>();
+  inFlightRefreshes.set(sdk, inFlight);
+  const tasks = new Map<string | (() => Promise<void>), () => Promise<void>>();
+  const agentDirectories = new Set<string>();
+  let agents = false;
+  for (const [kind, directories] of reloads) {
+    if (kind === "config" || kind === "agent") {
+      agents = true;
+      for (const directory of directories) agentDirectories.add(directory);
+    }
+    const kindTasks = catalogRefreshTasks(kind, directories);
+    // The first config/agent task captures directories; collect it below.
+    for (const task of (kind === "config" || kind === "agent") ? kindTasks.slice(1) : kindTasks) {
+      tasks.set(task, task);
+    }
+  }
+  if (agents) {
+    for (const directory of agentRefreshDirectories([...agentDirectories])) {
+      tasks.set(JSON.stringify(["agents", directory]), () => refreshAgentDirectory(directory));
+    }
+  }
+  // Credential changes already include the immediate provider read.
+  if (tasks.has(refreshProvidersAfterCredentialChange)) tasks.delete(refreshProviders);
+  await Promise.allSettled([...tasks].map(([key, task]) => {
+    // Each credential event retires old-account requests immediately, even
+    // while the preceding event's replacement quota load is still pending.
+    if (task === refreshUsageAfterCredentialChange) return task();
+    const scope = key instanceof Function ? JSON.stringify([getConfigDirectory(), useConfigStore.getState().activeDirectoryKey]) : key;
+    const requests = inFlight.get(key) ?? new Map<string, RefreshRequest>();
+    inFlight.set(key, requests);
+    const existing = requests.get(scope);
+    if (existing?.isCurrent()) {
+      existing.revision += 1;
+      return existing.promise;
+    }
+    const isCurrent = captureRuntimeInstance();
+    const entry: RefreshRequest = { promise: Promise.resolve(), isCurrent, revision: 0 };
+    const request: Promise<void> = (async () => {
+      let startedRevision: number;
+      do {
+        startedRevision = entry.revision;
+        try {
+          await task();
+        } catch (error) {
+          if (!isCurrent() || entry.revision === startedRevision) throw error;
+        }
+      } while (isCurrent() && entry.revision !== startedRevision);
+    })().finally(() => {
+      if (requests.get(scope)?.promise === request) requests.delete(scope);
+      if (requests.size === 0) inFlight.delete(key);
+    });
+    entry.promise = request;
+    requests.set(scope, entry);
+    return request;
+  }));
 }

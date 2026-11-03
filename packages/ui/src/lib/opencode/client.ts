@@ -2130,7 +2130,8 @@ class OpencodeService {
    * The store keeps image models out of the chat pickers.
    *
    * `fresh`: a request already in flight started before the caller's reason to re-read (a
-   * catalog event), so it may carry the old catalog. Wait it out and read again.
+   * catalog event), so it may carry the old catalog. Wait out ordinary reads;
+   * callers waiting on that read share the replacement started after their call.
    */
   async getProvidersForConfig(directory?: string | null, options?: { fresh?: boolean }): Promise<ProviderCatalog> {
     const isCurrent = captureRuntimeInstance()
