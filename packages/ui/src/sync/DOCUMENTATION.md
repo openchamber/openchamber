@@ -1553,8 +1553,11 @@ instance switcher always opens a fresh one. A link to any other address
 keeps the external path. A session
 deep link that launches the desktop app arrives before the renderer listens:
 `main.mjs` keeps it pending and the main window takes it on mount through
-`desktop_take_pending_session_links` (`takePendingDesktopSessionLinks`); a
-late flush still emits it to a renderer that never asks. A desktop session
+`desktop_take_pending_session_links` (`takePendingDesktopSessionLinks`). That
+request is what tells main the document listens; until it comes, a link stays
+pending however loaded the page looks, including on the splash. Ten seconds
+after an application document loads without asking, as a remote page does, main
+emits the links and treats that document as listening. A desktop session
 link can name the saved instance that owns the session (`?host=<id>`, `local`
 for the app's own server). Main passes it on as the runtime key a
 notification click carries, and the receiving window routes both the same
