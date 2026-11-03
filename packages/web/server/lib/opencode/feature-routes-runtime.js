@@ -2,6 +2,7 @@ import { registerFsRoutes } from '../fs/routes.js';
 import { createRipgrepResolver } from '../fs/ripgrep.js';
 import { registerEnvironmentRoutes } from '../environment/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
+import { createExtensionQuotaProviders } from '../quota/extension-quotas.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
@@ -754,6 +755,17 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       persistPath: extensionsPersistPath(openchamberDataDir),
       emitChanged: () => announceChange('openchamber:tracker-providers-changed'),
     });
+    // Extensions that report usage, attached to the quota registry beside the
+    // built-ins and kept in step with the catalog. The quota module stays
+    // unloaded until a request or such an extension needs it.
+    const extensionQuotaProviders = createExtensionQuotaProviders({
+      listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(openchamberDataDir) }),
+      currentGuest: async (guestId) => (await listInstalledGuests({ persistPath: extensionsPersistPath(openchamberDataDir) }))
+        .find((guest) => guest.id === guestId) ?? null,
+      loadRegistry: getQuotaProviders,
+      persistPath: extensionsPersistPath(openchamberDataDir),
+      emitChanged: () => announceChange('openchamber:quota-providers-changed'),
+    });
     registerGuestRoutes(app, {
       openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService,
       // One failing listener never skips the other: a browser role that
@@ -764,6 +776,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         { name: 'drop an extension\'s session event subscription', listener: () => onExtensionSessionEventsChanged() },
         { name: 'withdraw an extension notification channel', listener: (event) => extensionNotificationChannels?.deactivated(event) },
         { name: 'withdraw an extension tracker', listener: (event) => extensionTrackers.deactivated(event) },
+        { name: 'withdraw an extension usage provider', listener: () => extensionQuotaProviders.deactivated() },
       ]),
       // One failing reconcile never skips another; each failure is logged by the route.
       onGuestActivated: async () => {
@@ -772,6 +785,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
           onExtensionSessionEventsChanged(),
           extensionNotificationChannels?.reconcile(),
           extensionTrackers.reconcile(),
+          extensionQuotaProviders.reconcile(),
         ]);
         const failed = results.find((result) => result.status === 'rejected');
         if (failed) throw failed.reason;
@@ -786,6 +800,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
     await extensionTrackers.reconcile().catch((error) => {
       console.warn('Failed to load extension trackers:', error?.message ?? error);
+    });
+    await extensionQuotaProviders.reconcile().catch((error) => {
+      console.warn('Failed to load extension usage providers:', error?.message ?? error);
     });
     if (extensionNotificationChannels) {
       registerNotificationChannelRoutes(app, { channels: extensionNotificationChannels });

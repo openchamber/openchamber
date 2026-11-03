@@ -1176,3 +1176,170 @@ export const createTrackerOutbound = ({ env }: { env: Record<string, string | un
       (message, code, status) => new TrackerOutboundError(message, code, status)),
   };
 };
+
+/*
+ * Quota: a service with `provides: ["quota"]` is the usage provider
+ * `contributes.quota` describes, next to the built-in ones. OpenChamber lists
+ * it from the manifest, asks it for usage the way it asks a built-in
+ * (`QUOTA_PROVIDER_PATH`, one call per refresh) and draws the answer on the
+ * Usage page, in the header, in Work Status and on the phone. On every call
+ * the service receives the credentials OpenCode holds for exactly the provider
+ * ids the manifest lists, as OpenCode stores them, and nothing else of the
+ * credential store; the user approved that list in the dialog. OpenChamber
+ * refreshes no login for the service: an expired one is the service's to
+ * report, as a built-in reports it.
+ */
+
+/** Route on the service loopback OpenChamber posts every usage call to. */
+export const QUOTA_PROVIDER_PATH = '/quota';
+/** The `v` of every request; a service answers a version it does not know with HTTP 400. */
+export const QUOTA_PROVIDER_WIRE_VERSION = 1;
+/** The one call: read the provider's usage now. */
+export const QUOTA_PROVIDER_METHODS = ['usage.read'] as const;
+export type QuotaProviderMethod = (typeof QUOTA_PROVIDER_METHODS)[number];
+
+/** How long OpenChamber waits for an answer; under the Usage page's own 30 s deadline. */
+export const QUOTA_PROVIDER_TIMEOUT_MS = 20_000;
+/** Bytes of an answer OpenChamber reads: windows and per-model windows, never more. */
+export const QUOTA_PROVIDER_RESPONSE_MAX = 1_000_000;
+/** Characters of `error` and `error.message` OpenChamber reads. */
+export const QUOTA_PROVIDER_ERROR_MESSAGE_MAX = 2_000;
+/** No call for this long stops the service; the next call starts it again. The Usage page refreshes every 3 minutes while open. */
+export const QUOTA_PROVIDER_IDLE_MS = 10 * 60_000;
+/** Windows on the provider, and windows per model. */
+export const QUOTA_PROVIDER_WINDOWS_MAX = 32;
+/** Models with windows of their own in one answer. */
+export const QUOTA_PROVIDER_MODELS_MAX = 64;
+/** Characters of a window or model name. */
+export const QUOTA_PROVIDER_NAME_MAX = 128;
+/** Characters of `valueLabel` and `planLabel`. */
+export const QUOTA_PROVIDER_LABEL_MAX = 128;
+
+/**
+ * A credential as OpenCode stores it for one provider: an API key (the
+ * variable's value when OpenCode took it from the environment), or a browser
+ * login with its tokens. Whatever metadata OpenCode kept rides along.
+ */
+export type QuotaProviderCredential =
+  | { type: 'api'; key: string; metadata?: SourceControlJsonObject }
+  | { type: 'oauth'; access: string; refresh: string; expires: number; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
+
+/** What a window counts beside its percentage, formatted in the app's locale. */
+export type QuotaProviderWindowValue =
+  | { kind: 'requests'; count: number }
+  | { kind: 'spend'; spent: number; limit: number | null };
+
+/**
+ * One usage window as a built-in computes it from its API, before OpenChamber
+ * derives the remaining share, the time to reset and the formatted strings.
+ * `resetAt` is epoch milliseconds. `usedPercent` is null for a window with
+ * no share (a balance), which then carries a `valueLabel` or a `value`.
+ */
+export type QuotaProviderWindow = {
+  usedPercent: number | null;
+  /** The window's length; null for a balance or a lifetime cap. */
+  windowSeconds?: number | null;
+  resetAt?: number | null;
+  /** A ready string beside the share, such as a money balance. */
+  valueLabel?: string | null;
+  value?: QuotaProviderWindowValue;
+  /** Credits spent in an unlimited window; OpenChamber words it in the app's locale. */
+  creditsUsed?: number;
+};
+
+export type QuotaProviderUsage = {
+  /** Keyed by window name (`5h`, `weekly`, `credits_balance`); OpenChamber titles the known names. */
+  windows: Record<string, QuotaProviderWindow>;
+  /** Per-model windows, keyed by model name. */
+  models?: Record<string, { windows: Record<string, QuotaProviderWindow> }>;
+};
+
+/**
+ * What a built-in answers from its `fetchQuota`, before OpenChamber adds the
+ * provider id, the name and the time of the read. `configured: false` draws
+ * the Usage page's "not configured" state, which points at OpenChamber's
+ * Providers page: answer it only when a listed OpenCode credential is what is
+ * missing (OpenChamber already answers that case before it calls). A key of
+ * the extension's own that is missing is `configured: true` with an `error`
+ * that says where to enter it.
+ */
+export type QuotaProviderUsageData = {
+  ok: boolean;
+  configured: boolean;
+  /** What went wrong and what to do, shown on the card. */
+  error?: string;
+  /** The plan or tier the provider reports, shown beside the card's title. */
+  planLabel?: string | null;
+  usage: QuotaProviderUsage | null;
+};
+
+/** What each method's `input` holds. OpenChamber built every field. */
+export type QuotaProviderInputs = {
+  /** The listed providers OpenCode holds a credential for right now, keyed by provider id; one it does not hold is absent. */
+  'usage.read': { credentials: Record<string, QuotaProviderCredential> };
+};
+
+/**
+ * One call, as OpenChamber posts it. `provider` is the id OpenChamber gave
+ * this usage provider (`ext-<panel.id>`). There is no session: the service
+ * reaches its provider's API itself, with the credentials in `input`.
+ */
+export type QuotaProviderRequest = {
+  v: typeof QUOTA_PROVIDER_WIRE_VERSION;
+  requestId: string;
+  method: QuotaProviderMethod;
+  provider: string;
+  input: QuotaProviderInputs['usage.read'];
+};
+
+/** What each method answers in `data`. */
+export type QuotaProviderDataByMethod = {
+  'usage.read': QuotaProviderUsageData;
+};
+
+/**
+ * An answer. `data` is the provider's result, failure included (`ok: false`
+ * with `error`); the envelope's `ok: false` is for a call the service could
+ * not handle at all, and its `message` reaches the card as the error.
+ */
+export type QuotaProviderError = SourceControlProviderError;
+export type QuotaProviderResult =
+  | { ok: true; data: QuotaProviderUsageData }
+  | { ok: false; error: QuotaProviderError };
+
+export const isQuotaProviderMethod = (value: string): value is QuotaProviderMethod => (
+  QUOTA_PROVIDER_METHODS.some((method) => method === value)
+);
+
+type WireQuotaRequest = {
+  v?: unknown; requestId?: unknown; method?: unknown; provider?: unknown; input?: { credentials?: unknown } | null;
+};
+
+/**
+ * A service's read of the body OpenChamber posted to `QUOTA_PROVIDER_PATH`.
+ * OpenChamber built `input`, so this checks the envelope and that
+ * `credentials` is a map of objects, not each credential's fields, and the
+ * service bundle needs no schema library. `null` is a body that is not a
+ * usage call of this wire version; answer it with HTTP 400.
+ */
+export const readQuotaProviderRequest = (body: string): QuotaProviderRequest | null => {
+  let wire: WireQuotaRequest;
+  try {
+    const parsed: WireQuotaRequest | null = JSON.parse(body);
+    if (Object(parsed) !== parsed || parsed === null) return null;
+    wire = parsed;
+  } catch {
+    return null;
+  }
+  const { v, requestId, method, provider, input } = wire;
+  if (v !== QUOTA_PROVIDER_WIRE_VERSION) return null;
+  if (String(requestId) !== requestId || requestId.length === 0) return null;
+  if (String(provider) !== provider || provider.length === 0) return null;
+  if (String(method) !== method || !isQuotaProviderMethod(method)) return null;
+  if (Object(input) !== input || input === null || input === undefined || Array.isArray(input)) return null;
+  const { credentials } = input;
+  if (Object(credentials) !== credentials || credentials === null || Array.isArray(credentials)) return null;
+  if (Object.values(Object(credentials)).some((credential) => Object(credential) !== credential || credential === null || Array.isArray(credential))) return null;
+  // SAFETY: `credentials` is a plain object of plain objects parsed from JSON, built by OpenChamber from OpenCode's store.
+  return { v: QUOTA_PROVIDER_WIRE_VERSION, requestId, method, provider, input: { credentials: credentials as Record<string, QuotaProviderCredential> } };
+};

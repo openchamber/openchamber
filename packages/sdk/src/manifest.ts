@@ -333,11 +333,12 @@ export type PublicSocketBinding = {
  * for the user's notifications next to the desktop and the phone, described
  * by `contributes.notifications`. `tracker` makes it a work item tracker next
  * to Linear, described by `contributes.tracker`; an extension is a Git host
- * or a tracker, never both. The contracts are in `service-providers.ts`.
- * A service that provides a role needs no panel or background entry: the host
- * starts it on the first call.
+ * or a tracker, never both. `quota` makes it a usage provider next to the
+ * built-in ones on the Usage page, described by `contributes.quota`. The
+ * contracts are in `service-providers.ts`. A service that provides a role
+ * needs no panel or background entry: the host starts it on the first call.
  */
-export const GUEST_SERVICE_PROVIDES = ['browser', 'source-control', 'notifications', 'tracker'] as const;
+export const GUEST_SERVICE_PROVIDES = ['browser', 'source-control', 'notifications', 'tracker', 'quota'] as const;
 export type GuestServiceProvides = (typeof GUEST_SERVICE_PROVIDES)[number];
 
 /**
@@ -400,6 +401,48 @@ export const toPublicNotifications = (contribution: NotificationsContribution): 
   if (contribution.token.createPath) token.createPath = contribution.token.createPath;
   return { label: contribution.label, instances: { ...contribution.instances }, token };
 };
+
+/** The usage provider is named `ext-<panel.id>` the same way; quota provider ids share the 32-character limit. */
+export const QUOTA_GUEST_ID_MAX = 28;
+/** The provider id OpenChamber gives the usage provider an extension provides. */
+export const quotaProviderIdOf = (guestId: string): string => `ext-${guestId}`;
+/** OpenCode providers one extension may read the credentials of (`contributes.quota.providers`). */
+export const QUOTA_PROVIDERS_MAX = 16;
+/**
+ * An OpenCode provider id as its credential store keys it (`openrouter`,
+ * `zai-coding-plan`, `google.oauth`): lowercase letters and digits, then
+ * `.`, `_` and `-`. Checked by shape alone: a credential can arrive after
+ * install, and one OpenCode does not hold is the "not configured" state the
+ * Usage page already draws.
+ */
+export const OPENCODE_PROVIDER_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+export const isOpenCodeProviderId = (value: string): boolean => OPENCODE_PROVIDER_ID.test(value);
+
+/**
+ * `contributes.quota`: the usage provider an extension with
+ * `service.provides: ["quota"]` adds next to the built-in ones, declared in
+ * the manifest so OpenChamber can list it, draw its card and ask for approval
+ * without starting the service. The provider id is not declared: OpenChamber
+ * names it `ext-<panel.id>`. The service reads usage itself; what it receives
+ * from OpenChamber is the credential OpenCode holds for each provider listed
+ * here, on every read, and nothing else of the credential store.
+ */
+export type QuotaContribution = {
+  /**
+   * OpenCode provider ids whose stored credentials the service receives
+   * (`openrouter`, `deepinfra`). May be empty: a provider OpenCode has no
+   * credential for keeps its own key in the extension's settings and receives
+   * nothing. The approval dialog lists them; a changed list asks again.
+   */
+  providers: string[];
+};
+
+/** What the extension catalog and the approval dialog show of the usage provider. */
+export type PublicQuota = {
+  providers: string[];
+};
+
+export const toPublicQuota = (contribution: QuotaContribution): PublicQuota => ({ providers: [...contribution.providers] });
 
 /** The tracker is named `ext-<panel.id>` the same way, within the same 32 characters. */
 export const TRACKER_GUEST_ID_MAX = 28;
@@ -831,6 +874,8 @@ export type OpenChamberContributes = {
   notifications?: NotificationsContribution;
   /** The work item tracker a `tracker` service provides; present exactly when it does. */
   tracker?: TrackerContribution;
+  /** The usage provider a `quota` service provides; present exactly when it does. */
+  quota?: QuotaContribution;
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */

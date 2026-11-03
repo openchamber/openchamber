@@ -3,10 +3,9 @@ import { UsageCard } from './UsageCard';
 import { QuotaCredentials } from './QuotaCredentials';
 import { ClaudeCodeSignIn } from './ClaudeCodeSignIn';
 import { ConsoleBudgetsSection } from './ConsoleBudgetsSection';
-import { QUOTA_PROVIDERS } from '@/lib/quota';
-import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
+import { useQuotaAutoRefresh, useQuotaProviders, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
 import {
   Collapsible,
   CollapsibleContent,
@@ -58,6 +57,7 @@ export const UsagePage: React.FC = () => {
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
+  const providers = useQuotaProviders();
 
   useQuotaAutoRefresh();
 
@@ -74,12 +74,12 @@ export const UsagePage: React.FC = () => {
       return;
     }
     const firstConfigured = results.find((entry) => entry.configured)?.providerId;
-    setSelectedProvider(firstConfigured ?? QUOTA_PROVIDERS[0]?.id ?? null);
-  }, [results, selectedProviderId, setSelectedProvider]);
+    setSelectedProvider(firstConfigured ?? providers[0]?.id ?? null);
+  }, [providers, results, selectedProviderId, setSelectedProvider]);
 
   const selectedResult = results.find((entry) => entry.providerId === selectedProviderId) ?? null;
 
-  const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
+  const providerMeta = providers.find((provider) => provider.id === selectedProviderId);
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
   const refreshError = selectedProviderId ? refreshErrors[selectedProviderId] : undefined;
@@ -175,7 +175,7 @@ export const UsagePage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.usage.page.header.providerUsage', { provider: providerName })}
-      titleLeading={<ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />}
+      titleLeading={<QuotaProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />}
       description={
         isLoading ? (
           <span className={cn('typography-settings-description text-muted-foreground', blink)}>{t('settings.usage.page.header.refreshing')}</span>

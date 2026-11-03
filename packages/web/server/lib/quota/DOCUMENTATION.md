@@ -35,7 +35,6 @@ asked, `/api/quota/providers` answers 500 instead of an empty list.
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry, Claude Code credentials file, OpenCode `auth.json` (`anthropic`, `claude`), `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cline-pass` | ClinePass | `providers/cline-pass.js` | `cline-pass` (API key under `key` or `token`) |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
-| `command-code` | Command Code | `providers/command-code.js` | `command-code` OAuth/API credential in OpenCode `auth.json`, or `COMMAND_CODE_API_KEY` |
 | `cursor` | Cursor | `providers/cursor.js` | Environment/token files, OpenChamber-managed credentials, or explicit one-time Cursor import |
 | `deepinfra` | DeepInfra | `providers/deepinfra.js` | `deepinfra`, `deep-infra`, `deep_infra` (API key under `key` or `token`) |
 | `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` (API key under `key` or `token`) |
@@ -74,7 +73,26 @@ Provider modules must export `providerId`, `providerName`, `aliases`, `isConfigu
 
 exe.dev, Cursor, and ZenMux credentials are explicitly managed through Settings. exe.dev usage uses a separately generated HTTPS API token restricted to `billing credits usage` and aggregates every `exe-*` model provider into one monthly credit window. Generate the token with `ssh exe.dev "ssh-key generate-api-key --label=openchamber --exp=30d --cmds='billing credits usage'"`. ZenMux usage uses an optional Platform API key pasted on the Usage page; the OpenCode chat key is never used, and a missing Platform API key means ZenMux quota is not fetched. The server validates managed credentials before atomic `0600` writes and never returns secrets through its API. OpenChamber never scans browser cookie stores or automatically reads Cursor storage; Cursor import is an explicit one-time user action and never modifies Cursor's database.
 
-Command Code usage resolves account scope through `GET /alpha/whoami`, then reads server-backed credit balances and five-hour/weekly limits from `GET /alpha/billing/credits?orgId=...`. Personal accounts return `org: null` and use `/alpha/billing/credits` without an `orgId`; organization accounts include their organization id. Web/Electron and VS Code read the standard `command-code` OpenCode auth entry (including OAuth `access`) or `COMMAND_CODE_API_KEY`; credentials remain in the owning runtime and are never returned to shared UI.
+## Extension usage providers
+
+An installed extension with `provides: ["quota"]` and `contributes.quota` (the SDK role, `packages/sdk/GUEST_SERVICES.md`, *Usage provider*) is one more registry entry, `ext-<guestId>`, attached after the built-ins by `extension-quotas.js` and answered by `extension-quota.js`.
+
+- The catalog is the authority, never an event: a guest reports usage while it is enabled, fully approved with an effective `service` grant, provides `quota` and has a parsed `contributes.quota`. Pause, removal, withdrawn approval and a grant whose scope changed (the provider list is part of it, `guests/grant-scope.js`) detach it. `extension-quotas.js` reconciles at start, on `onGuestActivated` and on `onGuestDeactivated`, one run at a time, and announces a change as `openchamber:quota-providers-changed`, which the UI answers by reading `GET /api/quota/providers` again. The quota module stays unloaded on a host with no such extension.
+- `isConfigured(auth)` is true when OpenCode holds at least one listed credential, and always when the list is empty, so `listConfiguredQuotaProviders` and the UI's configured state work unchanged.
+- `fetchQuota` reads the credentials through `../opencode/auth.js` like every built-in, picks the listed entries (`pickCredentials`, own keys only) and answers `Not configured` without a call when none is present; it re-reads the guest's catalog row (enterprise policy applies on each read) and refuses a guest no longer eligible; then it posts one `usage.read` to the service with those entries and nothing else of the map, under the SDK's deadline, response cap and idle stop. A service not reached is a failed result with `configured: true`, as a built-in's API outage reads; an answer that does not parse (`quotaProviderSchemasV1`) is `502 MALFORMED_PROVIDER_RESPONSE` (`QuotaRouteError`, the only error `GET /api/quota/:providerId` answers with its own status), never an empty result. The host sets `providerId`, `providerName` and `fetchedAt` and runs `toUsageWindow`, so the result matches a built-in's field for field.
+- `GET /api/quota/providers` carries `extensions: [{ id, name, icon, guestId }]` beside the configured ids; the UI draws the card with the extension's name and icon and merges the list after its built-in one.
+- No host cache, as no built-in has one; concurrent refreshes coalesce per id in `fetchQuotaForProvider` as they do for a built-in.
+- The role keeps nothing on the server: a pause and a removal both only detach. The user's Usage settings for the card (shown in Work Status, selected models) are instance settings keyed by provider id and are kept like a built-in's; the UI narrows its saved list to the providers known now.
+- Runtimes: web and desktop serve the role; hosted mobile draws the card and sets nothing up; VS Code keeps its own provider copy and loads no extensions, so it shows none; a session inside an isolated space has `/api/quota` forwarded to the space's own server (`spaces/dispatcher.js` does not list it as host-only), so it sees that server's built-ins and no extension layer.
+- Enterprise mode: the `service` capability is gated by `allowedExtensions` through the catalog and re-read on every call; an allowed extension receives the listed credentials and no conversation content (`enterprise-mode.js`).
+
+### Why the credential is handed to the service and not proxied
+
+The other service roles keep the token in OpenChamber and give the service a per-call handle, because a forge or a tracker is one origin OpenChamber can pin. A usage API is the extension's own knowledge, a different one per provider, and the credential is OpenCode's, held for the model calls already; a proxy would have to know every provider's API to pin anything. The ticket settled the hand-over instead: the manifest names the providers, the approval dialog shows them, and the server hands only those entries, read through `../opencode/auth.js` like a built-in reads them, never the whole store.
+
+### Why the extension layer answers `Not configured` before calling the service
+
+A built-in answers it from the presence of its key without a request. Calling the service for a provider OpenCode holds no credential for would start a process to learn nothing, and would hand it an empty map it could mistake for a revoked key; the host knows the answer from the same read it hands every built-in.
 
 ## OpenCode Go credential and quota semantics
 

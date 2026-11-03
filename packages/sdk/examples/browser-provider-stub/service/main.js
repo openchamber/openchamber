@@ -167,6 +167,7 @@ var readBrowserProviderRequest = (body) => {
 var SOURCE_CONTROL_PROVIDER_IDLE_MS = 10 * 60000;
 var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
 var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
+var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_FRAME_PATH = "/surface/frame";
 var SURFACE_INPUT_PATH = "/surface/input";

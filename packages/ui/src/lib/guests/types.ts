@@ -10,6 +10,7 @@ import type {
   PublicGuestCapabilities,
   PublicIntegration,
   PublicNotifications,
+  PublicQuota,
   PublicTracker,
   PublicSessionEvents,
   PublicSourceControl,
@@ -65,6 +66,8 @@ export type InstalledGuest = {
   notifications?: PublicNotifications;
   /** The tracker from `contributes.tracker`, when the service provides `tracker`. */
   tracker?: PublicTracker;
+  /** The usage provider from `contributes.quota`, when the service provides `quota`: the OpenCode providers whose credentials it receives. */
+  quota?: PublicQuota;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
   /** Declared `contributes.commands`; the composer routes them only for an active guest. */

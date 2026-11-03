@@ -26,6 +26,7 @@ import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
 import { useSourceControlProviderSync } from '@/hooks/useSourceControlProviderSync';
 import { useTrackerProviderSync } from '@/hooks/useTrackerProviderSync';
+import { useQuotaProviderSync } from '@/hooks/useQuotaProviderSync';
 import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
 import { useLimitFailoverNotices } from '@/hooks/useLimitFailoverNotices';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
@@ -666,6 +667,7 @@ function App({ apis }: AppProps) {
   useBrowserProviderSync();
   useSourceControlProviderSync(apis.sourceControl);
   useTrackerProviderSync(apis.trackers);
+  useQuotaProviderSync();
   useGuestCatalogSync();
   useLimitFailoverNotices();
   useRoutingSync();

@@ -87,6 +87,16 @@ Mettre l'extension en pause retire l'outil de suivi jusqu'à ce que tu la réact
 
 Le SDK OpenChamber contient un exemple fonctionnel, `examples/tracker-provider`, avec un faux outil de suivi à faire tourner à côté. Voir [Créer une extension](/sdk/).
 
+## Une extension comme fournisseur de consommation
+
+Une extension peut ajouter un fournisseur de consommation à côté des fournisseurs intégrés : un fournisseur qu'OpenChamber ne lit pas lui-même, ou un fournisseur à elle. Son dialogue de permissions a alors une ligne qui commence par **Rapporte la consommation comme un fournisseur intégré** et liste les fournisseurs OpenCode dont elle lit les identifiants, comme `openrouter` ; une extension qui n'en liste aucun le dit.
+
+Une fois que tu l'autorises, sa carte se place après les fournisseurs intégrés dans **Réglages → Consommation**, avec le nom et l'icône de l'extension, et elle rejoint les limites de l'en-tête, l'état du travail, le popover du téléphone et la zone de notification du bureau quand tu coches **Afficher dans l'état du travail**, comme n'importe quel fournisseur intégré. À chaque actualisation, OpenChamber remet à l'extension l'identifiant qu'OpenCode conserve pour chaque fournisseur listé, et rien d'autre ; une version qui liste un autre fournisseur redemande ton accord. L'extension lit la consommation elle-même, et OpenChamber la dessine comme celle d'un fournisseur intégré.
+
+Mettre l'extension en pause retire la carte jusqu'à ce que tu la réactives, et tes réglages de consommation pour elle restent. Retirer l'extension retire la carte pour de bon. VS Code n'affiche pas de consommation venant des extensions ; sur le téléphone, la carte s'affiche, et l'extension se configure depuis l'application web ou de bureau. Une session dans un espace isolé lit la consommation sur le serveur propre de cet espace, qui n'a pas d'extensions.
+
+Le SDK OpenChamber contient un exemple fonctionnel, `examples/quota-provider`, avec une fausse API de consommation à faire tourner à côté. Voir [Créer une extension](/sdk/).
+
 ## Connecter son compte
 
 Une extension qui parle à un service reçoit une carte dans **Paramètres → Intégrations** sous **Comptes d’extensions**. Selon le service, la carte demande un jeton d'API, un nom d'utilisateur et un jeton, ou un client id pour une connexion. Choisis **Connecter** ; **Déconnecter** oublie le jeton enregistré. Les champs supplémentaires que l'extension déclare s'enregistrent tout seuls quand tu les quittes.

@@ -5,7 +5,7 @@ let runtimeKey = "url:https://instance-a"
 let isInitialized = true
 const fetched: string[] = []
 
-type StubPayload = { usageDropdownProviders: string[] } | ProviderResult
+type StubPayload = { usageDropdownProviders: string[] } | { providers: string[]; extensions: never[] } | ProviderResult
 let quotaRequestsFail = false
 let quotaFails = false;
 // Holds a quota request open until the test lets it answer.
@@ -28,6 +28,8 @@ mock.module("@/lib/runtime-fetch", () => ({
     fetched.push(path)
     if (quotaRequestsFail) throw new Error("network down")
     if (path.startsWith("/api/config/settings")) return json({ usageDropdownProviders: ["claude"] })
+    // The extensions' usage providers, read beside the settings; none installed here.
+    if (path === "/api/quota/providers") return json({ providers: ["claude"], extensions: [] })
     if (quotaGate) await quotaGate()
     // A reachable instance reporting a provider failure, which is different
     // from the transport failure `quotaRequestsFail` models.
@@ -128,7 +130,7 @@ describe("Usage quotas are loaded once per ready instance", () => {
       useQuotaStore.getState().ensureLoadedForRuntime(),
     ])
 
-    expect(fetched.filter((path) => path.startsWith("/api/quota/"))).toHaveLength(1)
+    expect(fetched.filter((path) => path.startsWith("/api/quota/") && path !== "/api/quota/providers")).toHaveLength(1)
   })
 
   test("a switch drops the previous instance's display settings", async () => {

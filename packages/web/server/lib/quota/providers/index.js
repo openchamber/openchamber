@@ -6,6 +6,8 @@
  */
 
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { isExtensionProviderId } from '../../source-control/provider-id.js';
+import { QuotaRouteError } from '../route-error.js';
 import { buildResult } from '../utils/index.js';
 
 import * as claude from './claude/index.js';
@@ -201,6 +203,32 @@ const registry = {
   }
 };
 
+/**
+ * Usage providers installed extensions serve (`../extension-quotas.js`), after
+ * the built-ins in attach order: `ext-<guestId>` ids only, which no built-in
+ * takes, so an extension can never replace a built-in's entry. A re-attach
+ * (a new version of the extension) keeps the slot's place.
+ */
+const attached = new Map();
+
+export const attachExtensionQuotaProvider = (provider) => {
+  if (!isExtensionProviderId(provider?.providerId)) {
+    throw new Error(`Extension quota registration is invalid (${String(provider?.providerId)}): not an extension provider id`);
+  }
+  attached.set(provider.providerId, provider);
+};
+
+export const detachExtensionQuotaProvider = (providerId) => attached.delete(providerId);
+
+/** What `GET /api/quota/providers` lists of them, for the UI's cards: the id, the name and icon to draw, the extension they come from. */
+export const listExtensionQuotaProviders = () => [...attached.values()].map(({ providerId, providerName, icon, guestId }) => ({
+  id: providerId, name: providerName, icon, guestId,
+}));
+
+// `hasOwn`, so an id such as `constructor` never resolves to the object's own prototype members.
+const providerOf = (providerId) => (Object.hasOwn(registry, providerId) ? registry[providerId] : attached.get(providerId) ?? null);
+const providerEntries = () => [...Object.entries(registry), ...attached.entries()];
+
 const pendingFetches = new Map();
 
 
@@ -213,7 +241,7 @@ export const listConfiguredQuotaProviders = async () => {
   const auth = await readOpenCodeCredentials();
   const configured = [];
 
-  for (const [id, provider] of Object.entries(registry)) {
+  for (const [id, provider] of providerEntries()) {
     try {
       if (provider.isConfigured(auth)) {
         configured.push(id);
@@ -227,7 +255,7 @@ export const listConfiguredQuotaProviders = async () => {
 };
 
 const fetchQuotaForProviderUncoalesced = async (providerId) => {
-  const provider = registry[providerId];
+  const provider = providerOf(providerId);
 
   if (!provider) {
     return buildResult({
@@ -242,6 +270,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   try {
     return await provider.fetchQuota();
   } catch (error) {
+    // The extension layer's own answer for a service reply OpenChamber cannot use: the route answers its status and code.
+    if (error instanceof QuotaRouteError) throw error;
     return buildResult({
       providerId: provider.providerId,
       providerName: provider.providerName,

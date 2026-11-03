@@ -299,6 +299,36 @@ if (url.pathname === TRACKER_PROVIDER_PATH) {
 
 Quando o usuário liga os comentários de sessão, o OpenChamber chama `comments.create` com "session started", "completed" ou "failed" e um link para a sessão, uma vez cada; o comentário não carrega mais nada. O exemplo `tracker-provider` é um rastreador completo com um servidor falso para testá-lo.
 
+## Provedores de uso
+
+Um serviço pode informar o uso ao lado dos provedores integrados: declare `provides: ["quota"]` e liste em `contributes.quota.providers` os provedores do OpenCode cujas credenciais ele precisa. O OpenChamber chama o provedor de `ext-<panel.id>`, desenha o cartão dele com o nome e o ícone da extensão e o consulta como consulta um provedor integrado.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["quota"] },
+"quota": { "providers": ["openrouter"] }
+```
+
+O diálogo de aprovação lista esses provedores, e uma versão que muda a lista pergunta de novo. A cada atualização o OpenChamber envia uma chamada, `usage.read`, para `POST /quota`, com `input.credentials` trazendo a credencial que o OpenCode guarda para cada provedor listado para o qual ele tem uma (uma chave de API, ou os tokens de um login no navegador) e nada mais do armazenamento. Um provedor listado para o qual o OpenCode não guarda credencial aparece como não configurado e o serviço não é chamado; uma lista vazia é permitida, para um provedor cuja chave fica nas configurações da própria extensão.
+
+Leia o corpo com `readQuotaProviderRequest` e responda `{ ok: true, data }` com o resultado que um provedor integrado calcula: `ok`, `configured`, `error`, `planLabel` e `usage.windows` por nome de janela, cada uma com `usedPercent`, `windowSeconds`, `resetAt` (época em milissegundos) e um `valueLabel` ou `value` opcional, mais `usage.models` para as janelas por modelo. O OpenChamber deriva a parte restante, a contagem até o reinício e os textos formatados, então o cartão bate com o de um provedor integrado.
+
+```ts
+import { QUOTA_PROVIDER_PATH, readQuotaProviderRequest } from "@openchamber/sdk";
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === QUOTA_PROVIDER_PATH) {
+  const request = readQuotaProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a usage call" } });
+  const credential = request.input.credentials.openrouter;
+  const bearer = credential.type === "api" ? credential.key : credential.access;
+  const answer = await fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: `Bearer ${bearer}` } });
+  if (answer.status === 401) return json(res, 200, { ok: true, data: { ok: false, configured: true, error: "OpenRouter refused the key.", usage: null } });
+  return json(res, 200, { ok: true, data: toUsage(await answer.json()) });
+}
+```
+
+O serviço responde em 20 s e para depois de dez minutos sem chamada; a página de uso atualiza a cada três minutos enquanto está aberta. O exemplo `quota-provider` é um provedor completo com uma API de uso falsa para testar.
+
 ## Arquivos
 
 Um caminho relativo fica dentro do projeto aberto e precisa da capacidade `files`. Um caminho que começa com `/` ou `~/` precisa bater com um padrão declarado em `contributes.filesystem` e precisa da capacidade `filesystem`. Veja [Crie uma extensão](/sdk/#arquivos) para as regras.

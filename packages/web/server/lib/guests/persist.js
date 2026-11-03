@@ -70,6 +70,10 @@ const capabilityScopeSchema = z.object({
       oauth: z.object({ authorizeUrl: z.string().min(1), tokenUrl: z.string().min(1) }).nullable(),
       urls: z.array(z.string().min(1)),
     }).optional(),
+    // The OpenCode providers a usage provider reads the credentials of (`grant-scope.js`); absent for other services.
+    quota: z.object({
+      providers: z.array(z.string().min(1)),
+    }).optional(),
   }).optional(),
 });
 
