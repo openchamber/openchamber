@@ -450,27 +450,29 @@ describe('the page height', () => {
         expect(sizes).toEqual([200, 349, 200]);
     });
 
-    test.each([0, 10])('keeps a grown box\'s height when measured again before the frame resizes (%ipx scrollbar)', (bar) => {
-        const page = mountPage(undefined, '<div id="screen" style="overflow-y:auto"><div style="height:349px"></div></div>');
-        const { win } = page;
-        const root = win.document.documentElement;
-        const screen = win.document.getElementById('screen');
-        if (!screen) throw new Error('no scroller');
-        Object.defineProperty(win, 'innerHeight', { get: () => 48, configurable: true });
-        Object.defineProperty(root, 'clientHeight', { get: () => 48 - bar, configurable: true });
-        Object.defineProperty(root, 'scrollHeight', { get: () => 48 - bar, configurable: true });
-        root.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 48);
-        Object.defineProperty(screen, 'clientHeight', { get: () => 48, configurable: true });
-        Object.defineProperty(screen, 'scrollHeight', { get: () => 349, configurable: true });
-        screen.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 48);
+    for (const bar of [0, 10]) {
+        test(`keeps a grown box's height when measured again before the frame resizes (${bar}px scrollbar)`, () => {
+            const page = mountPage(undefined, '<div id="screen" style="overflow-y:auto"><div style="height:349px"></div></div>');
+            const { win } = page;
+            const root = win.document.documentElement;
+            const screen = win.document.getElementById('screen');
+            if (!screen) throw new Error('no scroller');
+            Object.defineProperty(win, 'innerHeight', { get: () => 48, configurable: true });
+            Object.defineProperty(root, 'clientHeight', { get: () => 48 - bar, configurable: true });
+            Object.defineProperty(root, 'scrollHeight', { get: () => 48 - bar, configurable: true });
+            root.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 48);
+            Object.defineProperty(screen, 'clientHeight', { get: () => 48, configurable: true });
+            Object.defineProperty(screen, 'scrollHeight', { get: () => 349, configurable: true });
+            screen.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 48);
 
-        // The page's load measures it again while the host has not yet
-        // given the frame the height it reported.
-        win.dispatchEvent(new win.Event('resize'));
-        win.dispatchEvent(new win.Event('load'));
+            // The page's load measures it again while the host has not yet
+            // given the frame the height it reported.
+            win.dispatchEvent(new win.Event('resize'));
+            win.dispatchEvent(new win.Event('load'));
 
-        expect(page.reports.flatMap((report) => (report?.kind === 'size' ? [report.height] : []))).toEqual([349 + bar]);
-    });
+            expect(page.reports.flatMap((report) => (report?.kind === 'size' ? [report.height] : []))).toEqual([349 + bar]);
+        });
+    }
 
     test('settles on one height with content sized to the frame at a fractional display scale', () => {
         // `body{min-height:100vh}` at 175%: the frame snaps to device pixels,
