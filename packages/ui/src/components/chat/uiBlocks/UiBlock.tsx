@@ -1572,6 +1572,12 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
         return;
       }
+      // A reply's fallback Send answers no decision, so it sends without
+      // marking a button as chosen.
+      if (decisions.length === 0) {
+        sendReply(chosen);
+        return;
+      }
       // A press chooses; pressing the chosen button again clears the choice.
       const next = new Map(chosen);
       if (next.get(decision) === button) next.delete(decision);
@@ -1600,11 +1606,21 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
     />
   ) : !disabled ? <NoteToggle onOpen={() => setNoteOpen(true)} /> : null;
   const slot = slotPlace && noteElement ? { ...slotPlace, element: noteElement } : null;
-  const canSendChosen = host.kind === 'reply' && !sent && chosen.size > 0 && (chosen.size < decisions.length || failed);
-  // Only a press answers a page, so a waiting form the agent gave no button
-  // gets one; without it the user could not answer at all.
-  const sendButton = host.kind === 'page' && complete && decisions.length === 0 && Boolean(host.submit || sent)
-    ? { label: host.answered?.button ?? t('chat.uiBlock.send'), variant: 'primary' }
+  const canSendChosen = host.kind === 'reply' && decisions.length > 0 && !sent && chosen.size > 0
+    && (chosen.size < decisions.length || failed);
+  // Only a press sends a form's fields, so a form the agent gave no button
+  // gets one: without it a waiting page could not be answered at all, and a
+  // reply's fields would reach the agent nowhere. It goes through the same
+  // press path, so a reply sends them as an answer with no picks.
+  const fieldsOnly = complete && decisions.length === 0 && (host.kind === 'page' || fields.length > 0);
+  // A reply's Send is its whole answer: an empty one says nothing and freezes
+  // the block, so it waits for a filled field and goes away once sent. A page
+  // keeps the button, which carries what was pressed.
+  const canSendFields = host.kind === 'page'
+    ? Boolean(host.submit || sent)
+    : Boolean(host.submit) && !sent && fields.some((field) => String(answerValues[field.name] ?? '').trim() !== '');
+  const sendButton = fieldsOnly && canSendFields
+    ? { label: (host.kind === 'page' ? host.answered?.button : null) ?? t('chat.uiBlock.send'), variant: 'primary' }
     : null;
   const fallback = <NotDrawn source={source} errors={notDrawnErrors ?? []} />;
   if (parsed.kind === 'invalid') return fallback;
@@ -1626,9 +1642,9 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         </FormContext.Provider>
       ) : null}
       {/* A block that sends keeps one line for what happened, so the reply does not jump. */}
-      {decisions.length > 0 && host.kind === 'reply' && (host.submit || sent) ? (
+      {host.kind === 'reply' && (decisions.length > 0 || fieldsOnly) && (host.submit || sent) ? (
         <div className="mt-1 flex min-h-6 items-center gap-2 typography-meta text-muted-foreground" aria-live="polite" data-export-ignore>
-          {failed ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
+          {failed && (canSendFields || canSendChosen) ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
             : sent ? <span>{t('chat.uiBlock.sent')}</span>
               : chosen.size > 0 && decisions.length > 1
                 ? <span>{t('chat.uiBlock.chosenCount', { count: chosen.size, total: decisions.length })}</span>
