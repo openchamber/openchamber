@@ -63,16 +63,75 @@ describe('work.name', () => {
     expect(await renamedLater.namer.name({ sessionId: 's', title: 'Agent 2' })).toMatchObject({ named: false, title: 'Renamed' });
   });
 
-  it('stops at an origin in another folder and refuses an empty title', async () => {
+  it('names a plain fork itself, not the session it forked from', async () => {
+    const { namer, records, renameSession } = setup({
+      sessions: [
+        { id: 'root', title: 'Connect stall', location: { directory: '/repo' } },
+        { id: 'fork', title: 'Connect stall (fork #1)', location: { directory: '/repo' }, fork: { sessionID: 'root' } },
+      ],
+    });
+
+    expect(await namer.name({ sessionId: 'fork', title: 'Reconnect loop' })).toEqual({ task: 'session', sessionId: 'fork', title: 'Reconnect loop', named: true });
+    expect(renameSession).toHaveBeenCalledWith('fork', 'Reconnect loop', '/repo');
+    expect(records.get('root').title).toBe('Connect stall');
+    expect(records.get('root').metadata).toBeUndefined();
+  });
+
+  it('walks from a /btw side conversation to the session it was typed into', async () => {
+    const { namer, renameSession } = setup({
+      sessions: [
+        { id: 'parent', title: 'Connect stall', location: { directory: '/repo' } },
+        { id: 'btw', title: 'Btw', location: { directory: '/repo' }, fork: { sessionID: 'parent' }, metadata: { openchamber: { kind: 'btw', originalSessionID: 'parent' } } },
+      ],
+    });
+
+    expect(await namer.name({ sessionId: 'btw', title: 'Reconnect loop' })).toMatchObject({ sessionId: 'parent', named: true });
+    expect(renameSession).toHaveBeenCalledWith('parent', 'Reconnect loop', '/repo');
+  });
+
+  it('walks from a promoted /btw session through its fork source', async () => {
+    const { namer, renameSession } = setup({
+      sessions: [
+        { id: 'parent', title: 'Connect stall', location: { directory: '/repo' } },
+        { id: 'promoted', title: 'Promoted', location: { directory: '/repo' }, fork: { sessionID: 'parent' }, metadata: { openchamber: { btwPromoted: true } } },
+      ],
+    });
+
+    expect(await namer.name({ sessionId: 'promoted', title: 'Reconnect loop' })).toMatchObject({ sessionId: 'parent', named: true });
+    expect(renameSession).toHaveBeenCalledWith('parent', 'Reconnect loop', '/repo');
+  });
+
+  it('names the run that spawned a subagent', async () => {
+    const { namer, renameSession } = setup({
+      sessions: [
+        { id: 'parent', title: 'Connect stall', location: { directory: '/repo' } },
+        { id: 'child', title: 'Explore the relay', location: { directory: '/repo' }, parentID: 'parent' },
+      ],
+    });
+
+    expect(await namer.name({ sessionId: 'child', title: 'Reconnect loop' })).toMatchObject({ sessionId: 'parent', named: true });
+    expect(renameSession).toHaveBeenCalledWith('parent', 'Reconnect loop', '/repo');
+  });
+
+  it('stops at a /btw origin in another folder', async () => {
     const { namer, renameSession } = setup({
       sessions: [
         { id: 'origin', title: 'Origin', location: { directory: '/elsewhere' } },
-        { id: 'fork', title: 'Fork', location: { directory: '/repo' }, fork: { sessionID: 'origin' } },
+        { id: 'btw', title: 'Btw', location: { directory: '/repo' }, fork: { sessionID: 'origin' }, metadata: { openchamber: { kind: 'btw', originalSessionID: 'origin' } } },
       ],
     });
-    expect(await namer.name({ sessionId: 'fork', title: 'Own task' })).toMatchObject({ sessionId: 'fork', named: true });
-    expect(renameSession).toHaveBeenCalledWith('fork', 'Own task', '/repo');
-    await expect(namer.name({ sessionId: 'fork', title: '  ' })).rejects.toMatchObject({ status: 400 });
+
+    expect(await namer.name({ sessionId: 'btw', title: 'Own task' })).toMatchObject({ sessionId: 'btw', named: true });
+    expect(renameSession).toHaveBeenCalledWith('btw', 'Own task', '/repo');
+  });
+
+  it('refuses an empty title', async () => {
+    const { namer, renameSession } = setup({
+      sessions: [{ id: 's', title: 'Untitled', location: { directory: '/repo' } }],
+    });
+
+    await expect(namer.name({ sessionId: 's', title: '  ' })).rejects.toMatchObject({ status: 400 });
+    expect(renameSession).not.toHaveBeenCalled();
   });
 
   describe('a placeholder branch', () => {

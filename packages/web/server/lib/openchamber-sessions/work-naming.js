@@ -4,10 +4,11 @@
  *
  * A task is what the sidebar lists as one entry: a linked worktree with all
  * its sessions, or a session in the main checkout together with the sessions
- * that grew out of it there (an auto-review, a fork). A worktree's name is its branch description (see
- * `setWorktreeTaskTitle` in `lib/git`); a main-checkout task's name is its
- * root session's title, with `metadata.openchamber.workTitle` recording who
- * gave it.
+ * that grew out of it there (an auto-review, a `/btw` side conversation). A
+ * plain fork in the main checkout is a work of its own, so it names itself. A
+ * worktree's name is its branch description (see `setWorktreeTaskTitle` in
+ * `lib/git`); a main-checkout task's name is its root session's title, with
+ * `metadata.openchamber.workTitle` recording who gave it.
  *
  * A name the user gave wins. The agent's call then changes nothing and answers
  * with the current name, so it can stop asking.
@@ -25,7 +26,7 @@
 import { z } from 'zod';
 
 const TITLE_MAX_LENGTH = 120;
-// Origins chain (a review of a fork of a fork); recorded
+// Origins chain (a review of a `/btw` side conversation); recorded
 // metadata can loop, so the walk to the task's root session is bounded.
 const MAX_ORIGIN_DEPTH = 16;
 
@@ -38,13 +39,21 @@ const directoryOf = (session) => asText(session?.location?.directory) || asText(
 
 const normalizeDirectory = (value) => asText(value).replace(/\\/g, '/').replace(/\/+$/, '');
 
-/** The session this one grew out of, as the sidebar nests it (`lib/sessionWorkLineage.ts`). */
+/**
+ * The session this one grew out of, as the sidebar nests it
+ * (`lib/sessionWorkLineage.ts`): a review and a `/btw` side conversation nest
+ * under the session they grew out of, while a plain fork is a work of its own.
+ */
 const originOf = (session) => {
   const parentID = asText(session?.parentID);
   if (parentID) return parentID;
   const openchamber = openchamberOf(session);
-  if (openchamber.kind === 'review' && asText(openchamber.originalSessionID)) return asText(openchamber.originalSessionID);
-  return asText(session?.fork?.sessionID) || null;
+  const originalSessionID = asText(openchamber.originalSessionID);
+  if ((openchamber.kind === 'review' || openchamber.kind === 'btw') && originalSessionID) {
+    return originalSessionID;
+  }
+  if (openchamber.btwPromoted === true) return asText(session?.fork?.sessionID) || null;
+  return null;
 };
 
 const workTitleSchema = z.object({ title: z.string().trim().min(1), by: z.string().optional() });
