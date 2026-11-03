@@ -214,7 +214,7 @@ export function NewWorktreeDialog({
   const canFetchBranches = Boolean(projectDirectory && git);
   const handleFetchBranches = React.useCallback(() => {
     if (!projectDirectory || !git) return;
-    void fetchBranches(projectDirectory, git);
+    void fetchBranches(projectDirectory, git, { remote: 'live' });
   }, [projectDirectory, git, fetchBranches]);
 
   React.useEffect(() => {

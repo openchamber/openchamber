@@ -82,13 +82,26 @@ describe('useFileSearchStore', () => {
     searchRequests[0].resolve([]);
     expect(await hidden).toHaveLength(1);
 
-    const ordinary = useFileSearchStore.getState().searchFiles('/project', 'hidden');
-    searchRequests[1].resolve([]);
-    expect(await ordinary).toEqual([]);
+    expect(await useFileSearchStore.getState().searchFiles('/project', 'hidden')).toEqual([]);
     const directories = useFileSearchStore.getState().searchFiles('/project', 'hidden', 60, { includeHidden: true, type: 'directory' });
-    searchRequests[2].resolve([{ path: '/project/folder' }]);
+    searchRequests[1].resolve([{ path: '/project/folder' }]);
     expect(await directories).toEqual([{ path: '/project/folder' }]);
     expect(runtimeSearchCalls).toHaveLength(1);
+  });
+
+  test('shows the plain search before the supplement answers, with one indexed request between them', async () => {
+    const runtimeAnswer = createDeferred<Array<{ path: string; preview: string[] }>>();
+    runtimeSearch = mock(() => runtimeAnswer.promise);
+    const full = useFileSearchStore.getState().searchFiles('/project', 'x', 60, { includeHidden: true });
+    const plain = useFileSearchStore.getState().searchFiles('/project', 'x', 60);
+    expect(searchRequests).toHaveLength(1);
+
+    const indexed = [{ path: '/project/x.ts' }];
+    searchRequests[0].resolve(indexed);
+    expect(await plain).toEqual(indexed);
+
+    runtimeAnswer.resolve([{ path: '/project/.x.ts', preview: ['.x.ts'] }]);
+    expect((await full).map((file) => file.path)).toEqual(['/project/x.ts', '/project/.x.ts']);
   });
 
   test('preserves indexed hits, reports supplemental failure and retries without caching partial results', async () => {
@@ -101,14 +114,15 @@ describe('useFileSearchStore', () => {
       searchRequests[0].resolve(indexed);
       expect(await pending).toEqual(indexed);
       expect(warning.mock.calls).toEqual([['Supplemental file search failed; keeping indexed results:', error]]);
-      expect(useFileSearchStore.getState().cache).toEqual({});
+      // Only the plain search's own answer is kept; the partial one is not.
+      expect(Object.keys(useFileSearchStore.getState().cache)).toHaveLength(1);
       expect(useFileSearchStore.getState().inFlight).toEqual({});
 
       runtimeSearch = mock(async () => [{ path: '/project/.x.ts', preview: ['.x.ts'] }]);
       const retry = useFileSearchStore.getState().searchFiles('/project', 'x', 60, { includeHidden: true });
-      searchRequests[1].resolve(indexed);
       expect(await retry).toHaveLength(2);
-      expect(Object.values(useFileSearchStore.getState().cache)).toHaveLength(1);
+      expect(searchRequests).toHaveLength(1);
+      expect(Object.keys(useFileSearchStore.getState().cache)).toHaveLength(2);
     } finally {
       warning.mockRestore();
     }

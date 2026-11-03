@@ -991,13 +991,17 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         ),
     );
     const hasRenderableSessionSnapshot = useSessionRenderable(currentSessionId ?? '', effectiveSessionDirectory);
-    // Messages from sync system.
+    const isPageWaiting = useIsPageWaiting(currentSessionId);
+    // Messages from sync system. Only the live tail overlays a suspended
+    // message's newest parts, so a page held back in its record is lost to
+    // whatever reads the record: an opened Activity builds its rows from it.
+    // Nothing is suspended while a call waits for the user.
+    const suspendedMessageId = isPageWaiting ? null : streamingMessageId;
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', effectiveSessionDirectory, {
         enabled: active,
-        suspendPartUpdates: Boolean(streamingMessageId),
-        suspendPartUpdatesForMessageId: streamingMessageId,
+        suspendPartUpdates: Boolean(suspendedMessageId),
+        suspendPartUpdatesForMessageId: suspendedMessageId,
     });
-    const isPageWaiting = useIsPageWaiting(currentSessionId);
     const sessionMessages = React.useMemo(() => {
         if (!currentSessionId) return EMPTY_MESSAGES;
         return isPageWaiting ? holdPendingSynthetic(sessionMessageRecords) : sessionMessageRecords;
