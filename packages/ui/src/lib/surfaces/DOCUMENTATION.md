@@ -123,7 +123,8 @@ keep the full height). The chat is always the centre and cannot move.
   the chat keeps and leaves the docked size alone, so the docked and the
   expanded zone each keep the size the user gave them. The chat's size is
   stored, not the zone's, so a wider window goes to the zone. `Mod+Shift+F`
-  (`toggle_context_panel_expanded`, also the desktop View menu) expands the
+  (`toggle_context_panel_expanded`, also the desktop View menu; a no-op in
+  VS Code, which renders no context panel) expands the
   zone holding focus, else the first one on screen, else opens the right one
   expanded, and collapses an expanded one (`lib/workspace/toggleExpandedZone.ts`).
   The session sidebar folds while a zone is expanded, so the chat column

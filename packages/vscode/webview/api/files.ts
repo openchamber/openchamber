@@ -1,12 +1,11 @@
 import type {
-  CommandExecResult,
   DirectoryListResult,
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
 } from '@openchamber/ui/lib/api/types';
 
-import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
+import { sendBridgeMessage } from './bridge';
 
 const normalizePath = (value: string): string => value.replace(/\\/g, '/');
 
@@ -82,20 +81,6 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async delete(path: string): Promise<{ success: boolean }> {
-    const target = normalizePath(path);
-    const data = await sendBridgeMessage<{ success: boolean }>('api:fs:delete', { path: target });
-    return { success: Boolean(data?.success) };
-  },
-
-  async rename(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }> {
-    const data = await sendBridgeMessage<{ success: boolean; path: string }>('api:fs:rename', { oldPath, newPath });
-    return {
-      success: Boolean(data?.success),
-      path: typeof data?.path === 'string' ? normalizePath(data.path) : newPath,
-    };
-  },
-
   async readFile(path: string): Promise<{ content: string; path: string }> {
     const target = normalizePath(path);
     const data = await sendBridgeMessage<{ content: string; path: string }>('api:fs:read', { path: target });
@@ -105,32 +90,10 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
-    const target = normalizePath(path);
-    const data = await sendBridgeMessage<{ success: boolean; path: string }>('api:fs:write', { path: target, content });
-    return {
-      success: Boolean(data?.success),
-      path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
-    };
-  },
-
   async revealPath(path: string): Promise<{ success: boolean }> {
     const target = normalizePath(path);
     const data = await sendBridgeMessage<{ success?: boolean }>('api:fs:reveal', { path: target });
     return { success: Boolean(data?.success) };
-  },
-
-  async execCommands(commands: string[], cwd: string): Promise<{ success: boolean; results: CommandExecResult[] }> {
-    const targetCwd = normalizePath(cwd);
-    const data = await sendBridgeMessageWithOptions<{ success: boolean; results?: CommandExecResult[] }>('api:fs:exec', {
-      commands,
-      cwd: targetCwd,
-    }, { timeoutMs: 300000 });
-
-    return {
-      success: Boolean(data?.success),
-      results: Array.isArray(data?.results) ? data.results : [],
-    };
   },
 
   async downloadFile(path: string): Promise<void> {

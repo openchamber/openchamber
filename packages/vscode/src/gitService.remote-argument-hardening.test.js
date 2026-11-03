@@ -9,7 +9,7 @@ mock.module('vscode', () => ({
   Uri: { file: (fsPath) => ({ fsPath }) },
 }));
 
-const { createWorktree, deleteRemoteBranch, getWorktreeBootstrapStatus, gitFetch, gitPull, gitPush, removeRemote, validateWorktreeCreate } = await import('./gitService.ts?remote-argument-hardening-test');
+const { createWorktree, deleteRemoteBranch, getWorktreeBootstrapStatus, removeRemote, validateWorktreeCreate } = await import('./gitService.ts?remote-argument-hardening-test');
 
 const OPTION_LIKE_REMOTE = '--mirror';
 
@@ -134,43 +134,6 @@ describe('VS Code git remote arguments with option-like names', () => {
     });
   }, 30_000);
 
-  it('fetches from an option-like remote through the raw fallback', async () => {
-    if (!canRunGit()) return;
-
-    const { remote, repository } = createRepositoryWithRemote();
-    addOptionLikeRemote(repository, remote, { fetch: false });
-
-    const result = await gitFetch(repository, { remote: OPTION_LIKE_REMOTE });
-
-    expect(result.success).toBe(true);
-    const expected = runGit(remote, ['rev-parse', 'main']).trim();
-    expect(runGit(repository, ['rev-parse', `refs/remotes/${OPTION_LIKE_REMOTE}/main`]).trim()).toBe(expected);
-  }, 30_000);
-
-  it('pulls from a normal remote through the raw fallback', async () => {
-    if (!canRunGit()) return;
-
-    const { remote, repository } = createRepositoryWithRemote();
-    const scratch = createTempDir();
-    runGit(scratch, ['clone', '--quiet', remote, '.']);
-    runGit(scratch, ['config', 'user.email', 'test@example.com']);
-    runGit(scratch, ['config', 'user.name', 'Test']);
-    fs.writeFileSync(path.join(scratch, 'NEXT.md'), '# next\n');
-    runGit(scratch, ['add', 'NEXT.md']);
-    runGit(scratch, ['commit', '-m', 'next']);
-    const remoteHead = runGit(scratch, ['rev-parse', 'HEAD']).trim();
-    runGit(scratch, ['push', 'origin', 'HEAD:main']);
-
-    const result = await gitPull(repository, {
-      remote: 'origin',
-      branch: 'main',
-      rebase: true,
-    });
-
-    expect(result.success).toBe(true);
-    expect(runGit(repository, ['rev-parse', 'HEAD']).trim()).toBe(remoteHead);
-  }, 30_000);
-
   it('validates a start ref and upstream on an option-like remote', async () => {
     if (!canRunGit()) return;
 
@@ -259,28 +222,27 @@ describe('VS Code git remote arguments with option-like names', () => {
     expect(runGit(repository, ['remote']).split('\n').map((line) => line.trim())).not.toContain(OPTION_LIKE_REMOTE);
   }, 30_000);
 
-  it('pushes to and deletes a branch on an option-like remote instead of reading it as an option', async () => {
+  it('deletes a branch on an option-like remote instead of reading it as an option', async () => {
     if (!canRunGit()) return;
 
     const { remote, repository } = createRepositoryWithRemote();
     addOptionLikeRemote(repository, remote);
     runGit(repository, ['checkout', '-b', 'feature/option-like-push']);
 
-    await gitPush(repository, { remote: OPTION_LIKE_REMOTE, branch: 'feature/option-like-push' });
-    expect(runGit(remote, ['branch', '--list', 'feature/option-like-push']).trim()).toContain('feature/option-like-push');
+    runGit(repository, ['push', '--', OPTION_LIKE_REMOTE, 'feature/option-like-push']);
+    expect(runGit(repository, ['ls-remote', '--heads', remote, 'feature/option-like-push']).trim()).toContain('feature/option-like-push');
 
     const deleted = await deleteRemoteBranch(repository, 'feature/option-like-push', OPTION_LIKE_REMOTE);
     expect(deleted.success).toBe(true);
-    expect(runGit(remote, ['branch', '--list', 'feature/option-like-push']).trim()).toBe('');
+    expect(runGit(repository, ['ls-remote', '--heads', remote, 'feature/option-like-push']).trim()).toBe('');
   }, 30_000);
 
-  it("refuses to delete the branch the remote's HEAD names", async () => {
+  it('refuses to delete the default branch of the remote', async () => {
     if (!canRunGit()) return;
 
     const { remote, repository } = createRepositoryWithRemote();
-    runGit(remote, ['config', 'receive.denyDeleteCurrent', 'ignore']);
 
-    await expect(deleteRemoteBranch(repository, 'main', 'origin')).rejects.toThrow("The remote's default branch can't be deleted");
-    expect(runGit(remote, ['branch', '--list', 'main']).trim()).toContain('main');
+    await expect(deleteRemoteBranch(repository, 'main', 'origin')).rejects.toThrow("default branch can't be deleted");
+    expect(runGit(repository, ['ls-remote', '--heads', remote, 'main']).trim()).toContain('main');
   }, 30_000);
 });
