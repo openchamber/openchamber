@@ -83,7 +83,7 @@ import { MobileModelButton } from './MobileModelButton';
 import { MobileEffortButton } from './MobileEffortButton';
 import { cycleThinkingVariant } from '@/lib/cycleThinkingVariant';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
-import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { useIsPageWaiting } from '@/sync/global-blocking-requests';
 import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
 import { getSettingsSurface } from '@/lib/settings/surface';
@@ -1586,10 +1586,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // cannot end, so a queued message would never go out. The message is sent
     // at once instead: OpenCode hands it to the agent's plugin, which ends the
     // wait, and the agent reads the message next.
-    const isPageWaiting = useGlobalBlockingRequestsStore(React.useCallback(
-        (state) => Boolean(currentSessionId && state.bySession.get(currentSessionId)?.pages.length),
-        [currentSessionId],
-    ));
+    const isPageWaiting = useIsPageWaiting(currentSessionId);
 
     // Reads the text through refs, so the send and queue callbacks built on
     // it keep their identity while the user types.
