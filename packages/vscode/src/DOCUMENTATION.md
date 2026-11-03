@@ -304,9 +304,9 @@ every surface reached only through those is unreachable.
 | Worktrees | PARTIAL | Create/remove reachable via `SessionSidebar` → `NewWorktreeDialog` and `sessionWorktreeMenu`. `WorktreesView` is `MainLayout`-only |
 | Git | PARTIAL | Read-only status and branches via `useGitStore` in `SessionSidebar`, `ChatInput`, `WorkStatusPrimaryGroup`. Stage, commit, push, history, merge and rebase live in `GitView` + `views/git/*`, cut off with `ContextPanel`; the bridge has no handlers for them and the shared Git API rejects them as unsupported |
 | Voice / dictation | PARTIAL | `ComposerDictation` renders in `ChatInput`; the `voice` settings page is VS Code-gated |
-| Command palette | NOT MOUNTED | `CommandPalette` renders only in `MainLayout`; `useKeyboardShortcuts` gates `open_command_palette` off in the VS Code runtime, so the keystroke stays with VS Code's own command palette |
+| Command palette | NOT MOUNTED | `CommandPalette` renders only in `MainLayout`; `useKeyboardShortcuts` gates `open_command_palette` off in the VS Code runtime, so Cmd/Ctrl+P stays with VS Code's own Quick Open |
 | ContextPanel / project context (notes, todos, plans tabs) | NOT MOUNTED | `ContextPanel`, `ContextPanelRail`, `RightSidebarTabs` imported only by `MainLayout` and `MobileWorkspaceDrawer` |
-| Terminal | NOT MOUNTED | `TerminalView` imported only by `ContextPanel` and `MobileWorkspaceDrawer`. `webview/api/index.ts` ships `createStubTerminalAPI()` whose every method throws unsupported; `useKeyboardShortcuts` gates `toggle_terminal` off in the VS Code runtime, leaving the keystroke to VS Code's own terminal |
+| Terminal | NOT MOUNTED | `TerminalView` imported only by `ContextPanel` and `MobileWorkspaceDrawer`. `webview/api/index.ts` ships `createStubTerminalAPI()` whose every method throws unsupported; `useKeyboardShortcuts` gates `toggle_terminal` off in the VS Code runtime, leaving Cmd/Ctrl+J to VS Code, which toggles its bottom panel on whichever tab was last open |
 | Files view | NOT MOUNTED | lazy `FilesView` in `ContextPanel`; `SidebarFilesTree` is `MainLayout`-only |
 | Diff view | NOT MOUNTED | lazy `DiffView` in `ContextPanel` |
 | Git view | NOT MOUNTED | lazy `GitView` in `ContextPanel` |
@@ -323,8 +323,8 @@ every surface reached only through those is unreachable.
 
 No mounted VS Code surface reaches these: `api:git/*` commit, history, merge,
 rebase, network-write, diff and identity write handlers were removed with
-their surfaces, and the filesystem write handlers (`api:fs:write`,
-`api:fs:rename`, `api:fs:delete`) belong to `FilesView`, `SidebarFilesTree`
+their surfaces, as were the filesystem write handlers (`api:fs:write`,
+`api:fs:rename`, `api:fs:delete`) that served `FilesView`, `SidebarFilesTree`
 and `PlanView`, which never mount here.
 
 Reachable filesystem routes: `api:fs:read` (attachments), `api:fs:search`
