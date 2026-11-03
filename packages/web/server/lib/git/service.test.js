@@ -825,10 +825,8 @@ describe.runIf(canRunGit())('diff output with diff.external configured', () => {
     expect(range).not.toContain('EXTERNAL-DIFF-OUTPUT');
   });
 
-  it('keeps a/ and b/ header prefixes when diff.mnemonicPrefix and diff.noprefix are enabled', async () => {
+  it('keeps a/ and b/ header prefixes when diff.mnemonicPrefix or diff.noprefix is enabled', async () => {
     const { tmpDir, git } = await createTempRepo();
-    runGit(tmpDir, ['config', 'diff.mnemonicPrefix', 'true']);
-    runGit(tmpDir, ['config', 'diff.noprefix', 'true']);
     await writeFile(tmpDir, 'file.txt', 'one\n');
     await git.add('file.txt');
     await git.commit('Initial');
@@ -841,23 +839,32 @@ describe.runIf(canRunGit())('diff output with diff.external configured', () => {
     await writeFile(tmpDir, 'file.txt', 'three\n');
     await writeFile(tmpDir, 'new.txt', 'untracked\n');
 
-    const workingDiff = await getDiff(tmpDir, { path: 'file.txt' });
-    expect(workingDiff).toContain('diff --git a/file.txt b/file.txt');
-
-    const rangeDiff = await getRangeDiff(tmpDir, { base: 'base-branch', head: 'head-branch' });
-    expect(rangeDiff).toContain('diff --git a/file.txt b/file.txt');
-
-    const commitDiff = await getCommitDiff(tmpDir, { hash: commitHash });
-    expect(commitDiff).toContain('diff --git a/file.txt b/file.txt');
-
-    for (const [source, expectedPaths] of [
-      [{ kind: 'working-tree', scope: 'all' }, ['file.txt', 'new.txt']],
-      [{ kind: 'branch', baseRef: 'base-branch', headRef: 'head-branch' }, ['file.txt', 'new.txt']],
-      [{ kind: 'commit', hash: commitHash }, ['file.txt']],
+    // Verify diff.mnemonicPrefix alone first (where git would emit c/, w/, and i/
+    // prefixes), then with diff.noprefix enabled on top (where noprefix wins).
+    for (const [key, value] of [
+      ['diff.mnemonicPrefix', 'true'],
+      ['diff.noprefix', 'true'],
     ]) {
-      const { sections } = await loadSourceSections(tmpDir, source);
-      const files = sections.flatMap((section) => parseDiffFiles(section.patch, section.scope).files);
-      expect(files.map((file) => file.path)).toEqual(expectedPaths);
+      runGit(tmpDir, ['config', key, value]);
+
+      const workingDiff = await getDiff(tmpDir, { path: 'file.txt' });
+      expect(workingDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      const rangeDiff = await getRangeDiff(tmpDir, { base: 'base-branch', head: 'head-branch' });
+      expect(rangeDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      const commitDiff = await getCommitDiff(tmpDir, { hash: commitHash });
+      expect(commitDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      for (const [source, expectedPaths] of [
+        [{ kind: 'working-tree', scope: 'all' }, ['file.txt', 'new.txt']],
+        [{ kind: 'branch', baseRef: 'base-branch', headRef: 'head-branch' }, ['file.txt', 'new.txt']],
+        [{ kind: 'commit', hash: commitHash }, ['file.txt']],
+      ]) {
+        const { sections } = await loadSourceSections(tmpDir, source);
+        const files = sections.flatMap((section) => parseDiffFiles(section.patch, section.scope).files);
+        expect(files.map((file) => file.path)).toEqual(expectedPaths);
+      }
     }
   });
 });
