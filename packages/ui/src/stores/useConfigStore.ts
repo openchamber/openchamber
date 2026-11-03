@@ -7,7 +7,8 @@ import { devtools, persist } from "zustand/middleware";
 import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
 import type { DesktopSettings } from "@/lib/desktop";
 import type { CatalogKind } from "@/lib/opencode/events";
-import { OpencodeApiError, opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { isLocationNotFoundError } from "@/lib/opencode/location-errors";
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
@@ -1254,10 +1255,6 @@ const _agentsLoadErrors = new Map<string, Error>();
 // OpenCode cannot open the directory at all (deleted, or a path it cannot
 // resolve). Retrying gives the same answer, and startup treats the project like
 // one whose folder is gone.
-const isLocationNotFound = (error: Error | undefined): boolean => (
-    error instanceof OpencodeApiError && error.tag === 'LocationNotFoundError'
-);
-
 const clearProjectConfigError = (directoryKey: string): void => {
     if (!useConfigStore.getState().projectConfigErrors[directoryKey]) return;
     useConfigStore.setState((state) => {
@@ -3324,7 +3321,7 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                             // A rejected project config fails the same way until the
                             // user edits the file; retrying only delays the message.
-                            if (readProjectConfigError(error) || (error instanceof Error && isLocationNotFound(error))) break;
+                            if (readProjectConfigError(error) || (error instanceof Error && isLocationNotFoundError(error))) break;
                             const waitMs = 200 * (attempt + 1);
                             await new Promise((resolve) => setTimeout(resolve, waitMs));
                             if (!isCurrentAgentLoad()) return false;
@@ -4518,7 +4515,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 const configError = get().projectConfigErrors[configDirectoryKey];
                                 if (configError) {
                                     markStartupTrace('initializeApp:projectConfigInvalid', { configDirectoryKey, name: configError.name });
-                                } else if (isLocationNotFound(_agentsLoadErrors.get(configDirectoryKey))
+                                } else if (isLocationNotFoundError(_agentsLoadErrors.get(configDirectoryKey))
                                     || await opencodeClient.getDirectoryAvailability(configDirectory) === 'missing') {
                                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                                     markStartupTrace('initializeApp:projectDirectoryMissing', { configDirectoryKey });

@@ -1240,7 +1240,7 @@ metadata and the next authoritative load reconciles it.
 
 ### Missing worktree directories
 
-Existing sessions keep their directory when a worktree disappears. Session activation makes no directory-availability probe, and terminal failures and archive restoration never move sessions. Manual movement still goes through `moveSessionToDirectory`. Worktree deletion still archives its sessions before removing the worktree. Missing-worktree groups stay visible with a warning so users can choose either action.
+Existing sessions keep their directory when a worktree disappears. Session activation makes no directory-availability probe, and terminal failures and archive restoration never move sessions. Manual movement still goes through `moveSessionToDirectory`; for a session outside any worktree the composer's row and Move session… are that manual way. Worktree deletion still archives its sessions before removing the worktree. Missing-worktree groups stay visible with a warning so users can choose either action.
 
 After a restore succeeds while its captured runtime is still current, the
 action promotes the session through the ordering-only restore entry point. That

@@ -57,8 +57,8 @@ export type SessionTreeMoveIntent =
       messages: SessionTreeMoveMessages;
     }
   | {
-      // A chat promoted into a project: the conversation moves to the
-      // project's root folder; files the chat wrote stay where they are.
+      // The conversation moves to a folder the user picked, usually a
+      // project's root; files the session wrote stay where they are.
       kind: 'project';
       root: Session;
       descendants: Session[];

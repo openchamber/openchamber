@@ -12,6 +12,7 @@
  * here when they are part of the same directory/session workflows.
  */
 
+import { isLocationNotFoundError } from "./location-errors"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
 import type {
   FileDiffInfo,
@@ -1055,6 +1056,24 @@ class OpencodeService {
       return "unknown"
     }
     return readDirectoryAvailability(normalized)
+  }
+
+  /**
+   * Whether OpenCode itself can no longer work in a folder. The stat above runs
+   * on OpenChamber's machine, which is not OpenCode's when `OPENCODE_HOST` names
+   * another one, so only OpenCode's refusal makes a folder missing. The stat
+   * comes first: a folder that is there never takes this read, and the refused
+   * read starts nothing.
+   */
+  async getLocationAvailability(directory: string): Promise<DirectoryAvailability> {
+    const stat = await this.getDirectoryAvailability(directory)
+    if (stat !== "missing") return stat
+    try {
+      await this.listAgents(directory)
+      return "available"
+    } catch (error) {
+      return error instanceof Error && isLocationNotFoundError(error) ? "missing" : "unknown"
+    }
   }
 
   // -------------------------------------------------------------------------
