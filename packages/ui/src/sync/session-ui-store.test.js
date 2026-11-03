@@ -2935,3 +2935,44 @@ describe('send does not wait for session knowledge before showing the message', 
     }
   });
 });
+
+describe('setSessionDirectory and the model list', () => {
+  const originalLoaded = useConfigStore.getState().providersLoaded;
+  const originalProjects = useProjectsStore.getState().projects;
+  const originalDirectory = useDirectoryStore.getState().currentDirectory;
+  const originalClientDirectory = opencodeClient.getDirectory();
+
+  beforeEach(() => {
+    useDirectoryStore.setState({ currentDirectory: '/projects/gone' });
+    useProjectsStore.setState({ projects: [{ id: 'gone', path: '/projects/gone' }, { id: 'hortai', path: '/projects/hortai' }] });
+    useSessionUIStore.setState({ currentSessionId: 'session-a', currentSessionDirectory: '/projects/gone' });
+  });
+
+  afterEach(() => {
+    useConfigStore.setState({ providersLoaded: originalLoaded });
+    useProjectsStore.setState({ projects: originalProjects });
+    useDirectoryStore.setState({ currentDirectory: originalDirectory });
+    opencodeClient.setDirectory(originalClientDirectory);
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null });
+  });
+
+  test('a session that never loaded the model list takes the new folder for it', () => {
+    useConfigStore.setState({ providersLoaded: false });
+    useSessionUIStore.getState().setSessionDirectory('session-a', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/hortai');
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/projects/hortai');
+  });
+
+  test('a loaded model list stays, and with it the model of the session', () => {
+    useConfigStore.setState({ providersLoaded: true });
+    useSessionUIStore.getState().setSessionDirectory('session-a', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/gone');
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/projects/hortai');
+  });
+
+  test('another session changes nothing', () => {
+    useConfigStore.setState({ providersLoaded: false });
+    useSessionUIStore.getState().setSessionDirectory('session-b', '/projects/hortai');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/projects/gone');
+  });
+});

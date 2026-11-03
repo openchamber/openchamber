@@ -60,6 +60,8 @@ import {
 interface DirectoryExplorerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Takes over from opening a new session draft in the added project. Picks one folder at a time. */
+  onProjectAdded?: (project: { id: string; path: string }) => void;
 }
 
 type BrowseEntry = {
@@ -184,6 +186,7 @@ const resolveFreshFilesystemHome = async (): Promise<string | null> => {
 export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = ({
   open,
   onOpenChange,
+  onProjectAdded,
 }) => {
   const { t } = useI18n();
   const { git, sourceControl, runtime } = useRuntimeAPIs();
@@ -577,10 +580,14 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   }, [onOpenChange]);
 
   const openProjectDraft = React.useCallback((projectId: string, projectPath: string) => {
+    if (onProjectAdded) {
+      onProjectAdded({ id: projectId, path: projectPath });
+      return;
+    }
     if (isMobile) setSessionSwitcherOpen(false);
     openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: projectPath });
     handleClose();
-  }, [handleClose, isMobile, openNewSessionDraft, setSessionSwitcherOpen]);
+  }, [handleClose, isMobile, onProjectAdded, openNewSessionDraft, setSessionSwitcherOpen]);
 
   const handleQuickAdd = React.useCallback(async (event: React.MouseEvent, path: string) => {
     event.stopPropagation();
@@ -773,7 +780,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       // and must reach the input value.
       if (hasTrailingPathSeparator(query) && !isCloneMode) {
         event.preventDefault();
-        if (highlightedRow && highlightedRow.type === 'directory' && !highlightedRow.added) {
+        if (!onProjectAdded && highlightedRow && highlightedRow.type === 'directory' && !highlightedRow.added) {
           togglePathSelection(highlightedRow.path);
         }
       }
@@ -794,7 +801,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       event.preventDefault();
       handleClose();
     }
-  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, isCloneMode, query, rows.length, submitTarget, togglePathSelection]);
+  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, isCloneMode, query, onProjectAdded, rows.length, submitTarget, togglePathSelection]);
 
   const showHiddenToggle = (
     <button
@@ -898,7 +905,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const resultsSection = (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-edge bg-[var(--surface-elevated)] shadow-sm">
       <ScrollableOverlay outerClassName="max-h-[min(28rem,58vh)]" className="p-2">
-        {open && !runtime.isVSCode && !isCloneMode ? (
+        {open && !runtime.isVSCode && !isCloneMode && !onProjectAdded ? (
           <OpenCodeProjectImport key={runtimeKey} busy={isConfirming} onBusyChange={handleImportBusyChange} />
         ) : null}
         <div className="px-2 pb-1 pt-0.5 typography-meta font-medium uppercase tracking-wide text-muted-foreground">
@@ -978,17 +985,19 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                     </span>
                   ) : row.type === 'directory' && !isCloneMode ? (
                     <>
-                      <button
-                        type="button"
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={(event) => { event.stopPropagation(); togglePathSelection(row.path); }}
-                        title={t('directoryExplorerDialog.browse.selectForAdd')}
-                        aria-label={t('directoryExplorerDialog.browse.selectForAdd')}
-                        aria-pressed={selectedPaths.includes(row.path)}
-                        className="flex-shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
-                      >
-                        <Icon name={selectedPaths.includes(row.path) ? 'checkbox' : 'checkbox-blank'} className="h-4 w-4" />
-                      </button>
+                      {onProjectAdded ? null : (
+                        <button
+                          type="button"
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => { event.stopPropagation(); togglePathSelection(row.path); }}
+                          title={t('directoryExplorerDialog.browse.selectForAdd')}
+                          aria-label={t('directoryExplorerDialog.browse.selectForAdd')}
+                          aria-pressed={selectedPaths.includes(row.path)}
+                          className="flex-shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
+                        >
+                          <Icon name={selectedPaths.includes(row.path) ? 'checkbox' : 'checkbox-blank'} className="h-4 w-4" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onMouseDown={(event) => event.stopPropagation()}
