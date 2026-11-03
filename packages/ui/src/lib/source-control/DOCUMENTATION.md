@@ -296,6 +296,8 @@ storage context.
 
 ## Provider registry
 
+GitHub live summaries carry optional `isInMergeQueue`, `mergeQueueEntry` and `autoMergeRequest` fields through tracked-items and the branch-status store. `SourceBoardActions`, shared by the board, tracker and branch preview, reads its PR's tracked state with the reading account and shows the waiting state with Cancel. Existing surfaces retain ownership of visibility-scoped client interest; the actions add no declaration. Background user merge follows belong to the server and do not consume the client's 300-item interest budget. Cancel uses the merge mutation's optional `cancel` intent, sent only when the provider reported waiting-merge fields. Other hosts keep their existing merge controls.
+
 `providers/` owns what the UI knows about each source-control provider. The
 connected server describes its providers as plain data
 (`SourceControlAPI.providers()`, `GET /api/source-control/providers`);

@@ -202,7 +202,7 @@ type PostBody =
   | { disabled: boolean }
   | CreateBody
   | UpdateBody
-  | (MutationBody<SourceControlExistingMutationTarget> & { method: MergeChangeRequestInput['method'] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { method: MergeChangeRequestInput['method']; cancel?: boolean })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
@@ -585,7 +585,7 @@ const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmpty
   return {};
 };
 
-const MERGE_OUTCOMES = ['queued', 'merging'] as const;
+const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'] as const;
 const mergeOutcomeOf = (value: string): SourceControlMergeMutationResult['outcome'] | null => (
   MERGE_OUTCOMES.find((outcome) => outcome === value) ?? null
 );
@@ -1364,6 +1364,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/merge', {
         ...mutationBody(payload, identity, 'existing'), method: payload.method,
+        cancel: payload.cancel,
       });
       return parseMutationReceipt(result, payload, identity, parseMergeMutationResult);
     },

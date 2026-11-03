@@ -69,6 +69,9 @@ export type SourceControlStatus = ChangeRequestStatus & {
     headSha?: string;
     mergeable?: boolean | null;
     mergeableState?: string | null;
+    isInMergeQueue?: boolean;
+    mergeQueueEntry?: { state: string; position: number } | null;
+    autoMergeRequest?: { enabledAt: string; mergeMethod: string } | null;
   } | null;
   checks?: CISummary | null;
   repo?: {
@@ -728,6 +731,9 @@ const persistedPrStatusEntrySchema = z.object({
       headSha: z.string().optional(),
       mergeable: z.boolean().nullable().optional(),
       mergeableState: z.string().nullable().optional(),
+      isInMergeQueue: z.boolean().optional(),
+      mergeQueueEntry: z.object({ state: z.string(), position: z.number().int().nonnegative() }).nullish(),
+      autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullish(),
     }).strip().nullable().optional(),
     checks: z.object({
       state: z.enum(['success', 'failure', 'pending', 'unknown']),
@@ -864,6 +870,9 @@ const applyLiveSummary = (
     && pr.title === summary.title
     && (pr.mergeable ?? null) === summary.mergeable
     && (pr.mergeableState ?? null) === summary.mergeableState
+    && (pr.isInMergeQueue ?? false) === (summary.isInMergeQueue ?? false)
+    && JSON.stringify(pr.mergeQueueEntry ?? null) === JSON.stringify(summary.mergeQueueEntry ?? null)
+    && JSON.stringify(pr.autoMergeRequest ?? null) === JSON.stringify(summary.autoMergeRequest ?? null)
     && (!summary.headSha || pr.headSha === summary.headSha)
     && (!summary.base || pr.base === summary.base)
     && sameChecks(getStatusChecks(status), summary.checks);
@@ -878,6 +887,9 @@ const applyLiveSummary = (
     base: summary.base ?? pr.base,
     mergeable: summary.mergeable,
     mergeableState: summary.mergeableState,
+    isInMergeQueue: summary.isInMergeQueue ?? false,
+    mergeQueueEntry: summary.mergeQueueEntry ?? null,
+    autoMergeRequest: summary.autoMergeRequest ?? null,
   };
   const ci: CI | null = summary.checks ? { ...status.ci, summary: summary.checks } : null;
   return {

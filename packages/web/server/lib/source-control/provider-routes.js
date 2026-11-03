@@ -259,6 +259,8 @@ export function registerProviderRoutes(app, {
   validateReadContext,
   validateMutationContext,
   mutationExecutor,
+  onMutationSucceeded = async () => {},
+  onMutationStarting = () => null,
   oauthFlowRegistry = createOAuthFlowRegistry(),
 }) {
   const statusCaches = new Map();
@@ -752,31 +754,48 @@ export function registerProviderRoutes(app, {
       const record = (target) => ({ key: context.idempotencyKey, inputDigest: prepared.digest(target), kind, actor, target });
       const classifyError = impl.mutations.classifyError ?? classifyMutationError;
       let execution;
-      if (existing) {
-        requireReplayMatch(existing, kind, actor, context);
-        let replayResolution;
-        const resolveReplay = async () => {
-          replayResolution ??= await impl.mutations.resolveTarget({ session, context, kind, input, replayOf: existing });
-          return replayResolution;
-        };
-        execution = await mutationExecutor.execute({
-          record: record(existing.target),
-          providerAccountId: session.providerUserId,
-          perform: () => { throw mutationConflict(); },
-          reconcile: async () => impl.mutations.reconcile({ session, route, kind, input, resolved: await resolveReplay() }),
-          classifyError,
-        });
-      } else {
-        const resolved = await impl.mutations.resolveTarget({ session, context, kind, input });
-        execution = await mutationExecutor.execute({
-          record: record(resolved.target),
-          providerAccountId: session.providerUserId,
-          perform: () => impl.mutations.perform({ session, route, kind, input, resolved }),
-          reconcile: () => impl.mutations.reconcile({ session, route, kind, input, resolved }),
-          classifyError,
-        });
+      let settleStarted = null;
+      const starting = (target) => {
+        try { settleStarted = onMutationStarting({ context, kind, input, target }) ?? null; }
+        catch { settleStarted = null; }
+      };
+      try {
+        if (existing) {
+          starting(existing.target);
+          requireReplayMatch(existing, kind, actor, context);
+          let replayResolution;
+          const resolveReplay = async () => {
+            replayResolution ??= await impl.mutations.resolveTarget({ session, context, kind, input, replayOf: existing });
+            return replayResolution;
+          };
+          execution = await mutationExecutor.execute({
+            record: record(existing.target),
+            providerAccountId: session.providerUserId,
+            perform: () => { throw mutationConflict(); },
+            reconcile: async () => impl.mutations.reconcile({ session, route, kind, input, resolved: await resolveReplay() }),
+            classifyError,
+          });
+        } else {
+          const resolved = await impl.mutations.resolveTarget({ session, context, kind, input });
+          starting(resolved.target);
+          execution = await mutationExecutor.execute({
+            record: record(resolved.target),
+            providerAccountId: session.providerUserId,
+            perform: () => impl.mutations.perform({ session, route, kind, input, resolved }),
+            reconcile: () => impl.mutations.reconcile({ session, route, kind, input, resolved }),
+            classifyError,
+          });
+        }
+        statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
+        try { await onMutationSucceeded({ context, kind, input, record: execution.record, replayed: execution.replayed }); }
+        catch (error) {
+          // The provider write is already durable. Notification bookkeeping
+          // cannot turn an accepted merge into an apparent failed mutation.
+          console.warn('[source-control] post-mutation follow failed:', error?.code ?? 'FOLLOW_FAILED');
+        }
+      } finally {
+        settleStarted?.();
       }
-      statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
       // Cache invalidation after the write is durable and best effort: the write
       // landed, and a stale cache must not turn that into an error.
       if (impl.mutations.afterSuccess instanceof Function) {

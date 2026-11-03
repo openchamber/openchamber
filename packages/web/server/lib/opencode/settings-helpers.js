@@ -701,6 +701,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.notifyOnCompletion === 'boolean') {
       result.notifyOnCompletion = candidate.notifyOnCompletion;
     }
+    if (candidate.notifyOnPullRequests === true || candidate.notifyOnPullRequests === false) {
+      result.notifyOnPullRequests = candidate.notifyOnPullRequests;
+    }
     if (typeof candidate.notifyOnError === 'boolean') {
       result.notifyOnError = candidate.notifyOnError;
     }

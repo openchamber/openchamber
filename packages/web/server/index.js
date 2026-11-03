@@ -121,6 +121,7 @@ import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createAutoReviewRuntime } from './lib/auto-review/runtime.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createPrWatchRuntime } from './lib/pr-watch/runtime.js';
+import { createMergeFollowRuntime } from './lib/github/merge-follow.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
 import { createWorkflowRuntime } from './lib/workflows/runtime.js';
 import { createWorkflowRunStore } from './lib/workflows/store.js';
@@ -1354,6 +1355,10 @@ const prWatchRuntime = createPrWatchRuntime({
   insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
 });
 prWatchRuntime.start(globalMessageStreamHub);
+const mergeFollowRuntime = createMergeFollowRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  notify: (notification) => notificationTriggerRuntime.notifyPullRequest(notification),
+});
 
 // Agent workflows: scripts that fan a task out to many agents, run here while
 // the agent that asked stays free. Off until the user turns the tool on.
@@ -2260,6 +2265,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   autoReviewRuntime,
   prWatchRuntime,
   messageQueueRuntime,
+  mergeFollowRuntime,
   dispatchResultsRuntime,
   workflowRuntime,
   messageSearchRuntime,
@@ -2990,6 +2996,7 @@ async function main(options = {}) {
     autoReviewRuntime,
     prWatchRuntime,
     routingRuntime,
+    mergeFollowRuntime,
     workflowRuntime,
   });
 

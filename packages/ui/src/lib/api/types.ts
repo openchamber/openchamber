@@ -1618,6 +1618,9 @@ type GitHubRepoRef = {
 };
 
 export type GitHubPullRequest = {
+  isInMergeQueue?: boolean;
+  mergeQueueEntry?: { state: string; position: number } | null;
+  autoMergeRequest?: { enabledAt: string; mergeMethod: string } | null;
   number: number;
   title: string;
   body?: string;
@@ -1646,6 +1649,9 @@ export type ProviderReadsRefreshScope = { item: RepositoryItemRef } | { lists: t
 
 /** Live fields of a known PR, refreshed in batches for list surfaces. */
 export type ChangeRequestLiveSummary = RepositoryItemRef & {
+  isInMergeQueue?: boolean;
+  mergeQueueEntry?: { state: string; position: number } | null;
+  autoMergeRequest?: { enabledAt: string; mergeMethod: string } | null;
   state: GitHubPullRequest['state'];
   draft: boolean;
   title: string;

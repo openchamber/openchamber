@@ -605,6 +605,44 @@ describe('canonical GitHub mutations', () => {
       .toEqual({ merged: false, outcome: 'queued' });
   });
 
+  it('enables auto-merge after a rule-blocked async result and cancels it through durable receipts', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+    let autoMergeRequest = null;
+    const queries = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      if (new URL(url).pathname === '/graphql') {
+        const { query, variables } = JSON.parse(options.body);
+        queries.push({ query, variables });
+        if (query.includes('enablePullRequestAutoMerge')) {
+          autoMergeRequest = { enabledAt: '2026-11-03T12:00:00Z', mergeMethod: 'MERGE' };
+          return jsonResponse({ data: { enablePullRequestAutoMerge: { pullRequest: { autoMergeRequest } } } });
+        }
+        if (query.includes('disablePullRequestAutoMerge')) {
+          autoMergeRequest = null;
+          return jsonResponse({ data: { disablePullRequestAutoMerge: { pullRequest: { autoMergeRequest } } } });
+        }
+        return jsonResponse({ data: { repository: { mergeQueue: null, pullRequest: {
+          id: 'PR_7', state: 'OPEN', headRefOid: 'abc123', mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED', isInMergeQueue: false, autoMergeRequest,
+        } } } });
+      }
+      if (options.method === 'PUT') return jsonResponse({ status: 'failed', details: { message: 'Required checks have not passed' } });
+      return jsonResponse(pullRequest());
+    }));
+    const { app } = makeApp();
+    const body = mergeBody(account.accountId);
+    const enabled = await request(app).post('/api/source-control/github/pr/merge').send(body);
+    expect(enabled.status).toBe(200);
+    expect(queries).toHaveLength(2);
+    expect(enabled.body).toMatchObject({ status: 'succeeded', result: { merged: false, outcome: 'auto-merge' } });
+    expect(queries[1].variables.sha).toBe('abc123');
+    const cancelled = { ...body, idempotencyKey: 'request-cancel', cancel: true };
+    expect((await request(app).post('/api/source-control/github/pr/merge').send(cancelled).expect(200)).body.result)
+      .toEqual({ merged: false, outcome: 'cancelled' });
+    const count = queries.length;
+    expect((await request(app).post('/api/source-control/github/pr/merge').send(cancelled).expect(200)).body.replayed).toBe(true);
+    expect(queries).toHaveLength(count);
+  });
+
   it('reports an accepted merge as running when following it fails, and passes on a refusal GitHub explains', async () => {
     const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
     let refuse = false;

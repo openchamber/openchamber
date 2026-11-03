@@ -286,6 +286,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       messageQueueRuntime,
       autoReviewRuntime,
       prWatchRuntime = null,
+      mergeFollowRuntime = null,
       routingRuntime,
       globalEventHub,
       openchamberVersion,
@@ -538,6 +539,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     });
     app.use(providerReadCache.middleware);
     walkthroughBindingService = registerSourceControlRoutes(app, {
+      onMutationSucceeded: (mutation) => mergeFollowRuntime?.onMutationSucceeded(mutation),
+      onMutationStarting: (mutation) => mergeFollowRuntime?.onMutationStarting(mutation) ?? null,
       onRepositoryTransportChanged: syncRepositoryTransport,
       validateManagedSshCredential: managedSshInventory.assertAvailable,
       readManagedSshCredentialPresentation: managedSshInventory.presentation,
@@ -618,6 +621,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerTrackedItemsRoutes(app, { service: trackedItemsService });
     // An agent waiting on its pull request reads it through the same service.
     prWatchRuntime?.attach({ trackedItems: trackedItemsService, readers: trackedItemReaders });
+    void mergeFollowRuntime?.attach(trackedItemsService).catch((error) => console.warn('[merge-follow] attach failed:', error.message));
     const resolveGitIdentity = async (identityId) => {
       if (identityId === 'global') {
         const identity = await getGlobalIdentity();

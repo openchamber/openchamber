@@ -29,6 +29,8 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { TrackedThread } from '@/lib/trackedItems/model';
+import { useTrackedRecords } from '@/stores/useTrackedItemsStore';
 import { useSession } from '@/sync/sync-context';
 import { resolvePullLinkTarget } from './boardRepository';
 import { landsWithIt, mergeChoiceOf } from './mergeChoice';
@@ -139,6 +141,19 @@ export const SourceBoardActions: React.FC<{
     const pull: RepositoryChangeRequestReference | null = item.source === 'repository' && item.reference.kind === 'pull' ? item.reference : null;
     const descriptor = useSourceControlProvider(pull?.provider);
     const openPull = pull && pull.state === 'open' ? pull : null;
+    const trackedPulls = React.useMemo<TrackedThread<'pull'>[]>(() => openPull && context ? [{
+        provider: context.provider, instance: context.instance, accountId: context.accountId,
+        kind: 'pull', owner: openPull.sourceRepo.owner, repo: openPull.sourceRepo.repo, number: openPull.number,
+    }] : [], [context, openPull]);
+    // The board/branch preview already owns visibility-scoped interest.
+    const [liveRecord] = useTrackedRecords(trackedPulls);
+    const liveMerge = liveRecord?.type === 'pull' ? liveRecord.state : null;
+    const waitingMerge = liveMerge?.state === 'open' && (liveMerge.isInMergeQueue || liveMerge.autoMergeRequest);
+    const waitingLabel = liveMerge?.isInMergeQueue
+        ? liveMerge.mergeQueueEntry?.position != null
+            ? t('sourceBoard.merge.queuePosition', { position: liveMerge.mergeQueueEntry.position })
+            : t('sourceBoard.merge.inQueue')
+        : t('sourceBoard.merge.autoMerge');
     // Asked only while an open PR is previewed: nothing else merges.
     const capabilities = useCapabilities(openPull ? context : null);
 
@@ -248,6 +263,8 @@ export const SourceBoardActions: React.FC<{
                         : t('stacks.toast.mergedWithBelow.other', { reference, count: landsBelow.length }));
             } else if (outcome === 'queued') {
                 toast.message(t('sourceBoard.toast.mergeQueued', { reference }));
+            } else if (outcome === 'auto-merge') {
+                toast.message(t('sourceBoard.toast.autoMerge', { reference }));
             } else if (outcome === 'merging') {
                 toast.message(t('sourceBoard.toast.mergeRunning', { reference }), { description: t('sourceBoard.toast.mergeRunningDescription') });
             } else {
@@ -259,6 +276,20 @@ export const SourceBoardActions: React.FC<{
             setBusy(null);
             onChanged();
         }
+    };
+
+    const cancelMerge = async () => {
+        if (!openPull || !context) return;
+        setBusy('merge');
+        try {
+            const receipt = await sourceControl.changeRequestMerge({
+                ...context, idempotencyKey: newMutationKey(), method: chosenMethod, cancel: true,
+                target: { project: { owner: openPull.sourceRepo.owner, name: openPull.sourceRepo.repo }, number: openPull.number, head: openPull.head, base: openPull.base, headSha: openPull.headSha },
+            });
+            toast.success(t(receipt.result.merged ? 'sourceBoard.toast.merged' : 'sourceBoard.toast.mergeCancelled', { reference }));
+        } catch (error) {
+            toast.error(t('sourceBoard.toast.mergeCancelFailed', { reference }), { description: error instanceof Error ? error.message : String(error) });
+        } finally { setBusy(null); onChanged(); }
     };
 
     const markReady = async () => {
@@ -281,7 +312,12 @@ export const SourceBoardActions: React.FC<{
 
     const maintenance = (
         <>
-            {openPull && !openPull.draft && mergeMethod ? (
+            {waitingMerge ? (
+                <>
+                    <span className="text-muted-foreground typography-small">{waitingLabel}</span>
+                    <ActionButton icon="close" label={t('sourceBoard.merge.cancel')} onClick={() => void cancelMerge()} busy={busy === 'merge'} />
+                </>
+            ) : openPull && !openPull.draft && mergeMethod ? (
                 // One control, as on the host: the button says how it merges,
                 // the arrow beside it picks another way.
                 <div className="flex shrink-0 items-center">

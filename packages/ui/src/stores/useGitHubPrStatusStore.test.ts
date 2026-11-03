@@ -1314,6 +1314,22 @@ describe("branch PR live state pushed by the server", () => {
     expect(status?.canMerge).toBe(false)
   })
 
+  test("queue and auto-merge changes propagate even when checks are unchanged", () => {
+    const key = boundKey("feature")
+    seed(key, openStatus())
+    const mergeQueueEntry = { state: "AWAITING_CHECKS", position: 3 }
+    pushFor(key, liveSummary({ isInMergeQueue: true, mergeQueueEntry }))
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr).toMatchObject({ isInMergeQueue: true, mergeQueueEntry })
+    const before = useGitHubPrStatusStore.getState().entries
+    pushFor(key, liveSummary({ isInMergeQueue: true, mergeQueueEntry }))
+    expect(useGitHubPrStatusStore.getState().entries).toBe(before)
+    const autoMergeRequest = { enabledAt: "2026-11-03T12:00:00Z", mergeMethod: "SQUASH" }
+    pushFor(key, liveSummary({ isInMergeQueue: false, mergeQueueEntry: null, autoMergeRequest }))
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr).toMatchObject({ isInMergeQueue: false, mergeQueueEntry: null, autoMergeRequest })
+    pushFor(key, liveSummary({ isInMergeQueue: false, mergeQueueEntry: null, autoMergeRequest: null }))
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.autoMergeRequest).toBeNull()
+  })
+
   test("failing checks reach the entry, and an unchanged state leaves the store untouched", () => {
     const key = boundKey("feature")
     seed(key, openStatus())
