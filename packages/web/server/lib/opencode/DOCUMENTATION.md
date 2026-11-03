@@ -388,6 +388,7 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `waitForAgentPresence(agentName, timeoutMs?, intervalMs?)`
   - `refreshOpenCodeAfterConfigChange(reason, options?)`
   - `bootstrapOpenCodeAtStartup()`
+  - `scheduleBootstrapRetry(bootstrap, onAlreadyRunning)`: when the last bootstrap left no managed OpenCode, runs `bootstrap` again after 5, 15, 30 and then every 60 seconds, or `onAlreadyRunning` if a restart has started OpenCode by then, and answers whether it scheduled a run
   - `startHealthMonitoring(healthCheckIntervalMs)`
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
@@ -430,6 +431,8 @@ Upstream health is probed with `GET /api/info` (OpenCode 2.0.8 removed `/api/hea
 Transport-triggered health checks share the periodic monitor's failure accounting interval. Rapid WS reconnect callbacks therefore cannot exhaust the managed-process restart threshold using one cached unhealthy result; an exited managed process still restarts immediately.
 
 Managed health failures are classified as `timeout`, `connection_refused`, `connection_reset`, `invalid_response`, or `error`. The lifecycle retains the latest counted failure with a bounded detail string and source. Managed process wrappers continue capturing a sanitized, bounded stderr tail after readiness and retain exit code/signal. Before replacing a managed process, lifecycle snapshots the reason, latest health failure, process diagnostics/aliveness, busy-session count, and timestamp into `lastOpenCodeRestartDiagnostics`; successful startup does not clear this snapshot, and `/health` exposes it for post-restart diagnosis without process environment or credentials.
+
+A bootstrap that leaves no managed OpenCode is retried for as long as the server runs, because the health monitor only watches a running process and nothing else would start one. `index.js` skips the steps that need OpenCode (health monitoring, the global watcher, legacy migrations) until a run succeeds. A retry and a restart never start OpenCode at once: a retry waits for a restart in flight, and a restart waits for a retry in flight and then still restarts, since that run may have read the configuration the restart is for. `lastOpenCodeError` keeps the last failure during a retry, so the UI goes on showing the real reason. A rejected binary (invalid path, unsupported version) is not retried, since it fails the same way until the user changes it; an external server is not retried, since OpenChamber does not start it.
 
 Managed process ownership starts at spawn. The registry and runtime process
 handle include children that have not announced readiness yet, so shutdown can

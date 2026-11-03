@@ -72,6 +72,16 @@ so no application code runs before the values are set. Remote, SSH,
 environment-target, HMR and background launches keep the previous order:
 resolve, then navigate, with the splash reporting the connection attempt.
 
+A launch runs one startup. The tray, a second launch, a deep link, a shortcut or
+macOS `activate` can ask for a window while that startup still runs, and
+`openMainWindow` then waits for it. Resolving next to it would call `main()` of
+the server module a second time in the same process: depending on the timing,
+that run fails to listen on the port, replaces the first run's listener handle
+so the managed OpenCode cannot start, or binds a second port, and the failure
+can reject the startup itself and exit the app. A background launch without a
+local server still probes its remote again when the window opens, because
+reachability from login time says little about later.
+
 `bun run profile:startup` measures a packaged build's launch in an isolated
 profile; see `scripts/perf/DOCUMENTATION.md`.
 
