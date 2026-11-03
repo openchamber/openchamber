@@ -217,6 +217,8 @@ export type SyntheticMessage = MessageBase & {
   time: { created: number }
   text: string
   description?: string
+  /** Still in OpenCode's inbox: the agent reads it at its next step. Delivery removes this. */
+  pending?: true
 }
 
 /** Text OpenCode itself added (instruction updates, notices). */

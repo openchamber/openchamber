@@ -146,6 +146,23 @@ describe("translateWireEvent", () => {
     })
   })
 
+  test("a synthetic item entering the inbox is pending until it is delivered", () => {
+    const events = translateWireEvent({
+      ...base,
+      type: "session.inbox.enqueued",
+      durable,
+      data: {
+        sessionID: "ses_1",
+        inboxID: "msg_s",
+        item: { type: "synthetic", delivery: "steer", payload: { text: "result" } },
+      },
+    })
+    expect(events).toEqual([{
+      type: "message.updated",
+      properties: { info: { id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 1000 }, text: "result", pending: true } },
+    }])
+  })
+
   test("assistant steps create the message, then patch it on completion", () => {
     const started = translateWireEvent({
       ...base,

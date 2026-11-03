@@ -48,6 +48,20 @@ describe("getSessionMaterializationRequestKey", () => {
 })
 
 describe("materializeSessionSnapshots", () => {
+  test("a delivered record replaces the pending one a missed delivery left, at its delivery time", () => {
+    const pending: Message = { id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 1 }, text: "result", pending: true }
+    const delivered: Message = { id: "msg_s", sessionID: "ses_1", role: "synthetic", time: { created: 3 }, text: "result" }
+    const later = { ...message("msg_a"), time: { created: 2 } }
+
+    const result = materializeSessionSnapshots(
+      { message: { ses_1: [pending, later] }, part: {} },
+      "ses_1",
+      [{ info: delivered, parts: [] }],
+    )
+
+    expect(result.message.ses_1).toEqual([later, delivered])
+  })
+
   test("finalizes an active tool under a completed assistant message", () => {
     const completedMessage = completedAssistantMessage("msg_1")
     const staleRunningTool = {

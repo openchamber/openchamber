@@ -365,6 +365,19 @@ other.
 
 ## Decisions
 
+### Why a background message waits behind a page and does not end it
+
+A dispatched session's result, a pull request wake, a workflow report or a
+restart resume can arrive while a page or a secret card waits. OpenCode keeps it
+in the session's inbox until the waiting call returns, and the agent reads it at
+the next step, right after the user's answer. The alternative, ending the wait
+so the agent reads the message at once and asks again, loses the question the
+user was reading. A message the user writes in the chat still ends the wait, and
+`hasUnreadChat` counts only those. The chat keeps such a message out of the
+transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
+through `SyntheticMessage.pending`): drawn as a new turn, it took the question
+out of the chat.
+
 ### Why selection is checked before creating a session
 
 The target directory's agent snapshot determines its model bindings. Missing
