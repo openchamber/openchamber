@@ -322,7 +322,7 @@ Portable, git-commit-able scheduled-task definitions:
 name: daily-digest
 schedule: "0 9 * * *"
 enabled: true
-model: anthropic/claude-sonnet-4-5
+model: opencode/big-pickle
 agent: plan
 timezone: Europe/Kyiv
 ---
@@ -340,6 +340,18 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 | `agent` | `execution.agent` (optional) |
 | `timezone` | `schedule.timezone` (optional, IANA; defaults to the server zone) |
 | body | `execution.prompt` (required) |
+
+A stored `model` is checked against the model catalog when it is written. The
+agent tool and the Scheduled tasks editor both save through
+`scheduledTaskService.upsert`, so both reject a `provider/model` the catalog
+does not serve, with `unknown model: provider/model`. The check follows the
+directory the run will happen in — a target-session task against that session's
+worktree, everything else against the project — and stands down on an empty
+catalog, which is a location OpenCode has not started in yet. Only a model the
+call changes is checked: a task whose stored model has since disappeared stays
+editable, retimeable and deletable. A loop file's model is checked when the
+loop is enabled from the app, since that is the point a person is present to be
+told.
 
 `thinking_level` and `goalEnabled`/`goalTokenBudget` are not part of the portable
 format (UI/JSON-only today); `daily`/`weekly`/`once` schedules remain UI/JSON-only.
