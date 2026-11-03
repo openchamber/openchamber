@@ -348,6 +348,21 @@ describe('scheduled-task service chats scope', () => {
     expect(chatsScope.id).not.toContain(':');
   });
 
+  it('reads the catalog at the chats root for a chats task', async () => {
+    // The public id the UI sends is not a directory; the check must land on the
+    // chats root, which is the directory a chats task actually fires in.
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service, projectConfigRuntime } = createService({ chatsScope, readModelCatalog });
+
+    await expect(service.upsert(CHATS_SCOPE_PUBLIC_ID, {
+      name: 'Chats task',
+      schedule: { kind: 'cron', cron: '0 9 * * *' },
+      execution: { prompt: 'Run', providerID: 'p', modelID: 'm' },
+    })).resolves.toHaveProperty('task');
+    expect(readModelCatalog).toHaveBeenCalledWith(chatsScope.root);
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledWith(chatsScope.id, expect.anything());
+  });
+
   it('resolves a directory inside a chat to the chats scope, and projects first', async () => {
     const { service } = createService({ chatsScope });
 
