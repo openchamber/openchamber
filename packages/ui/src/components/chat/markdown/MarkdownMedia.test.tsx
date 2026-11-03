@@ -376,6 +376,32 @@ describe('React-owned Markdown media', () => {
     expect(reads()).toEqual(['/repo/docs/light.png', '/repo/docs/dark.png']);
     expect(host.querySelector('source')?.getAttribute('srcset')).toBe('blob:document-image');
   });
+  test('a body reads a project upload route itself and leaves any other path a plain address', async () => {
+    const upload = '/api/source-control/gitlab/uploads/66dbcd21ec5d24ed6ea225176098d52b/shot.png?owner=team';
+    await act(async () => root.render(<MarkdownMediaProvider content="body" mode="document" directory="/repo" settled><MarkdownImage src={upload} alt="shot" /></MarkdownMediaProvider>));
+    await flush();
+    expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:document-image');
+    expect(requests).toEqual([`https://runtime.test${upload}`]);
+    requests = [];
+    await act(async () => root.render(<MarkdownMediaProvider content="other" mode="document" directory="/repo" settled><MarkdownImage src="/api/fs/raw?path=/etc/passwd" alt="other" /></MarkdownMediaProvider>));
+    await flush();
+    expect(host.querySelector('img')?.getAttribute('src')).toBe('/api/fs/raw?path=/etc/passwd');
+    expect(requests).toEqual([]);
+  });
+  test('a body reads a failed project upload again when it is shown again', async () => {
+    const upload = '/api/source-control/gitlab/uploads/66dbcd21ec5d24ed6ea225176098d52b/shot.png?owner=team';
+    const answered = globalThis.fetch;
+    globalThis.fetch = async () => new Response(null, { status: 503 });
+    const body = (shown: boolean) => <MarkdownMediaProvider content="body" mode="document" directory="/repo" settled>{shown ? <MarkdownImage src={upload} alt="shot" /> : null}</MarkdownMediaProvider>;
+    await act(async () => root.render(body(true)));
+    await flush();
+    expect(host.querySelector('[data-oc-media-state="failed"]')).not.toBeNull();
+    globalThis.fetch = answered;
+    await act(async () => root.render(body(false)));
+    await act(async () => root.render(body(true)));
+    await flush();
+    expect(host.querySelector('img')?.getAttribute('src')).toBe('blob:document-image');
+  });
   test('local mode keeps relative sources and document images remain valid children of picture', async () => {
     await act(async () => root.render(<MarkdownMediaProvider content="local" mode="local" directory="/repo" settled><MarkdownImage src="./local.png" /></MarkdownMediaProvider>));
     await flush(); expect(host.querySelector('img')?.getAttribute('src')).toBe('./local.png'); expect(requests).toEqual([]);
