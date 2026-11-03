@@ -181,6 +181,23 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
   return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest);
 };
 
+/**
+ * Every session `useSessionTurnActivity` reads as working, for a consumer that
+ * asks about many at once: the running ones, their ancestors, and the sessions
+ * waiting on work outside them (a workflow run, a command, a pull request).
+ */
+export const collectOpenTurnSessionIds = (
+  activeSessionIds: ReadonlySet<string>,
+  waitingSessionIds: readonly Iterable<string>[],
+): ReadonlySet<string> => {
+  const open = new Set(activeSessionIds);
+  for (const activeId of activeSessionIds) forEachAncestorId(activeId, (ancestorId) => open.add(ancestorId));
+  for (const sessionIds of waitingSessionIds) {
+    for (const sessionId of sessionIds) open.add(sessionId);
+  }
+  return open;
+};
+
 // The last background command of an idle session ending closes its turn,
 // the way the last subagent finishing does below.
 useBackgroundShellsStore.subscribe((state, previous) => {

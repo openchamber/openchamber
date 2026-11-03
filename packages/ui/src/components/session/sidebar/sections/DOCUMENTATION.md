@@ -87,6 +87,10 @@ with its named pin lists. How the rows are drawn stays with the row model
   Unread and failed come from the session record (`time.idle` / `time.viewed`,
   `outcome`), so they survive a restart; running and waiting requests from the
   live indexes.
+- Running and unread follow the session's row (`useSessionTurnActivity`). A
+  session idling on a subagent, a background command, a workflow run or its
+  pull request is running, and turns unread only when that work ends, though
+  its record already carries `time.idle`.
 - The Plan link comes from project knowledge, which lives outside the session.
   It is read only for the projects a shown section asks plans of (every project
   when it names none), once each through the background gate, and again when

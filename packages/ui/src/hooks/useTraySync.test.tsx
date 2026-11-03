@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
+import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session } from '@/lib/opencode/model';
 import { CHAT_DRAFT_PROJECT_ID, ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -14,6 +15,8 @@ import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { applyBackgroundShellEvents } from '@/sync/background-shells';
+import { replaceGlobalSessionStatusById, setSessionParentResolver } from '@/sync/global-session-status';
 import {
   applyGlobalBlockingRequestEvents,
   applyWaitingPageEvent,
@@ -184,6 +187,35 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useGlobalSessionsStore.setState({ activeSessions: [] });
     await flush();
     expect(counts).toEqual([0, 1, 0]);
+  });
+
+  test('counts a session idling on background work only when that work ends', async () => {
+    const started: SyncEvent = {
+      type: 'shell.started',
+      properties: { shell: { id: 'sh_1', sessionID: 'root', command: 'sleep 300', file: '/tmp/sh_1.out', startedAt: 1 } },
+    };
+    const ended: SyncEvent = { type: 'shell.ended', properties: { shellID: 'sh_1', end: { kind: 'exited', status: 'exited', exit: 0 }, endedAt: 2 } };
+    await act(async () => root.render(<Harness />));
+
+    applyBackgroundShellEvents('/project', [started]);
+    finishTurn('root');
+    await flush();
+    expect(counts).toEqual([0]);
+    applyBackgroundShellEvents('/project', [ended]);
+    await flush();
+    expect(counts).toEqual([0, 1]);
+
+    view('root');
+    await flush();
+    setSessionParentResolver((id) => (id === 'child' ? 'root' : undefined));
+    replaceGlobalSessionStatusById(new Map([['child', { directory: '/project', status: { type: 'busy' } }]]));
+    finishTurn('root');
+    await flush();
+    expect(counts).toEqual([0, 1, 0]);
+    replaceGlobalSessionStatusById(new Map());
+    await flush();
+    expect(counts).toEqual([0, 1, 0, 1]);
+    setSessionParentResolver(() => undefined);
   });
 
   test('coalesces unread updates and cancels pending updates on unmount', async () => {
