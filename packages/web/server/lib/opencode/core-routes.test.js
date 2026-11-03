@@ -837,6 +837,44 @@ describe('client auth routes', () => {
     expect(listedAfterPurge.body.clients).toHaveLength(0);
   });
 
+  it('removes a revoked client\'s push registrations, and a failure leaves the revocation answered as done', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const removeClientPushDevices = vi.fn(async () => {});
+    registerAuthAndAccessRoutes(app, { ...dependencies, removeClientPushDevices });
+    await request(app).post('/api/client-auth/clients').send({ label: 'Phone' });
+
+    removeClientPushDevices.mockRejectedValueOnce(new Error('disk full'));
+    const revoked = await request(app).delete('/api/client-auth/clients/client-1');
+
+    expect(revoked.status).toBe(200);
+    expect(revoked.body.revoked).toBe(true);
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
+  });
+
+  it('keeps revoked rows when their push registrations cannot be removed', async () => {
+    const app = express();
+    const dependencies = createDependencies();
+    const removeClientPushDevices = vi.fn(async () => {});
+    registerAuthAndAccessRoutes(app, { ...dependencies, removeClientPushDevices });
+    app.use((error, _req, res, _next) => res.status(500).json({ error: error.message }));
+    await request(app).post('/api/client-auth/clients').send({ label: 'Revoked' });
+    await request(app).post('/api/client-auth/clients').send({ label: 'Active' });
+    await request(app).delete('/api/client-auth/clients/client-1');
+    removeClientPushDevices.mockClear();
+
+    removeClientPushDevices.mockRejectedValueOnce(new Error('disk full'));
+    const failed = await request(app).delete('/api/client-auth/clients');
+    expect(failed.status).toBe(500);
+    expect(removeClientPushDevices).toHaveBeenCalledWith(['client-1']);
+    expect(dependencies.testHooks.clients).toHaveLength(2);
+
+    const purged = await request(app).delete('/api/client-auth/clients');
+    expect(purged.status).toBe(200);
+    expect(purged.body.purged).toBe(1);
+    expect(dependencies.testHooks.clients.map((client) => client.id)).toEqual(['client-2']);
+  });
+
   it('reports current connection candidates with server identity for paired devices', async () => {
     const app = express();
     const relayCandidate = {

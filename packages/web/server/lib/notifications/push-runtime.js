@@ -22,6 +22,8 @@ export const createPushRuntime = (deps) => {
     PUSH_SUBSCRIPTIONS_FILE_PATH,
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
+    // Session keys of revoked or expired clients (client-push-access.js).
+    getInvalidSessionKeys = async () => new Set(),
   } = deps;
 
   let persistPushSubscriptionsLock = Promise.resolve();
@@ -215,6 +217,27 @@ export const createPushRuntime = (deps) => {
     });
   };
 
+  // A browser can sit under several keys and a send reaches it through any of them, so it
+  // leaves every key except those in `keep`.
+  const removePushDevicesOfSessions = async (sessionKeys, keep) => {
+    await persistPushSubscriptionUpdate((current) => {
+      const subsBySession = { ...(current.subscriptionsBySession || {}) };
+      const endpoints = new Set(
+        sessionKeys.flatMap((key) => normalizePushSubscriptions(subsBySession[key]).map((entry) => entry.endpoint)),
+      );
+      for (const [token, entries] of Object.entries(subsBySession)) {
+        if (keep.has(token) || !Array.isArray(entries)) continue;
+        const filtered = entries.filter((entry) => !endpoints.has(entry?.endpoint));
+        if (filtered.length === 0) {
+          delete subsBySession[token];
+        } else {
+          subsBySession[token] = filtered;
+        }
+      }
+      return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
+    });
+  };
+
   const sendPushToSubscription = async (sub, payload) => {
     await ensurePushInitialized();
     const body = JSON.stringify(payload);
@@ -243,10 +266,14 @@ export const createPushRuntime = (deps) => {
   const sendPushToAllUiSessions = async (payload, options = {}) => {
     const requireNoSse = options.requireNoSse === true;
     const store = await readPushSubscriptionsFromDisk();
+    // Rejects when the client list cannot be read: this notification is lost with a log line
+    // in the fanout, since sending would reach a revoked device.
+    const invalidSessionKeys = await getInvalidSessionKeys();
     const sessions = store.subscriptionsBySession || {};
     const subscriptionsByEndpoint = new Map();
 
-    for (const record of Object.values(sessions)) {
+    for (const [sessionKey, record] of Object.entries(sessions)) {
+      if (invalidSessionKeys.has(sessionKey)) continue;
       const subscriptions = normalizePushSubscriptions(record);
       if (subscriptions.length === 0) continue;
 
@@ -376,6 +403,7 @@ export const createPushRuntime = (deps) => {
     getOrCreateVapidKeys,
     addOrUpdatePushSubscription,
     removePushSubscription,
+    removePushDevicesOfSessions,
     sendPushToAllUiSessions,
     updateUiVisibility,
     isAnyUiVisible,
