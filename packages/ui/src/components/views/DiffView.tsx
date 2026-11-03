@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { statusToGitCode, type TurnSnapshotDiff } from './turnSnapshotDiff';
+import { statusToGitCode } from './turnSnapshotDiff';
 import { toast } from '@/components/ui';
 
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -81,8 +81,7 @@ import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionMessages } from '@/sync/sync-context';
-import { opencodeClient } from '@/lib/opencode/client';
+import { useLastTurnDiff } from './useLastTurnDiff';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
@@ -1618,7 +1617,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
     // Another project's PR has nothing to do with the session on screen.
     const panelSessionId = useSessionUIStore((state) => state.currentSessionId);
     const currentSessionId = foreign ? null : panelSessionId;
-    const sessionMessages = useSessionMessages(activeDiffScope === 'turn' ? currentSessionId ?? '' : '', rootDirectory ?? undefined);
     const diffWrapLines = diffWrapLinesStore;
     const forcedStaged = activeDiffScope === 'staged' ? true : activeDiffScope === 'working' ? false : null;
     const activeDiffStaged = forcedStaged ?? displayFileStaged;
@@ -1673,46 +1671,17 @@ export const DiffView: React.FC<DiffViewProps> = ({
         });
     }, []);
 
-    // v1 read the last turn's diffs off a working-tree snapshot on the user
-    // message. v2 computes them on request from the turn's snapshots
-    // (`GET /api/session/:id/diff`), merged per file, so a file edited three
-    // times in one turn is one diff. Refetched whenever the transcript moves
-    // (a turn ending is what changes the answer).
-    const [lastTurnDiffs, setLastTurnDiffs] = React.useState<TurnSnapshotDiff[]>([]);
-    // A failed read is not "this turn changed nothing": it keeps its own state
-    // and a retry, and the last good list stays until a read replaces it.
-    const [turnDiffError, setTurnDiffError] = React.useState<string | null>(null);
-    const [turnDiffAttempt, retryTurnDiff] = React.useReducer((value: number) => value + 1, 0);
-    // Another session's turn is never shown while this one's loads.
-    React.useEffect(() => {
-        setLastTurnDiffs([]);
-        setTurnDiffError(null);
-    }, [currentSessionId]);
-    const lastMessageId = sessionMessages.length > 0 ? sessionMessages[sessionMessages.length - 1].id : '';
-    React.useEffect(() => {
-        if (activeDiffScope !== 'turn' || !currentSessionId || !visible) return;
-        let cancelled = false;
-        void opencodeClient.getSessionTurnDiff(currentSessionId, { directory: rootDirectory ?? undefined })
-            .then((files) => {
-                if (cancelled) return;
-                setLastTurnDiffs(files.map((entry) => ({
-                    file: entry.file,
-                    patch: entry.patch,
-                    status: entry.status,
-                    additions: entry.additions,
-                    deletions: entry.deletions,
-                })));
-                setTurnDiffError(null);
-            })
-            .catch((error) => {
-                if (cancelled) return;
-                console.warn('[diff-view] turn diff unavailable:', error instanceof Error ? error.message : error);
-                setTurnDiffError(error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff'));
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [activeDiffScope, currentSessionId, lastMessageId, rootDirectory, t, turnDiffAttempt, visible]);
+    // The last turn's diffs, merged per file by OpenCode from the turn's
+    // snapshots, so a file edited three times in one turn is one diff. Read
+    // in every scope while the view is shown, so the scope picker's count is
+    // current before the user switches to it.
+    const {
+        diffs: lastTurnDiffs,
+        count: turnFileCount,
+        loaded: turnDiffLoaded,
+        error: turnDiffError,
+        retry: retryTurnDiff,
+    } = useLastTurnDiff(currentSessionId, rootDirectory ?? undefined, { enabled: visible, live: activeDiffScope === 'turn' });
 
     const lastTurnDiffData = React.useMemo(() => {
         const map = new Map<string, DiffData>();
@@ -1740,8 +1709,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (!status?.files) return 0;
         return status.files.filter(isStagedStatusFile).length;
     }, [status]);
-
-    const turnFileCount = lastTurnDiffs.length;
 
     // ----- Branch scope (all changes on this branch vs its base) -----
     const currentBranch = status?.current ?? null;
@@ -3075,9 +3042,18 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-sm text-muted-foreground">
                     <div className="typography-ui-label font-semibold text-foreground">{t('diffView.state.failedToLoadDiff')}</div>
                     <div className="typography-meta max-w-[32rem] text-center">{turnDiffError}</div>
-                    <button type="button" className="typography-ui-label text-primary hover:underline" onClick={() => { setTurnDiffError(null); retryTurnDiff(); }}>
+                    <button type="button" className="typography-ui-label text-primary hover:underline" onClick={retryTurnDiff}>
                         {t('diffView.actions.retry')}
                     </button>
+                </div>
+            );
+        }
+
+        if (activeDiffScope === 'turn' && !turnDiffLoaded && currentSessionId) {
+            return (
+                <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Icon name="loader-4" className="size-4 animate-spin" />
+                    {t('diffView.state.loadingChanges')}
                 </div>
             );
         }
