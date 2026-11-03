@@ -38,8 +38,8 @@ const requestWorktreeBootstrapStatus = (directory: string): Promise<GitWorktreeB
 };
 
 // Author profiles live in webview memory for the lifetime of the view, as they
-// always have. The extension host applies a profile to a repository through the
-// standard identity bridge message and stores nothing itself.
+// always have. Nothing applies them to a repository in this runtime, and the
+// extension host stores nothing.
 let storedProfiles: GitIdentityProfile[] = [];
 
 const readStoredProfiles = (): GitIdentityProfile[] => storedProfiles;

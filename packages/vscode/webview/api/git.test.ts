@@ -139,7 +139,7 @@ describe('createVSCodeGitAPI network operations', () => {
     });
     const executing = git.executeNetworkOperation(plan.operationId);
     const revalidation = await nextMessage();
-    // Fake timers start before the push request exists, so its bridge timeout,
+    // Fake timers start before the deletion request exists, so its bridge timeout,
     // if one were armed, would fire on the tick below.
     mock.timers.enable({ apis: ['setTimeout'] });
     let deletion: (typeof messages)[number] | undefined;
