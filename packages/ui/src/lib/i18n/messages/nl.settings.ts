@@ -1410,6 +1410,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_help.label': 'Sneltoetsen openen',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': 'Services-menu in-/uitschakelen',
   'settings.openchamber.keyboardShortcuts.action.cycle_theme.label': 'Thema doorlopen',
+  'settings.openchamber.keyboardShortcuts.action.reload_ui.label': 'Interface herladen',
   'settings.openchamber.keyboardShortcuts.action.cycle_agent.label': 'Agent doorlopen',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label': 'Favoriet model vooruit doorlopen',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label': 'Favoriet model achteruit doorlopen',

@@ -1280,6 +1280,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_help.label': 'Ouvrir les raccourcis clavier',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': 'Afficher/masquer le menu des services',
   'settings.openchamber.keyboardShortcuts.action.cycle_theme.label': 'Changer de thème',
+  'settings.openchamber.keyboardShortcuts.action.reload_ui.label': 'Recharger l’interface',
   'settings.openchamber.keyboardShortcuts.action.cycle_agent.label': 'Changer d’agent',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label': 'Faire avancer le modèle favori',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label': 'Faire défiler le modèle favori vers l\'arrière',

@@ -1377,6 +1377,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_help.label': '키보드 단축키 열기',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': '서비스 메뉴 토글',
   'settings.openchamber.keyboardShortcuts.action.cycle_theme.label': '테마 순환',
+  'settings.openchamber.keyboardShortcuts.action.reload_ui.label': 'UI 새로고침',
   'settings.openchamber.keyboardShortcuts.action.cycle_agent.label': '에이전트 순환',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label': '즐겨찾기 모델 앞으로 순환',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label': '즐겨찾기 모델 뒤로 순환',

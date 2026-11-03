@@ -1409,6 +1409,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_help.label': 'فتح اختصارات لوحة المفاتيح',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': 'إظهار/إخفاء قائمة الخدمات',
   'settings.openchamber.keyboardShortcuts.action.cycle_theme.label': 'التبديل بين السمات',
+  'settings.openchamber.keyboardShortcuts.action.reload_ui.label': 'إعادة تحميل الواجهة',
   'settings.openchamber.keyboardShortcuts.action.cycle_agent.label': 'التبديل بين الوكلاء',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label': 'النموذج المفضل التالي',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label': 'النموذج المفضل السابق',

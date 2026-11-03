@@ -62,6 +62,14 @@ describe('shortcut schema', () => {
     expect(getShortcutAction('focus_input')?.category).toBe('session');
   });
 
+  test('exposes reload UI as a customizable application shortcut on mod+r', () => {
+    const action = getShortcutAction('reload_ui');
+
+    expect(action?.category).toBe('application');
+    expect(action?.defaultBinding).toBe('mod+r');
+    expect(action?.customizable).toBe(true);
+  });
+
   test('exposes prompt history search as a customizable session shortcut', () => {
     const action = getShortcutAction('search_prompt_history');
 

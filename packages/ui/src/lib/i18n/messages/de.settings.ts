@@ -1351,6 +1351,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_help.label': 'Tastenkürzel öffnen',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': 'Dienstemenü umschalten',
   'settings.openchamber.keyboardShortcuts.action.cycle_theme.label': 'Thema wechseln',
+  'settings.openchamber.keyboardShortcuts.action.reload_ui.label': 'Oberfläche neu laden',
   'settings.openchamber.keyboardShortcuts.action.cycle_agent.label': 'Agent wechseln',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label': 'Favorites Modell vorwärts durchschalten',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label': 'Favorites Modell rückwärts durchschalten',

@@ -58,6 +58,9 @@ export const useMiniChatKeyboardShortcuts = () => {
       focusChatInput();
     },
     search_prompt_history: (event) => dispatchPromptHistorySearch(event),
+    reload_ui: () => {
+      window.location.reload();
+    },
     new_mini_chat: () => {
       if (!canUseElectronDesktopIPC()) return false;
       void invokeDesktop('desktop_open_draft_mini_chat_window', {

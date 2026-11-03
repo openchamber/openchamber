@@ -310,6 +310,14 @@ const SHORTCUT_GROUPS = {
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_theme.label',
     },
+    {
+      // Takes over the browser's own reload key with the same effect, so the
+      // macOS desktop shell, whose menu has no reload key, gets one too.
+      id: 'reload_ui',
+      defaultBinding: 'mod+r',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.reload_ui.label',
+    },
   ],
   // Desktop-shell capabilities: registered as OS-level global shortcuts rather
   // than in-app keybindings, so they carry no in-app default binding. The

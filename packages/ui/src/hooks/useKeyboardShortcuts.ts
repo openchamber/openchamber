@@ -138,6 +138,11 @@ export const useKeyboardShortcuts = () => {
     open_command_palette: () => {
       useUIStore.getState().toggleCommandPalette();
     },
+    reload_ui: () => {
+      // Same reach as the palette's Reload UI: the VS Code webview reloads through VS Code.
+      if (isVSCodeRuntime()) return false;
+      window.location.reload();
+    },
     search_prompt_history: (event) => dispatchPromptHistorySearch(event),
     open_timeline_dialog: () => {
       useUIStore.getState().setTimelineDialogOpen(true);

@@ -1377,6 +1377,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.action.open_help.label": "Abrir atalhos de teclado",
   "settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label": "Mostrar ou ocultar menu de serviços",
   "settings.openchamber.keyboardShortcuts.action.cycle_theme.label": "Alternar tema",
+  "settings.openchamber.keyboardShortcuts.action.reload_ui.label": "Recarregar interface",
   "settings.openchamber.keyboardShortcuts.action.cycle_agent.label": "Alternar agente",
   "settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label": "Próximo modelo favorito",
   "settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label": "Modelo favorito anterior",

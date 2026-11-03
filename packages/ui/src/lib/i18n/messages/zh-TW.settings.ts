@@ -1262,6 +1262,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.action.open_help.label': '開啟鍵盤快速鍵',
   'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label': '切換服務選單',
   'settings.openchamber.keyboardShortcuts.action.cycle_theme.label': '輪換主題',
+  'settings.openchamber.keyboardShortcuts.action.reload_ui.label': '重新載入介面',
   'settings.openchamber.keyboardShortcuts.action.cycle_agent.label': '輪換 agent',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_forward.label': '向前輪換收藏模型',
   'settings.openchamber.keyboardShortcuts.action.cycle_favorite_model_backward.label': '向後輪換收藏模型',

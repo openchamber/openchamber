@@ -5447,7 +5447,8 @@ const buildMacMenu = (locale = 'en') => {
         },
         { type: 'separator' },
         { label: t('settings'), accelerator: 'Cmd+,', click: () => dispatchAction('settings') },
-        { label: t('reloadWebview'), click: () => reloadMenuTargetWindow() },
+        // The renderer owns the customizable binding (reload_ui); the menu only shows it.
+        { label: t('reloadWebview'), accelerator: 'Cmd+R', registerAccelerator: false, click: () => reloadMenuTargetWindow() },
         { label: t('restart'), click: () => relaunchFromMenu() },
         { label: t('commandPalette'), accelerator: 'Cmd+P', click: () => dispatchAction('command-palette') },
         { type: 'separator' },
