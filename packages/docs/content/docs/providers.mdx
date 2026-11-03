@@ -60,7 +60,7 @@ The Antigravity CLI (`agy`) can run a scoped task for the agent, using your Goog
 2. Open **Settings → Providers → Antigravity CLI**. The page shows the installed version and the models your account can use.
 3. Pick a default model and turn on delegation.
 
-Agents then get an `agy` tool, and you can type `/agy` in chat to hand over a task. Antigravity works in the session's directory with its own tools and permissions; the agent that delegates reviews the result. Headless runs cannot show approval prompts, so a tool that needs one is denied and the result says which. "Run commands without asking" is off by default and always keeps commands inside Antigravity's terminal sandbox.
+Agents then get an `agy` tool, and you can type `/agy` in chat to hand over a task. Antigravity works in the session's directory with its own tools and permissions; the agent that delegates reviews the result. Headless runs cannot show approval prompts, so a tool that needs one is denied and the result says which. "Run commands without asking" is off by default. When enabled, sandboxed commands run automatically; if the sandbox is unavailable, commands that need approval are denied. Your CLI allow and deny rules still apply.
 
 Delegation needs OpenChamber to start OpenCode. When OpenChamber is connected to an external OpenCode server, the page disables the switch. VS Code has no OpenChamber server, so it has no Antigravity settings.
 

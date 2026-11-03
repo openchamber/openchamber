@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AntigravityError,
+  buildChildEnv,
   buildRunArgs,
   classifyFailure,
   formatTimeout,
@@ -38,10 +39,25 @@ describe('Antigravity CLI contract', () => {
     expect(args[args.indexOf('--print') + 1]).toBe('/literal task');
   });
 
-  it('pairs auto-approval with the terminal sandbox', () => {
+  it('allows sandboxed commands without bypassing permission checks', () => {
     const args = buildRunArgs({ prompt: 'task', timeoutMs: 60_000, skipPermissions: true });
-    expect(args).toContain('--dangerously-skip-permissions');
+    expect(args).not.toContain('--dangerously-skip-permissions');
     expect(args).toContain('--sandbox');
+    expect(JSON.parse(args[args.indexOf('--settings') + 1])).toEqual({
+      toolPermission: 'proceed-in-sandbox',
+      agentMode: '',
+    });
+  });
+
+  it('preserves Linux keyring routing without inheriting provider secrets', () => {
+    expect(buildChildEnv({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/example/session-bus',
+      XDG_RUNTIME_DIR: '/run/user/example',
+      OPENAI_API_KEY: 'synthetic-provider-key',
+    })).toEqual({
+      DBUS_SESSION_BUS_ADDRESS: 'unix:path=/example/session-bus',
+      XDG_RUNTIME_DIR: '/run/user/example',
+    });
   });
 
   it('defaults and clamps timeouts', () => {
@@ -95,6 +111,51 @@ describe('Antigravity CLI contract', () => {
 });
 
 describe('Antigravity result envelope', () => {
+  it('redacts diagnostics before taking the display tail', () => {
+    try {
+      outcomeFromEnvelope({
+        envelope: { status: 'ERROR' },
+        stderr: `Bearer ${'synthetic'.repeat(300)}`,
+        exitCode: 1,
+        durationMs: 10,
+        model: 'm',
+      });
+      throw new Error('Expected a failed envelope');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AntigravityError);
+      expect(error.details.stderr).not.toContain('synthetic');
+      expect(error.details.stderr).toContain('[redacted]');
+    }
+  });
+
+  it('preserves a validated conversation id when the first turn times out', () => {
+    try {
+      outcomeFromEnvelope({
+        envelope: { status: 'SUCCESS', finished_reason: 'print_timeout', conversation_id: 'conv-1' },
+        stderr: '',
+        exitCode: 0,
+        durationMs: 10,
+        model: 'm',
+      });
+      throw new Error('Expected a timeout');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AntigravityError);
+      expect(error.code).toBe('TIMEOUT');
+      expect(error.details.conversationId).toBe('conv-1');
+    }
+  });
+
+  it('never returns an invalid conversation id to the caller', () => {
+    const result = outcomeFromEnvelope({
+      envelope: { status: 'SUCCESS', response: 'done', conversation_id: '--unsafe' },
+      stderr: '',
+      exitCode: 0,
+      durationMs: 10,
+      model: 'm',
+    });
+    expect(result.conversationId).toBeNull();
+  });
+
   it('reads the last JSON object when progress lines precede it', () => {
     expect(parseEnvelope('thinking\n{"status":"SUCCESS","response":"done"}')).toEqual({ status: 'SUCCESS', response: 'done' });
     expect(parseEnvelope('not json')).toBeNull();

@@ -2,6 +2,7 @@ import { AGY_COMMAND, ANTIGRAVITY_CLI_INSTALL_URL, AntigravityError, buildChildE
 import { ANTIGRAVITY_SKILL } from './skill.js';
 import { createCallbackAddress } from '../agent-tool/callback-address.js';
 import { isEnterpriseMode } from '../enterprise-mode.js';
+import { z } from 'zod';
 
 const PLUGIN_ID = 'openchamber-antigravity';
 const STATUS_CACHE_TTL_MS = 30_000;
@@ -10,6 +11,23 @@ const VERSION_TIMEOUT_MS = 5_000;
 const MAX_STDOUT_BYTES = 1_000_000;
 const MAX_STDERR_BYTES = 20_000;
 const KILL_GRACE_MS = 2_000;
+const settingsSchema = z.object({
+  antigravityDelegationEnabled: z.boolean().catch(false),
+  antigravityDelegationModel: z.string().trim().catch(''),
+  antigravityDelegationSkipPermissions: z.boolean().catch(false),
+}).transform((settings) => ({
+  enabled: settings.antigravityDelegationEnabled,
+  model: settings.antigravityDelegationModel,
+  skipPermissions: settings.antigravityDelegationSkipPermissions,
+}));
+const runInputSchema = z.object({
+  prompt: z.string().trim().min(1),
+  model: z.string().trim().catch(''),
+  conversation: z.string().trim().catch(''),
+  sessionID: z.string().catch(''),
+  timeout: z.union([z.string(), z.number()]).nullish(),
+});
+const authorizationSchema = z.string().catch('');
 
 const PLUGIN_PACKAGE_JSON = `${JSON.stringify({
   name: PLUGIN_ID,
@@ -118,10 +136,11 @@ export default {
               timeout: input.timeout,
               sessionID,
             }, context?.signal)
+            const conversationId = payload.ok ? payload.data?.conversationId : payload.error?.details?.conversationId
+            if (sessionID && conversationId) conversations.set(sessionID, conversationId)
             if (!payload.ok) {
               return { content: errorText(payload.error?.code || "AGY_FAILED", payload.error?.message || "Antigravity failed.", payload.error?.details), metadata: { error: true, code: payload.error?.code } }
             }
-            if (sessionID && payload.data?.conversationId) conversations.set(sessionID, payload.data.conversationId)
             return {
               content: formatResult(payload.data),
               metadata: {
@@ -221,14 +240,12 @@ export const createAntigravityRuntime = (dependencies) => {
   let activeToken = null;
   let statusCache = null;
   let statusInFlight = null;
+  let stopping = false;
+  const activeProcesses = new Set();
 
   const readRuntimeSettings = async () => {
     const settings = await Promise.resolve(readSettings()).catch(() => null);
-    return {
-      enabled: settings?.antigravityDelegationEnabled === true,
-      model: typeof settings?.antigravityDelegationModel === 'string' ? settings.antigravityDelegationModel.trim() : '',
-      skipPermissions: settings?.antigravityDelegationSkipPermissions === true,
-    };
+    return settingsSchema.parse(settings ?? {});
   };
 
   const binary = () => resolveBinary({
@@ -243,12 +260,23 @@ export const createAntigravityRuntime = (dependencies) => {
 
   /** Spawn the CLI and collect its envelopes; the caller owns the result. */
   const runProcess = ({ args, cwd, timeoutMs, env, signal }) => new Promise((resolve, reject) => {
+    if (stopping || signal?.aborted) {
+      reject(new AntigravityError('The Antigravity task was cancelled.', 'CANCELLED'));
+      return;
+    }
     const binaryPath = binary();
     if (!binaryPath) {
       reject(new AntigravityError(
         `The Antigravity CLI (\`${AGY_COMMAND}\`) is not installed on this machine. Install it from ${ANTIGRAVITY_CLI_INSTALL_URL} and run \`${AGY_COMMAND}\` once to sign in.`,
         'AGY_NOT_FOUND',
       ));
+      return;
+    }
+    // Settings reads and directory lookup can yield while policy changes.
+    // Keep the final check synchronous with the process boundary for all calls,
+    // including model discovery after its version read.
+    if (isEnterpriseMode()) {
+      reject(new AntigravityError('Enterprise mode does not allow Antigravity delegation.', 'ENTERPRISE_MODE'));
       return;
     }
     const child = spawn(binaryPath, args, {
@@ -262,24 +290,44 @@ export const createAntigravityRuntime = (dependencies) => {
     });
     let stdout = '';
     let stderr = '';
+    let stderrOmitted = false;
     let settled = false;
     let timedOut = false;
     let aborted = false;
+    let termination = null;
+    const completion = Promise.withResolvers();
+    const operation = {
+      stop: () => {
+        if (!settled) onAbort();
+        return completion.promise;
+      },
+    };
+    activeProcesses.add(operation);
 
     const finish = (fn, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener?.('abort', onAbort);
-      fn(value);
+      // Even if the CLI closes first, descendants may ignore SIGTERM. Keep
+      // shutdown waiting until the group's SIGKILL escalation has run.
+      void Promise.resolve(termination).then(() => {
+        activeProcesses.delete(operation);
+        completion.resolve();
+        fn(value);
+      });
     };
 
     const killTree = () => {
-      if (!child.pid) return;
+      if (termination || !child.pid) return;
       if (process.platform === 'win32') {
-        const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-        killer.on('error', () => {
-          try { child.kill(); } catch { /* already gone */ }
+        termination = new Promise((resolveStopped) => {
+          const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+          killer.once('error', () => {
+            try { child.kill(); } catch { /* already gone */ }
+            resolveStopped();
+          });
+          killer.once('close', resolveStopped);
         });
         return;
       }
@@ -288,14 +336,16 @@ export const createAntigravityRuntime = (dependencies) => {
       } catch {
         try { child.kill('SIGTERM'); } catch { /* already gone */ }
       }
-      const hard = setTimeout(() => {
-        try {
-          process.kill(-child.pid, 'SIGKILL');
-        } catch {
-          try { child.kill('SIGKILL'); } catch { /* already gone */ }
-        }
-      }, KILL_GRACE_MS);
-      hard.unref?.();
+      termination = new Promise((resolveStopped) => {
+        setTimeout(() => {
+          try {
+            process.kill(-child.pid, 'SIGKILL');
+          } catch {
+            try { child.kill('SIGKILL'); } catch { /* already gone */ }
+          }
+          resolveStopped();
+        }, KILL_GRACE_MS);
+      });
     };
 
     const onAbort = () => {
@@ -322,7 +372,14 @@ export const createAntigravityRuntime = (dependencies) => {
       }
     });
     child.stderr.on('data', (chunk) => {
-      stderr = (stderr + chunk.toString('utf8')).slice(-MAX_STDERR_BYTES);
+      if (stderrOmitted) return;
+      stderr += chunk.toString('utf8');
+      // A raw tail can start inside a credential, beyond its identifying
+      // prefix. Drop oversized diagnostics entirely instead of keeping fragments.
+      if (stderr.length > MAX_STDERR_BYTES) {
+        stderr = 'Antigravity diagnostics exceeded the capture limit and were omitted.';
+        stderrOmitted = true;
+      }
     });
     child.once('error', (error) => finish(reject, new AntigravityError(
       error?.code === 'ENOENT'
@@ -335,7 +392,7 @@ export const createAntigravityRuntime = (dependencies) => {
         finish(reject, new AntigravityError('The Antigravity task was cancelled.', 'CANCELLED'));
         return;
       }
-      finish(resolve, { stdout, stderr, exitCode: typeof exitCode === 'number' ? exitCode : 1, timedOut });
+      finish(resolve, { stdout, stderr: redactSecrets(stderr), exitCode: exitCode ?? 1, timedOut });
     });
   });
 
@@ -404,6 +461,9 @@ export const createAntigravityRuntime = (dependencies) => {
       return { installed: true, binaryPath, version, models, error, blocked: false, managed, checkedAt };
     })()
       .then((value) => {
+        if (isEnterpriseMode()) {
+          return { installed: false, binaryPath: null, version: null, models: [], error: null, blocked: true, managed: !isExternalOpenCode(), checkedAt: Date.now() };
+        }
         statusCache = { at: Date.now(), value };
         return value;
       })
@@ -454,7 +514,7 @@ export const createAntigravityRuntime = (dependencies) => {
 
   const authorize = (req) => {
     if (!activeToken || !isSameMachineAddress(req.socket?.remoteAddress)) return false;
-    const header = typeof req.headers?.authorization === 'string' ? req.headers.authorization : '';
+    const header = authorizationSchema.parse(req.headers?.authorization);
     if (!header.startsWith('Bearer ')) return false;
     const provided = Buffer.from(header.slice(7));
     const expected = Buffer.from(activeToken);
@@ -479,15 +539,12 @@ export const createAntigravityRuntime = (dependencies) => {
     if (!settings.enabled) {
       throw new AntigravityError('Antigravity delegation is switched off in Settings.', 'DISABLED');
     }
-    const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
-    if (!prompt) throw new AntigravityError('A prompt is required.', 'INVALID_ARGUMENT');
-    const timeoutMs = parseTimeoutMs(payload.timeout);
-    const model = typeof payload.model === 'string' && payload.model.trim()
-      ? payload.model.trim()
-      : settings.model;
-    const conversationId = typeof payload.conversation === 'string' && payload.conversation.trim()
-      ? payload.conversation.trim()
-      : null;
+    const parsed = runInputSchema.safeParse(payload);
+    if (!parsed.success) throw new AntigravityError('A prompt and valid delegation arguments are required.', 'INVALID_ARGUMENT');
+    const { prompt, model: requestedModel, conversation, sessionID, timeout } = parsed.data;
+    const timeoutMs = parseTimeoutMs(timeout);
+    const model = requestedModel || settings.model;
+    const conversationId = conversation || null;
     // Both reach argv as values. Only the shapes Antigravity itself produces
     // are accepted, so a model cannot turn one into another flag.
     if (model && !isValidArgumentToken(model)) {
@@ -496,8 +553,7 @@ export const createAntigravityRuntime = (dependencies) => {
     if (conversationId && !isValidArgumentToken(conversationId)) {
       throw new AntigravityError('That Antigravity conversation id is not valid.', 'INVALID_ARGUMENT');
     }
-    const sessionID = typeof payload.sessionID === 'string' ? payload.sessionID : '';
-    const directory = sessionID && typeof resolveSessionDirectory === 'function'
+    const directory = sessionID
       ? await Promise.resolve(resolveSessionDirectory(sessionID)).catch(() => null)
       : null;
     if (!directory) {
@@ -512,14 +568,18 @@ export const createAntigravityRuntime = (dependencies) => {
       env: buildChildEnv(),
       signal,
     });
+    const envelope = parseEnvelope(result.stdout);
     if (result.timedOut) {
       throw new AntigravityError(
         `Antigravity did not finish within ${Math.round(timeoutMs / 60_000)} minutes.`,
         'TIMEOUT',
-        { durationMs: Date.now() - startedAt, model },
+        {
+          conversationId: isValidArgumentToken(envelope?.conversation_id) ? envelope.conversation_id : null,
+          durationMs: Date.now() - startedAt,
+          model,
+        },
       );
     }
-    const envelope = parseEnvelope(result.stdout);
     if (!envelope) {
       const message = redactSecrets(result.stderr.trim() || `Antigravity exited with code ${result.exitCode} and no result.`);
       throw new AntigravityError(message, classifyFailure({ message, exitCode: result.exitCode }), {
@@ -552,7 +612,7 @@ export const createAntigravityRuntime = (dependencies) => {
         }
       };
       const uiAuth = getUiAuthController();
-      if (uiAuth && typeof uiAuth.requireAuth === 'function') {
+      if (uiAuth) {
         try {
           await uiAuth.requireAuth(req, res, respond);
         } catch (error) {
@@ -594,6 +654,11 @@ export const createAntigravityRuntime = (dependencies) => {
     });
   };
 
+  const stop = async () => {
+    stopping = true;
+    await Promise.all([...activeProcesses].map((operation) => operation.stop()));
+  };
+
   return {
     pluginDirectory,
     materializePlugin,
@@ -601,5 +666,6 @@ export const createAntigravityRuntime = (dependencies) => {
     status,
     run,
     registerRoutes,
+    stop,
   };
 };

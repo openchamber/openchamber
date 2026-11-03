@@ -87,7 +87,7 @@ const ADD_PROVIDER_ID = '__add_provider__';
 /** Not an OpenCode provider id: the page for OpenChamber's own classification providers (Jev). */
 const CLASSIFICATION_PAGE_ID = '__classification__';
 /** Not an OpenCode provider id: delegation to the Antigravity CLI. */
-export const ANTIGRAVITY_PAGE_ID = '__antigravity__';
+const ANTIGRAVITY_PAGE_ID = '__antigravity__';
 
 interface ProviderSourceInfo {
   exists: boolean;

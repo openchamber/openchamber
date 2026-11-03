@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 export interface AntigravityModel {
@@ -19,40 +20,30 @@ export interface AntigravityStatus {
   checkedAt: number;
 }
 
-const asModel = (value: unknown): AntigravityModel | null => {
-  if (!value || typeof value !== 'object') return null;
-  const model = value as Record<string, unknown>;
-  if (typeof model.id !== 'string' || model.id.length === 0) return null;
-  return { id: model.id, name: typeof model.name === 'string' && model.name ? model.name : model.id };
-};
+const modelSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().catch(''),
+}).transform((model): AntigravityModel => ({ id: model.id, name: model.name || model.id }));
+
+const statusSchema = z.object({
+  installed: z.boolean(),
+  binaryPath: z.string().nullable().catch(null),
+  version: z.string().nullable().catch(null),
+  models: z.array(modelSchema.nullable().catch(null)).catch([])
+    .transform((models) => models.filter((model) => model !== null)),
+  error: z.object({ code: z.string(), message: z.string().catch('') }).nullable().catch(null),
+  blocked: z.boolean().catch(false),
+  managed: z.boolean().catch(true),
+  checkedAt: z.number().catch(() => Date.now()),
+});
+const statusErrorSchema = z.object({ error: z.string().min(1) });
 
 /**
  * Parse the status route at the boundary. The page decides what to show from
  * this shape alone, so an unexpected payload is a failed read rather than a
  * half-filled screen.
  */
-export const parseAntigravityStatus = (value: unknown): AntigravityStatus | null => {
-  if (!value || typeof value !== 'object') return null;
-  const payload = value as Record<string, unknown>;
-  if (typeof payload.installed !== 'boolean') return null;
-  const error = payload.error && typeof payload.error === 'object'
-    ? payload.error as Record<string, unknown>
-    : null;
-  return {
-    installed: payload.installed,
-    binaryPath: typeof payload.binaryPath === 'string' ? payload.binaryPath : null,
-    version: typeof payload.version === 'string' ? payload.version : null,
-    models: Array.isArray(payload.models)
-      ? payload.models.map(asModel).filter((model): model is AntigravityModel => model !== null)
-      : [],
-    error: error && typeof error.code === 'string'
-      ? { code: error.code, message: typeof error.message === 'string' ? error.message : '' }
-      : null,
-    blocked: payload.blocked === true,
-    managed: payload.managed !== false,
-    checkedAt: typeof payload.checkedAt === 'number' ? payload.checkedAt : Date.now(),
-  };
-};
+export const parseAntigravityStatus = statusSchema.nullable().catch(null).parse;
 
 /**
  * Read the CLI's state on the host that runs OpenCode. `refresh` asks the
@@ -63,11 +54,11 @@ export const fetchAntigravityStatus = async ({ refresh = false } = {}): Promise<
   const response = await runtimeFetch('/api/antigravity/status', {
     method: 'GET',
     headers: { Accept: 'application/json' },
-    ...(refresh ? { query: { refresh: '1' } } : {}),
+    query: refresh ? { refresh: '1' } : undefined,
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    const message = body && typeof body.error === 'string' && body.error ? body.error : `HTTP ${response.status}`;
+    const body = statusErrorSchema.safeParse(await response.json().catch(() => null));
+    const message = body.success ? body.data.error : `HTTP ${response.status}`;
     throw new Error(message);
   }
   const parsed = parseAntigravityStatus(await response.json().catch(() => null));

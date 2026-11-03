@@ -47,6 +47,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getRelayService,
     getRelayReconcileTimer,
     getSpacesHost = () => null,
+    getAntigravityRuntime = () => null,
   } = dependencies;
 
   let shutdownPromise = null;
@@ -73,6 +74,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
 
     setIsShuttingDown(true);
     beginGuestServiceShutdown();
+    const antigravityShutdown = getAntigravityRuntime()?.stop();
     // Admission to guest services closed above; stop the session-event
     // subscriber in the same tick, so no event reaches a service's refusal
     // ("the host is shutting down") and reads as a broken service entry.
@@ -84,6 +86,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     // Both embedded stop() and daemon exits use this sequence. Close admission
     // synchronously above, then stop viewers before draining their services.
     const cleanupOperations = [
+      () => antigravityShutdown,
       () => clearInterval(getRelayReconcileTimer()),
       () => getGuestSurfaceRuntime()?.stop(),
       () => getRealtimeProxyRuntime()?.stop(),

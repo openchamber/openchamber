@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { z } from 'zod';
 
 /**
  * @module antigravity/cli
@@ -22,10 +23,18 @@ export const ANTIGRAVITY_CLI_INSTALL_URL = 'https://antigravity.google/docs/gett
  * argument.
  */
 const ARGUMENT_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const argumentTokenSchema = z.string().regex(ARGUMENT_TOKEN_PATTERN);
+const envelopeSchema = z.object({
+  status: z.string().nullish(),
+  response: z.string().nullish(),
+  error: z.string().nullish(),
+  finished_reason: z.string().nullish(),
+  conversation_id: z.string().nullish(),
+  usage: z.json().optional(),
+  duration_seconds: z.union([z.number(), z.string()]).nullish(),
+}).refine((envelope) => envelope.status != null || envelope.response != null);
 
-export const isValidArgumentToken = (value) => (
-  typeof value === 'string' && ARGUMENT_TOKEN_PATTERN.test(value)
-);
+export const isValidArgumentToken = (value) => argumentTokenSchema.safeParse(value).success;
 
 /**
  * Remove credentials from text shown to the model or a user. The CLI child
@@ -48,9 +57,8 @@ export const redactSecrets = (text) => {
 
 
 /** A delegated task may not run longer than this, whatever a model asks for. */
-export const MAX_RUN_TIMEOUT_MS = 60 * 60 * 1000;
-export const DEFAULT_RUN_TIMEOUT_MS = 15 * 60 * 1000;
-const MAX_TIMEOUT_MS = MAX_RUN_TIMEOUT_MS;
+const MAX_TIMEOUT_MS = 60 * 60 * 1000;
+const DEFAULT_RUN_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
  * Variables the CLI child may inherit. The server environment carries provider
@@ -90,6 +98,8 @@ const CHILD_ENV_ALLOWLIST = [
   'XDG_DATA_HOME',
   'XDG_CACHE_HOME',
   'XDG_STATE_HOME',
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
   'NODE_EXTRA_CA_CERTS',
@@ -103,7 +113,7 @@ export const buildChildEnv = (baseEnv = process.env) => {
   const env = {};
   for (const name of CHILD_ENV_ALLOWLIST) {
     const value = baseEnv[name];
-    if (typeof value === 'string') env[name] = value;
+    if (value !== undefined) env[name] = value;
   }
   return env;
 };
@@ -157,11 +167,13 @@ export const parseModelsOutput = (text) => {
 /** Normalize a timeout input (ms number, `"5m"`, `"300s"`) into milliseconds. */
 export const parseTimeoutMs = (value, fallback = DEFAULT_RUN_TIMEOUT_MS) => {
   if (value == null) return fallback;
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-    return Math.min(Math.trunc(value), MAX_TIMEOUT_MS);
+  const numeric = z.number().finite().positive().safeParse(value);
+  if (numeric.success) {
+    return Math.min(Math.trunc(numeric.data), MAX_TIMEOUT_MS);
   }
-  if (typeof value !== 'string') return fallback;
-  const match = value.trim().match(/^(\d+)\s*(h|m|s|ms)$/i);
+  const text = z.string().safeParse(value);
+  if (!text.success) return fallback;
+  const match = text.data.trim().match(/^(\d+)\s*(h|m|s|ms)$/i);
   if (!match) return fallback;
   const amount = Number(match[1]);
   if (!Number.isFinite(amount) || amount <= 0) return fallback;
@@ -195,11 +207,10 @@ export const buildRunArgs = ({ model, prompt, timeoutMs, conversationId, skipPer
     '--print-timeout', formatTimeout(timeoutMs),
     '--disable-slash-commands',
   ];
-  // Auto-approval is only ever offered together with the terminal sandbox, so
-  // an approved command still runs inside the CLI's own confinement. The
-  // setting behind this is host-owned; the model cannot ask for it.
+  // This mode falls back to review when the sandbox is unavailable. Skipping
+  // permissions would approve unsandboxed commands on those machines too.
   if (skipPermissions) {
-    args.push('--dangerously-skip-permissions', '--sandbox');
+    args.push('--sandbox', '--settings', JSON.stringify({ toolPermission: 'proceed-in-sandbox', agentMode: '' }));
   }
   if (model) args.push('--model', model);
   if (conversationId) args.push('--conversation', conversationId);
@@ -236,8 +247,8 @@ export const parseEnvelope = (stdout) => {
   const lines = text.split(/\r?\n/).filter((line) => line.trim().startsWith('{'));
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     try {
-      const value = JSON.parse(lines[index]);
-      if (value && typeof value === 'object' && ('status' in value || 'response' in value)) return value;
+      const parsed = envelopeSchema.safeParse(JSON.parse(lines[index]));
+      if (parsed.success) return parsed.data;
     } catch {
       // A truncated last line is a broken stream, not a result.
     }
@@ -261,9 +272,12 @@ export class AntigravityError extends Error {
 export const outcomeFromEnvelope = ({ envelope, stderr, exitCode, durationMs, model }) => {
   const status = envelope?.status;
   const finishedReason = envelope?.finished_reason;
+  const conversationId = isValidArgumentToken(envelope?.conversation_id) ? envelope.conversation_id : null;
+  const diagnostics = redactSecrets(String(stderr ?? ''));
   if (finishedReason === 'print_timeout' || status === 'TIMEOUT') {
     throw new AntigravityError('Antigravity reached its print timeout before answering.', 'TIMEOUT', {
-      stderr: redactSecrets(String(stderr ?? '').slice(-2000)),
+      conversationId,
+      stderr: diagnostics.slice(-2000),
       durationMs,
       model,
     });
@@ -272,27 +286,27 @@ export const outcomeFromEnvelope = ({ envelope, stderr, exitCode, durationMs, mo
     const message = envelope?.error || status;
     throw new AntigravityError(redactSecrets(message), classifyFailure({ message, exitCode }), {
       status,
-      conversationId: envelope?.conversation_id || null,
-      stderr: redactSecrets(String(stderr ?? '').slice(-2000)),
+      conversationId,
+      stderr: diagnostics.slice(-2000),
       durationMs,
       model,
     });
   }
-  const response = typeof envelope?.response === 'string' ? envelope.response : '';
+  const response = envelope?.response ?? '';
   if (!response.trim()) {
     // Headless soft-denies a tool it cannot get approval for: exit 0, SUCCESS,
     // empty response, and the notice on stderr. Reporting "no output" would
     // hide the one sentence that explains it.
-    const notice = redactSecrets(String(stderr ?? '').trim());
+    const notice = diagnostics.trim();
     throw new AntigravityError(
       notice || 'Antigravity returned no output. A tool that needed approval may have been denied in headless mode.',
       classifyFailure({ message: notice, exitCode }),
-      { conversationId: envelope?.conversation_id || null, stderr: notice.slice(-2000), durationMs, model },
+      { conversationId, stderr: notice.slice(-2000), durationMs, model },
     );
   }
   return {
     response: response.trimEnd(),
-    conversationId: envelope?.conversation_id || null,
+    conversationId,
     usage: envelope?.usage ?? null,
     durationMs: Math.round(Number(envelope?.duration_seconds ?? 0) * 1000) || durationMs,
     model,

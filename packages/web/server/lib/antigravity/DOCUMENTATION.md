@@ -25,6 +25,8 @@ result comes back as an ordinary tool result.
   is written. Enterprise mode refuses the call even if the plugin is already
   loaded, and the status route reports a blocked state without starting the CLI
   (even `agy models` reaches Google).
+- Enterprise mode is checked again immediately before each CLI launch, after
+  asynchronous settings, directory and version reads.
 - An external OpenCode server is not launched by OpenChamber, so there is no
   managed config to list the plugin in. The status reports `managed: false`,
   the page disables enabling with that reason, and `run` refuses with
@@ -40,13 +42,17 @@ result comes back as an ordinary tool result.
   arrive as a successful, empty answer.
 - Cancellation ends the CLI and the commands it started; a cancelled turn is
   never reported as a result.
+- Server shutdown closes process admission and awaits CLI process-tree cleanup,
+  including forced termination of descendants that ignore SIGTERM.
 - One Antigravity conversation per OpenCode session, kept in the plugin's
   memory so a follow-up continues without naming an id. The result always
   carries the id, which survives a reload.
 - A model id or conversation id reaches argv only in the token shape
   Antigravity produces. Anything else is rejected before a process starts.
-- Error details are redacted before they reach the model: proxy credentials,
-  bearer tokens and key-shaped assignments never leave this module.
+- Error details are redacted before display truncation. Oversized stderr is
+  omitted entirely so a capture boundary cannot retain a credential fragment.
+- The child inherits Linux session-bus routing for the CLI's keyring, while
+  provider credentials remain outside its environment allowlist.
 
 ## Decisions
 
@@ -72,12 +78,14 @@ fails, and the user would read that as a broken provider. The Settings page
 already refuses to enable it without a model list, so the plugin and the setting
 agree.
 
-### Why auto-approval requires the sandbox
+### Why sandbox permission mode replaces skipping permissions
 
-`--dangerously-skip-permissions` approves every tool call. Paired always with
-`--sandbox`, an approved command still runs inside the CLI's own terminal
-confinement, and the setting is host-owned: the model cannot ask for it. The
-default is off, so the CLI's own permission rules apply.
+`--sandbox` can have no effect on unsupported hosts, so combining it with
+`--dangerously-skip-permissions` can approve unrestricted commands. The opt-in
+uses `--settings` with `toolPermission: "proceed-in-sandbox"` and the default
+agent mode. The CLI falls back to review when sandboxing is unavailable, and
+headless mode denies operations that still need approval. The user's explicit
+allow and deny rules continue to apply. The setting defaults to off.
 
 ### Why `/agy` sends a prompt instead of calling the tool directly
 
@@ -93,6 +101,13 @@ is worth it, how to brief the task and how to resume. The tool description
 alone states what the tool does, not when to reach for it. The skill is
 registered at runtime, so it is available to agents but is not a file in the
 user's skills folder and does not appear in Settings → Skills.
+
+### Why failed turns retain their conversation
+
+A timeout can arrive after files changed. Validated conversation ids from both
+successful and failed envelopes are returned and retained by the plugin, so a
+follow-up resumes that work. A host timeout can retain an id only if the CLI
+already wrote its envelope.
 
 ## Attribution
 

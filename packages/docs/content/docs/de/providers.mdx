@@ -47,7 +47,7 @@ Die Antigravity CLI (`agy`) kann eine abgegrenzte Aufgabe für den Agenten ausf�
 2. Öffnen Sie **Einstellungen → Anbieter → Antigravity CLI**. Die Seite zeigt die installierte Version und die Modelle, die Ihr Konto nutzen kann.
 3. Wählen Sie ein Standardmodell und aktivieren Sie die Delegation.
 
-Agenten erhalten dann das Werkzeug `agy`, und Sie können im Chat `/agy` eingeben, um eine Aufgabe zu übergeben. Antigravity arbeitet im Verzeichnis der Sitzung mit eigenen Werkzeugen und Berechtigungen; der delegierende Agent prüft das Ergebnis. Headless-Läufe können keine Genehmigung anzeigen, deshalb wird ein Werkzeug, das eine braucht, abgelehnt, und das Ergebnis nennt sie. "Befehle ohne Nachfrage ausführen" ist aus und hält Befehle immer in der Terminal-Sandbox von Antigravity.
+Agenten erhalten dann das Werkzeug `agy`, und Sie können im Chat `/agy` eingeben, um eine Aufgabe zu übergeben. Antigravity arbeitet im Verzeichnis der Sitzung mit eigenen Werkzeugen und Berechtigungen; der delegierende Agent prüft das Ergebnis. Headless-Läufe können keine Genehmigung anzeigen, deshalb wird ein Werkzeug, das eine braucht, abgelehnt, und das Ergebnis nennt sie. "Befehle ohne Nachfrage ausführen" ist standardmäßig aus. Wenn aktiviert, laufen Befehle in der Sandbox automatisch. Ist die Sandbox nicht verfügbar, werden Befehle abgelehnt, die eine Genehmigung benötigen. Die Erlaubnis- und Verbotsregeln der CLI gelten weiterhin.
 
 Die Delegation setzt voraus, dass OpenChamber OpenCode startet. Ist OpenChamber mit einem externen OpenCode-Server verbunden, deaktiviert die Seite den Schalter. VS Code hat keinen OpenChamber-Server und daher keine Antigravity-Einstellungen.
 

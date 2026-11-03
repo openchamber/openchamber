@@ -2284,6 +2284,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
   getSpacesHost: () => spacesHost,
+  getAntigravityRuntime: () => antigravityRuntime,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -2327,7 +2328,7 @@ async function main(options = {}) {
     resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
     getActivePort: () => {
       const address = server?.address?.();
-      return typeof address === 'object' && address ? address.port : null;
+      return address?.port ?? null;
     },
     getActiveHost: () => server?.address?.()?.address ?? null,
     getUiAuthController: () => uiAuthController,

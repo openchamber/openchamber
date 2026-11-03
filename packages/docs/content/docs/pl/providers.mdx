@@ -47,7 +47,7 @@ Antigravity CLI (`agy`) może wykonać wyodrębnione zadanie dla agenta w ramach
 2. Otwórz **Ustawienia → Dostawcy → Antigravity CLI**. Strona pokazuje zainstalowaną wersję i modele dostępne dla Twojego konta.
 3. Wybierz model domyślny i włącz delegowanie.
 
-Agenci otrzymują narzędzie `agy`, a Ty możesz wpisać `/agy` w czacie, aby przekazać zadanie. Antigravity pracuje w katalogu sesji własnymi narzędziami i uprawnieniami; delegujący agent sprawdza wynik. Uruchomienia bez interfejsu nie mogą pokazać zgody, więc narzędzie, które jej wymaga, zostaje odrzucone, a wynik to opisuje. „Uruchamiaj polecenia bez pytania” jest wyłączone i zawsze trzyma polecenia w piaskownicy terminala Antigravity.
+Agenci otrzymują narzędzie `agy`, a Ty możesz wpisać `/agy` w czacie, aby przekazać zadanie. Antigravity pracuje w katalogu sesji własnymi narzędziami i uprawnieniami; delegujący agent sprawdza wynik. Uruchomienia bez interfejsu nie mogą pokazać zgody, więc narzędzie, które jej wymaga, zostaje odrzucone, a wynik to opisuje. "Uruchamiaj polecenia bez pytania" jest domyślnie wyłączone. Po włączeniu polecenia w piaskownicy uruchamiają się automatycznie. Jeśli piaskownica jest niedostępna, polecenia wymagające zgody są odrzucane. Reguły zezwalania i odmawiania w CLI nadal obowiązują.
 
 Delegowanie wymaga, aby OpenCode uruchamiał OpenChamber. Gdy OpenChamber jest połączony z zewnętrznym serwerem OpenCode, strona wyłącza przełącznik. VS Code nie ma serwera OpenChamber, więc nie ma ustawień Antigravity.
 

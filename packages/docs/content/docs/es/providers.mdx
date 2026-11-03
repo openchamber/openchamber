@@ -47,7 +47,7 @@ La CLI de Antigravity (`agy`) puede ejecutar una tarea acotada para el agente co
 2. Abre **Configuración → Proveedores → Antigravity CLI**. La página muestra la versión instalada y los modelos que puede usar tu cuenta.
 3. Elige un modelo predeterminado y activa la delegación.
 
-Los agentes reciben la herramienta `agy`, y puedes escribir `/agy` en el chat para entregar una tarea. Antigravity trabaja en el directorio de la sesión con sus propias herramientas y permisos; el agente que delega revisa el resultado. Las ejecuciones sin interfaz no pueden mostrar aprobaciones, así que una herramienta que las necesite se deniega y el resultado indica cuál. "Ejecutar comandos sin preguntar" está desactivado y mantiene los comandos dentro del entorno aislado de terminal de Antigravity.
+Los agentes reciben la herramienta `agy`, y puedes escribir `/agy` en el chat para entregar una tarea. Antigravity trabaja en el directorio de la sesión con sus propias herramientas y permisos; el agente que delega revisa el resultado. Las ejecuciones sin interfaz no pueden mostrar aprobaciones, así que una herramienta que las necesite se deniega y el resultado indica cuál. "Ejecutar comandos sin preguntar" está desactivado de forma predeterminada. Al activarlo, los comandos del entorno aislado se ejecutan automáticamente. Si no está disponible, se deniegan los comandos que necesitan aprobación. Las reglas de permiso y denegación de la CLI siguen vigentes.
 
 La delegación requiere que OpenChamber inicie OpenCode. Si OpenChamber está conectado a un servidor OpenCode externo, la página desactiva el interruptor. VS Code no tiene servidor de OpenChamber, así que no tiene ajustes de Antigravity.
 

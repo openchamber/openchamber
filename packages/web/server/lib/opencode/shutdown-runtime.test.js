@@ -201,6 +201,19 @@ describe('graceful shutdown runtime', () => {
     expect(stopAllGuestServices).toHaveBeenCalledTimes(1);
   });
 
+  it('closes delegation admission synchronously and waits for its processes before exiting', async () => {
+    const drained = Promise.withResolvers();
+    const stop = vi.fn(() => drained.promise);
+    const process = { exit: vi.fn() };
+    const runtime = createRuntime(null, { process, getAntigravityRuntime: () => ({ stop }) });
+    const shutdown = runtime.gracefulShutdown({ exitProcess: true });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(process.exit).not.toHaveBeenCalled();
+    drained.resolve();
+    await shutdown;
+    expect(process.exit).toHaveBeenCalledWith(0);
+  });
+
   it('continues shutdown when stopping guest services fails', async () => {
     const server = {
       close: vi.fn((callback) => {

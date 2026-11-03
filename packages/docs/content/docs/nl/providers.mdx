@@ -60,7 +60,7 @@ De Antigravity CLI (`agy`) kan een afgebakende taak voor de agent uitvoeren met 
 2. Open **Instellingen → Providers → Antigravity CLI**. De pagina toont de geïnstalleerde versie en de modellen die uw account kan gebruiken.
 3. Kies een standaardmodel en schakel delegatie in.
 
-Agenten krijgen dan de tool `agy`, en u kunt `/agy` in de chat typen om een taak over te dragen. Antigravity werkt in de map van de sessie met eigen tools en rechten; de delegerende agent beoordeelt het resultaat. Headless runs kunnen geen goedkeuring tonen, dus een tool die er een nodig heeft wordt geweigerd en het resultaat noemt welke. "Opdrachten zonder vragen uitvoeren" staat uit en houdt opdrachten altijd in de terminalsandbox van Antigravity.
+Agenten krijgen dan de tool `agy`, en u kunt `/agy` in de chat typen om een taak over te dragen. Antigravity werkt in de map van de sessie met eigen tools en rechten; de delegerende agent beoordeelt het resultaat. Headless runs kunnen geen goedkeuring tonen, dus een tool die er een nodig heeft wordt geweigerd en het resultaat noemt welke. "Opdrachten zonder vragen uitvoeren" staat standaard uit. Als het aanstaat, worden opdrachten in de sandbox automatisch uitgevoerd. Als de sandbox niet beschikbaar is, worden opdrachten die goedkeuring nodig hebben geweigerd. De toestemmings- en weigeringsregels van uw CLI blijven gelden.
 
 Delegatie vereist dat OpenChamber OpenCode start. Is OpenChamber verbonden met een externe OpenCode-server, dan schakelt de pagina de knop uit. VS Code heeft geen OpenChamber-server en dus geen Antigravity-instellingen.
 

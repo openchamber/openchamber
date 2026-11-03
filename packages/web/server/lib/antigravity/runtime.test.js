@@ -7,7 +7,7 @@ const spawnMock = vi.fn(() => {
 });
 const writeFileMock = vi.fn(async () => {});
 
-const createRuntime = ({ settings, enterprise = false, external = false } = {}) => {
+const createRuntime = ({ settings, enterprise = false, external = false, resolveSessionDirectory = () => '/tmp/project' } = {}) => {
   if (enterprise) process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
   return createAntigravityRuntime({
     crypto: { randomBytes },
@@ -17,7 +17,7 @@ const createRuntime = ({ settings, enterprise = false, external = false } = {}) 
     spawn: spawnMock,
     instanceDir: '/tmp/instance',
     readSettings: () => settings ?? { antigravityDelegationEnabled: true },
-    resolveSessionDirectory: () => '/tmp/project',
+    resolveSessionDirectory,
     getActivePort: () => 1234,
     getActiveHost: () => '127.0.0.1',
     isExternalOpenCode: () => external,
@@ -44,6 +44,18 @@ describe('Antigravity delegation gate', () => {
       models: [],
       blocked: true,
     });
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses pending delegation when enterprise mode changes during directory resolution', async () => {
+    const runtime = createRuntime({
+      resolveSessionDirectory: () => {
+        process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+        return '/tmp/project';
+      },
+    });
+    await expect(runtime.run({ prompt: 'hello', sessionID: 'ses_1' }))
+      .rejects.toMatchObject({ code: 'ENTERPRISE_MODE' });
     expect(spawnMock).not.toHaveBeenCalled();
   });
 
