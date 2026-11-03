@@ -312,6 +312,12 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], get
     res.json(await journey.startSpace(spaceIdOf(req)));
   }));
 
+  app.put(`${SPACES_ROUTE}/:id/task-title`, withJourney(async (journey, req, res) => {
+    const body = z.object({ title: z.string() }).safeParse(req.body);
+    if (!body.success) throw new SpaceError('invalid_request_body', 'The task title takes title, a string.');
+    res.json(await journey.setTaskTitle(spaceIdOf(req), body.data.title));
+  }));
+
   app.post(`${SPACES_ROUTE}/:id/stop`, withJourney(async (journey, req, res) => {
     res.json(await journey.stopSpace(spaceIdOf(req)));
   }));

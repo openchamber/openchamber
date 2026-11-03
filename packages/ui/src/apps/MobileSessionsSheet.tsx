@@ -49,6 +49,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { markAllSessionsViewed } from '@/sync/notification-store';
+import { useHasUnreadSession } from '@/sync/session-unread';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -106,6 +108,20 @@ const GROUPING_OPTIONS = [
 
 /** Menu rows tall enough for a thumb. */
 const MOBILE_MENU_ITEM_CLASS = 'min-h-10 items-center justify-between';
+
+/** Mounts only with the open menu, so the sheet does not watch every session for it. */
+function MobileMarkAllReadItem(): React.ReactNode {
+  const { t } = useI18n();
+  const hasUnread = useHasUnreadSession();
+  return (
+    <DropdownMenuItem disabled={!hasUnread} onClick={markAllSessionsViewed} className={MOBILE_MENU_ITEM_CLASS}>
+      <span className="flex items-center gap-2">
+        <Icon name="check-double" className="size-4" />
+        {t('sessions.sidebar.header.actions.markAllRead')}
+      </span>
+    </DropdownMenuItem>
+  );
+}
 
 type ReorderProject = {
   id: string;
@@ -352,17 +368,17 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         {renderMenuChoice('branch-names', 'sessions.sidebar.header.displayMode.worktreeNameByBranch', worktreeNameByBranch, toggleSetting(worktreeNameByBranch, setWorktreeNameByBranch, (next) => {
           void updateDesktopSettings({ sidebarWorktreeNameByBranch: next });
         }))}
+        <DropdownMenuSeparator />
         {canEditOrder ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setEditingOrder(true)} className={MOBILE_MENU_ITEM_CLASS}>
-              <span className="flex items-center gap-2">
-                <Icon name="drag-move-2" className="size-4" />
-                {t('mobile.sessions.editOrder')}
-              </span>
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem onClick={() => setEditingOrder(true)} className={MOBILE_MENU_ITEM_CLASS}>
+            <span className="flex items-center gap-2">
+              <Icon name="drag-move-2" className="size-4" />
+              {t('mobile.sessions.editOrder')}
+            </span>
+          </DropdownMenuItem>
         ) : null}
+        <MobileMarkAllReadItem />
+      
       </DropdownMenuContent>
     </DropdownMenu>
   ) : null;

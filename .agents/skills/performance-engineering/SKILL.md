@@ -302,6 +302,7 @@ live in the documentation and `--help`.
 | Command | Answers |
 |---|---|
 | `bun run profile:idle` | What the app does while nobody interacts with it, in a chosen mounted state: frames drawn and main-thread work, with baseline and budget gating (`--budget-frames`). |
+| `bun run profile:soak` | What the user's installed app costs over many idle minutes, with their real projects and accounts: CPU, memory and bytes per process, spawned processes, every request and event, CPU spikes next to what came with them. |
 | `bun run profile:session` | What a streaming reply costs on deterministic fixtures (prose, code, unicode, tool-heavy): long tasks against the frame budget, the finalize spike, a trace breakdown. |
 | `bun run profile:switch` | How long a session switch takes until it is `visible`, cold and warm, the shift after reveal, and the bytes each switch fetches. The gate for sidebar, header, chat container and markdown first-paint changes. |
 | `bun run profile:startup` | Time from launch to a usable composer, web or packaged desktop, with the requests and bytes until then. |

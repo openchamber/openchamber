@@ -32,6 +32,8 @@ import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
+import { markAllSessionsViewed } from '@/sync/notification-store';
+import { useHasUnreadSession } from '@/sync/session-unread';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -59,6 +61,21 @@ type Props = {
 
 const PRESSED_PAGE_BUTTON_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground';
 const IDLE_PAGE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
+
+/**
+ * Clears every unread mark at once. It mounts only with the open menu, so the
+ * sidebar does not watch the whole session list for it.
+ */
+function MarkAllReadItem(): React.ReactNode {
+  const { t } = useI18n();
+  const hasUnread = useHasUnreadSession();
+  return (
+    <DropdownMenuItem disabled={!hasUnread} onClick={markAllSessionsViewed} className="flex items-center gap-2">
+      <Icon name="check-double" className="h-4 w-4" />
+      <span>{t('sessions.sidebar.header.actions.markAllRead')}</span>
+    </DropdownMenuItem>
+  );
+}
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
@@ -233,6 +250,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
       </DropdownMenuItem>
     </>);
   }
+  displayMenuSections.push(<MarkAllReadItem />);
 
   // The pages the sidebar opens in the main area, most used first. Each item
   // is a toggle: it carries a check while its page is open and closes it.

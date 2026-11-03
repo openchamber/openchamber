@@ -143,9 +143,10 @@ const useActions = (): ActionState => {
 // ----- Content -----
 
 /**
- * The fill is the track's full width slid back by what is missing, so a new
- * sample glides to its value on the compositor and the rounded end keeps
- * its shape; the track clips the rest.
+ * The fill is the track's full width slid back by what is missing, so the
+ * rounded end keeps its shape; the track clips the rest. A new sample jumps to
+ * its value: a source polled every 2 s with a 400 ms glide kept the GPU
+ * drawing a fifth of the time, 3.4% of a core against 0.6% for a still page.
  */
 const Bar: React.FC<{ value: number; tone?: GuestStatusTone }> = ({ value, tone }) => {
   const { direction } = useI18n();
@@ -153,7 +154,7 @@ const Bar: React.FC<{ value: number; tone?: GuestStatusTone }> = ({ value, tone 
   return (
     <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--chat-divider)]">
       <div
-        className="h-full rounded-full transition-transform duration-[400ms] ease-out"
+        className="h-full rounded-full"
         style={{ transform: `translateX(${direction === 'rtl' ? missing : -missing}%)`, backgroundColor: strokeColor(tone) }}
       />
     </div>

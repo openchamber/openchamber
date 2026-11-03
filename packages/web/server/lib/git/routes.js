@@ -70,7 +70,7 @@ export const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAu
 // Actions the user starts here may run a project's environment command, so
 // hooks find the project's tools; reads the UI repeats on its own may not
 // (lib/environment/refresh-scope.js).
-const worktreeTitleBodySchema = z.object({ title: z.string() });
+const worktreeTitleBodySchema = z.object({ title: z.string(), by: z.enum(['user', 'agent']).default('user') });
 const worktreePinBodySchema = z.object({ pinned: z.boolean(), list: z.string().nullable().optional() });
 
 const userAction = (handler) => (req, res, next) => runAsUserAction(() => handler(req, res, next));
@@ -1678,8 +1678,8 @@ export function registerGitRoutes(app, {
     }
   });
 
-  // The user renaming a worktree's task: always written, and from then on the
-  // agent keeps it (see `setWorktreeTaskTitle`). An empty title clears it.
+  // User renames win. A session move seeds an agent-owned title unless the
+  // session's title was explicitly given by the user.
   app.put('/api/git/worktrees/title', userAction(async (req, res) => {
     const { setWorktreeTaskTitle } = await getGitLibraries();
     try {
@@ -1691,7 +1691,7 @@ export function registerGitRoutes(app, {
       if (!body.success) {
         return res.status(400).json({ error: 'title must be a string' });
       }
-      res.json(await setWorktreeTaskTitle(directory, { title: body.data.title, by: 'user' }));
+      res.json(await setWorktreeTaskTitle(directory, body.data));
     } catch (error) {
       console.error('Failed to set the worktree task title:', error);
       res.status(Number.isInteger(error?.status) ? error.status : 500).json({ error: error.message || 'Failed to set the task title' });

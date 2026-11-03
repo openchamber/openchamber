@@ -3,7 +3,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useIsContributorWorktree } from '@/hooks/useIsContributorWorktree';
 import { WhitespaceToggleIcon } from '@/components/views/WhitespaceToggleIcon';
-import { statusToGitCode, type TurnSnapshotDiff } from '@/components/views/turnSnapshotDiff';
+import { statusToGitCode } from '@/components/views/turnSnapshotDiff';
 
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -58,8 +58,7 @@ import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessages } from '@/sync/sync-context';
-import { opencodeClient } from '@/lib/opencode/client';
+import { useLastTurnDiff } from '@/components/views/useLastTurnDiff';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { cn } from '@/lib/utils';
@@ -373,14 +372,14 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     usePullRequestSelectionStore.getState().settleDiffRequest(rootDirectory, requestedPr);
   }, [requestedPr, rootDirectory, selectedPr, status]);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const turnSessionMessages = useSessionMessages(mode === 'turn' ? currentSessionId ?? '' : '', rootDirectory || undefined);
-  const lastTurnMessageId = turnSessionMessages.length > 0 ? turnSessionMessages[turnSessionMessages.length - 1].id : '';
-  const [lastTurnDiffs, setLastTurnDiffs] = React.useState<TurnSnapshotDiff[]>([]);
-  const [hasTurnData, setHasTurnData] = React.useState(false);
-  // A failed read is not "this turn changed nothing": it keeps its own state
-  // and a retry, and the last good list stays until a read replaces it.
-  const [turnDiffError, setTurnDiffError] = React.useState<string | null>(null);
-  const [turnDiffAttempt, retryTurnDiff] = React.useReducer((value: number) => value + 1, 0);
+  // Turn scope mirrors the desktop Diff view, read only while the scope is
+  // active: the mode menu here shows no counts.
+  const {
+    diffs: lastTurnDiffs,
+    loaded: hasTurnData,
+    error: turnDiffError,
+    retry: retryTurnDiff,
+  } = useLastTurnDiff(currentSessionId, rootDirectory || undefined, { enabled: visible && mode === 'turn', live: true });
   const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
   const closeReviewDialog = React.useCallback(() => {
     setReviewDialogOpen(false);
@@ -475,42 +474,6 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       ? { ...current, route: LIST_ROUTE }
       : current);
   }, [comparison.key, ownerKey]);
-
-  // Turn scope mirrors the desktop Diff view: recomputed from the session's
-  // snapshots whenever the transcript moves (a turn ending changes the answer),
-  // and only while the scope is active.
-  // Another session's turn is never shown while this one's loads.
-  React.useEffect(() => {
-    setLastTurnDiffs([]);
-    setHasTurnData(false);
-    setTurnDiffError(null);
-  }, [currentSessionId]);
-
-  React.useEffect(() => {
-    if (mode !== 'turn' || !currentSessionId || !visible) return;
-    let cancelled = false;
-    void opencodeClient.getSessionTurnDiff(currentSessionId, { directory: rootDirectory || undefined })
-      .then((files) => {
-        if (cancelled) return;
-        setLastTurnDiffs(files.map((entry) => ({
-          file: entry.file,
-          patch: entry.patch,
-          status: entry.status,
-          additions: entry.additions,
-          deletions: entry.deletions,
-        })));
-        setHasTurnData(true);
-        setTurnDiffError(null);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.warn('[mobile-changes] turn diff unavailable:', error instanceof Error ? error.message : error);
-        setTurnDiffError(error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff'));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentSessionId, lastTurnMessageId, mode, rootDirectory, t, turnDiffAttempt, visible]);
 
   const turnFiles = React.useMemo(
     () => lastTurnDiffs
@@ -1255,7 +1218,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       return <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
         <p className="typography-ui-label font-semibold">{t('diffView.state.failedToLoadDiff')}</p>
         <p className="typography-meta text-muted-foreground">{turnDiffError}</p>
-        <Button variant="outline" size="lg" onClick={() => { setTurnDiffError(null); retryTurnDiff(); }}>{t('diffView.actions.retry')}</Button>
+        <Button variant="outline" size="lg" onClick={retryTurnDiff}>{t('diffView.actions.retry')}</Button>
       </div>;
     }
     if (!hasTurnData && currentSessionId) return <MobileChangesState loading message={t('diffView.state.loadingChanges')} />;

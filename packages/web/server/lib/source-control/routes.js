@@ -167,6 +167,8 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
     validateMutationContext: bindingService.validateMutationContext,
     mutationExecutor,
     oauthFlowRegistry,
+    onMutationSucceeded: dependencies.onMutationSucceeded,
+    onMutationStarting: dependencies.onMutationStarting,
   });
   /** The instances of one provider the user can work with: its defaults first, then the ones it knows of. */
   const instancesOf = async (descriptor) => {

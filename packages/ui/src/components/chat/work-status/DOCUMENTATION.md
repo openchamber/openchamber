@@ -694,7 +694,7 @@ space runs, then runs them in the space (`useDraftSpaceTarget`). Three views rea
 
 - the header's button (`HeaderProjectControls`): the shown action's
   run state as one icon, the preview globe while it serves a page, the action
-  list on right click. It asks for the run listing whenever it is mounted,
+  list on right click. It observes the run listing while mounted,
   so a run another client started never shows as Run;
 - `ProjectActionsDialog`, opened by `open_project_actions` (`mod+alt+r`). It
   lists the actions with their state, opens with the button's action highlighted,
@@ -705,7 +705,17 @@ space runs, then runs them in the space (`useDraftSpaceTarget`). Three views rea
 The runner lives above the layout, so a run keeps its output watch (URL
 auto-open, exit tracking) whatever is on screen. The server terminal listing
 still runs only on demand: each view calls `useObserveProjectActionRuns` while
-it is on screen, and the runner polls only while at least one view asks.
+it is on screen. The shared observer lists once, then refreshes on terminal
+lifecycle signals, control-stream connections, runtime switches and visibility,
+focus or online recovery. Hidden/offline clients wait for recovery.
+
+### Why events and not polling
+
+The header is nearly always mounted, so a five-second listing loop generated
+idle requests even when no action ran. Terminal create, exit, restart and removal
+invalidate the list through the existing realtime control stream. A fresh list
+on connection or visibility recovery also discovers runs started on another
+client during a disconnect, while failed reads preserve the last known state.
 
 The goal icon reproduces the **composer target button's** colour mapping, not
 the goal strip's. The two disagree today — the strip paints `paused` muted and
@@ -805,8 +815,9 @@ Two readouts had no loader of their own and appeared only after the user opened
 the matching header dropdown:
 
 - **MCP** — `McpDropdown` was the only mount-time caller of `refresh()`.
-- **Usage** — `useQuotaAutoRefresh` schedules the shared fixed three-minute
-  refresh; the *first* fetch was performed by the dropdown's open handler.
+- **Usage** — `useQuotaAutoRefresh` owns the initial fetch and the shared
+  three-minute refresh while a quota readout is shown. The panel passes its
+  visibility through the section list, so retained closing content does no work.
 - **Skills** — `loadSkills()` ran only when the composer's slash autocomplete
   opened, so the context-sources count was whatever happened to be cached. The
   section loads them itself, keyed on the directory, since skills are
@@ -819,9 +830,10 @@ which on a remote instance is not true when the UI mounts — a fetch fired at
 mount gets "nothing configured" for every provider, and since each one then has
 a result, nothing asks again until the three-minute refresh. That is why Usage
 could stay missing from the panel until Settings -> Usage forced a fresh fetch.
-`useQuotaStore.ensureLoadedForRuntime` owns both the readiness rule and the
-once-per-instance bookkeeping, so every caller can ask on each connection
-change.
+`useQuotaStore.ensureLoadedForRuntime` owns the readiness rule and runtime
+bookkeeping. `useQuotaAutoRefresh` applies the shared 15-second opening freshness
+window and suspends demand while the document or native window is hidden. The
+store documentation defines the refresh contract for all quota readouts.
 
 The visible panel's initial quota load uses the background gate's active-session
 priority. It runs ahead of queued metadata reads while keeping the same network

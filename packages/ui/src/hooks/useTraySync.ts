@@ -12,14 +12,17 @@ import {
 } from '@/sync/global-blocking-requests';
 import { compareSessionsByLifecycleOrder, useSessionOrderingStore } from '@/sync/session-ordering';
 import { isSessionUnread, isSessionUnreadWithError } from '@/sync/session-unread';
+import { markAllSessionsViewed } from '@/sync/notification-store';
 import { respondToPermission } from '@/sync/session-actions';
 import { canSavePermission } from '@/components/chat/permissionSummary';
 import {
   useGlobalSessionsStore,
+  ensureGlobalSessionsLoaded,
   resolveGlobalSessionDirectory,
 } from '@/stores/useGlobalSessionsStore';
 import { createSessionLineage } from '@/stores/sessionLineage';
-import { useQuotaStore } from '@/stores/useQuotaStore';
+import { refreshTrayQuotas, useQuotaStore } from '@/stores/useQuotaStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -97,12 +100,15 @@ type TraySnapshot = {
   // for the macOS dock badge. 0 when the user disabled the badge — the main
   // process clears it.
   dockBadgeCount: number;
+  dockUnreadSessions: { id: string; title: string; directory: string }[];
 };
 
 // focus-session / new-session are routed natively by the main process through
 // the existing `openchamber:open-session` / `openchamber:open-draft-session`
-// events (handled in App.tsx). Only respond-permission needs handling here.
+// events (handled in App.tsx). Permission responses and mark-all-read run here.
 type TrayAction =
+  | { type: 'mark-all-read' }
+  | { type: 'menu-opened' }
   | { type: 'respond-permission'; sessionId: string; id: string; response: 'once' | 'always' | 'reject' };
 
 type DesktopBridgeGlobal = {
@@ -363,11 +369,16 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
   // Count the full root list, independently of the tray's visibility and limit.
   // Only top-level sessions are ever unread (`isSessionUnread`); a subtask
   // reports to its parent.
-  const dockBadgeCount = useUIStore.getState().dockBadgeEnabled
-    ? allSessions.filter((session) => isSessionUnread(session) && hasRowIn(session, shownSections)).length
-    : 0;
+  const dockUnread = useUIStore.getState().dockBadgeEnabled
+    ? allSessions.filter((session) => isSessionUnread(session) && hasRowIn(session, shownSections))
+    : [];
+  const dockBadgeCount = dockUnread.length;
+  const dockUnreadSessions = dockUnread
+    .sort((left, right) => (right.time.idle ?? right.time.updated) - (left.time.idle ?? left.time.updated) || left.id.localeCompare(right.id))
+    .slice(0, 10)
+    .map((session) => ({ id: session.id, title: session.title, directory: resolveGlobalSessionDirectory(session) ?? '' }));
   if (!includeTray) {
-    return { sessions: [], approvals: [], instanceName, usage: { mode: 'usage', groups: [] }, dockBadgeCount };
+    return { sessions: [], approvals: [], instanceName, usage: { mode: 'usage', groups: [] }, dockBadgeCount, dockUnreadSessions };
   }
 
   const live = collectLiveData();
@@ -438,7 +449,7 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
   return {
     sessions,
     approvals: approvals.filter((approval) => isSessionDirectoryAdmitted(approval.directory, projects, worktreesByProject)),
-    instanceName, usage: buildUsage(), dockBadgeCount,
+    instanceName, usage: buildUsage(), dockBadgeCount, dockUnreadSessions,
   };
 };
 
@@ -564,16 +575,13 @@ export const useTraySync = (): void => {
     const unsubscribeGlobalRequests = useGlobalBlockingRequestsStore.subscribe(() => scheduleFlush());
     const unsubscribeSessionOrder = useSessionOrderingStore.subscribe(() => scheduleFlush());
 
-    // Usage: push to the tray whenever the quota store changes, and do one
-    // initial fetch for enabled providers so the submenu isn't empty on launch.
+    // Seed dropdown quotas once after readiness; later native openings refresh
+    // through the readouts' shared freshness window without a tray quota timer.
     const unsubscribeQuota = useQuotaStore.subscribe(() => scheduleFlush());
-    void useQuotaStore.getState().loadSettings().then(() => {
-      if (disposed) return;
-      const { dropdownProviderIds, results } = useQuotaStore.getState();
-      const needsFetch = dropdownProviderIds.length > 0
-        && dropdownProviderIds.some((id) => !results.some((r) => r.providerId === id));
-      if (needsFetch) void useQuotaStore.getState().fetchQuotas(dropdownProviderIds);
+    const unsubscribeQuotaReady = useConfigStore.subscribe((state, previous) => {
+      if (state.isInitialized && !previous.isInitialized) refreshTrayQuotas(true);
     });
+    refreshTrayQuotas(true);
 
     // Safety net: catches anything the event subscriptions miss (e.g. a store
     // that existed before the registry subscription was attached).
@@ -589,6 +597,7 @@ export const useTraySync = (): void => {
       unsubscribeGlobalRequests();
       unsubscribeSessionOrder();
       unsubscribeQuota();
+      unsubscribeQuotaReady();
       unsubscribeRegistry?.();
       for (const unsub of storeUnsubs.values()) unsub();
       storeUnsubs.clear();
@@ -596,13 +605,19 @@ export const useTraySync = (): void => {
   }, []);
 
   React.useEffect(() => {
-    if (!isTrayPlatform() || !isTrayEnabled() || !canUseElectronDesktopIPC()) return;
+    if (!isTrayPlatform() || !canUseElectronDesktopIPC()) return;
     const bridge = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
     const listen = bridge?.listen;
     if (typeof listen !== 'function') return;
 
     const handle = (action: TrayAction) => {
       switch (action.type) {
+        case 'mark-all-read':
+          void ensureGlobalSessionsLoaded().then(() => markAllSessionsViewed()).catch(() => {});
+          break;
+        case 'menu-opened':
+          if (isTrayEnabled()) refreshTrayQuotas();
+          break;
         case 'respond-permission':
           void respondToPermission(action.sessionId, action.id, action.response).catch(() => {
             toast.error('Failed to respond to permission request');
@@ -612,15 +627,24 @@ export const useTraySync = (): void => {
     };
 
     let unlisten: null | (() => void | Promise<void>) = null;
+    let disposed = false;
     listen(TRAY_ACTION_EVENT, (evt) => {
       const action = evt?.payload as TrayAction | undefined;
       if (!action || typeof action !== 'object' || typeof action.type !== 'string') return;
       handle(action);
     })
-      .then((fn) => { unlisten = fn; })
+      .then((fn) => {
+        if (disposed) {
+          fn();
+          return;
+        }
+        unlisten = fn;
+        void invokeDesktop('desktop_tray_actions_ready');
+      })
       .catch(() => { /* ignore */ });
 
     return () => {
+      disposed = true;
       try {
         const result = unlisten?.();
         if (result instanceof Promise) void result.catch(() => {});

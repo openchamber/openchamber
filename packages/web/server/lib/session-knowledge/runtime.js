@@ -250,9 +250,9 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
 export const SECRET_REQUEST_GUIDANCE = "The openchamber_secret tool asks the user for a secret (API key, token, password) on a private card in the chat."
   + " Whenever you need one, call it: never ask for a secret in the chat or tell the user to paste one there.";
 
-const buildGuidance = ({ linking, rendering, secrets, workflows, directTools }) => [
+const buildGuidance = ({ linking, naming, rendering, secrets, workflows, directTools }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
-  linking ? WORK_NAME_GUIDANCE : '',
+  linking && naming ? WORK_NAME_GUIDANCE : '',
   rendering ? UI_BLOCKS_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
   secrets ? SECRET_REQUEST_GUIDANCE : '',
@@ -265,11 +265,11 @@ const buildGuidance = ({ linking, rendering, secrets, workflows, directTools }) 
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
-    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, secrets, workflows, directTools }),
+    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, naming, rendering, secrets, workflows, directTools }),
   };
   if (responseStyleInstruction !== undefined) {
     entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();
@@ -289,6 +289,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     isAgentMemoryEnabled,
     // Whether this session's agent has the `openchamber` tool to link with.
     isSessionLinkingAvailable = null,
+    // A linked worktree or isolated space; main checkout tasks keep session titles.
+    isWorkNamingAvailable = async () => false,
     // The checked-out branch, or '' when none is checked out. Failures throw;
     // read only while the agent has the tool.
     readCheckoutBranch = null,
@@ -391,6 +393,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const linking = typeof isSessionLinkingAvailable === 'function'
       ? await Promise.resolve(isSessionLinkingAvailable()).catch(() => false)
       : false;
+    const naming = linking && Boolean(directory)
+      && await Promise.resolve(isWorkNamingAvailable(directory)).catch(() => false);
     // The branch is read only while the tool that moves a session off it is there.
     const branch = linking && directory && readCheckoutBranch
       ? await Promise.resolve(readCheckoutBranch(directory)).catch(() => null)
@@ -405,7 +409,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const workflows = await Promise.resolve(isWorkflowAvailable()).catch(() => false);
     const directTools = !(await Promise.resolve(areAgentToolsInCodeMode()).catch(() => false));
 
-    return { notes, plans, memory, linking, rendering, secrets, workflows, directTools, checkout };
+    return { notes, plans, memory, linking, naming, rendering, secrets, workflows, directTools, checkout };
   };
 
   /**

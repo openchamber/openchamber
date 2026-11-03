@@ -7,7 +7,8 @@ import { devtools, persist } from "zustand/middleware";
 import { findCatalogModel, type Provider, type Model, type Agent, type Config } from "@/lib/opencode/model";
 import type { DesktopSettings } from "@/lib/desktop";
 import type { CatalogKind } from "@/lib/opencode/events";
-import { OpencodeApiError, opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { isLocationNotFoundError } from "@/lib/opencode/location-errors";
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
@@ -902,13 +903,16 @@ const ensureModelsMetadataFetch = (
     }
 
     markStartupTrace('modelsMetadata:queued');
+    const runtimeContext = captureConfigRuntimeContext();
     // Model metadata (prices, limits, capabilities) only enriches the pickers
     // and usage display, so it waits until the browser is idle instead of
     // competing with startup for the network and main thread.
-    modelsMetadataInFlight = whenIdle()
-        .then(() => measureStartupTrace('modelsMetadata', fetchModelsDevMetadata))
+    const request: Promise<Map<string, ModelMetadata>> = whenIdle()
+        .then(() => isConfigRuntimeContextCurrent(runtimeContext)
+            ? measureStartupTrace('modelsMetadata', fetchModelsDevMetadata)
+            : new Map<string, ModelMetadata>())
         .then((metadata) => {
-            if (metadata.size > 0) {
+            if (metadata.size > 0 && modelsMetadataInFlight === request && isConfigRuntimeContextCurrent(runtimeContext)) {
                 markStartupTrace('modelsMetadata:set', { entries: metadata.size });
                 setModelsMetadata(metadata);
             }
@@ -916,8 +920,9 @@ const ensureModelsMetadataFetch = (
         })
         .catch(() => new Map<string, ModelMetadata>())
         .finally(() => {
-            modelsMetadataInFlight = null;
+            if (modelsMetadataInFlight === request) modelsMetadataInFlight = null;
         });
+    modelsMetadataInFlight = request;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1254,10 +1259,6 @@ const _agentsLoadErrors = new Map<string, Error>();
 // OpenCode cannot open the directory at all (deleted, or a path it cannot
 // resolve). Retrying gives the same answer, and startup treats the project like
 // one whose folder is gone.
-const isLocationNotFound = (error: Error | undefined): boolean => (
-    error instanceof OpencodeApiError && error.tag === 'LocationNotFoundError'
-);
-
 const clearProjectConfigError = (directoryKey: string): void => {
     if (!useConfigStore.getState().projectConfigErrors[directoryKey]) return;
     useConfigStore.setState((state) => {
@@ -1279,10 +1280,12 @@ subscribeRuntimeEndpointChanged((detail) => {
     _inFlightAgents.clear();
     _agentsLoadGeneration.clear();
     _initializeAppInFlight = null;
+    modelsMetadataInFlight = null;
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     configInstanceGeneration += 1;
     useConfigStore.setState({
         configRuntimeKey: detail.runtimeKey,
+        modelsMetadata: new Map<string, ModelMetadata>(),
         directoryScoped: {},
         projectConfigErrors: {},
         lastInitFailure: null,
@@ -2357,8 +2360,8 @@ export const useConfigStore = create<ConfigStore>()(
                     markStartupTrace('loadProviders:called', { directoryKey, source, requestedDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it.
-                    // A fresh load waits it out instead: that request may have been
-                    // answered before the change that prompted this one.
+                    // A fresh call waits out any read started before it. Calls
+                    // waiting together share the replacement started afterward.
                     let existing = _inFlightProviders.get(inFlightKey);
                     if (existing && options?.fresh) {
                         await existing.catch(() => undefined);
@@ -2994,8 +2997,8 @@ export const useConfigStore = create<ConfigStore>()(
                     markStartupTrace('loadAgents:called', { directoryKey, source, requestedDirectory, effectiveDirectory });
 
                     // Dedup: if a load is already in-flight for this directory, reuse it.
-                    // A fresh load waits it out instead: that request may have been
-                    // answered before the change that prompted this one.
+                    // A fresh call waits out any read started before it. Calls
+                    // waiting together share the replacement started afterward.
                     let existing = _inFlightAgents.get(inFlightKey);
                     if (existing && options?.fresh) {
                         await existing.catch(() => false);
@@ -3324,7 +3327,7 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                             // A rejected project config fails the same way until the
                             // user edits the file; retrying only delays the message.
-                            if (readProjectConfigError(error) || (error instanceof Error && isLocationNotFound(error))) break;
+                            if (readProjectConfigError(error) || (error instanceof Error && isLocationNotFoundError(error))) break;
                             const waitMs = 200 * (attempt + 1);
                             await new Promise((resolve) => setTimeout(resolve, waitMs));
                             if (!isCurrentAgentLoad()) return false;
@@ -4518,7 +4521,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 const configError = get().projectConfigErrors[configDirectoryKey];
                                 if (configError) {
                                     markStartupTrace('initializeApp:projectConfigInvalid', { configDirectoryKey, name: configError.name });
-                                } else if (isLocationNotFound(_agentsLoadErrors.get(configDirectoryKey))
+                                } else if (isLocationNotFoundError(_agentsLoadErrors.get(configDirectoryKey))
                                     || await opencodeClient.getDirectoryAvailability(configDirectory) === 'missing') {
                                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                                     markStartupTrace('initializeApp:projectDirectoryMissing', { configDirectoryKey });

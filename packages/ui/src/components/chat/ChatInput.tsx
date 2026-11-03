@@ -141,6 +141,7 @@ import { isGuestActive } from '@/lib/guests/capabilities';
 import { routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { AgentUnavailableError, opencodeClient, type SkillMentions } from '@/lib/opencode/client';
+import { isLocationNotFoundError } from '@/lib/opencode/location-errors';
 import { buildSkillMentionInstruction } from '@/lib/skillMentionInstruction';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -269,6 +270,9 @@ import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './compose
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { usePlaceholderFitsOneLine } from './composer/ui/usePlaceholderFitsOneLine';
 import { RevertedMessagesStrip } from './RevertedMessagesStrip';
+import { SessionFolderMissingRow } from './SessionFolderMissingRow';
+import { useFolderMissing } from '@/components/session/sidebar/projects/useProjectFolderMissing';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionDoneHintRow } from '@/components/chat/SessionDoneHintRow';
 import { SessionReviewHintRow } from '@/components/chat/SessionReviewHintRow';
@@ -618,6 +622,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     // The new-session draft is the main chat's; a pinned composer is never on it.
     const newSessionDraftOpen = !columnPinned && Boolean(newSessionDraft?.open);
+    // The server's folder stat cannot see inside an isolated space's container.
+    const sessionFolder = useFolderMissing(
+        !newSessionDraftOpen && !isSpaceDirectory(currentSessionDirectoryForSync) ? currentSessionDirectoryForSync ?? undefined : undefined,
+        probeSessionLocation,
+    );
+    // Nothing runs in a folder that is gone; the composer's row says so and
+    // offers the move. The text stays, and this looks again in case the folder
+    // came back. Where only a refused send said so, the next send asks again.
+    const sendHeldByMissingFolder = () => {
+        if (!sessionFolder.missing || isBtwActive) return false;
+        if (!sessionFolder.confirmed) {
+            sessionFolder.clearSendMark();
+            return false;
+        }
+        sessionFolder.recheck();
+        return true;
+    };
+    const sendHeldByMissingFolderRef = React.useRef(sendHeldByMissingFolder);
+    sendHeldByMissingFolderRef.current = sendHeldByMissingFolder;
     const draftPermissionMode = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionMode : undefined
     ));
@@ -1625,6 +1648,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             void handleSubmitRef.current();
             return;
         }
+        if (sendHeldByMissingFolderRef.current()) return;
         const queueRuntimeKey = getRuntimeKey();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
@@ -2019,6 +2043,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             toast.error(t('sessionAuth.expired.sendBlocked'));
             return;
         }
+
+        if (sendHeldByMissingFolder()) return;
 
         // A failed send returns the typed prompt no matter WHY it failed —
         // auth, network, server, anything. Losing a long prompt to a toast is
@@ -2665,6 +2691,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     : null;
             if (unavailableAgent) {
                 toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent.agent }));
+                return;
+            }
+
+            // OpenCode's word that the folder is gone, for a runtime without the
+            // folder probe: the composer's row explains it and offers the move.
+            if (sessionFolder.tracked && !isBtwActive && error instanceof Error && isLocationNotFoundError(error)) {
+                sessionFolder.markMissing();
                 return;
             }
 
@@ -4609,8 +4642,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     ) : null;
     // Null exactly when the suggestion row alone would have been: the mobile
     // pill picks its shape from whether a top row exists.
-    const composerTopRows = worktreeSetupRow || creatingSessionRow || spaceWaitRow || goalRow || autoReviewRow || prWatchRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
+    const folderMissingRow = sessionFolder.missing && currentSessionId && currentSessionDirectoryForSync && !isBtwActive && !newSessionDraftOpen
+        ? <SessionFolderMissingRow sessionId={currentSessionId} directory={currentSessionDirectoryForSync} busy={sessionPhase !== 'idle'} />
+        : null;
+    const composerTopRows = folderMissingRow || worktreeSetupRow || creatingSessionRow || spaceWaitRow || goalRow || autoReviewRow || prWatchRow || backgroundShellsRow || revertRow || queueRow || doneHintRow || reviewHintRow || suggestionRow ? (
         <>
+            {folderMissingRow}
             {worktreeSetupRow}
             {creatingSessionRow}
             {spaceWaitRow}
@@ -5372,5 +5409,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 };
 
 ChatInputComponent.displayName = 'ChatInput';
+
+const probeSessionLocation = (directory: string) => opencodeClient.getLocationAvailability(directory);
 
 export const ChatInput = React.memo(ChatInputComponent);

@@ -28,7 +28,7 @@ Every fix and feature goes through these steps, in order. What counts as proof, 
 1. **Reproduce.** Make the failure happen the way a user hits it, in the runtime that runs the code; for a feature, see what that runtime does today where the feature goes. Unreproduced goes to the report with what you tried before any fix.
 2. **Fix the cause.** The smallest change that removes it. A correctness problem you trip over in code you touch is fixed in the same change; one elsewhere goes to the report or its own pull request.
 3. **Prove it.** Run the same reproduction and watch it pass. Report what the proof covered and what it did not.
-4. **Second look.** The `review` agent on the diff (`.opencode/agent/review.md`), or a reviewer on another model where your tool has no such agent; one-line and text-only edits go without. Answer findings per `openchamber-change-discipline` (*Answering Review Findings*).
+4. **Second look.** The `review-changes` agent on the diff (`.opencode/agent/review-changes.md`), or a reviewer on another model where your tool has no such agent; one-line and text-only edits go without. Answer findings per `openchamber-change-discipline` (*Answering Review Findings*).
 5. **Hand off.** The working tree for the person you work with, or a pull request (*Pull Request Handoff*).
 
 ## Runtime Boundaries

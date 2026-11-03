@@ -127,7 +127,8 @@ request and never drops the newest session first (session ids descend with
 time; the reducer trims by creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
-the surface stays one shape. Top to bottom: worktree setup, the session still
+the surface stays one shape. Top to bottom: the session's folder being gone
+(`SessionFolderMissingRow`), worktree setup, the session still
 being created from a draft's first message, and a message waiting for its
 space (`ComposerStatusStrip`; the creating line yields to the worktree line,
 so one wait shows one line, and appears only once the creation has taken
@@ -147,6 +148,26 @@ nothing is queued. A first send that fails restores its text under the
 identity `DraftSendError` names: the created session's composer, or the
 reopened draft's, with the text typed meanwhile kept above the sent text
 (*A draft's first send* in `sync/DOCUMENTATION.md`).
+
+### Why a session whose folder is gone gets a row and keeps its text
+
+OpenCode answers every request of such a session with `LocationNotFoundError`,
+so the model list stays on Loading and a send can only fail. When the session
+opens and when the window regains focus, `useFolderMissing` asks the server's
+folder stat, and only if that says missing asks OpenCode
+(`getLocationAvailability`): OpenChamber's stat alone would be wrong when
+`OPENCODE_HOST` puts OpenCode on another machine, and a hold on sending must not
+rest on it. `SessionFolderMissingRow` then names the folder and offers Move session.
+While the row shows, Send and queueing keep the text, send nothing and look at
+the folder again, so a raw error never replaces the row. VS Code has no folder
+stat: there the row appears when a send comes back with `LocationNotFoundError`,
+the next send asks OpenCode again because nothing else could lift the row, and
+the same answer covers a folder that vanished while the window kept focus.
+Isolated spaces take no row: the server's stat cannot see inside the container,
+and a space's session cannot leave it. The move stays
+manual (*Missing worktree directories* in `sync/DOCUMENTATION.md`): only the user
+knows where the folder went. A running location outlives its folder and keeps
+answering, so no row shows while sends still work; the row comes once it unloads.
 
 `RevertedMessagesStrip` lists the user messages a staged revert hides (see
 "Committing a revert" in `sync/DOCUMENTATION.md`). Its one action is Restore,

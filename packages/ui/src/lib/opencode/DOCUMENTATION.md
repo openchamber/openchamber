@@ -26,6 +26,16 @@ to the shared UI domain model. Sync owns transcript membership and store writes.
 
 ## Decisions
 
+### Why fresh provider reads wait for post-call requests
+
+Provider, model and default-model reads share one catalog promise per directory
+on the active SDK instance. `fresh` waits for any request started before the
+call, including another fresh request. Callers waiting on the same read share
+the replacement started afterward. Joining an earlier fresh request lost a
+second catalog change arriving during that request. Catalog invalidations
+coalesce by resource revision above this adapter. Reconnect clears the request map;
+obsolete completions cannot remove the replacement runtime's entries.
+
 ### Why a missing agent stops the send instead of being skipped
 
 OpenCode records any agent name and fails only the next turn, so the send has

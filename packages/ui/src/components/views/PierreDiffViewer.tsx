@@ -1472,10 +1472,10 @@ const PierreDiffViewerBody: React.FC<
     return 'additions';
   }, []);
 
-  ensurePierreThemeRegistered(lightTheme);
-  ensurePierreThemeRegistered(darkTheme);
+  const lightThemeName = ensurePierreThemeRegistered(lightTheme);
+  const darkThemeName = ensurePierreThemeRegistered(darkTheme);
 
-  const diffThemeKey = `${lightTheme.metadata.id}:${darkTheme.metadata.id}:${isDark ? 'dark' : 'light'}`;
+  const diffThemeKey = `${lightThemeName}:${darkThemeName}:${isDark ? 'dark' : 'light'}`;
 
   const isLargeContent = useMemo(() => {
     if (incomingFileDiff) {
@@ -1681,8 +1681,8 @@ const PierreDiffViewerBody: React.FC<
 
   const options = useMemo<FileDiffOptions<DiffAnnotation, undefined>>(() => ({
     theme: {
-      dark: darkTheme.metadata.id,
-      light: lightTheme.metadata.id,
+      dark: darkThemeName,
+      light: lightThemeName,
     },
     themeType: isDark ? 'dark' : 'light',
     preferredHighlighter: DIFFS_HIGHLIGHTER,
@@ -1711,7 +1711,7 @@ const PierreDiffViewerBody: React.FC<
     ].join('\n'),
     renderAnnotation: enableComments || hunkAnchors.length > 0 || expandOnDemand ? renderAnnotation : undefined,
     onPostRender: handlePostRender,
-  }), [handlePostRender, hunkAnchors.length, darkTheme.metadata.id, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, onFindWordRequest, renderAnnotation]);
+  }), [handlePostRender, hunkAnchors.length, darkThemeName, enableComments, expandOnDemand, isDark, isLargeContent, layout, lightThemeName, renderSideBySide, wrapLines, handleSelectionChange, handleGutterUtilityClick, handleLineClick, onFindWordRequest, renderAnnotation]);
 
 
   const lineAnnotations = useMemo<DiffLineAnnotation<DiffAnnotation>[]>(() => {

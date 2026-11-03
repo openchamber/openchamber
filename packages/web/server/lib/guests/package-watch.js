@@ -5,18 +5,19 @@ import { resolveAttachEntry, resolvePageEntry, resolveStatusSectionEntry } from 
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestAssetHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
+import { createFolderChangeWatch } from '../fs/folder-change-watch.js';
 
 const POLL_MS = 500;
 const SCRIPT_MODULE = /\.[cm]?js$/;
 
 /** Every script a service can import: `.js`, `.mjs` and `.cjs` under its entry's folder, outside `node_modules` and dot folders. */
-const serviceModules = async (root, folder) => {
+const serviceModules = async (root, folder, fs) => {
   const found = [];
   const entries = await fs.readdir(path.join(root, folder), { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
     if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
     const child = path.posix.join(folder, entry.name);
-    if (entry.isDirectory()) found.push(...await serviceModules(root, child));
+    if (entry.isDirectory()) found.push(...await serviceModules(root, child, fs));
     else if (SCRIPT_MODULE.test(entry.name)) found.push(child);
   }
   return found;
@@ -29,7 +30,7 @@ const serviceModules = async (root, folder) => {
  * still names the files its build will write. Anything else a service writes
  * beside them does not count.
  */
-const loadedFiles = async (root) => {
+const loadedFiles = async (root, fs) => {
   const files = ['package.json'];
   const raw = await fs.readFile(path.join(root, 'package.json'), 'utf8').catch(() => null);
   const parsed = raw === null ? null : parseManifestJson(raw);
@@ -53,13 +54,13 @@ const loadedFiles = async (root) => {
     }
   }
   if (contributes.service?.entry) {
-    files.push(contributes.service.entry, ...await serviceModules(root, path.posix.dirname(contributes.service.entry)));
+    files.push(contributes.service.entry, ...await serviceModules(root, path.posix.dirname(contributes.service.entry), fs));
   }
   return [...new Set(files)];
 };
 
-const fingerprint = async (root) => {
-  const files = await loadedFiles(root);
+const fingerprint = async (root, fs) => {
+  const files = await loadedFiles(root, fs);
   const stamps = await Promise.all(files.map((file) => fs.stat(path.join(root, file)).then(
     (stat) => `${stat.mtimeMs}:${stat.size}`,
     () => 'missing',
@@ -70,52 +71,35 @@ const fingerprint = async (root) => {
 /**
  * Watches folder installs, the packages an author rebuilds in place, and calls
  * `onChange(root)` when the files the host loads have changed and then held
- * still for one poll. Copies (ZIP, Git) change only through install and
+ * still for one check. Copies (ZIP, Git) change only through install and
  * update, which report themselves.
  *
- * It polls `stat` on those files instead of using `fs.watch`: a service that
- * writes into its own folder changes nothing it loads, and a build that
- * deletes and recreates its output folder is seen on every platform, where a
- * Linux or Windows folder watcher goes silent with the folder it watched.
+ * Tree signals trigger fingerprints of loaded files only. A slow safety check
+ * reopens watchers so deleted and recreated roots recover on every platform.
  * `sync()` follows the installed folders; calls run one after another.
  */
-export const createGuestPackageWatch = ({ listFolderInstalls, onChange, pollMs = POLL_MS }) => {
-  /** @type {Map<string, { timer: ReturnType<typeof setInterval>, reported: string, seen: string, polling: boolean }>} */
+export const createGuestPackageWatch = ({ listFolderInstalls, onChange, pollMs = POLL_MS, fsPromises = fs, fsWatch, timers }) => {
   const watched = new Map();
   let syncing = Promise.resolve();
-
-  const poll = async (root, entry) => {
-    if (entry.polling) return;
-    entry.polling = true;
-    try {
-      const current = await fingerprint(root);
-      if (watched.get(root) !== entry) return;
-      const settled = current === entry.seen;
-      entry.seen = current;
-      if (!settled || current === entry.reported) return;
-      entry.reported = current;
-      onChange(root);
-    } finally {
-      entry.polling = false;
-    }
-  };
+  let stopped = false;
 
   const apply = async () => {
     const roots = new Set(await listFolderInstalls());
+    if (stopped) return;
     for (const [root, entry] of [...watched]) {
       if (roots.has(root)) continue;
-      clearInterval(entry.timer);
+      entry.stop();
       watched.delete(root);
     }
     for (const root of roots) {
       if (watched.has(root)) continue;
-      const initial = await fingerprint(root);
-      const entry = { timer: undefined, reported: initial, seen: initial, polling: false };
-      entry.timer = setInterval(() => {
-        poll(root, entry).catch((error) => console.warn('Failed to check an extension folder:', error?.message ?? error));
-      }, pollMs);
-      entry.timer.unref();
+      if (stopped) return;
+      const entry = createFolderChangeWatch({
+        root, fingerprint: () => fingerprint(root, fsPromises), onChange: () => onChange(root),
+        recursive: true, pollMs, fsWatch, timers,
+      });
       watched.set(root, entry);
+      await entry.ready;
     }
   };
 
@@ -126,5 +110,12 @@ export const createGuestPackageWatch = ({ listFolderInstalls, onChange, pollMs =
     return syncing;
   };
 
-  return { sync };
+  return {
+    sync,
+    stop: () => {
+      stopped = true;
+      for (const entry of watched.values()) entry.stop();
+      watched.clear();
+    },
+  };
 };

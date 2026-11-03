@@ -1,0 +1,123 @@
+{
+  "metadata": {
+    "id": "aurora-dark",
+    "name": "Aurora",
+    "variant": "dark",
+    "description": "Emerald aurora over slate night neutrals, from the OpenChamber night watercolour (dark variant)",
+    "version": "1.0.0",
+    "author": "OpenChamber",
+    "tags": [
+      "dark",
+      "brand",
+      "emerald"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#239d6a",
+      "foreground": "#0c1313",
+      "hover": "#35aa76",
+      "active": "#4ab683",
+      "muted": "#239d6a80"
+    },
+    "surface": {
+      "background": "#131515",
+      "foreground": "#ced2d2",
+      "muted": "#090f0f",
+      "mutedForeground": "#848b8b",
+      "elevated": "#181b1b",
+      "subtle": "#1c2323"
+    },
+    "interactive": {
+      "border": "#2b32326e",
+      "selection": "#99a0a033",
+      "borderHover": "#2b3232",
+      "borderFocus": "#239d6a66",
+      "focus": "#f6f9f916",
+      "focusRing": "#239d6a66",
+      "cursor": "#dfe2e2",
+      "hover": "#f6f9f908",
+      "active": "#252c2cb9"
+    },
+    "status": {
+      "error": "#df746d",
+      "errorBackground": "#df746d29",
+      "errorBorder": "#df746d73",
+      "warning": "#e2a85c",
+      "warningBackground": "#e2a85c29",
+      "warningBorder": "#e2a85c73",
+      "success": "#6bce71",
+      "successBackground": "#6bce7129",
+      "successBorder": "#6bce7173",
+      "info": "#67abe5",
+      "infoBackground": "#67abe529",
+      "infoBorder": "#67abe573"
+    },
+    "syntax": {
+      "base": {
+        "comment": "#6a7070",
+        "keyword": "#5cc692",
+        "string": "#e5a788",
+        "number": "#76b1e3",
+        "function": "#dcc99a",
+        "variable": "#ced2d2",
+        "type": "#82ccd7",
+        "operator": "#939a9a"
+      },
+      "tokens": {
+        "punctuation": "#939a9a",
+        "stringEscape": "#76b1e3",
+        "parameter": "#e39287",
+        "keywordImport": "#5cc692",
+        "variableProperty": "#ab9cc8",
+        "variableBuiltin": "#5cc692",
+        "constant": "#ab9cc8",
+        "null": "#5cc692",
+        "variableReadonly": "#ab9cc8"
+      },
+      "highlights": {
+        "diffAdded": "#6bce71",
+        "diffAddedBackground": "#6bce7125",
+        "diffRemoved": "#df746d",
+        "diffRemovedBackground": "#df746d40",
+        "diffModified": "#ced2d2",
+        "diffModifiedBackground": "#ced2d229",
+        "lineNumber": "#646a6a",
+        "lineNumberActive": "#dfe2e2"
+      }
+    },
+    "pr": {
+      "blocked": "#d99464",
+      "merged": "#b79bd9"
+    },
+    "chat": {
+      "background": "#131515",
+      "userMessageBackground": "#082012",
+      "divider": "#2b3232d4"
+    },
+    "markdown": {
+      "link": "#7cafe8",
+      "linkHover": "#93c2f7",
+      "inlineCode": "#89d0aa",
+      "inlineCodeBackground": "#161f1a",
+      "blockquote": "#848b8b",
+      "blockquoteBorder": "#239d6a66",
+      "listMarker": "#89d0aa99",
+      "bold": "#cacdcd",
+      "italic": "#ced2d2",
+      "hr": "#2b32326e"
+    },
+    "tools": {
+      "border": "#2b32327d",
+      "icon": "#848b8b",
+      "title": "#ced2d2",
+      "description": "#848b8b",
+      "edit": {
+        "addedBackground": "#6bce7125",
+        "removedBackground": "#df746d40",
+        "modifiedBackground": "#ced2d229",
+        "lineNumber": "#646a6a"
+      }
+    }
+  }
+}

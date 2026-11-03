@@ -193,7 +193,10 @@ only setting OpenCode cannot pick up on its own is which binary runs, and
 Settings → OpenChamber → OpenCode CLI owns that restart.
 
 One saved file produces a burst of events, so the kinds are collected and
-re-read once the burst settles (250 ms). A `config` rebuild first clears the
+their resource tasks are unioned once the burst settles (250 ms). Config and
+its derived agent/provider/model events share one refresh per resource and
+directory. Concurrent batches share in-flight work in `catalogRefresh.ts`.
+A `config` rebuild first clears the
 client's config cache, otherwise the refresh would be answered from the copy
 cached seconds earlier. A re-read that returns an identical list keeps the
 objects already in the stores, so nothing re-renders.
@@ -218,7 +221,7 @@ second time `PROVIDER_REREAD_AFTER_CREDENTIAL_MS` after a credential change.
 | `skill` | — | skills store + skills catalog |
 | `plugin` | — | plugins store |
 | `config` | `config` per named directory (plus `emitSyncConfigChanged`) | agents, commands, skills, MCP config, plugins, config-store providers |
-| `provider` / `model` / `credential` | — | config-store providers (model-metadata cache invalidated; the current list stays until the new one lands; `credential` reads twice) |
+| `provider` / `model` / `credential` | — | config-store providers (metadata retained; the current list stays until the new one lands; `credential` reads twice) |
 | `project` | global project list | — |
 
 ## Compaction records
@@ -565,7 +568,7 @@ Session message loads use runtime, normalized directory, session ID, SDK epoch, 
 
 An authoritative `session.deleted` event also clears persisted UI state before routing metadata can be removed. Confirmed local deletion and accepted `404` deletion do the same directly instead of depending on the event echo. Cleanup is identity-owned by runtime, normalized directory, and session ID: queued messages, persisted todos, composer drafts, per-session input-history buckets, inline-comment drafts, and pins clear only that tuple, while the active runtime's folder store removes the session from every active or archived folder scope. Stale-runtime events and unresolved/global directory identities do not mutate persisted state.
 
-Persisted sidebar state is never reconciled destructively from the first successful startup list. That list establishes an authoritative active+archived baseline. Only a session present in that baseline and omitted from a later complete snapshot is treated as a missed external deletion, and that judgment commits the same reconciliation as a confirmed deletion through `reconcileExternallyDeletedSession`: the session leaves every live store and the global cache, the current-session pointer clears when it pointed there, and `cleanupPersistedSessionState` runs. Clearing only persisted state was the earlier behavior, and it left the session in every live store, in the sidebar, and as the open chat still prompting an id the server no longer has when the `session.deleted` event was lost. The reconciliation is rechecked against the captured runtime before it mutates the non-runtime-scoped live, global, and UI stores. Archive and directory moves retain the session ID across snapshots and are not deletion cleanup. The judgment runs in `MainLayout` and `VSCodeLayout` through `useSessionListSync`, which see a snapshot every 45-second global poll, and in the mobile shell's `MobileAppContent`, which has no poller and sees a snapshot whenever the sessions sheet opens or the last session is restored. This favors harmless hidden stale metadata over irreversible user-state loss when startup data is incomplete.
+Persisted sidebar state is never reconciled destructively from the first successful startup list. That list establishes an authoritative active+archived baseline. Only a session present in that baseline and omitted from a later complete snapshot is treated as a missed external deletion, and that judgment commits the same reconciliation as a confirmed deletion through `reconcileExternallyDeletedSession`: the session leaves every live store and the global cache, the current-session pointer clears when it pointed there, and `cleanupPersistedSessionState` runs. Clearing only persisted state was the earlier behavior, and it left the session in every live store, in the sidebar, and as the open chat still prompting an id the server no longer has when the `session.deleted` event was lost. The reconciliation is rechecked against the captured runtime before it mutates the non-runtime-scoped live, global, and UI stores. Archive and directory moves retain the session ID across snapshots and are not deletion cleanup. The judgment runs in `MainLayout` and `VSCodeLayout` through `useSessionListSync` and in the mobile shell's `MobileAppContent`. Both consume `authoritativeSessions`, published only by complete global loads. Head checks never advance this baseline. Full app roots sweep on startup, return from hidden state, and every 10 minutes while visible. Mobile has no poller and sees a snapshot whenever the sessions sheet opens or the last session is restored. This favors harmless hidden stale metadata over irreversible user-state loss when startup data is incomplete.
 
 Session materialization recency is keyed by runtime and directory. Foreground loads promote navigation recency. Prefetch reserves only unused per-directory capacity before HTTP starts and inserts speculative entries behind visited sessions. A prefetch cache hit does not promote recency, and a full cache skips uncached speculation. Otherwise the sidebar's neighbor prefetch displaces visited sessions and causes repeated HTTP on every navigation cycle near the limit. Prefetch pagination metadata has a global count ceiling and is removed with session eviction, directory disposal, loader runtime reconfiguration, and loader disposal.
 
@@ -587,8 +590,8 @@ Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**
 
 Each full app root owns one global polling lifecycle through
 `useGlobalSessionsPolling`. The web/desktop root, the desktop Mini Chat window
-root, and the VS Code chat root load once when mounted and schedule the next
-refresh 45 seconds after completion, so sessions created by another OpenCode
+root, and the VS Code chat root load a complete snapshot when mounted and schedule a
+head check 45 seconds after completion, so sessions created by another OpenCode
 process are discovered without relying on the sidebar or native tray being
 visible. Before the first successful global load, failures receive at most
 three earlier retries after 1, 2, and 4 seconds; then the normal cadence
@@ -596,8 +599,11 @@ continues. Store error status, including a chats-root
 lookup failure, drives recovery because the loader returns retained data on
 failure. Runtime changes retire the old timer and start a fresh load immediately;
 late completions cannot restart the old timer or seed the new runtime.
-A refresh that comes due while the document is hidden does not run; it runs
-once when the document is visible again, and the cadence resumes from there.
+A refresh that comes due while the document is hidden does not run. Returning
+from hidden state takes a complete snapshot even if no poll came due, and the
+cadence resumes from there. A complete sweep also runs within 10 minutes of the
+last successful full load while visible; the timer shortens its final interval
+to meet that deadline. Startup failures keep retrying complete loads.
 Live events keep the list current meanwhile; only sessions another OpenCode
 process created wait for the window to be seen. On desktop that includes a
 window closed to the tray.
@@ -615,6 +621,18 @@ runs the refresh at once instead of waiting for the next startup retry or the
 45-second interval; when it arrives during a load that then fails, one more
 load follows immediately. After a success it changes nothing.
 
+### Why head checks and complete snapshots have separate authority
+
+The 45-second check reads 20 records in newest-updated order and merges the whole
+page, continuing while every returned record is new or changed. A known unchanged
+record ends pagination. This bounds idle traffic independently of historical
+session count. Only complete loads publish `authoritativeSessions`, the committed
+active-plus-archived snapshot consumed by missed-deletion cleanup. A partial or
+failed check cannot establish absence or advance that cleanup baseline. A session
+deleted by another process therefore disappears on the complete-sweep cadence
+when its deletion event was missed. Head checks skip the host status seed and
+do not republish unchanged space marks, avoiding their follow-on requests.
+
 **Startup seed.** The global store starts from the managed-chats snapshot plus
 a global snapshot of active sessions outside the chats root (see
 `stores/DOCUMENTATION.md`), so worktrees and other projects paint before the
@@ -626,7 +644,7 @@ for a complete load, which replaces the seed silently.
 host's `spaces` mark: one entry per space with its name, the state of its last
 answer (`complete`, `partial`, `stale`, `unknown`), the registered project it
 was made for and its directory inside. `lib/spaces/spaces-store.ts` keeps the
-marks of the last complete load, reset on a runtime switch. A space's sessions
+marks of the latest successful global read, including head checks, reset on a runtime switch. A space's sessions
 live at `/spaces/<id>/<folder>`, and the server sends a request that names
 such a directory in its query or its directory header to that space, so the
 sidebar's per-directory reads of a space go to the space; a request that names
@@ -755,8 +773,9 @@ The session creation action accepts `navigation: "preserve"` for background exte
 An explicit creation title is recorded as `metadata.openchamber.workTitle`
 with `by: "user"`, preserving the caller's other metadata. Titleless creation
 leaves metadata unchanged. The title and its ownership reach OpenCode in the
-same create request, so `work.name` cannot replace a user-given title before
-a later metadata write completes.
+same create request. `work.name` never changes a session title. When a session
+moves into a new worktree, this marker carries explicit user ownership to its
+task title; without it the current session title seeds an agent-owned name.
 
 Use the sync hooks backed by aggregated child stores when the UI needs **live truth** for sessions or statuses across all initialized directories.
 
@@ -1240,7 +1259,7 @@ metadata and the next authoritative load reconciles it.
 
 ### Missing worktree directories
 
-Existing sessions keep their directory when a worktree disappears. Session activation makes no directory-availability probe, and terminal failures and archive restoration never move sessions. Manual movement still goes through `moveSessionToDirectory`. Worktree deletion still archives its sessions before removing the worktree. Missing-worktree groups stay visible with a warning so users can choose either action.
+Existing sessions keep their directory when a worktree disappears. Session activation makes no directory-availability probe, and terminal failures and archive restoration never move sessions. Manual movement still goes through `moveSessionToDirectory`; for a session outside any worktree the composer's row and Move session… are that manual way. Worktree deletion still archives its sessions before removing the worktree. Missing-worktree groups stay visible with a warning so users can choose either action.
 
 After a restore succeeds while its captured runtime is still current, the
 action promotes the session through the ordering-only restore entry point. That

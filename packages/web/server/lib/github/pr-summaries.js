@@ -27,6 +27,9 @@ const SUMMARY_FIELDS = `
   isDraft
   mergeable
   mergeStateStatus
+  isInMergeQueue
+  mergeQueueEntry { state position }
+  autoMergeRequest { enabledAt mergeMethod }
   headRefOid
   baseRefName
   comments { totalCount }
@@ -139,6 +142,9 @@ const prNodeSchema = z.object({
   isDraft: z.boolean(),
   mergeable: z.string().nullable(),
   mergeStateStatus: z.string().nullable(),
+  isInMergeQueue: z.boolean().optional(),
+  mergeQueueEntry: z.object({ state: z.string(), position: z.number().int().nonnegative() }).nullish(),
+  autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullish(),
   headRefOid: z.string(),
   baseRefName: z.string(),
   comments: z.object({ totalCount: z.number().int() }).nullish(),
@@ -305,6 +311,9 @@ function toSummary(ref, value, details) {
     base: node.baseRefName,
     mergeable: toMergeable(node.mergeable),
     mergeableState: node.mergeStateStatus ? node.mergeStateStatus.toLowerCase() : null,
+    isInMergeQueue: node.isInMergeQueue ?? false,
+    mergeQueueEntry: node.mergeQueueEntry ?? null,
+    autoMergeRequest: node.autoMergeRequest ?? null,
     // A closed/merged PR's checks are not actionable; the REST status route
     // drops them too.
     checks: state === 'open' ? summarizeCheckContexts(contexts) : null,

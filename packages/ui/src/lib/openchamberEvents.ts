@@ -151,6 +151,12 @@ type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
 type GuestsChangedEvent = { type: 'guests-changed' };
 
 /**
+ * A theme file in the server's custom themes folder was added, removed or
+ * rewritten. Carries nothing; listeners re-read the custom themes.
+ */
+type ThemesChangedEvent = { type: 'themes-changed' };
+
+/**
  * A usage limit stopped a session and the server moved on: the provider to
  * its next account (for every session), or this session to the fallback model.
  */
@@ -271,6 +277,7 @@ const notificationPropertiesSchema = z.object({
 });
 
 type OpenChamberEvent =
+  | { type: 'terminal-sessions-changed' }
   | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
   /** `connectionId` names this connection on the server; absent from servers before tracked items. */
   | { type: 'event-stream-ready'; connectionId: string | null }
@@ -302,6 +309,7 @@ type OpenChamberEvent =
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
   | GuestsChangedEvent
+  | ThemesChangedEvent
   | LimitFailoverEvent
   | ProjectContextChangedEvent
   | SessionFoldersChangedEvent
@@ -322,6 +330,10 @@ let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
 const listeners = new Set<Listener>();
+// The ready event of the open connection. A listener that subscribes after it
+// arrived gets it replayed, since the server sends it once per connection and
+// some listeners (tracked-items interest) cannot act until they have it.
+let readyEvent: Extract<OpenChamberEvent, { type: 'event-stream-ready' }> | null = null;
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
@@ -365,6 +377,7 @@ const scheduleReconnect = () => {
 };
 
 const cleanupSource = () => {
+  readyEvent = null;
   clearHeartbeatTimer();
   streamAbortController?.abort();
   streamAbortController = null;
@@ -469,6 +482,10 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
+  if (envelope.type === 'openchamber:terminal-sessions-changed') {
+    for (const listener of listeners) listener({ type: 'terminal-sessions-changed' });
+    return;
+  }
   if (envelope.type === 'openchamber:notification') {
     const parsed = notificationPropertiesSchema.safeParse(envelope.properties);
     if (parsed.success) {
@@ -481,7 +498,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     reconnectAttempt = 0;
     const ready = eventStreamReadySchema.safeParse(envelope.properties);
     const connectionId = ready.success ? ready.data.connectionId ?? null : null;
-    for (const listener of listeners) listener({ type: 'event-stream-ready', connectionId });
+    const event = { type: 'event-stream-ready', connectionId } as const;
+    readyEvent = event;
+    for (const listener of listeners) listener(event);
     return;
   }
 
@@ -617,6 +636,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:guests-changed') {
     for (const listener of listeners) listener({ type: 'guests-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:themes-changed') {
+    for (const listener of listeners) listener({ type: 'themes-changed' });
     return;
   }
 
@@ -822,6 +846,12 @@ export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => 
   listeners.add(listener);
   ensureRuntimeChangeSubscription();
   connect();
+  if (readyEvent) {
+    const event = readyEvent;
+    queueMicrotask(() => {
+      if (readyEvent === event && listeners.has(listener)) listener(event);
+    });
+  }
 
   return () => {
     listeners.delete(listener);

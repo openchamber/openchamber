@@ -91,6 +91,7 @@
     "release:test:intel": "./scripts/test-release-build.sh x86_64",
     "release:test:arm": "./scripts/test-release-build.sh aarch64",
     "profile:idle": "node scripts/profile-idle.mjs",
+    "profile:soak": "node scripts/profile-soak.mjs",
     "profile:session": "node scripts/profile-session.mjs",
     "profile:animation": "node scripts/profile-animation.mjs",
     "profile:switch": "node scripts/profile-switch.mjs",

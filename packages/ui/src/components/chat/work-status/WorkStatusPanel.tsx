@@ -280,6 +280,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           directory={directory}
           repositoryEnabled={repositoryEnabled}
           layout={sectionLayout}
+          visible={visible}
         />
       </ScrollShadow>
       </WorkStatusPresenceProvider>

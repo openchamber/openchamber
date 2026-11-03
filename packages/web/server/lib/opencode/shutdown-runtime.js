@@ -15,6 +15,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     sessionWarmingRuntime,
     autoReviewRuntime,
     prWatchRuntime,
+    mergeFollowRuntime,
     messageQueueRuntime,
     dispatchResultsRuntime,
     workflowRuntime = null,
@@ -47,6 +48,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getRelayService,
     getRelayReconcileTimer,
     getSpacesHost = () => null,
+    stopFolderWatches = () => {},
   } = dependencies;
 
   let shutdownPromise = null;
@@ -91,6 +93,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => getSpacesHost()?.close(),
       () => getRelayService()?.stop(),
       () => getDictationRuntime()?.stop(),
+      stopFolderWatches,
       () => openCodeWatcherRuntime.stop(),
       () => sessionRuntime.dispose(),
       () => sessionAssistRuntime?.stop?.(),
@@ -100,6 +103,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       () => sessionWarmingRuntime?.stop?.(),
       () => autoReviewRuntime?.stop?.(),
       () => prWatchRuntime?.stop?.(),
+      () => mergeFollowRuntime?.stop?.(),
       () => messageQueueRuntime?.stop?.(),
       () => dispatchResultsRuntime?.stop?.(),
       () => workflowRuntime?.shutdown(),

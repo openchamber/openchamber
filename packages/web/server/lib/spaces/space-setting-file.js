@@ -3,6 +3,8 @@
 // which a plain read would wait on forever, with the server's event loop stuck behind it.
 
 import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
 
 // A real setting file is a few dozen bytes.
 const MAX_SETTING_BYTES = 1024;
@@ -20,5 +22,19 @@ export const readSpaceSettingFile = async (filePath, schema) => {
     return parsed.success ? parsed.data : null;
   } catch {
     return null;
+  }
+};
+
+/** Atomically replaces a small setting; never opens the destination or an existing temporary file. */
+export const writeSpaceSettingFile = async (filePath, value, schema) => {
+  const text = `${JSON.stringify(schema.parse(value))}\n`;
+  if (Buffer.byteLength(text) > MAX_SETTING_BYTES) throw new Error('Space setting exceeds 1 KiB');
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fs.promises.writeFile(temporary, text, { flag: 'wx', mode: 0o600 });
+    await fs.promises.rename(temporary, filePath);
+  } finally {
+    await fs.promises.rm(temporary, { force: true });
   }
 };

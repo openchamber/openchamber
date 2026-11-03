@@ -781,6 +781,9 @@
     "notifyOnCompletion": {
       "scope": "profile"
     },
+    "notifyOnPullRequests": {
+      "scope": "profile"
+    },
     "notifyOnError": {
       "scope": "profile"
     },
