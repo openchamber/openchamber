@@ -1,19 +1,20 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
+import vm from 'node:vm';
+import { RUNTIME_CONFIG_SCRIPT, RUNTIME_CONFIG_SCRIPT_PATHNAME, createRuntimeConfigGate, injectRuntimeConfig, isRuntimeConfigFrame } from './packaged-runtime-config.mjs';
 
 const HTML = '<html><head><script type="module" src="/assets/main.js"></script></head><body><div id="initial-loading"></div><script>late()</script></body></html>';
 
 describe('packaged runtime config injection', () => {
-  it('inlines resolved values before every other head script', () => {
-    const html = injectRuntimeConfig(HTML, { pending: false, scriptBody: 'window.x=1;' });
-    assert.ok(html.startsWith('<html><head><script>window.x=1;</script><script type="module"'));
+  it('asks for the values before every other head script', () => {
+    const html = injectRuntimeConfig(HTML, { pending: false });
+    assert.ok(html.startsWith(`<html><head><script>${RUNTIME_CONFIG_SCRIPT}</script><script type="module"`));
     assert.ok(!html.includes(RUNTIME_CONFIG_SCRIPT_PATHNAME));
   });
 
   it('ends a pending document with the blocking script, after its loading screen and own scripts', () => {
-    const html = injectRuntimeConfig(HTML, { pending: true, scriptBody: '', nonce: 'n1' });
-    const tag = `<script src="${RUNTIME_CONFIG_SCRIPT_PATHNAME}?nonce=n1"></script>`;
+    const html = injectRuntimeConfig(HTML, { pending: true });
+    const tag = `<script src="${RUNTIME_CONFIG_SCRIPT_PATHNAME}"></script>`;
     assert.ok(html.endsWith(`<script>late()</script>${tag}</body></html>`));
     assert.ok(html.indexOf('initial-loading') < html.indexOf(tag));
     // A classic script without async/defer, so parsing (and therefore module execution) waits for it.
@@ -21,8 +22,60 @@ describe('packaged runtime config injection', () => {
   });
 
   it('appends the blocking script to a document without a body end tag', () => {
-    const html = injectRuntimeConfig('<p>x</p>', { pending: true, scriptBody: '', nonce: 'n1' });
-    assert.equal(html, `<p>x</p><script src="${RUNTIME_CONFIG_SCRIPT_PATHNAME}?nonce=n1"></script>`);
+    const html = injectRuntimeConfig('<p>x</p>', { pending: true });
+    assert.equal(html, `<p>x</p><script src="${RUNTIME_CONFIG_SCRIPT_PATHNAME}"></script>`);
+  });
+});
+
+describe('runtime config script', () => {
+  const VALUES = { localOrigin: 'http://127.0.0.1:1', apiBaseUrl: 'http://127.0.0.1:2', clientToken: 'value' };
+  const run = (globals) => {
+    const window = { ...globals };
+    vm.runInNewContext(RUNTIME_CONFIG_SCRIPT, { window });
+    return window;
+  };
+
+  it('sets what the bridge returns', () => {
+    const window = run({ __OPENCHAMBER_READ_RUNTIME_CONFIG__: () => VALUES });
+    assert.equal(window.__OPENCHAMBER_LOCAL_ORIGIN__, VALUES.localOrigin);
+    assert.equal(window.__OPENCHAMBER_API_BASE_URL__, VALUES.apiBaseUrl);
+    assert.equal(window.__OPENCHAMBER_CLIENT_TOKEN__, VALUES.clientToken);
+  });
+
+  it('keeps the values the preload exposed for this window', () => {
+    const window = run({
+      __OPENCHAMBER_READ_RUNTIME_CONFIG__: () => VALUES,
+      __OPENCHAMBER_API_BASE_URL__: 'http://other-host',
+      __OPENCHAMBER_CLIENT_TOKEN__: 'other-value',
+    });
+    assert.equal(window.__OPENCHAMBER_API_BASE_URL__, 'http://other-host');
+    assert.equal(window.__OPENCHAMBER_CLIENT_TOKEN__, 'other-value');
+  });
+
+  it('leaves the token unset when there is none', () => {
+    const window = run({ __OPENCHAMBER_READ_RUNTIME_CONFIG__: () => ({ ...VALUES, clientToken: '' }) });
+    assert.equal(window.__OPENCHAMBER_CLIENT_TOKEN__, undefined);
+  });
+
+  it('sets nothing in a frame without the bridge, or when main refuses', () => {
+    assert.deepEqual(run({}), {});
+    assert.equal(run({ __OPENCHAMBER_READ_RUNTIME_CONFIG__: () => null }).__OPENCHAMBER_API_BASE_URL__, undefined);
+  });
+});
+
+describe('runtime config frame check', () => {
+  it('accepts only the top frame of the packaged application', () => {
+    assert.equal(isRuntimeConfigFrame({ parent: null, origin: 'openchamber-ui://app' }), true);
+    assert.equal(isRuntimeConfigFrame({ parent: {}, origin: 'openchamber-ui://app' }), false);
+    assert.equal(isRuntimeConfigFrame({ parent: {}, origin: 'null' }), false);
+    assert.equal(isRuntimeConfigFrame({ parent: null, origin: 'http://127.0.0.1:3000' }), false);
+    assert.equal(isRuntimeConfigFrame({ parent: null, origin: 'null' }), false);
+    assert.equal(isRuntimeConfigFrame(null), false);
+  });
+
+  it('refuses a frame that is already gone', () => {
+    const gone = { get parent() { throw new Error('Render frame was disposed'); } };
+    assert.equal(isRuntimeConfigFrame(gone), false);
   });
 });
 
@@ -53,66 +106,5 @@ describe('runtime config gate', () => {
     const gate = createRuntimeConfigGate();
     gate.release();
     assert.equal(gate.isHeld(), false);
-  });
-});
-
-describe('runtime config script access', () => {
-  const scriptUrl = (nonce) => `openchamber-ui://app${RUNTIME_CONFIG_SCRIPT_PATHNAME}${nonce === undefined ? '' : `?nonce=${nonce}`}`;
-  const sameOriginScript = new Headers({ 'sec-fetch-dest': 'script', 'sec-fetch-site': 'same-origin' });
-  const sequentialGate = () => {
-    let n = 0;
-    return createRuntimeConfigGate({ createNonce: () => `nonce-${++n}` });
-  };
-
-  it('answers the document it issued the nonce to, once', () => {
-    const gate = sequentialGate();
-    gate.hold();
-    const nonce = gate.issueScriptNonce();
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(nonce), headers: sameOriginScript }), true);
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(nonce), headers: sameOriginScript }), false);
-  });
-
-  it('still answers an issued nonce after the gate is released', () => {
-    const gate = sequentialGate();
-    gate.hold();
-    const nonce = gate.issueScriptNonce();
-    gate.release();
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(nonce), headers: new Headers() }), true);
-  });
-
-  it('refuses requests without a nonce or with one it never issued', () => {
-    const gate = sequentialGate();
-    gate.hold();
-    gate.issueScriptNonce();
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(), headers: sameOriginScript }), false);
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl('guess'), headers: sameOriginScript }), false);
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(''), headers: sameOriginScript }), false);
-  });
-
-  it('refuses cross-site and non-script loads without spending the nonce', () => {
-    const gate = sequentialGate();
-    gate.hold();
-    const nonce = gate.issueScriptNonce();
-    const crossSite = new Headers({ 'sec-fetch-dest': 'script', 'sec-fetch-site': 'cross-site' });
-    const asFetch = new Headers({ 'sec-fetch-dest': 'empty', 'sec-fetch-site': 'same-origin' });
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(nonce), headers: crossSite }), false);
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(nonce), headers: asFetch }), false);
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(nonce), headers: sameOriginScript }), true);
-  });
-
-  it('gives each pending document its own nonce', () => {
-    const gate = sequentialGate();
-    gate.hold();
-    const first = gate.issueScriptNonce();
-    const second = gate.issueScriptNonce();
-    assert.notEqual(first, second);
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(second), headers: sameOriginScript }), true);
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: scriptUrl(first), headers: sameOriginScript }), true);
-  });
-
-  it('ignores other paths', () => {
-    const gate = sequentialGate();
-    const nonce = gate.issueScriptNonce();
-    assert.equal(claimRuntimeConfigScriptRequest(gate, { url: `openchamber-ui://app/index.html?nonce=${nonce}`, headers: sameOriginScript }), false);
   });
 });

@@ -60,17 +60,17 @@ before the local server is imported, and the renderer parses, fetches and
 compiles the application while the server starts. The runtime values the
 application needs before any request (local origin, API base, client token)
 do not exist yet, so that document ends with a parser-blocking
-`<script src="/__runtime-config.js">` instead of the inline values; main
-answers it once `activateMainWindow` has the resolved runtime
-(`packaged-runtime-config.mjs`). The script carries the client token, and a
-classic `<script src>` ignores CORS, so each pending document gets its own
-single-use nonce in the script URL; a request without an issued, unclaimed
-nonce, or whose fetch metadata is not a same-origin script load, gets 404. A
-sandboxed preview or plugin frame cannot read the document, so it cannot
-learn the nonce. Module scripts run only after parsing ends,
-so no application code runs before the values are set. Remote, SSH,
-environment-target, HMR and background launches keep the previous order:
-resolve, then navigate, with the splash reporting the connection attempt.
+`<script src="/__runtime-config.js">`; main answers it once `activateMainWindow`
+has the resolved runtime (`packaged-runtime-config.mjs`). Module scripts run only
+after parsing ends, so no application code runs before the values are set.
+Remote, SSH, environment-target, HMR and background launches keep the previous
+order: resolve, then navigate, with the splash reporting the connection attempt.
+
+Packaged documents and that script hold no runtime values. They ask for them
+through the preload bridge, and main answers only the top frame of a window on
+the packaged origin. The scheme answers every frame in the session, including
+sandboxed ones, and a request to it carries nothing that says who is asking, so
+main decides by the IPC sender's frame.
 
 `bun run profile:startup` measures a packaged build's launch in an isolated
 profile; see `scripts/perf/DOCUMENTATION.md`.
@@ -179,7 +179,7 @@ IPC results if its endpoint changes while the read is pending.
 |------|---------|
 | `entry.mjs` | What Electron loads: pre-`ready` configuration, single-instance lock, the first window, then a dynamic import of `main.mjs` |
 | `compile-cache.mjs` | Node's V8 code cache for the packaged main process: enabling it under userData, keeping it out of child environments, flushing and pruning after startup |
-| `packaged-runtime-config.mjs` | Runtime values for packaged application documents: inline injection, and the blocking script and gate used while the first navigation runs ahead of the local server |
+| `packaged-runtime-config.mjs` | Runtime values for packaged application documents: the script that asks main for them, the check on the asking frame, and the blocking script and gate used while the first navigation runs ahead of the local server |
 | `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles. Its window icon in an unpackaged Windows run is `dev-icon.ico`, the Windows icon behind construction tape (source `resources/icons/dev-icon-win.svg`), so the taskbar tells a dev copy apart; Linux keeps the usual icon, because GNOME takes the dock icon from the installed app's `.desktop` entry |
 | `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
