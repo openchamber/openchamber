@@ -12,6 +12,7 @@
  * here when they are part of the same directory/session workflows.
  */
 
+import { isLocationNotFoundError } from "./location-errors"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
 import type {
   FileDiffInfo,
@@ -135,11 +136,6 @@ const STATUS_BY_TAG = new Map<string, number>([
 ])
 
 export type OpencodeHealthProbe = "healthy" | "unhealthy" | "unreachable"
-
-/** OpenCode's answer for a request in a folder that is gone. */
-export const isLocationNotFoundError = (error: Error | undefined): boolean => (
-  error instanceof OpencodeApiError && error.tag === "LocationNotFoundError"
-)
 
 export class OpencodeApiError extends Error {
   readonly operation: string
