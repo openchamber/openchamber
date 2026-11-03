@@ -3465,7 +3465,7 @@ describe('git remote arguments with option-like names', () => {
     const head = runGit(repository, ['rev-parse', 'HEAD']).trim();
     runGit(repository, ['update-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/gone`, head]);
 
-    const branches = await getBranches(repository);
+    const branches = await getBranches(repository, { remote: 'live' });
 
     expect(branches.all).toContain(`remotes/${OPTION_LIKE_REMOTE}/react`);
     expect(branches.all).not.toContain(`remotes/${OPTION_LIKE_REMOTE}/gone`);
@@ -5578,7 +5578,7 @@ describe.runIf(canRunGit())('getBranches', () => {
     const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
     fs.rmSync(remote, { recursive: true, force: true });
 
-    const branches = await getBranches(repository);
+    const branches = await getBranches(repository, { remote: 'live' });
 
     expect(branches.all).toContain('remotes/origin/react');
   });
@@ -5616,7 +5616,7 @@ describe.runIf(canRunGit())('getBranches', () => {
     runGit(collaborator, ['push', 'origin', 'feature-remote-only']);
     runGit(collaborator, ['push', 'origin', ':feature-stale']);
 
-    const branches = await getBranches(repository);
+    const branches = await getBranches(repository, { remote: 'live' });
 
     expect(branches.all).toContain('remotes/origin/feature-remote-only');
     expect(branches.all).toContain('remotes/origin/feature-known');
@@ -5663,17 +5663,18 @@ describe.runIf(canRunGit())('getBranches', () => {
 
   it('reuses a remote\'s answer until its local tracking refs change', async () => {
     const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
-    expect((await getBranches(repository)).all).not.toContain('remotes/origin/later');
+    const live = { remote: 'live' };
+    expect((await getBranches(repository, live)).all).not.toContain('remotes/origin/later');
     const collaborator = createTempDir();
     runGit(collaborator, ['clone', remote, '.']);
     runGit(collaborator, ['checkout', '-b', 'later']);
     runGit(collaborator, ['push', 'origin', 'later']);
 
     // Within the freshness window the remote is not asked again.
-    expect((await getBranches(repository)).all).not.toContain('remotes/origin/later');
+    expect((await getBranches(repository, live)).all).not.toContain('remotes/origin/later');
     // A fetch here changes the tracking refs, so the remote is read again.
     runGit(repository, ['fetch', 'origin']);
-    expect((await getBranches(repository)).all).toContain('remotes/origin/later');
+    expect((await getBranches(repository, live)).all).toContain('remotes/origin/later');
   });
 });
 

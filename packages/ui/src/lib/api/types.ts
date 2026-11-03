@@ -376,7 +376,7 @@ export interface GitBranchDetails {
   behind?: number;
 }
 
-export type GitBranchListOptions = { remote?: 'local' };
+export type GitBranchListOptions = { remote?: 'local' | 'live' };
 
 export interface GitBranch {
   all: string[];
@@ -1218,9 +1218,11 @@ export interface GitAPI {
   revertGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
   isLinkedWorktree(directory: string): Promise<boolean>;
   /**
-   * `remote: 'local'` lists what local refs know, without asking each remote
-   * over the network; for callers that need only the checked-out branch and
-   * its upstream. Runtimes that never ask remotes ignore it.
+   * `remote: 'local'` lists what local refs know. `remote: 'live'` also asks
+   * each remote over the network, which can start an SSH sign-in, so only an
+   * explicit request from the person may pass it. Callers name the mode: a
+   * server older than this contract treats a missing one as live. Runtimes
+   * that never ask remotes ignore it.
    */
   getGitBranches(directory: string, options?: GitBranchListOptions): Promise<GitBranch>;
   getGitUnpushedBranchCounts(directory: string, branches: string[]): Promise<GitUnpushedBranchCounts>;
