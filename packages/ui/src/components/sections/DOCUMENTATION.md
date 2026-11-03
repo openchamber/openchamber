@@ -169,6 +169,15 @@ in the fixed order of `POPULAR_PROVIDERS`, with a one-line note and a
 Recommended pill on the ones the maintainer recommends; every other provider
 is a compact row behind "Show all", and the search covers all of them.
 
+A provider OpenCode lists with no model at all keeps a card on the grid while
+its integration holds a stored login (Copilot Free or Student): the login keeps
+it off the connect page, so this card is the only way to sign out or switch
+accounts. Its page is the usual provider page. Building such a provider from the
+integration list was rejected, because OpenCode reports the provider itself and
+the page then acts on OpenCode's record. A provider with no model and no stored
+login, such as a config entry with an empty model list, has no account to
+manage and stays off the grid.
+
 The integration list is kept for the app session by
 `lib/opencode/integration-catalog.ts`, so the page opens on it without a
 loading state. The desktop/web/VS Code app reads it once at startup when the
