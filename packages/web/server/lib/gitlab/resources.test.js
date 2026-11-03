@@ -58,6 +58,14 @@ describe('GitLab resource service', () => {
     expect(download).toHaveBeenCalledOnce();
   });
 
+  it('reads the bound project avatar from the API route, not from its web URL', async () => {
+    const download = vi.fn(async () => new Response('png'));
+    const { service } = setup({}, { download });
+
+    await service.readProjectAvatar('/repo', 'origin', {});
+    expect(download).toHaveBeenCalledWith('projects/1/avatar', { signal: undefined });
+  });
+
   it('finds a fork merge request in its upstream and keeps CI separate', async () => {
     const { service, client } = setup();
     const result = await service.changeRequestStatus('/repo', 'feature');
