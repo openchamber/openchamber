@@ -1286,7 +1286,7 @@ subscribeRuntimeEndpointChanged((detail) => {
         directoryScoped: {},
         projectConfigErrors: {},
         lastInitFailure: null,
-        imageOnlyProviders: {},
+        settingsOnlyProviders: {},
         providers: [],
         agents: [],
         providersLoaded: false,
@@ -1568,11 +1568,11 @@ interface ConfigStore {
     /** Projects whose OpenCode config OpenCode refused to load, keyed by config-directory key. Runtime-only. */
     projectConfigErrors: Record<string, ProjectConfigError>;
     /**
-     * Per config-directory key: providers whose every model generates images.
-     * Kept apart from `providers`, which feeds the chat pickers; only Settings →
-     * Providers lists them. Runtime-only.
+     * Per config-directory key: providers with no chat model, so image models or
+     * none at all. Kept apart from `providers`, which feeds the chat pickers; only
+     * Settings → Providers lists them. Runtime-only.
      */
-    imageOnlyProviders: Record<string, ProviderWithModelList[]>;
+    settingsOnlyProviders: Record<string, ProviderWithModelList[]>;
     isInitialized: boolean;
     modelsMetadata: Map<string, ModelMetadata>;
     // OpenChamber settings-based defaults (take precedence over agent preferences)
@@ -1783,15 +1783,15 @@ const EMPTY_PROVIDERS: ProviderWithModelList[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 
 /**
- * Providers of one project that offer only image models. Settings → Providers
+ * Providers of one project that offer no chat model. Settings → Providers
  * lists them next to `selectProvidersForDirectory`; no chat picker reads them.
  */
-export const selectImageOnlyProvidersForDirectory = (
-    state: Pick<ConfigStore, "imageOnlyProviders" | "activeDirectoryKey">,
+export const selectSettingsOnlyProvidersForDirectory = (
+    state: Pick<ConfigStore, "settingsOnlyProviders" | "activeDirectoryKey">,
     directory?: string | null,
 ): ProviderWithModelList[] => {
     const directoryKey = directory == null ? state.activeDirectoryKey : toConfigDirectoryKey(directory);
-    return state.imageOnlyProviders[directoryKey] ?? EMPTY_PROVIDERS;
+    return state.settingsOnlyProviders[directoryKey] ?? EMPTY_PROVIDERS;
 };
 
 export const selectConfigAgentsForDirectory = (
@@ -1904,7 +1904,7 @@ export const useConfigStore = create<ConfigStore>()(
                 lastDisconnectReason: null,
                 lastInitFailure: null,
                 projectConfigErrors: {},
-                imageOnlyProviders: {},
+                settingsOnlyProviders: {},
                 isInitialized: false,
                 modelsMetadata: new Map<string, ModelMetadata>(),
                 settingsDefaultModel: undefined,
@@ -2321,11 +2321,11 @@ export const useConfigStore = create<ConfigStore>()(
                         }
 
                         if (targetDirectoryKey === null) {
-                            if (Object.keys(state.imageOnlyProviders).length > 0) nextState.imageOnlyProviders = {};
-                        } else if (state.imageOnlyProviders[targetDirectoryKey]) {
-                            const { [targetDirectoryKey]: _cleared, ...imageOnlyProviders } = state.imageOnlyProviders;
+                            if (Object.keys(state.settingsOnlyProviders).length > 0) nextState.settingsOnlyProviders = {};
+                        } else if (state.settingsOnlyProviders[targetDirectoryKey]) {
+                            const { [targetDirectoryKey]: _cleared, ...settingsOnlyProviders } = state.settingsOnlyProviders;
                             void _cleared;
-                            nextState.imageOnlyProviders = imageOnlyProviders;
+                            nextState.settingsOnlyProviders = settingsOnlyProviders;
                         }
 
                         if (targetDirectoryKey === null || targetDirectoryKey === state.activeDirectoryKey) {
@@ -2424,12 +2424,11 @@ export const useConfigStore = create<ConfigStore>()(
                                     ...provider,
                                     models: modelsByProvider.get(provider.id) ?? [],
                                 }));
-                            // A provider with image models only is still configured and
+                            // A provider with no chat model is still configured and
                             // manageable, so Settings lists it; chat never offers it.
-                            const imageOnlyProviders: ProviderWithModelList[] = providers
+                            const settingsOnlyProviders: ProviderWithModelList[] = providers
                                 .filter((provider) => provider.activation !== "disabled"
-                                    && !modelsByProvider.has(provider.id)
-                                    && imageModelsByProvider.has(provider.id))
+                                    && !modelsByProvider.has(provider.id))
                                 .map((provider) => ({
                                     ...provider,
                                     models: imageModelsByProvider.get(provider.id) ?? [],
@@ -2437,10 +2436,10 @@ export const useConfigStore = create<ConfigStore>()(
 
                             if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                             set((state) => {
-                                const previous = state.imageOnlyProviders[directoryKey] ?? EMPTY_PROVIDERS;
-                                return isSameProviderCatalog(previous, imageOnlyProviders)
+                                const previous = state.settingsOnlyProviders[directoryKey] ?? EMPTY_PROVIDERS;
+                                return isSameProviderCatalog(previous, settingsOnlyProviders)
                                     ? state
-                                    : { imageOnlyProviders: { ...state.imageOnlyProviders, [directoryKey]: imageOnlyProviders } };
+                                    : { settingsOnlyProviders: { ...state.settingsOnlyProviders, [directoryKey]: settingsOnlyProviders } };
                             });
                             // A re-read that returns the same catalog keeps the arrays the
                             // store already holds, so nothing subscribed to them re-renders.

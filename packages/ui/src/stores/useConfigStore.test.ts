@@ -258,7 +258,7 @@ const {
   useConfigStore,
   selectConfigAgentsForDirectory,
   selectProvidersForDirectory,
-  selectImageOnlyProvidersForDirectory,
+  selectSettingsOnlyProvidersForDirectory,
   selectCatalogLoadedForDirectory,
   markConfigCatalogStale,
   selectKnownAgent,
@@ -566,13 +566,30 @@ describe('useConfigStore provider persistence', () => {
       ['chat', ['talk']],
       ['mixed', ['talk']],
     ]);
-    expect(selectImageOnlyProvidersForDirectory(state, DIRECTORY).map((entry) => [entry.id, entry.models.map((item) => item.modelID)])).toEqual([
+    expect(selectSettingsOnlyProvidersForDirectory(state, DIRECTORY).map((entry) => [entry.id, entry.models.map((item) => item.modelID)])).toEqual([
       ['wawa', ['flare']],
     ]);
-    expect(selectImageOnlyProvidersForDirectory(state, OTHER_DIRECTORY)).toEqual([]);
+    expect(selectSettingsOnlyProvidersForDirectory(state, OTHER_DIRECTORY)).toEqual([]);
 
     useConfigStore.getState().invalidateProviderCache(DIRECTORY);
-    expect(selectImageOnlyProvidersForDirectory(useConfigStore.getState(), DIRECTORY)).toEqual([]);
+    expect(selectSettingsOnlyProvidersForDirectory(useConfigStore.getState(), DIRECTORY)).toEqual([]);
+  });
+
+  test('a provider with no model at all is kept for Settings and stays out of the chat catalog', async () => {
+    // What a Copilot Free or Student sign-in leaves: OpenCode lists the provider
+    // and answers no model for it.
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('chat'), providerInfo('github-copilot')],
+      models: [model('chat', 'talk')],
+      default: { providerID: 'chat', id: 'talk' },
+    });
+    await useConfigStore.getState().activateDirectory(DIRECTORY);
+
+    const state = useConfigStore.getState();
+    expect(state.providers.map((entry) => entry.id)).toEqual(['chat']);
+    expect(selectSettingsOnlyProvidersForDirectory(state, DIRECTORY).map((entry) => [entry.id, entry.models])).toEqual([
+      ['github-copilot', []],
+    ]);
   });
 
   test('Settings without a project reads the active catalog', () => {
