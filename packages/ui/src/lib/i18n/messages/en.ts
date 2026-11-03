@@ -1794,6 +1794,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'Switch to edit mode to fix the issue.',
   'filesView.error.readFileFailed': 'Failed to read file',
   'filesView.editor.htmlPreviewTitle': 'HTML Preview',
+  'filesView.editor.htmlPreviewRelayUnavailable': "HTML preview isn't available over the relay",
+  'filesView.editor.htmlPreviewShowCode': 'Show code',
   'filesView.editor.htmlAnnotate.intro': 'This is an annotated selection from an HTML file preview.',
   'filesView.diagram.closeDiagramView': 'Close diagram view',
   'filesView.diagram.saveDiagram': 'Save diagram',

@@ -1751,6 +1751,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.error.switchToEditMode": "Cambia al modo de edición para resolver el problema.",
   "filesView.error.readFileFailed": "No se pudo leer el archivo",
   "filesView.editor.htmlPreviewTitle": "Vista previa HTML",
+  "filesView.editor.htmlPreviewRelayUnavailable": "La vista previa HTML no está disponible a través del relay",
+  "filesView.editor.htmlPreviewShowCode": "Mostrar código",
   "filesView.editor.htmlAnnotate.intro": "Esta es una selección anotada de la vista previa de un archivo HTML.",
   "filesView.diagram.closeDiagramView": "Cerrar vista de diagrama",
   "filesView.diagram.saveDiagram": "Guardar diagrama",

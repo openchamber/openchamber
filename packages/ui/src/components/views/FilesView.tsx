@@ -63,6 +63,7 @@ import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/file
 import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { isFilePathMoveInFlight, rebaseMovedPath, rebaseMovedPathKeys, subscribeToFilePathMoves } from '@/lib/filePathMoves';
 import { DiagramEditor } from '@/components/diagram';
@@ -3726,8 +3727,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     [runtimeKey, selectedFile?.path, usesRawAssetUrl, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
+  // The browser loads an HTML preview and its neighbouring files itself, and a
+  // URL it loads never enters the relay tunnel.
+  const htmlPreviewUnreachable = isRelayModeActive();
   const htmlPreviewRequest = React.useMemo(
-    () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
+    () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode && !htmlPreviewUnreachable
       ? {
         path: selectedFile.path,
         directory: root || '',
@@ -3735,7 +3739,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         outsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace,
       }
       : null),
-    [selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
+    [selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, htmlPreviewUnreachable, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
@@ -4263,7 +4267,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
     // Annotation needs the rendered page: from the source it switches to the
     // preview and starts once the page has loaded.
-    const annotateAction: ToolbarAction | null = isHtml && !isMobile && !runtime.isVSCode ? {
+    const annotateAction: ToolbarAction | null = isHtml && !isMobile && !runtime.isVSCode && !htmlPreviewUnreachable ? {
       id: 'annotate',
       label: t('contextPanel.browser.annotate.toggle'),
       icon: 'markup',
@@ -4880,6 +4884,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 />
               )}
             </div>
+          ) : selectedFile && isHtml && htmlViewMode === 'preview' && htmlPreviewUnreachable ? (
+            <ContentState
+              icon={<FileTypeIcon filePath={selectedFile.path} className="size-10" />}
+              title={t('filesView.editor.htmlPreviewRelayUnavailable')}
+              actions={(
+                // For this file only: leaving this message is not choosing code
+                // as the default, which would follow the user to a direct host.
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    htmlViewModeByPathRef.current[selectedFile.path] = 'edit';
+                    setHtmlViewMode('edit');
+                  }}
+                >
+                  {t('filesView.editor.htmlPreviewShowCode')}
+                </Button>
+              )}
+            />
           ) : selectedFile && isHtml && htmlViewMode === 'preview' ? (
             !runtime.isVSCode && htmlPreview.status === 'loading' ? (
               <div className="flex h-full items-center justify-center text-muted-foreground typography-ui-label">

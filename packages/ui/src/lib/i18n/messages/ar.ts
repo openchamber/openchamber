@@ -1724,6 +1724,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'بدّل إلى وضع التحرير لإصلاح المشكلة.',
   'filesView.error.readFileFailed': 'تعذّرت قراءة الملف',
   'filesView.editor.htmlPreviewTitle': 'معاينة HTML',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'معاينة HTML غير متاحة عبر المرحّل',
+  'filesView.editor.htmlPreviewShowCode': 'عرض الكود',
   'filesView.editor.htmlAnnotate.intro': 'هذا تحديد عليه تعليق توضيحي من معاينة ملف HTML.',
   'filesView.diagram.closeDiagramView': 'إغلاق عرض المخطط',
   'filesView.diagram.saveDiagram': 'حفظ المخطط',

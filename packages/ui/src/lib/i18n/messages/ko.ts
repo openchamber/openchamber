@@ -1794,6 +1794,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.error.switchToEditMode': '문제를 수정하려면 편집 모드로 전환하세요.',
   'filesView.error.readFileFailed': '파일 읽기 실패',
   'filesView.editor.htmlPreviewTitle': 'HTML 미리보기',
+  'filesView.editor.htmlPreviewRelayUnavailable': '릴레이를 통해서는 HTML 미리보기를 사용할 수 없습니다',
+  'filesView.editor.htmlPreviewShowCode': '코드 보기',
   'filesView.editor.htmlAnnotate.intro': 'HTML 파일 미리보기에서 주석을 단 선택 영역입니다.',
   'filesView.diagram.closeDiagramView': '다이어그램 보기 닫기',
   'filesView.diagram.saveDiagram': '다이어그램 저장',

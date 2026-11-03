@@ -1751,6 +1751,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.error.switchToEditMode": "Перейдіть у режим редагування, щоб усунути проблему.",
   "filesView.error.readFileFailed": "Не вдалося прочитати файл",
   "filesView.editor.htmlPreviewTitle": "Попередній перегляд HTML",
+  "filesView.editor.htmlPreviewRelayUnavailable": "Перегляд HTML недоступний через relay",
+  "filesView.editor.htmlPreviewShowCode": "Показати код",
   "filesView.editor.htmlAnnotate.intro": "Це анотований фрагмент із попереднього перегляду HTML-файлу.",
   "filesView.diagram.closeDiagramView": "Закрити перегляд діаграми",
   "filesView.diagram.saveDiagram": "Зберегти діаграму",

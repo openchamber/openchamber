@@ -2360,6 +2360,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.symbols.noneInFile': 'W tym pliku nie znaleziono funkcji, klas ani nagłówków',
   'filesView.symbols.noMatches': 'Brak pasujących symboli',
   'filesView.editor.htmlPreviewTitle': 'Podgląd HTML',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'Podgląd HTML nie jest dostępny przez relay',
+  'filesView.editor.htmlPreviewShowCode': 'Pokaż kod',
   'filesView.editor.htmlAnnotate.intro': 'To jest opatrzony adnotacją fragment z podglądu pliku HTML.',
   'filesView.diagram.closeDiagramView': 'Zamknij widok diagramu',
   'filesView.diagram.saveDiagram': 'Zapisz diagram',

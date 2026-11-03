@@ -1530,6 +1530,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'Wechseln Sie zum Bearbeitungsmodus, um das Problem zu beheben.',
   'filesView.error.readFileFailed': 'Fehler beim Lesen der Datei',
   'filesView.editor.htmlPreviewTitle': 'HTML-Vorschau',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'HTML-Vorschau ist über den Relay nicht verfügbar',
+  'filesView.editor.htmlPreviewShowCode': 'Code anzeigen',
   'filesView.editor.htmlAnnotate.intro': 'Dies ist eine annotierte Auswahl aus der Vorschau einer HTML-Datei.',
   'filesView.diagram.closeDiagramView': 'Diagrammansicht schließen',
   'filesView.diagram.saveDiagram': 'Diagramm speichern',
