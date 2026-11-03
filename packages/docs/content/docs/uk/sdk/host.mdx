@@ -257,6 +257,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 У яку кімнату чи канал іде проєкт, вирішує ваше розширення: сповіщення несе `directory` і `sessionName`. У корпоративному режимі воно несе лише загальний заголовок, як і телефон. Приклад `notification-webhook` є повним каналом із приймачем, на якому його можна випробувати.
 
+## Трекери
+
+Сервіс може бути трекером робочих елементів поруч із Linear: оголосіть `provides: ["tracker"]` і опишіть трекер у `contributes.tracker`. Тоді OpenChamber показує його поруч із Linear усюди, де з'являються трекери, лише за маніфестом, ще до того, як сервіс узагалі запуститься.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+Користувач підключає облікові записи на картці трекера в розділі Облікові записи розширень: токеном або входом у браузері, коли ви оголосите `auth.oauth` (OpenChamber проводить вхід із client id, який вводить користувач, і зберігає токени). Ваш сервіс ніколи не бачить облікових даних. `urls.item` є шаблонами адреси елемента, де `{id}` позначає ідентифікатор (також як `?name={id}`, коли він передається в query); OpenChamber компілює їх, щоб вставлені посилання ставали пов'язаними елементами. `identifier` каже, як виглядає ключ: `key-number` (`PROJ-42`), `number` або `short-code`.
+
+OpenChamber передає дев'ять викликів на `POST /tracker`: `auth.probe` і `auth.verify`, читання `items.list`, `items.get`, `items.liveSummaries`, `states.list` і `containers.list`, а також записи `items.updateState` і `comments.create`. Читайте кожен через `readTrackerProviderRequest`, відповідайте в нейтральних формах елементів, а до сервера трекера звертайтеся лише через вихідний помічник, який надсилає ваш запит в OpenChamber разом із дескриптором виклику; OpenChamber додає облікові дані і не випускає запит за межі сервера облікового запису. Дескриптор читання надсилає лише `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Коли користувач увімкне коментарі сесій, OpenChamber викликає `comments.create` з "session started", "completed" або "failed" і посиланням на сесію, по одному разу; більше коментар нічого не несе. Приклад `tracker-provider` є повним трекером із несправжнім сервером, на якому його можна випробувати.
+
 ## Файли
 
 Відносний шлях лежить усередині відкритого проєкту і потребує дозволу `files`. Шлях, що починається з `/` або `~/`, має збігатися з оголошеним шаблоном `contributes.filesystem` і потребує дозволу `filesystem`. Правила див. у [Зробити розширення](/sdk/#файли).

@@ -259,6 +259,8 @@ export function registerProviderRoutes(app, {
   validateReadContext,
   validateMutationContext,
   mutationExecutor,
+  onMutationSucceeded = async () => {},
+  onMutationStarting = () => null,
   oauthFlowRegistry = createOAuthFlowRegistry(),
 }) {
   const statusCaches = new Map();
@@ -609,6 +611,30 @@ export function registerProviderRoutes(app, {
       }
     });
 
+    const takesSshUrl = descriptor.settings.some((field) => field.key === 'sshUrl');
+    target.post(authPaths('/auth/ssh-url'), async (req, res) => {
+      let impl;
+      try {
+        impl = await loadImplementation(id);
+        if (!takesSshUrl || !(impl.auth.setSshUrl instanceof Function)) return unsupportedCapability(res);
+        let instance;
+        try { instance = requestInstance(req); }
+        catch (error) { return res.status(400).json({ error: error.message }); }
+        const value = req.body?.sshUrl;
+        if (value !== undefined && value !== null && !isString(value)) {
+          return res.status(400).json({ error: 'sshUrl must be a string' });
+        }
+        return res.json(await impl.auth.setSshUrl({ instance, sshUrl: isString(value) ? value : null }));
+      } catch (error) {
+        const lockResponse = sendAuthStorageError(res, error);
+        if (lockResponse) return lockResponse;
+        const answered = sendProviderResponse(res, error);
+        if (answered) return answered;
+        const kind = impl ? impl.classifyFailure(error) : 'provider-error';
+        return res.status(errorStatus(kind)).json({ error: error?.message || `Failed to save ${label} SSH URL` });
+      }
+    });
+
     target.post(authPaths('/auth/activate'), async (req, res) => {
       try {
         const impl = await loadImplementation(id);
@@ -728,31 +754,48 @@ export function registerProviderRoutes(app, {
       const record = (target) => ({ key: context.idempotencyKey, inputDigest: prepared.digest(target), kind, actor, target });
       const classifyError = impl.mutations.classifyError ?? classifyMutationError;
       let execution;
-      if (existing) {
-        requireReplayMatch(existing, kind, actor, context);
-        let replayResolution;
-        const resolveReplay = async () => {
-          replayResolution ??= await impl.mutations.resolveTarget({ session, context, kind, input, replayOf: existing });
-          return replayResolution;
-        };
-        execution = await mutationExecutor.execute({
-          record: record(existing.target),
-          providerAccountId: session.providerUserId,
-          perform: () => { throw mutationConflict(); },
-          reconcile: async () => impl.mutations.reconcile({ session, route, kind, input, resolved: await resolveReplay() }),
-          classifyError,
-        });
-      } else {
-        const resolved = await impl.mutations.resolveTarget({ session, context, kind, input });
-        execution = await mutationExecutor.execute({
-          record: record(resolved.target),
-          providerAccountId: session.providerUserId,
-          perform: () => impl.mutations.perform({ session, route, kind, input, resolved }),
-          reconcile: () => impl.mutations.reconcile({ session, route, kind, input, resolved }),
-          classifyError,
-        });
+      let settleStarted = null;
+      const starting = (target) => {
+        try { settleStarted = onMutationStarting({ context, kind, input, target }) ?? null; }
+        catch { settleStarted = null; }
+      };
+      try {
+        if (existing) {
+          starting(existing.target);
+          requireReplayMatch(existing, kind, actor, context);
+          let replayResolution;
+          const resolveReplay = async () => {
+            replayResolution ??= await impl.mutations.resolveTarget({ session, context, kind, input, replayOf: existing });
+            return replayResolution;
+          };
+          execution = await mutationExecutor.execute({
+            record: record(existing.target),
+            providerAccountId: session.providerUserId,
+            perform: () => { throw mutationConflict(); },
+            reconcile: async () => impl.mutations.reconcile({ session, route, kind, input, resolved: await resolveReplay() }),
+            classifyError,
+          });
+        } else {
+          const resolved = await impl.mutations.resolveTarget({ session, context, kind, input });
+          starting(resolved.target);
+          execution = await mutationExecutor.execute({
+            record: record(resolved.target),
+            providerAccountId: session.providerUserId,
+            perform: () => impl.mutations.perform({ session, route, kind, input, resolved }),
+            reconcile: () => impl.mutations.reconcile({ session, route, kind, input, resolved }),
+            classifyError,
+          });
+        }
+        statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
+        try { await onMutationSucceeded({ context, kind, input, record: execution.record, replayed: execution.replayed }); }
+        catch (error) {
+          // The provider write is already durable. Notification bookkeeping
+          // cannot turn an accepted merge into an apparent failed mutation.
+          console.warn('[source-control] post-mutation follow failed:', error?.code ?? 'FOLLOW_FAILED');
+        }
+      } finally {
+        settleStarted?.();
       }
-      statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
       // Cache invalidation after the write is durable and best effort: the write
       // landed, and a stale cache must not turn that into an error.
       if (impl.mutations.afterSuccess instanceof Function) {

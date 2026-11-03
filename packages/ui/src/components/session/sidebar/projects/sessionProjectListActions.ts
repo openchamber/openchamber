@@ -36,11 +36,15 @@ export const toggleActivityZone = (
   });
 };
 
-/** Folds or opens every project under the Projects caption at once. */
-export const toggleProjectsCaption = ({ model }: Pick<SessionProjectListProps, 'model'>): void => {
+/** Folds or opens every project under a caption at once: Projects, or a group of projects the user made. */
+export const toggleProjectsCaption = (
+  row: Extract<SessionSidebarRow, { kind: 'caption' }>,
+  { model }: Pick<SessionProjectListProps, 'model'>,
+): void => {
+  const key = row.caption === 'projects' ? PROJECTS_CAPTION_COLLAPSE_KEY : row.caption;
   model.state.setCollapsedActivityKeys((current) => {
     const next = new Set(current);
-    if (next.has(PROJECTS_CAPTION_COLLAPSE_KEY)) next.delete(PROJECTS_CAPTION_COLLAPSE_KEY); else next.add(PROJECTS_CAPTION_COLLAPSE_KEY);
+    if (next.has(key)) next.delete(key); else next.add(key);
     return next;
   });
 };

@@ -135,13 +135,15 @@ const BANNER_CLASS_NAMES = {
   // the larger disc. Sonner positions the button absolutely; `!` undoes it.
   closeButton:
     "order-last !static -me-1 flex size-9 shrink-0 !transform-none items-center justify-center self-center rounded-full !border-0 !bg-transparent p-0 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none",
+  // Rows start at the top: the title's first line is padded to the close
+  // target's height (size-9), and the icon fills that same band, so the two
+  // share a centre whether the title wraps or not. The close and action
+  // buttons centre on the whole toast.
   toast:
-    "oc-surface-elevated group/toast toast flex w-[var(--width)] items-center gap-2 rounded-[var(--radius-xl)] py-2.5 ps-3.5 pe-2 text-foreground data-[expanded=false]:data-[front=false]:[&>*]:opacity-0 [&_[data-button]]:shrink-0",
+    "oc-surface-elevated group/toast toast flex w-[var(--width)] items-start gap-2 rounded-[var(--radius-xl)] py-2.5 ps-3.5 pe-2 text-foreground data-[expanded=false]:data-[front=false]:[&>*]:opacity-0 [&_[data-button]]:shrink-0 [&_[data-button]]:self-center",
   content: "flex min-w-0 flex-1 flex-col",
-  title: "typography-ui-label font-medium text-foreground",
-  // On the title's first line: the icon takes the title's type so `1lh` is
-  // that line's height.
-  icon: "relative me-0.5 flex h-[1lh] w-5 shrink-0 items-center justify-center self-start typography-ui-label text-muted-foreground [&>svg]:size-5",
+  title: "typography-ui-label font-medium text-foreground py-[calc((2.25rem-1lh)/2)]",
+  icon: "relative me-0.5 flex h-9 w-5 shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-5",
 }
 
 const Toaster = ({ position = "bottom-right", layout = "corner", ...props }: ToasterProps & { layout?: ToastLayout }) => {

@@ -1,7 +1,8 @@
 import type { Session } from '@/lib/opencode/model';
 import { isReviewSession } from '@/lib/sessionReviewMetadata';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
-import { markOverviewSessionsDone, readWorktreeUse, sessionsInWorktree } from '@/components/overview/overviewActions';
+import { markOverviewSessionsDone } from '@/components/overview/overviewActions';
+import { readWorktreeUse, sessionsInWorktree } from '@/lib/worktrees/worktreeUse';
 import { archiveWorktreeWork } from '@/lib/worktrees/worktreeArchive';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { setSessionWorkState } from '@/sync/session-actions';

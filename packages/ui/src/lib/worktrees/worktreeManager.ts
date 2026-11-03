@@ -328,7 +328,8 @@ export const worktreeMapsEqual = (
         // unchanged and the sidebar kept the old name.
         || next.title !== current.title
         // Pinning changes it the same way.
-        || next.pinnedAt !== current.pinnedAt) return false;
+        || next.pinnedAt !== current.pinnedAt
+        || next.pinList !== current.pinList) return false;
     }
   }
   return true;
@@ -567,6 +568,7 @@ const readProjectWorktrees = async (projectDirectory: string, isCurrent: () => b
         worktreeSource: canonical.worktreeSource,
         title: entry.title?.trim() || undefined,
         pinnedAt: (entry.pinnedAt ?? 0) > 0 ? entry.pinnedAt : undefined,
+        pinList: (entry.pinnedAt ?? 0) > 0 ? entry.pinList || undefined : undefined,
         ...(entry.provenance ? { provenance: entry.provenance } : {}),
       };
     })

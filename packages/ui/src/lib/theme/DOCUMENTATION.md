@@ -6,6 +6,14 @@ Keep authored definitions separate from runtime colors. Optional values are mean
 
 `syntax.ts` owns syntax inheritance. Code is highlighted by `@pierre/highlights` for the languages it has a lexer for and by Shiki for the rest, so every palette is built in two formats from the same resolved roles: TextMate rules in `buildSyntaxTokenRules`, and Zed token styles in `lib/shiki/zedThemeFromAppTheme.ts`, whose table maps each Highlights token name to a syntax role. Files, diffs and CodeMirror get concrete colors; chat code gets the CSS-variable form of each, so switching palettes does not require tokenizing code again. Highlights accepts only hex colors, so the Zed builder converts `rgb()` itself and other color functions through a canvas where a document exists. Changes to inheritance must preserve explicit overrides and pass compact round-trip tests.
 
+Files, diffs and the editor highlight under a theme's render name
+(`getThemeRenderName` in `lib/shiki/appThemeRegistry.ts`): its ID plus a digest
+of its colours, also the name inside the TextMate and Zed theme objects. A custom
+theme edited on disk keeps its ID, and @pierre/diffs ignores a second
+registration of a name while the diff and highlighter worker caches key on it,
+so rendering under the bare ID would keep the first version until a restart.
+Pass the render name wherever a theme name reaches Pierre or the workers.
+
 CodeMirror, Shiki/Pierre and chat/tool output use the authored
 `syntax.base.background` directly, exposed as `--syntax-background` in CSS.
 There is no global opacity or canvas-mixing adjustment. Built-in palettes keep
@@ -77,6 +85,17 @@ Borders use Overlay 1 with alpha; hover and pressed states use Text with alpha.
 Body and secondary text retain the official contrasts rather than the softened
 text targets used by adapted palettes. These exceptions are authored in the
 built-in definition; the shared theme resolver and VS Code adaptation are unchanged.
+
+Aurora is the candidate for the next default pair, drawn from the night and day
+watercolours on openchamber.dev: an emerald accent (`#063e2a` in light), poppy strings
+and parameters, and per-role code colours named after the pictures. Its dark
+variant departs from two built-in rules on purpose. Body text sits at about
+12:1 on the canvas, under the 13.3 band, and bold is a little dimmer than body
+text: brighter, heavier strokes on the near-black canvas left after-images of
+the lines during long reading, and bold keeps its emphasis through weight. Its
+surfaces carry faint tints (slate frame, emerald glass on elevated surfaces in
+light, a sky tint on light code blocks) at the lightness of the OpenChamber pair.
+Do not move these values back toward the shared targets.
 
 Built-in border strength uses OpenChamber's matching light/dark palette as the
 reference. Compare alpha-composited contrast on canvas, sidebar and elevated

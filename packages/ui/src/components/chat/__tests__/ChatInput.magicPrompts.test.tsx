@@ -131,6 +131,7 @@ const { useMessageQueueStore, createMessageQueueTarget, getMessageQueueKey } = a
 const { opencodeClient } = await import('@/lib/opencode/client');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
 const { OpenCode } = await import('@opencode/client');
+const { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 
 const sdk = OpenCode.make({
   baseUrl: 'https://sync.test',
@@ -312,17 +313,54 @@ for (const queue of [false, true]) {
     // Capture the queue payload without writing to the running server.
     const add = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockResolvedValue(undefined);
     try {
-      await submitInComposer('Read @src/a.ts', { attachment: selection, queue });
+      await submitInComposer('Read @src/a.ts', { attachment: selection, queue }, undefined, () => {
+        if (queue) useSelectionStore.getState().pickSessionModel('ses_feature', 'provider', 'model');
+      });
       const attachments = queue ? add.mock.calls[0]?.[1].attachments : sent[0]?.attachments;
       expect(queue ? add.mock.calls.length : sent.length).toBe(1);
       expect(attachments).toHaveLength(2);
       expect(attachments?.[0]).toEqual(selection);
       expect(attachments?.[1]?.serverPath).toBe(path);
       expect(attachments?.[1]?.dataUrl).toBe(`file://${path}`);
-      if (queue) expect(sent).toEqual([]);
+      if (queue) {
+        expect(sent).toEqual([]);
+        expect(useSelectionStore.getState().getSessionModelPick('ses_feature')).toBeNull();
+      }
     } finally {
       add.mockRestore();
       listing.mockRestore();
+    }
+  });
+}
+
+for (const outcome of ['runtime switch', 'newer pick', 'failure']) {
+  test(`queue acceptance keeps model intent scoped through ${outcome}`, async () => {
+    const apiBaseUrl = getRuntimeApiBaseUrl();
+    const runtimeKey = getRuntimeKey();
+    const selection = useSelectionStore.getState();
+    const add = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockImplementation(async () => {
+      if (outcome === 'failure') throw new Error('queue refused');
+      if (outcome === 'runtime switch') {
+        switchRuntimeEndpoint({ apiBaseUrl: 'https://queue-other.test', runtimeKey: 'queue-other' });
+      }
+      selection.pickSessionModel('ses_feature', 'provider', 'model');
+    });
+    try {
+      const attachment: AttachedFile = {
+        id: 'queue-context', file: new File(['context'], 'context.txt', { type: 'text/plain' }),
+        filename: 'context.txt', mimeType: 'text/plain', size: 7, dataUrl: 'data:text/plain;base64,Y29udGV4dA==', source: 'local',
+      };
+      await submitInComposer('Queued prompt', { attachment, queue: true }, undefined, () => {
+        selection.pickSessionModel('ses_feature', 'provider', 'model');
+      });
+      expect(add.mock.calls).toHaveLength(1);
+      expect(selection.getSessionModelPick('ses_feature')).toEqual({ providerId: 'provider', modelId: 'model' });
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+      expect(selection.getSessionModelPick('ses_feature')).toEqual(outcome === 'runtime switch'
+        ? null : { providerId: 'provider', modelId: 'model' });
+    } finally {
+      add.mockRestore();
+      switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
     }
   });
 }

@@ -286,6 +286,25 @@ unmirrored arrow up inside the LTR block.
 
 A percentage max-height inside auto-height wrappers let the inner viewport grow to the entire virtual list. The Files pane then scrolled outside the virtualizer, which mounted every row and froze the renderer on large JSON. The flex layout keeps the virtualizer's viewport bounded without changing file limits, preview preferences or saved tabs.
 
+## Last turn scope
+
+`useLastTurnDiff` reads the last turn's per-file diff from OpenCode
+(`GET /api/session/:id/diff`), which compares the turn's first and last step
+snapshots. The answer moves when a step is added, when the newest step finishes
+(its end snapshot is recorded then) and when the session goes idle, so those
+three key the refetch. The desktop Diff view reads it in every scope while
+shown, so the scope picker's Last turn count is current before the user picks
+it; mobile Changes has no counts and reads it only in that scope. Outside the
+scope a running turn is not read, and its count shows as unknown until the
+turn ends. A failed read keeps its own error and retry, and another session's
+turn never shows while this one's loads.
+
+### Why the count waits for the turn to end outside the scope
+
+A read of a running step makes OpenCode capture a fresh working-copy snapshot.
+Reading on every step only to keep a count current would cost one capture per
+step of every turn while the panel is open on another scope.
+
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`

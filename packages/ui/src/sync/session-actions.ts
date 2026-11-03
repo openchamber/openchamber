@@ -493,14 +493,19 @@ export async function compactSession(
   directory?: string | null,
 ): Promise<void> {
   const isCurrentRuntime = captureRuntimeInstance()
+  const settleModelPick = selection && !isAutoModel(selection.providerID, selection.modelID)
+    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, selection.providerID, selection.modelID)
+    : undefined
   if (selection && !isAutoModel(selection.providerID, selection.modelID)) {
-    const { model } = resolveSendSelection(sessionId, directory ?? undefined, selection)
+    const { model } = await resolveSendSelection(sessionId, directory ?? undefined, selection)
+    if (!isCurrentRuntime()) throw new Error("Compaction was cancelled because the runtime changed.")
     if (model) {
       await opencodeClient.switchSessionModel(sessionId, model, directory)
     }
   }
   if (!isCurrentRuntime()) throw new Error("Compaction was cancelled because the runtime changed.")
   await opencodeClient.compactSession(sessionId, directory)
+  settleModelPick?.()
 }
 
 type SessionListSnapshot = {
@@ -1290,11 +1295,12 @@ export async function setSessionPinned(
   sessionId: string,
   directory: string | null | undefined,
   pinned: boolean,
+  list: string | null = null,
 ): Promise<Session | null> {
   const runtimeKeyAtClick = getRuntimeKey()
   try {
     return await patchSessionMetadata(sessionId, directory, (metadata) =>
-      withSessionPinned(metadata, pinned, Date.now()), runtimeKeyAtClick)
+      withSessionPinned(metadata, pinned, Date.now(), list), runtimeKeyAtClick)
   } catch (error) {
     if (isStaleRuntime(runtimeKeyAtClick)) return null
     throw error

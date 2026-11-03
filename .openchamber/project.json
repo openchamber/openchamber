@@ -30,13 +30,13 @@
       "id": "oc-electron-build",
       "name": "Build Electron app",
       "command": "bun run oc-dev build-electron-app",
-      "icon": "build"
+      "icon": "command"
     },
     {
       "id": "oc-ios-device-debug",
       "name": "iOS device debug",
       "command": "bun run oc-dev mobile-tools --mobile-task ios-device-sync-debug",
-      "icon": "bug",
+      "icon": "apple",
       "platforms": [
         "macos"
       ]
@@ -45,7 +45,7 @@
       "id": "oc-android-run",
       "name": "Android build + run",
       "command": "bun run oc-dev mobile-tools --mobile-task android-deploy-usb",
-      "icon": "play"
+      "icon": "android"
     },
     {
       "id": "oc-vscode-install",

@@ -17,10 +17,12 @@ export const isProviderId = (value) => Object.prototype.toString.call(value) ===
 export const isReservedProviderId = (value) => RESERVED_PROVIDER_IDS.includes(value);
 
 /**
- * Ids an installed extension's source-control provider takes: `ext-` plus its
- * guest id, derived by the host and never declared, so no extension can
- * claim a built-in's id or another extension's. Built-in lists and the
- * tracker registry refuse any id with the prefix.
+ * Ids an installed extension's source-control provider, notification channel
+ * or tracker takes: `ext-` plus its guest id, derived by the host and never
+ * declared, so no extension can claim a built-in's id or another extension's.
+ * Built-in lists and the tracker registry's built-ins refuse any id with the
+ * prefix; an extension's tracker takes it through the registry's extension
+ * layer, which is why one extension is a Git host or a tracker, never both.
  */
 export const EXTENSION_PROVIDER_PREFIX = 'ext-';
 
@@ -29,9 +31,9 @@ export const isExtensionProviderId = (value) => isProviderId(value) && value.sta
   && isProviderId(value.slice(EXTENSION_PROVIDER_PREFIX.length));
 
 /**
- * The provider id of a guest's source-control role, or null when the guest id
- * is malformed or too long for the id syntax (more than 28 characters), so
- * such a guest cannot take the role.
+ * The provider id of a guest's source-control or tracker role, or null when
+ * the guest id is malformed or too long for the id syntax (more than 28
+ * characters), so such a guest cannot take the role.
  */
 export function extensionProviderId(guestId) {
   // Guest ids share the provider id alphabet; the prefixed id must still fit 32 characters.

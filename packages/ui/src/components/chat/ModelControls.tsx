@@ -1604,6 +1604,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             if (options?.applyVariant) {
                 rememberVariantForModel(providerId, modelId, options.variant ?? null);
             }
+            const pickedSessionId = selection ? controlledSessionId : currentSessionId;
+            if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, providerId, modelId);
             if (!selection && !options?.applyVariant && !isAutoModel(providerId, modelId)) {
                 // Add to recent models on successful selection. Auto is pinned, not recent.
                 addRecentModel(providerId, modelId);
@@ -1929,6 +1931,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
             return;
         }
+        const pickedSessionId = selection ? controlledSessionId : currentSessionId;
+        if (pickedSessionId) useSelectionStore.getState().pickSessionModel(pickedSessionId, providerId, modelId);
         if (!selection) setLastSelectedModel(providerId, modelId);
         setMobileDetailsEntry(null);
         closeMobilePanel();

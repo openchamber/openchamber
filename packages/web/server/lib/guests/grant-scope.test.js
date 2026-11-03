@@ -170,3 +170,44 @@ describe('the notification channel role in the service grant', () => {
     expect(effectiveGrants(['service'], slack, plain)).toEqual([]);
   });
 });
+
+describe('tracker scope', () => {
+  const tracker = (instances, oauth) => ({
+    ...guest,
+    service: { ...guest.service, provides: ['tracker'] },
+    tracker: {
+      wire: 1, label: 'YouTrack', instances,
+      auth: { token: { header: 'authorization', scheme: 'bearer' }, ...(oauth ? { oauth } : {}) },
+      capabilities: {}, stateFilters: ['open', 'all'], identifier: 'key-number',
+      urls: { item: ['/issue/{id}', '/{segments+}/issue/{id}'] },
+    },
+  });
+  const endpoints = { authorizeUrl: '/hub/api/rest/oauth2/auth', tokenUrl: '/hub/api/rest/oauth2/token' };
+
+  test('covers where the accounts live, the OAuth endpoints and the links the tracker claims', () => {
+    expect(guestGrantScope(tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' })).service.tracker)
+      .toEqual({ instances: { kind: 'fixed', origin: 'https://acme.atlassian.net' }, oauth: null, urls: ['/issue/{id}', '/{segments+}/issue/{id}'] });
+    expect(guestGrantScope(tracker({ kind: 'user', label: 'Server' }, endpoints)).service.tracker)
+      .toEqual({ instances: { kind: 'user' }, oauth: endpoints, urls: ['/issue/{id}', '/{segments+}/issue/{id}'] });
+    expect(guestGrantScope(guest).service).not.toHaveProperty('tracker');
+  });
+
+  test('a tracker that moves its server, its endpoints or its links needs the service approved again', () => {
+    const approved = guestGrantScope(tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' }, endpoints));
+    expect(effectiveGrants(['service'], approved, approved)).toEqual(['service']);
+    const moved = guestGrantScope(tracker({ kind: 'fixed', origin: 'https://other.atlassian.net' }, endpoints));
+    expect(effectiveGrants(['service'], approved, moved)).toEqual([]);
+    const typed = guestGrantScope(tracker({ kind: 'user', label: 'Server' }, endpoints));
+    expect(effectiveGrants(['service'], approved, typed)).toEqual([]);
+    const otherEndpoints = guestGrantScope(tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' }, { ...endpoints, tokenUrl: '/moved' }));
+    expect(effectiveGrants(['service'], approved, otherEndpoints)).toEqual([]);
+    const withoutOauth = guestGrantScope(tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' }));
+    expect(effectiveGrants(['service'], approved, withoutOauth)).toEqual([]);
+    const current = tracker({ kind: 'fixed', origin: 'https://acme.atlassian.net' }, endpoints);
+    current.tracker.urls.item = ['/browse/{id}'];
+    expect(effectiveGrants(['service'], approved, guestGrantScope(current))).toEqual([]);
+    // Adding the role to a service approved without it also asks again.
+    const plain = guestGrantScope(guest);
+    expect(effectiveGrants(['service'], plain, approved)).toEqual([]);
+  });
+});

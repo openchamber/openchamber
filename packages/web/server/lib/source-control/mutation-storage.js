@@ -35,7 +35,7 @@ const TERMINAL_STATES = ['succeeded', 'failed'];
 const TARGET_OPTIONAL_KEYS = ['number', 'head', 'base', 'headSha'];
 const RESULT_KEYS = [...TARGET_OPTIONAL_KEYS, 'state', 'merged', 'outcome', 'stacked', 'ready', 'commented', 'failureStatus', 'failureCode'];
 // A merge GitHub accepted without finishing it yet: in a merge queue, or still running.
-const MERGE_OUTCOMES = ['queued', 'merging'];
+const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'];
 
 const emptyState = () => ({ version: VERSION, records: {} });
 const isBoolean = (value) => Object.prototype.toString.call(value) === '[object Boolean]';

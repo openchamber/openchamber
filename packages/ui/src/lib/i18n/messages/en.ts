@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -23,8 +24,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -177,6 +180,7 @@ export const dict = {
   ...fileEditorAidsI18n.en,
   ...htmlRenderI18n.en,
   ...documentToolbarI18n.en,
+  ...uiBlocksI18n.en,
   ...updateDialogCanaryI18n.en,
   ...secretRequestI18n.en,
   ...sessionNoticesI18n.en,
@@ -187,8 +191,10 @@ export const dict = {
   ...heapSnapshotI18n.en,
   ...consoleBudgetsI18n.en,
   ...imageToolI18n.en,
+  ...agentStatusI18n.en,
   ...snippetsI18n.en,
   ...sidebarWorkI18n.en,
+  ...sidebarSectionsI18n.en,
   ...worktreeArchiveI18n.en,
   ...overviewI18n.en,
   ...isolatedSpacesI18n.en,
@@ -469,6 +475,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Choose a project first',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Failed to load scheduled tasks',
   'sessions.scheduledTasks.dialog.toast.saved': 'Scheduled task saved',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'The task now runs in its new place, but the old copy could not be deleted. Delete it there so the task doesn\'t run twice.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Failed to update task',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Scheduled task deleted',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Failed to delete task',
@@ -618,6 +625,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'More',
   'sessions.sidebar.header.actions.exitSelection': 'Exit selection',
   'sessions.sidebar.header.actions.selectSessions': 'Select sessions',
+  'sessions.sidebar.header.actions.markAllRead': 'Mark all as read',
   'sessions.sidebar.header.actions.sortProjects': 'Sort projects',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Session display mode',
   'sessions.sidebar.header.displayMode.label': 'Display mode',
@@ -1786,6 +1794,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'Switch to edit mode to fix the issue.',
   'filesView.error.readFileFailed': 'Failed to read file',
   'filesView.editor.htmlPreviewTitle': 'HTML Preview',
+  'filesView.editor.htmlPreviewRelayUnavailable': "HTML preview isn't available over the relay",
+  'filesView.editor.htmlPreviewShowCode': 'Show code',
   'filesView.editor.htmlAnnotate.intro': 'This is an annotated selection from an HTML file preview.',
   'filesView.diagram.closeDiagramView': 'Close diagram view',
   'filesView.diagram.saveDiagram': 'Save diagram',
@@ -3013,7 +3023,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'Project icon discovered',
   'openInApp.actions.open': 'Open',
   'openInApp.actions.openInAria': 'Open in {app}',
-  'openInApp.actions.chooseAppAria': 'Choose app to open',
   'openInApp.actions.copyPath': 'Copy Path',
   'openInApp.actions.refreshApps': 'Refresh Apps',
   'openInApp.toast.pathCopied': 'Path copied to clipboard',
@@ -3895,12 +3904,16 @@ export const dict = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': 'The worktree and its branch stay after the run so you can review the result.',
   'sessions.scheduledTasks.editor.worktree.notRepo': 'The project folder is not a git repository; runs will use the checkout as-is.',
   'sessions.scheduledTasks.dialog.usesDefaults': 'Session defaults',
-  'sessions.moveChatToProject.menu': 'Move to project…',
-  'sessions.moveChatToProject.hint': 'Continue this conversation inside a project',
-  'sessions.moveChatToProject.title': 'Move chat to a project',
-  'sessions.moveChatToProject.description': 'The conversation continues in the project\'s folder. Files the chat created stay where they are.',
-  'sessions.moveChatToProject.success': 'Chat moved to the project',
-  'sessions.moveChatToProject.failed': 'Could not move the chat',
+  'sessions.moveSession.menu': 'Move session…',
+  'sessions.moveSession.hint': 'Files stay in the old folder',
+  'sessions.moveSession.title': 'Move session',
+  'sessions.moveSession.description': 'The session continues in the chosen folder. Files stay where they are.',
+  'sessions.moveSession.chooseFolder': 'Choose folder…',
+  'sessions.moveSession.current': 'Current folder',
+  'sessions.moveSession.success': 'Session moved',
+  'sessions.moveSession.failed': 'Could not move the session',
+  'chat.folderMissing.text': 'Folder {name} no longer exists',
+  'chat.folderMissing.action': 'Move session',
   'chat.worktreeSetup.running': 'Setting up the worktree: running the project\'s setup commands…',
   'chat.draft.creatingSession': 'Creating session…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'Its connection didn\'t open, so OpenChamber started on Local. Connect it from the instance switcher once it\'s reachable.',

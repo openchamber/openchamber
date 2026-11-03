@@ -8,6 +8,11 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
 - `packages/web/server/lib/fs/search.js`: fuzzy filesystem search for workspace supplements and project icon discovery.
 - `packages/web/server/lib/fs/content-search.js`: find in files, run by ripgrep (`GET /api/fs/find-in-files`).
 - `packages/web/server/lib/fs/ripgrep.js`: where the ripgrep binary comes from.
+- `folder-change-watch.js` owns signal-driven fingerprint/settle scheduling for extension packages and custom themes. Each root has one watcher, one 30-second safety interval and at most one pending fast check. Its first fingerprint starts at creation; stop closes the watcher, cancels timers and suppresses in-flight results.
+
+### Why folder change checks retain a safety interval
+
+The interval reopens the watcher before checking, so Linux/Windows folder deletion and recreation recovers even when the old watcher emits nothing. A failed, errored or closed watcher uses the caller's fast cadence until a safety tick restores it; healthy roots read files only on signals, settling checks and safety ticks.
 
 ## Public exports
 - `registerFsRoutes(app, dependencies)` from `routes.js`
@@ -60,7 +65,7 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
   - The active project directory is validated with `fs.realpath`, so when the project root is itself a symlink the workspace base no longer matches the paths the client sends. Workspace resolution therefore retries against the raw directory the client requested (`requestedDirectory` from `resolveProjectDirectory`) before falling back to worktree roots. Symlinks are still resolved afterwards, and write/exec routes keep their canonical containment check against the resolved base.
 - `createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn })` from `search.js`
   - Returns `{ searchFilesystemFiles(rootPath, options) }`.
-  - Supports fuzzy matching, hidden-file handling, and optional `git check-ignore` filtering.
+   - Supports fuzzy matching, hidden-file handling, and optional Git ignore filtering.
    - An empty query stops at `limit` candidates. A query walks the tree until it is exhausted or 10,000 files are inspected (`FILE_SEARCH_MAX_VISITED_FILES`): weak shallow matches would otherwise exhaust a candidate budget before exact deeper matches are ever visited. The ceiling mirrors `packages/vscode/src/bridge-fs-helpers-runtime.ts`, and both suites pin the two runtimes' agreement.
 
 ### Why workspace search supplements OpenCode
@@ -71,14 +76,30 @@ caller's result limit. Replacing the index with the icon-discovery walk would
 drop normal results. Web, desktop, hosted mobile and Capacitor use this endpoint;
 VS Code forwards the same flags to its extension-host search.
 
-Search ignore checks send and receive NUL-delimited names with
-`git check-ignore --stdin -z`, preserving Unicode, whitespace and newlines.
-Git's quoted line output cannot be compared directly with filesystem names.
+Git ignore reads use NUL-delimited paths, preserving Unicode, whitespace and
+newlines. Git's quoted line output cannot be compared directly with filesystem
+names.
 
 `workspaceSearch: true` searches generated directories such as `build` and
 `dist`, excludes only `.git` and `node_modules`, and removes the icon walk's
 10,000-file ceiling. A 30-second deadline fails the search rather than returning
 an unmarked partial answer. Default icon discovery keeps its existing bounds.
+
+### Why workspace search reads ignored paths per repository
+
+Workspace search runs `git ls-files --others --ignored --exclude-standard
+--directory -z` once per repository in each query. Per-directory `check-ignore`
+spawned hundreds of Git processes in a copied checkout; batching its input still
+repeated path checks. Git's ignored-path listing keeps tracked files visible,
+applies nested ignore and negation rules, and collapses fully ignored directories
+so the filesystem walk can prune them. A nested `.git` file or directory starts
+a separate read in that repository's context. A wholly ignored search root can
+be reported as `./`; it excludes that root's contents. Git keeps directories with
+tracked descendants expanded, preserving their tracked exceptions.
+The reads live only for the current
+query, so later queries see changed ignore rules and cannot share state across
+requested roots. Icon discovery retains per-directory `check-ignore` and its
+bounded walk.
 
 ### Find in files
 
@@ -123,7 +144,7 @@ npm and Bun install for the current platform; `rg` on the PATH user commands
 get. A found binary is kept for the process lifetime; a miss is looked up again
 on the next search. The stderr pipe is read to the end, for the reason below.
 
-Both search and directory listing discard `git check-ignore` stderr at spawn.
+Both search and directory listing discard Git ignore-read stderr at spawn.
 They consume stdout for ignore matches. Never create an unread stderr pipe:
 Git diagnostics can fill it and block the child indefinitely, so repeated
 searches accumulate live Git processes. Both also kill a `check-ignore` child
@@ -132,7 +153,8 @@ that has not exited within `OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS` (default
 `git-process.test.js` exercises both
 paths with real OS pipes, twelve concurrent checks, and 2 MiB of diagnostics
 per child. Successful completion must preserve ignore filtering and reap all
-twelve children.
+twelve children. Workspace search applies the same timeout and fallback to its
+`ls-files` child.
 
 ## Composition contract with `index.js`
 - `index.js` provides composition-time dependencies only (platform primitives + callbacks such as `resolveProjectDirectory`, `normalizeDirectoryPath`, and `buildAugmentedPath`).

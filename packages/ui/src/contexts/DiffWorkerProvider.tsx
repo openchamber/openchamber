@@ -47,7 +47,7 @@ const WORKER_POOL_CONFIG: Record<WorkerPoolStyle, { poolSize: number; totalASTLR
 type PoolModules = {
   WorkerPoolManager: typeof WorkerPoolManager;
   workerFactory: () => Worker;
-  ensurePierreThemeRegistered: (theme: Theme) => void;
+  ensurePierreThemeRegistered: (theme: Theme) => string;
   highlighter: HighlighterTypes;
 };
 
@@ -162,9 +162,10 @@ export const DiffWorkerProvider: React.FC<DiffWorkerProviderProps> = ({ children
     let cancelled = false;
     void loadPoolModules().then((modules) => {
       if (cancelled) return;
-      modules.ensurePierreThemeRegistered(lightTheme);
-      modules.ensurePierreThemeRegistered(darkTheme);
-      setRenderTheme({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id });
+      setRenderTheme({
+        light: modules.ensurePierreThemeRegistered(lightTheme),
+        dark: modules.ensurePierreThemeRegistered(darkTheme),
+      });
     });
     return () => {
       cancelled = true;

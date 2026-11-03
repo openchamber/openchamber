@@ -257,6 +257,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 어떤 프로젝트를 어느 방이나 채널로 보낼지는 확장이 정합니다. 알림에는 `directory`와 `sessionName`이 담겨 있습니다. 엔터프라이즈 모드에서는 휴대폰과 마찬가지로 일반적인 제목만 담깁니다. `notification-webhook` 예제는 완성된 채널이며, 시험해 볼 수신기도 들어 있습니다.
 
+## 트래커
+
+서비스는 Linear 옆에 놓이는 작업 항목 트래커가 될 수 있습니다. `provides: ["tracker"]`를 선언하고 `contributes.tracker`에 트래커를 기술하세요. 그러면 OpenChamber는 서비스가 실행되기도 전에 매니페스트만으로 트래커가 나오는 모든 곳에서 Linear 옆에 그것을 나열합니다.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+사용자는 확장 계정 아래 트래커의 카드에서 계정을 연결합니다. 토큰, 또는 `auth.oauth`를 선언했다면 브라우저 로그인입니다(OpenChamber가 사용자가 입력한 client id로 로그인을 진행하고 토큰을 보관합니다). 서비스는 자격 증명을 결코 보지 못합니다. `urls.item`은 항목 주소의 템플릿이며 `{id}`가 식별자를 나타냅니다(쿼리로 전달될 때는 `?name={id}` 형태도 됩니다). OpenChamber가 이를 컴파일하므로 붙여 넣은 링크가 연결된 항목이 됩니다. `identifier`는 키의 모양을 말합니다. `key-number`(`PROJ-42`), `number`, `short-code` 중 하나입니다.
+
+OpenChamber는 아홉 가지 호출을 `POST /tracker`로 전달합니다. `auth.probe`와 `auth.verify`, 읽기인 `items.list`, `items.get`, `items.liveSummaries`, `states.list`, `containers.list`, 쓰기인 `items.updateState`와 `comments.create`입니다. 각각을 `readTrackerProviderRequest`로 읽고, 중립적인 항목 형태로 응답하고, 트래커의 서버에는 아웃바운드 헬퍼를 통해서만 접근하세요. 헬퍼는 호출의 핸들을 붙여 요청을 OpenChamber에 보내고, OpenChamber가 자격 증명을 추가하고 요청을 계정의 서버로만 보냅니다. 읽기의 핸들은 `GET`만 보냅니다.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+사용자가 세션 댓글을 켜면 OpenChamber는 "session started", "completed" 또는 "failed"와 세션 링크를 담아 `comments.create`를 각각 한 번씩 호출합니다. 댓글에는 그 외 아무것도 담기지 않습니다. `tracker-provider` 예제는 완성된 트래커이며, 시험해 볼 가짜 서버도 들어 있습니다.
+
 ## 파일
 
 상대 경로는 열린 프로젝트 안을 가리키며 `files` 권한이 필요합니다. `/` 또는 `~/`로 시작하는 경로는 선언된 `contributes.filesystem` 패턴과 일치해야 하며 `filesystem` 권한이 필요합니다. 규칙은 [확장 만들기](/sdk/#파일)를 참고하세요.

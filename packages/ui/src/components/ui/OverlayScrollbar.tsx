@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/useUIStore";
 import { isRightToLeft } from '@/lib/i18n';
 
-type OverlayScrollbarProps = {
+export type OverlayScrollbarProps = {
   /** The scrolling element. Container replacement is picked up on the next React commit. */
   containerRef: React.RefObject<HTMLElement | null>;
   /** Minimum thumb length in CSS pixels, capped to the available track. */
@@ -122,16 +122,28 @@ function bindScrollbar(
     hideTimerId = setTimeout(hide, Math.max(hideDeadlineMs - performance.now(), 0));
   };
 
+  // Live: it reflects the current overflow without a fresh style lookup per measure.
+  const containerStyle = container.ownerDocument.defaultView?.getComputedStyle(container) ?? null;
+  // Only a scrolling axis gets a thumb: one its owner switched to hidden (a
+  // composer below its height cap, a list showing one open entry) or left
+  // visible (a menu that only sometimes scrolls) overflows without scrolling.
+  // An unknown value (no window, a DOM without computed longhands) counts as scrolling.
+  const scrolls = (overflow: string | undefined) => !overflow || overflow === "auto" || overflow === "scroll";
+
   // Measurement is the cold path. Read every axis before writing either thumb to avoid forced layout.
   const measureThumbs = () => {
-    const clientHeight = container.clientHeight;
-    const scrollHeight = container.scrollHeight;
-    const clientWidth = options.disableHorizontal ? 0 : container.clientWidth;
-    const scrollWidth = options.disableHorizontal ? 0 : container.scrollWidth;
-    const vertical = calculateThumb(clientHeight, scrollHeight, options.minThumbSize, options.verticalTrackStart);
-    const horizontal = options.disableHorizontal
-      ? null
-      : calculateThumb(clientWidth, scrollWidth, options.minThumbSize);
+    const scrollsVertically = scrolls(containerStyle?.overflowY);
+    const scrollsHorizontally = !options.disableHorizontal && scrolls(containerStyle?.overflowX);
+    const clientHeight = scrollsVertically ? container.clientHeight : 0;
+    const scrollHeight = scrollsVertically ? container.scrollHeight : 0;
+    const clientWidth = scrollsHorizontally ? container.clientWidth : 0;
+    const scrollWidth = scrollsHorizontally ? container.scrollWidth : 0;
+    const vertical = scrollsVertically
+      ? calculateThumb(clientHeight, scrollHeight, options.minThumbSize, options.verticalTrackStart)
+      : null;
+    const horizontal = scrollsHorizontally
+      ? calculateThumb(clientWidth, scrollWidth, options.minThumbSize)
+      : null;
 
     // Write only what changed: the wrapper's gutter matches the thumb's
     // `hidden` through :has(), so even a same-value write invalidates style.

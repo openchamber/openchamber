@@ -54,7 +54,6 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * @param {object|null} [dependencies.agentToolRuntime]
  * @param {object|null} [dependencies.limitFailoverRuntime] `../limit-failover/runtime.js`; its plugin calls back through the agent tool's address
  * @param {() => Promise<object|null>} dependencies.readSettings
- * @param {() => boolean} [dependencies.isWorkflowAvailable] whether workflows ship in this build (`../workflows/feature-flag.js`)
  */
 export const createManagedConfigRuntime = ({
   fsPromises,
@@ -64,7 +63,6 @@ export const createManagedConfigRuntime = ({
   agentToolRuntime = null,
   limitFailoverRuntime = null,
   readSettings,
-  isWorkflowAvailable = () => false,
 }) => {
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
@@ -104,8 +102,7 @@ export const createManagedConfigRuntime = ({
     const includeRender = settings?.agentRenderToolEnabled !== false;
     const includeImage = settings?.agentImageToolEnabled === true;
     const includeSecret = settings?.agentSecretToolEnabled !== false;
-    // On by default wherever the build has workflows: the build flag is the opt-in.
-    const includeWorkflow = isWorkflowAvailable() && settings?.agentWorkflowToolEnabled !== false;
+    const includeWorkflow = settings?.agentWorkflowToolEnabled === true;
     const codeMode = settings?.agentToolsCodeMode === true;
 
     const directories = [];

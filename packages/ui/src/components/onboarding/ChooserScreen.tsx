@@ -14,6 +14,7 @@ import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/v2/install | bash';
 const WINDOWS_INSTALL_COMMAND = 'npm install -g @opencode/cli';
@@ -31,7 +32,7 @@ type ChooserScreenProps = {
 function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCopy: () => void; copyTitle: string }) {
   return (
     <div className="flex items-center justify-between gap-3 w-full">
-      <code className="flex-1 min-w-0 text-start overflow-x-auto whitespace-nowrap">
+      <ScrollableOverlay as="code" outerClassName="overlay-scrollbar-wrapper--no-gutter flex-1 min-w-0" fillContainer={false} className="text-start whitespace-nowrap">
         {windows ? (
           <span style={{ color: 'var(--syntax-keyword)' }}>{WINDOWS_INSTALL_COMMAND}</span>
         ) : (
@@ -43,7 +44,7 @@ function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCo
             <span style={{ color: 'var(--syntax-keyword)' }}>bash</span>
           </>
         )}
-      </code>
+      </ScrollableOverlay>
       <button
         onClick={onCopy}
         className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors shrink-0"
@@ -243,9 +244,11 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
   const showLocal = localAvailable && (!isDesktopApp || activeTab === 'local');
 
   return (
-    <div
-      className="app-region-drag h-full flex items-center justify-center bg-transparent p-8 cursor-default select-none overflow-y-auto"
+    <ScrollableOverlay
+      outerClassName="h-full bg-transparent"
+      className="app-region-drag flex items-center justify-center p-8 cursor-default select-none"
       onMouseDown={handleDragStart}
+      disableHorizontal
     >
       <div className="w-full max-w-md">
         <header className="flex flex-col items-center text-center">
@@ -420,6 +423,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
           </div>
         )}
       </div>
-    </div>
+    </ScrollableOverlay>
   );
 }

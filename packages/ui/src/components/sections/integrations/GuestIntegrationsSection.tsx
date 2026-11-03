@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { IntegrationCatalogCard } from './IntegrationCatalogCard';
 import { NotificationChannelCard } from './NotificationChannelCard';
+import { TrackerSettings } from './TrackerSettings';
 import { focusDesktopWindow, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { loadNotificationChannels, type NotificationChannel } from '@/lib/notifications/channels';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -28,6 +29,8 @@ import {
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
+import { extensionTrackerGuest } from '@/lib/trackers/extension';
+import { useTrackerDescriptors } from '@/lib/trackers/registry';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
@@ -436,6 +439,12 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
+  // The trackers extensions serve: the server lists them beside the built-ins, the catalog says which extension each is.
+  const trackerDescriptors = useTrackerDescriptors();
+  const extensionTrackers = React.useMemo(() => trackerDescriptors.flatMap((descriptor) => {
+    const guest = extensionTrackerGuest(descriptor, guests);
+    return guest?.tracker ? [{ descriptor, extension: { guest, tracker: guest.tracker } }] : [];
+  }), [guests, trackerDescriptors]);
   const [channels, setChannels] = React.useState<NotificationChannel[]>([]);
   const [ownerRuntimeKey] = React.useState(getRuntimeKey);
   // Whether the last channel load failed: the section refreshes on every catalog change, and one failure is told once.
@@ -470,7 +479,7 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
   }
 
   const cards = guests.filter((guest) => guest.source !== 'bundled' && guest.integration && isGuestActive(guest));
-  if (cards.length === 0 && channels.length === 0) {
+  if (cards.length === 0 && channels.length === 0 && extensionTrackers.length === 0) {
     return null;
   }
 
@@ -492,6 +501,9 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
           guest={guests.find((guest) => guest.id === channel.guestId) ?? null}
           onChanged={refreshChannels}
         />
+      ))}
+      {extensionTrackers.map(({ descriptor, extension }) => (
+        <TrackerSettings key={`${runtimeKey}:${descriptor.id}`} descriptor={descriptor} extension={extension} />
       ))}
     </SettingsSection>
   );

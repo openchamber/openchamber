@@ -7,6 +7,12 @@ export interface SourceControlIdentity {
   provider: SourceControlProvider;
   /** Stable provider installation or host identifier, such as `github.com`. */
   instance: string;
+  /**
+   * The instance's separate SSH address, where its Git SSH host is not its web
+   * address (`SSH_DOMAIN`). Remotes there are recognised as this instance.
+   * Named apart from a repository's own `sshUrl` clone address.
+   */
+  instanceSshUrl?: string;
 }
 
 export interface SourceControlRepositoryEndpoint {
@@ -357,6 +363,9 @@ export interface ChangeRequest extends SourceControlIdentity {
   headProject?: Project | null;
   mergeable?: boolean | null;
   mergeableState?: string | null;
+  isInMergeQueue?: boolean;
+  mergeQueueEntry?: { state: string; position: number } | null;
+  autoMergeRequest?: { enabledAt: string; mergeMethod: string } | null;
   labels?: Label[];
   /** A review host's work-in-progress flag; `draft` carries the same meaning for gating. */
   workInProgress?: boolean;
@@ -691,7 +700,7 @@ export interface SourceControlMergeMutationResult {
    * merge queue, or still merging in the background (GitHub, a stack's lower
    * layers included). The PR's live state shows the outcome.
    */
-  outcome?: 'queued' | 'merging';
+  outcome?: 'queued' | 'merging' | 'auto-merge' | 'cancelled';
 }
 export interface SourceControlReadyMutationResult {
   ready: boolean;
@@ -719,6 +728,8 @@ export interface UpdateChangeRequestInput extends SourceControlMutationContext<S
 
 export interface MergeChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
   method: MergeMethod;
+  /** GitHub only: remove from the queue or disable auto-merge. */
+  cancel?: boolean;
 }
 
 export type ReadyChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;

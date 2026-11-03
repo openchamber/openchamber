@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createWorkNamer } from './work-naming.js';
+import { createWorkNamer, linkedWorktreeOf } from './work-naming.js';
 
 const createError = (message, status) => Object.assign(new Error(message), { status });
 
@@ -26,6 +26,15 @@ const setup = ({ sessions, worktrees = [{ path: '/repo' }] }) => {
 };
 
 describe('work.name', () => {
+  it('uses linked topology for naming eligibility, including nested and Windows directories', () => {
+    const checkouts = [{ path: '/repo' }, { path: '/repo/linked' }];
+    expect(linkedWorktreeOf('/repo', checkouts)).toBeNull();
+    expect(linkedWorktreeOf('/repo/src', checkouts)).toBeNull();
+    expect(linkedWorktreeOf('/plain', checkouts)).toBeNull();
+    expect(linkedWorktreeOf('/repo/linked/src/', checkouts)).toBe('/repo/linked');
+    expect(linkedWorktreeOf('/repo/linked-other', checkouts)).toBeNull();
+    expect(linkedWorktreeOf('C:\\wt\\src', [{ path: 'C:\\repo' }, { path: 'C:\\wt' }])).toBe('C:\\wt');
+  });
   it('names a linked worktree through its branch', async () => {
     const { namer, setWorktreeTaskTitle, renameSession } = setup({
       sessions: [{ id: 's1', title: 'Untitled', location: { directory: '/wt/feature/src' } }],
@@ -37,17 +46,18 @@ describe('work.name', () => {
     expect(renameSession).not.toHaveBeenCalled();
   });
 
-  it('names the root session of a main-checkout task, walking up from a review', async () => {
-    const { namer, records, renameSession } = setup({
+  it('never renames a main-checkout session or its review origin', async () => {
+    const { namer, records, renameSession, updateMetadata } = setup({
       sessions: [
         { id: 'root', title: 'Untitled', location: { directory: '/repo' } },
         { id: 'review', title: 'Review', location: { directory: '/repo' }, metadata: { openchamber: { kind: 'review', originalSessionID: 'root' } } },
       ],
     });
 
-    expect(await namer.name({ sessionId: 'review', title: 'Sidebar rows' })).toEqual({ task: 'session', sessionId: 'root', title: 'Sidebar rows', named: true });
-    expect(renameSession).toHaveBeenCalledWith('root', 'Sidebar rows', '/repo');
-    expect(records.get('root').metadata.openchamber.workTitle).toEqual({ title: 'Sidebar rows', by: 'agent' });
+    expect(await namer.name({ sessionId: 'review', title: 'Sidebar rows' })).toMatchObject({ task: 'session', sessionId: 'review', title: 'Review', named: false, reason: expect.stringContaining('Nothing needs naming') });
+    expect(renameSession).not.toHaveBeenCalled();
+    expect(updateMetadata).not.toHaveBeenCalled();
+    expect(records.get('root').title).toBe('Untitled');
   });
 
   it('keeps a name the user gave, by marker or by renaming after the agent', async () => {
@@ -63,15 +73,15 @@ describe('work.name', () => {
     expect(await renamedLater.namer.name({ sessionId: 's', title: 'Agent 2' })).toMatchObject({ named: false, title: 'Renamed' });
   });
 
-  it('stops at an origin in another folder and refuses an empty title', async () => {
+  it('keeps forks and plain-folder sessions unchanged and refuses an empty title', async () => {
     const { namer, renameSession } = setup({
       sessions: [
         { id: 'origin', title: 'Origin', location: { directory: '/elsewhere' } },
-        { id: 'fork', title: 'Fork', location: { directory: '/repo' }, fork: { sessionID: 'origin' } },
+        { id: 'fork', title: 'Fork', location: { directory: '/plain-folder' }, fork: { sessionID: 'origin' } },
       ],
     });
-    expect(await namer.name({ sessionId: 'fork', title: 'Own task' })).toMatchObject({ sessionId: 'fork', named: true });
-    expect(renameSession).toHaveBeenCalledWith('fork', 'Own task', '/repo');
+    expect(await namer.name({ sessionId: 'fork', title: 'Own task' })).toMatchObject({ sessionId: 'fork', title: 'Fork', named: false });
+    expect(renameSession).not.toHaveBeenCalled();
     await expect(namer.name({ sessionId: 'fork', title: '  ' })).rejects.toMatchObject({ status: 400 });
   });
 
@@ -137,13 +147,22 @@ describe('carrying a task name into a new worktree', () => {
     await namer.carryToWorktree({ sessionId: 'renamed', worktree: '/wt/b' });
 
     expect(setWorktreeTaskTitle).toHaveBeenNthCalledWith(1, '/wt/a', { title: 'Login fix', by: 'agent' });
-    expect(setWorktreeTaskTitle).toHaveBeenNthCalledWith(2, '/wt/b', { title: 'My login fix', by: 'user' });
+    expect(setWorktreeTaskTitle).toHaveBeenNthCalledWith(2, '/wt/b', { title: 'My login fix', by: 'agent' });
   });
 
-  it('leaves the worktree unnamed when nobody named the task', async () => {
+  it('carries generated session titles as agent-owned without requiring metadata', async () => {
     const { namer, setWorktreeTaskTitle } = setup({ sessions: [{ id: 's', title: 'New session - 2026-10-27' }] });
 
-    expect(await namer.carryToWorktree({ sessionId: 's', worktree: '/wt/a' })).toBeNull();
-    expect(setWorktreeTaskTitle).not.toHaveBeenCalled();
+    await namer.carryToWorktree({ sessionId: 's', worktree: '/wt/a' });
+    expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'New session - 2026-10-27', by: 'agent' });
+  });
+
+  it('preserves explicit user ownership and skips a missing session', async () => {
+    const { namer, setWorktreeTaskTitle } = setup({ sessions: [
+      { id: 's', title: 'Mine now', metadata: { openchamber: { workTitle: { title: 'Mine', by: 'user' } } } },
+    ] });
+    await namer.carryToWorktree({ sessionId: 's', worktree: '/wt/a' });
+    expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'Mine now', by: 'user' });
+    expect(await namer.carryToWorktree({ sessionId: 'missing', worktree: '/wt/a' })).toBeNull();
   });
 });

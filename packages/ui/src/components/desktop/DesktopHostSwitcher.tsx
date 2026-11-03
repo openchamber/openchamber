@@ -53,6 +53,7 @@ import { scheduleDesktopHostCandidateRefresh } from '@/lib/desktopRelayRestore';
 import { adoptRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   desktopSshConnect,
   desktopSshDisconnect,
@@ -931,7 +932,7 @@ export function DesktopHostSwitcherDialog({
           </div>
         )}
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <ScrollableOverlay outerClassName="flex-1 min-h-0" disableHorizontal>
           <div className={cn('space-y-1', embedded && 'space-y-1.5 px-3 py-1')}>
             {isLoading ? (
               <div className="px-2 py-2 text-muted-foreground text-sm">{t('desktopHostSwitcher.state.loading')}</div>
@@ -1098,7 +1099,7 @@ export function DesktopHostSwitcherDialog({
               })
             )}
           </div>
-        </div>
+        </ScrollableOverlay>
 
         {desktopAvailable && editingId && editingId !== LOCAL_HOST_ID && (
           <div className="flex-shrink-0 rounded-lg border border-edge bg-muted/20 p-3">

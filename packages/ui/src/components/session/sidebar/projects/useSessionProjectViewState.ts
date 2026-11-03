@@ -3,7 +3,8 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { z } from 'zod';
-import { PROJECTS_CAPTION_COLLAPSE_KEY, SIDEBAR_ACTIVITY_KEYS } from '../sessionSidebarRowModel';
+import { PROJECTS_CAPTION_COLLAPSE_KEY, SIDEBAR_ACTIVITY_KEYS, sidebarSectionActivityKey } from '../sessionSidebarRowModel';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
@@ -150,7 +151,12 @@ export const useSessionProjectViewState = ({
     workExpansionDirty.current = true;
     setCollapsedGroups(new Set());
     setWorkExpansion({ expandedByDefault: false, toggled: new Set() });
-    setCollapsedActivities((current) => new Set([...current, ...SIDEBAR_ACTIVITY_KEYS]));
+    // The user's sections fold like the zones; a group of projects keeps its
+    // caption open, as Projects does, and its projects fold one by one.
+    const customZoneKeys = useSessionDisplayStore.getState().sections.flatMap((entry) => (
+      entry.kind === 'custom' && entry.grouping === 'time' ? [sidebarSectionActivityKey(entry.id)] : []
+    ));
+    setCollapsedActivities((current) => new Set([...current, ...SIDEBAR_ACTIVITY_KEYS, ...customZoneKeys]));
     setCollapsedProjects(() => {
       const allIds = new Set(projects.map((project) => project.id));
       try {
@@ -173,6 +179,7 @@ export const useSessionProjectViewState = ({
     setCollapsedActivities((current) => {
       const next = new Set(current);
       for (const key of SIDEBAR_ACTIVITY_KEYS) next.delete(key);
+      for (const key of current) if (key.startsWith('section:')) next.delete(key);
       next.delete(PROJECTS_CAPTION_COLLAPSE_KEY);
       return next;
     });

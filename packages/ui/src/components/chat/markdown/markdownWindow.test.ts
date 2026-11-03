@@ -61,13 +61,22 @@ describe('markdown window', () => {
     expect(rendered()).toEqual([8, 9, 10, 11, 12]);
   });
 
+  test('leaves its blocks as they are while its scroller is hidden', () => {
+    blockWindow.attach(container);
+    blockWindow.update();
+    scroller.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+    top = 1000;
+    blockWindow.update();
+    expect(rendered()).toEqual([0, 1, 2]);
+  });
+
   test('measures a block as it leaves, with the edge margins its box then carries', () => {
     blockWindow.attach(container);
     blockWindow.update();
     paragraphs[0].style.marginBlockStart = '12px';
     top = 1000;
     blockWindow.update();
-    expect(blockWindow.size('0:10')).toEqual({ height: 100, start: 12, end: 0 });
+    expect(blockWindow.size('0:10')).toMatchObject({ height: 100, start: 12, end: 0 });
   });
 
   test('holds every block, or one, until released', () => {
@@ -103,6 +112,19 @@ describe('markdown window', () => {
     expect(rendered().length).toBe(20);
     selection?.removeAllRanges();
     document.dispatchEvent(new Event('selectionchange'));
+    expect(rendered()).toEqual([0, 1, 2]);
+  });
+
+  test('lets go of a selection hold when it is detached', () => {
+    blockWindow.attach(container);
+    blockWindow.update();
+    document.getSelection()?.setBaseAndExtent(wrappers[0], 0, wrappers[15], 0);
+    document.dispatchEvent(new Event('selectionchange'));
+    expect(rendered().length).toBe(20);
+    blockWindow.detach();
+    document.getSelection()?.removeAllRanges();
+    blockWindow.attach(container);
+    blockWindow.update();
     expect(rendered()).toEqual([0, 1, 2]);
   });
 

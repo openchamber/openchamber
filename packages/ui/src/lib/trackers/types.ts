@@ -76,13 +76,54 @@ export type TrackerAccount = {
   user?: TrackerPerson | null;
   current: boolean;
   authorizedAt?: number | null;
+  /** An extension tracker's account: whether its server still takes the credential, and how it signed in. */
+  status?: 'valid' | 'invalid';
+  invalidReason?: string;
+  method?: 'oauth' | 'token';
 };
 
+/**
+ * What an extension tracker's card needs beside the accounts: the server the
+ * accounts live on (null until a `user` instance is connected), whether an
+ * OAuth client is saved, and where the browser sign-in returns. A built-in
+ * tracker answers none.
+ */
+export type TrackerConnectInfo = {
+  instance: string | null;
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  hasClient: boolean;
+  redirectUri: string | null;
+};
+
+/** Disconnected with `accounts` means every stored account is written off: the card shows them so the user can reconnect or remove them. */
 export type TrackerAuthStatus =
-  | { connected: false }
-  | { connected: true; account?: TrackerAccount | null; accounts?: TrackerAccount[] };
+  | { connected: false; accounts?: TrackerAccount[]; connect?: TrackerConnectInfo }
+  | { connected: true; account?: TrackerAccount | null; accounts?: TrackerAccount[]; connect?: TrackerConnectInfo };
+
+/** Why an extension tracker's connect was refused; the card names each in the user's words. */
+export type TrackerConnectFailureCode =
+  | 'UNSUPPORTED'
+  | 'INSTANCE_REQUIRED'
+  | 'INSTANCE_MISMATCH'
+  | 'UNSUPPORTED_INSTANCE'
+  | 'TOKEN_REQUIRED'
+  | 'TOKEN_REFUSED'
+  | 'USERNAME_REQUIRED'
+  | 'USERNAME_INVALID'
+  | 'CLIENT_MISSING'
+  | 'CONNECT_SUPERSEDED'
+  | 'TRACKER_UNAVAILABLE'
+  | 'failed';
+
+export type TrackerConnectResult = { ok: true } | { ok: false; code: TrackerConnectFailureCode; message: string | null };
 
 export type TrackerAuthOrigin = 'desktop' | 'web';
+
+/** A token the user pasted on the card; `instance` only while the tracker has no server yet, `username` for a Basic-auth scheme. */
+export type TrackerConnectTokenInput = { instance?: string; token: string; username?: string };
+
+/** The OAuth app the user registered with the tracker; `instance` only while the tracker has no server yet. */
+export type TrackerOAuthClientInput = { instance?: string; clientId: string; clientSecret?: string };
 export type TrackerAuthStart = { authorizationUrl: string; expiresIn: number };
 
 type Connected<T> = { connected: false } | ({ connected: true } & T);
@@ -119,8 +160,13 @@ export type TrackerDescriptor = {
   };
   /** In menu order: `open`, `all`, categories, then provider extras (`inReview`, `duplicate`). */
   stateFilters: string[];
-  /** `host` compared to the URL host without `www.`; `path` is a regex source tested on the pathname, group 1 = identifier. */
-  urlPatterns: { host: string; path: string }[];
+  /**
+   * `host` compared to the URL host without `www.`; `path` is a regex source
+   * tested on the pathname, group 1 = identifier. With `query`, the path names
+   * no identifier and the parameter `query.name` carries it, checked against
+   * `identifierPattern`.
+   */
+  urlPatterns: { host: string; path: string; query?: { name: string } }[];
   identifierPattern: string;
 };
 
@@ -159,7 +205,12 @@ export interface TrackerAPI {
   /** The server's trackers; Linear on a server that predates the route. Rejects on failure, never answers empty for it. */
   providers(): Promise<TrackerDescriptor[]>;
   authStatus(provider: TrackerProviderId): Promise<TrackerAuthStatus>;
-  authStart(provider: TrackerProviderId, origin?: TrackerAuthOrigin): Promise<TrackerAuthStart>;
+  /** `instance` is the server an extension tracker's `user` instance signs in to, typed on its card before the first account. */
+  authStart(provider: TrackerProviderId, origin?: TrackerAuthOrigin, options?: { instance?: string }): Promise<TrackerAuthStart>;
+  /** An extension tracker that takes a pasted token; the card refreshes the status on `ok`. */
+  authConnectToken(provider: TrackerProviderId, input: TrackerConnectTokenInput): Promise<TrackerConnectResult>;
+  /** An extension tracker that signs in through the browser: the OAuth client the user registered for it. */
+  authSaveOAuthClient(provider: TrackerProviderId, input: TrackerOAuthClientInput): Promise<TrackerConnectResult>;
   authDisconnect(provider: TrackerProviderId): Promise<{ removed: boolean }>;
   authActivate(provider: TrackerProviderId, accountId: string): Promise<TrackerAuthStatus>;
   list(provider: TrackerProviderId, options?: TrackerListOptions): Promise<TrackerListResult>;

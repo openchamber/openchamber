@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -24,8 +25,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -188,6 +191,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n['pt-BR'],
   ...htmlRenderI18n['pt-BR'],
   ...documentToolbarI18n['pt-BR'],
+  ...uiBlocksI18n['pt-BR'],
   ...updateDialogCanaryI18n['pt-BR'],
   ...secretRequestI18n['pt-BR'],
   ...sessionNoticesI18n['pt-BR'],
@@ -198,8 +202,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['pt-BR'],
   ...consoleBudgetsI18n['pt-BR'],
   ...imageToolI18n['pt-BR'],
+  ...agentStatusI18n['pt-BR'],
   ...snippetsI18n['pt-BR'],
   ...sidebarWorkI18n['pt-BR'],
+  ...sidebarSectionsI18n['pt-BR'],
   ...worktreeArchiveI18n['pt-BR'],
   ...overviewI18n['pt-BR'],
   ...isolatedSpacesI18n['pt-BR'],
@@ -479,6 +485,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.dialog.error.chooseProjectFirst": "Escolha um projeto primeiro",
   "sessions.scheduledTasks.dialog.toast.loadFailed": "Não foi possível carregar tarefas agendadas",
   "sessions.scheduledTasks.dialog.toast.saved": "Tarefa agendada salva",
+  "sessions.scheduledTasks.dialog.toast.moveLeftOriginal": "A tarefa agora é executada no novo local, mas a cópia antiga não pôde ser excluída. Exclua-a lá para que a tarefa não seja executada duas vezes.",
   "sessions.scheduledTasks.dialog.toast.updateFailed": "Não foi possível atualizar a tarefa",
   "sessions.scheduledTasks.dialog.toast.deleted": "Tarefa agendada excluída",
   "sessions.scheduledTasks.dialog.toast.deleteFailed": "Não foi possível excluir a tarefa",
@@ -628,6 +635,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.actions.more": "Mais",
   "sessions.sidebar.header.actions.exitSelection": "Sair da seleção",
   "sessions.sidebar.header.actions.selectSessions": "Selecionar sessões",
+  "sessions.sidebar.header.actions.markAllRead": "Marcar tudo como lido",
   "sessions.sidebar.header.actions.sortProjects": "Ordenar projetos",
   "sessions.sidebar.header.actions.sessionDisplayMode": "Modo de visualização da sessão",
   "sessions.sidebar.header.displayMode.label": "Modo de visualização",
@@ -1743,6 +1751,8 @@ export const dict: Record<I18nKey, string> = {
   "filesView.error.switchToEditMode": "Alterne para o modo de edição para resolver o problema.",
   "filesView.error.readFileFailed": "Não foi possível ler o arquivo",
   "filesView.editor.htmlPreviewTitle": "Pré-visualização HTML",
+  "filesView.editor.htmlPreviewRelayUnavailable": "A pré-visualização HTML não está disponível pelo relay",
+  "filesView.editor.htmlPreviewShowCode": "Mostrar código",
   "filesView.editor.htmlAnnotate.intro": "Esta é uma seleção anotada da pré-visualização de um arquivo HTML.",
   "filesView.diagram.closeDiagramView": "Fechar visualização de diagrama",
   "filesView.diagram.saveDiagram": "Salvar diagrama",
@@ -2395,7 +2405,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.statusRow.todo.priority.low": "Prioridade baixa",
   "chat.statusRow.actions.stopGeneratingAria": "Parar a geração",
   "chat.statusRow.tasksTitle": "Tarefas",
-  "chat.statusRow.modelStatus": "{model} · {status}",
+  "chat.statusRow.modelStatus": "{model} {status}",
   "chat.statusRow.summary.activeLeft": "{active} ativas · {left} restantes",
   "chat.revertIndicator.redo": "Refazer",
   "chat.revertIndicator.redoAria": "Refazer — restaurar mensagens revertidas",
@@ -2970,7 +2980,6 @@ export const dict: Record<I18nKey, string> = {
   "projectEditDialog.toast.iconDiscovered": "Ícone do projeto descoberto",
   "openInApp.actions.open": "Abrir",
   "openInApp.actions.openInAria": "Abrir em {app}",
-  "openInApp.actions.chooseAppAria": "Escolher aplicativo para abrir",
   "openInApp.actions.copyPath": "Copiar caminho",
   "openInApp.actions.refreshApps": "Atualizar aplicativos",
   "openInApp.toast.pathCopied": "Caminho copiado para a área de transferência",
@@ -3896,12 +3905,16 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': 'O worktree e seu branch permanecem após a execução para você revisar o resultado.',
   'sessions.scheduledTasks.editor.worktree.notRepo': 'A pasta do projeto não é um repositório git; as execuções usarão o checkout como está.',
   'sessions.scheduledTasks.dialog.usesDefaults': 'Padrões de sessão',
-  'sessions.moveChatToProject.menu': 'Mover para um projeto…',
-  'sessions.moveChatToProject.hint': 'Continuar esta conversa dentro de um projeto',
-  'sessions.moveChatToProject.title': 'Mover o chat para um projeto',
-  'sessions.moveChatToProject.description': 'A conversa continua na pasta do projeto. Os arquivos que o chat criou ficam onde estão.',
-  'sessions.moveChatToProject.success': 'Chat movido para o projeto',
-  'sessions.moveChatToProject.failed': 'Não foi possível mover o chat',
+  'sessions.moveSession.menu': 'Mover sessão…',
+  'sessions.moveSession.hint': 'Os arquivos ficam na pasta antiga',
+  'sessions.moveSession.title': 'Mover sessão',
+  'sessions.moveSession.description': 'A sessão continua na pasta escolhida. Os arquivos ficam onde estão.',
+  'sessions.moveSession.chooseFolder': 'Escolher pasta…',
+  'sessions.moveSession.current': 'Pasta atual',
+  'sessions.moveSession.success': 'Sessão movida',
+  'sessions.moveSession.failed': 'Não foi possível mover a sessão',
+  'chat.folderMissing.text': 'A pasta {name} não existe mais',
+  'chat.folderMissing.action': 'Mover sessão',
   'chat.worktreeSetup.running': 'Preparando o worktree: executando os comandos de configuração do projeto…',
   'chat.draft.creatingSession': 'Criando a sessão…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'A conexão não abriu, então o OpenChamber iniciou no Local. Conecte-a pelo seletor de instâncias quando estiver acessível.',

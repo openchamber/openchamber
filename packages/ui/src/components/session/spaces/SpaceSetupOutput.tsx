@@ -23,6 +23,7 @@ import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
 import { useOpenSpaceDomain, useSpaceJournal } from './spaceNetwork';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type OutputRead = { kind: 'reading' } | { kind: 'read'; answer: SpaceSetupOutput } | { kind: 'failed'; reason: string };
 
@@ -120,10 +121,10 @@ export const SpaceSetupOutputDialog: React.FC = () => {
         <div className="flex min-w-0 flex-col gap-1">
           {setup.total > 1 ? <p className="typography-micro text-muted-foreground">{t('spaces.setup.output.command', { current: setup.index + 1, total: setup.total })}</p> : null}
           {/* The command and what it printed, as a terminal shows them; the project's own text, shown as is. */}
-          <pre dir="ltr" className="max-h-[50vh] min-w-0 overflow-auto whitespace-pre-wrap break-all rounded-md bg-[var(--surface-muted)] p-2.5 font-mono text-[0.6875rem] leading-snug text-foreground">
+          <ScrollableOverlay as="pre" dir="ltr" outerClassName="max-h-[50vh] min-w-0 rounded-md bg-[var(--surface-muted)]" className="whitespace-pre-wrap break-all p-2.5 font-mono text-[0.6875rem] leading-snug text-foreground" disableHorizontal>
             <span className="text-muted-foreground">$ </span>{setup.command}
             {output ? `\n${output}` : null}
-          </pre>
+          </ScrollableOverlay>
           {read.kind === 'read' && !output ? <p className="typography-meta text-muted-foreground">{t('spaces.setup.output.empty')}</p> : null}
           {setup.timedOut ? <p className="typography-meta text-muted-foreground">{t('spaces.setup.output.timedOut')}</p> : null}
         </div>

@@ -9,7 +9,6 @@ import {
   resolveSessionSidebarScrollAnchor,
   sectionSpacingAfter,
   isSessionSidebarUserChange,
-  sessionSidebarProjectOrderChanged,
   sessionSidebarRowVirtualKey,
   sessionSidebarRowSizeKey,
 } from './sessionSidebarVirtualization';
@@ -70,7 +69,7 @@ describe('SessionSidebarRows section spacing', () => {
   test('a zone opens with the widest gap, and a project after rows with a wide one', () => {
     for (const withChats of [true, false]) {
       const rows = buildSessionSidebarRowModel(input(withChats)).rows;
-      if (withChats) expect(spacingBefore(rows, 'activity-header', 'activity:work:header')).toBe('pb-5');
+      if (withChats) expect(spacingBefore(rows, 'activity-header', 'activity:work:header')).toBe('pb-4');
       expect(spacingBefore(rows, 'project-header')).toBe('pb-3');
     }
   });
@@ -81,7 +80,7 @@ describe('SessionSidebarRows section spacing', () => {
     expect(caption).toBeGreaterThan(0);
     expect(captioned[caption + 1]?.kind).toBe('project-header');
     expect(sectionSpacingAfter(captioned[caption], captioned[caption + 1])).toBeUndefined();
-    expect(sectionSpacingAfter(captioned[caption - 1], captioned[caption])).toBe('pb-5');
+    expect(sectionSpacingAfter(captioned[caption - 1], captioned[caption])).toBe('pb-4');
     expect(buildSessionSidebarRowModel(input(true)).rows.some((row) => row.kind === 'caption')).toBe(false);
   });
 
@@ -326,11 +325,9 @@ describe('SessionSidebarRows scroll anchor', () => {
     expect(isSessionSidebarUserChange(open, model({ collapsedProjects: new Set(['project-a']) }))).toBe(true);
     expect(isSessionSidebarUserChange(model({ visible: 20 }), model({ visible: 40 }))).toBe(true);
     expect(isSessionSidebarUserChange(open, model({ mode: 'search' }))).toBe(true);
-    // A drag says so itself (`takeProjectReorder`): the rows look the same as
-    // projects sorted by recent activity moving on their own.
+    // A drag holds the row it dropped (`heldRowRef`): the rows look the same
+    // as projects sorted by recent activity moving on their own.
     expect(isSessionSidebarUserChange(open, model({ projectOrder: ['project-b', 'project-a'] }))).toBe(false);
-    expect(sessionSidebarProjectOrderChanged(open, model({ projectOrder: ['project-b', 'project-a'] }))).toBe(true);
-    expect(sessionSidebarProjectOrderChanged(open, model({ sessionIds: ['new-1', ...ids(40)] }))).toBe(false);
     expect(isSessionSidebarUserChange(open, model())).toBe(false);
   });
 

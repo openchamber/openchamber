@@ -20,6 +20,7 @@ import * as git from '@/lib/gitApi';
 import { toast } from '@/components/ui/toast';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const HISTORY_DIFF_REQUEST_TIMEOUT_MS = 15000;
 const HISTORY_DIFF_LARGE_CHANGED_LINES = 500;
@@ -609,7 +610,7 @@ export const HistoryCommitRow = React.memo(({
                   </button>
 
                   {openDiffPaths.has(file.path) && (
-                    <div className="max-h-[400px] overflow-y-auto rounded border border-edge-muted mx-2 mb-1" data-diff-virtual-root data-diff-virtual-content>
+                    <ScrollableOverlay outerClassName="max-h-[400px] w-auto rounded border border-edge-muted mx-2 mb-1" data-diff-virtual-root data-diff-virtual-content>
                       {file.changeType === 'R' ? (
                         <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.renamedNoDiff')}</div>
                       ) : file.isBinary ? (
@@ -668,7 +669,7 @@ export const HistoryCommitRow = React.memo(({
                             />
                         );
                       })()}
-                    </div>
+                    </ScrollableOverlay>
                   )}
                 </li>
               ))}

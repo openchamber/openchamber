@@ -31,7 +31,7 @@ const isCurrentAction = (entry: GuestActionEntry, item: GuestActionItem, runtime
   if (isVSCodeRuntime() || isMobileSurfaceRuntime() || getRuntimeKey() !== runtimeKey || catalog.runtimeKey !== runtimeKey) return false;
   const guest = catalog.guests.find((candidate) => candidate.id === entry.guest.id);
   if (!guest || (!guest.entry && !guest.backgroundEntry) || !isGuestActive(guest)
-    || guest.version !== entry.guest.version || guest.entry !== entry.guest.entry || guest.backgroundEntry !== entry.guest.backgroundEntry) return false;
+    || guest.version !== entry.guest.version || guest.revision !== entry.guest.revision || guest.entry !== entry.guest.entry || guest.backgroundEntry !== entry.guest.backgroundEntry) return false;
   const action = guest.actions?.find((candidate) => candidate.id === item.action);
   if (!action || action.where !== item.kind || JSON.stringify(action) !== JSON.stringify(entry.action)) return false;
   if (action.mode !== 'background' && !guest.entry) return false;

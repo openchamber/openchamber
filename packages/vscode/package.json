@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "2.5.3",
+  "version": "2.6.0",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -314,7 +314,7 @@
     "concurrently": "^10.0.0",
     "esbuild": "^0.28.0",
     "typescript": "~7.0.2",
-    "vite": "^7.1.2"
+    "vite": "^7.3.2"
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",

@@ -437,6 +437,8 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     getRelayPairingCandidate = async () => null,
     // Re-evaluate the relay lifecycle after pairing/device changes.
     reconcileRelay = async () => {},
+    // Drops the push registrations of the given clients' devices.
+    removeClientPushDevices = async () => {},
     // Returns { local, lan, relayAvailable } — the direct transport URLs the
     // server can actually be reached on (LAN derived from the server bind, not
     // the UI origin), for the create-device dialog.
@@ -675,9 +677,12 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
    */
   const selfAuthenticatedApiPaths = new Set(['/api/git/repository-credential']);
 
+  // An extension tracker's OAuth callback (`/tracker/ext-<id>/oauth/callback`)
+  // is the same kind of page: the tracker redirects the browser here with no
+  // UI bearer, and the route accepts only a `state` this process issued.
   const isGuestOauthCallback = (req) => (
     req.method === 'GET'
-    && /^\/guests\/[a-z][a-z0-9-]*\/oauth\/callback$/.test(req.path || '')
+    && /^\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(req.path || '')
   );
 
   // An HTML preview runs in an opaque-origin sandbox and carries no session.
@@ -894,6 +899,12 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
       if (!result.revoked) {
         return res.status(404).json({ revoked: false, error: 'Client not found' });
       }
+      // The revocation is already written, and the page acts on its success (the
+      // desktop drops its own token), so a failure here stays a log line. Sends
+      // skip this client's key, and clearing it from the list retries the rest.
+      await removeClientPushDevices([req.params.id]).catch((error) => {
+        console.warn('Failed to remove push registrations of a revoked client:', error?.message ?? error);
+      });
       void reconcileRelay();
       res.json(result);
     });
@@ -909,6 +920,10 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
           return res.status(403).json({ purged: 0, error: 'Client tokens cannot purge revoked devices' });
         }
       }
+      // Before the rows go: once a row is gone its registrations can no longer
+      // be told from a cookie session's. A failure keeps the rows for a retry.
+      const clients = await remoteClientAuthRuntime.listClients();
+      await removeClientPushDevices(clients.filter((client) => client.revokedAt).map((client) => client.id));
       const result = await remoteClientAuthRuntime.purgeRevokedClients();
       void reconcileRelay();
       res.json(result);

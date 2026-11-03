@@ -26,7 +26,7 @@ const CONFIGURE_ITEM_VALUE = '__configure_project_actions__';
 
 /**
  * The current project's actions, from the keyboard: Enter runs an idle action
- * and stops a running one. It opens on the action the Work Status row shows,
+ * and stops a running one. It opens on the action the header button shows,
  * so the shortcut and Enter repeat the last run.
  */
 export const ProjectActionsDialog: React.FC = () => {
@@ -68,6 +68,7 @@ export const ProjectActionsDialog: React.FC = () => {
         showCloseButton={false}
       >
         <Command
+          loop
           value={highlighted}
           onValueChange={setHighlighted}
           className="[&_[cmdk-group]]:px-2 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]]:typography-meta"

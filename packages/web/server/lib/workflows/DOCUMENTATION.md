@@ -9,10 +9,16 @@ here, in its own server, so the agent that asked stays free. The user approves
 each run's plan in the chat before anything starts, and when the run ends its
 report is delivered into the session that proposed it.
 
-The feature ships dark: `OPENCHAMBER_WORKFLOWS_ENABLE` (`feature-flag.js`)
-decides whether it exists at all. Without it there is no runtime, no routes, no
-`openchamber_workflow` tool, no settings row and no session guidance. With it,
-the tool is on unless the user switches it off (`agentWorkflowToolEnabled`).
+The tool is off until the user turns it on (`agentWorkflowToolEnabled`, Settings
+→ General → OpenChamber Tools). Off means no `openchamber_workflow` tool and no
+session guidance, and the runtime refuses every action that proposes, runs or
+saves one. The app hides the Workflows panel, its rail entry and work-status
+section, reads no runs, and a past run's card says workflows are off
+(`packages/ui/src/lib/workflows/availability.ts`).
+
+Workflow agents' sessions carry `metadata.openchamber.kind = 'workflow-agent'`.
+The sidebar leaves them out of its subagent rows (one run can start a hundred);
+the run's card and the Workflows panel open them.
 
 ## Ownership
 

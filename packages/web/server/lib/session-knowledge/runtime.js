@@ -14,6 +14,7 @@
  * carry the same context as the ones a tab sends to.
  */
 import { isRecord } from '../shared/guards.js';
+import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const PINS_METADATA_KEY = 'project_context_pins';
 
@@ -125,21 +126,19 @@ export const DIRECT_TOOLS_GUIDANCE = "The openchamber tools (openchamber, opench
  * `openchamber_render` tool, and only here. Stated only in the tool
  * description, it went unread: asked for a breakdown of lines of code per
  * package, an agent answered with a list and drew the chart only when asked.
- * Interface mockups are named on their own: listed only as data, the cases
- * read to a literal model as "charts only", while a proposed UI change is
- * where a page helps most. The limits matter as much as the cases: a page for
- * two numbers is worse than a sentence.
+ * Data and structure go to UI blocks (`UI_BLOCKS_GUIDANCE`), which look the
+ * same whatever model writes them; a page is left with what the block
+ * catalog cannot draw. Interface mockups are named on their own, because a
+ * proposed UI change is where a page helps most.
  */
-export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws a chart, table, diagram or interface mockup inline in the chat."
-  + " Use it when the answer is mostly data or structure the user would otherwise picture:"
-  + " numbers across several items (sizes, counts, timings, costs, test results), shares of a whole,"
-  + " a trend, options compared on several criteria, a timeline, how components connect;"
-  + " or how something looks: a proposed interface change, before and after, layout options."
-  + " Skip it for a few numbers, a short list, code, or when the user asked for plain text."
+export const RENDER_PAGE_GUIDANCE = "The openchamber_render tool draws an HTML page inline in the chat, above your reply."
+  + " Use it for what UI blocks cannot show: how something looks (a proposed interface change, before and after, layout options),"
+  + " or a custom drawing the block components do not cover. Never for data: charts, tables and comparisons are UI blocks, even when the user asks to see them."
   + " At most one page per answer."
   + " A mockup of the user's own project takes its look from that project's code (theme tokens, CSS variables, styles), not from OpenChamber's theme."
   + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
-  + " For a choice a page shows better than text, such as layouts or designs, ask on a page with awaitAnswer and continue from the answer.";
+  + " A choice that sets the direction of the work goes through ui with awaitAnswer (see UI blocks);"
+  + " a choice between visual designs, through an html page with awaitAnswer.";
 
 /**
  * Titles only for memory, never bodies: an index carrying full text grows
@@ -228,13 +227,19 @@ const buildPinnedBlock = ({ notes, plans }) => {
  * When to reach for a workflow, stated in every session that has the
  * `openchamber_workflow` tool. A run costs many agents, so the agent starts
  * one only when the user asks; spotting a task that fits is the agent's job
- * too, and it offers one instead of starting it.
+ * too, and it offers one instead of starting it. The models are agreed with
+ * the user before the run: without them every agent runs on the session's
+ * own model, often the most expensive one.
  */
 export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script that fans a large task out to many agents in the background.'
   + ' Start one when the user asks for a workflow.'
   + ' When the task in front of you has many similar independent pieces (a review per file, an audit across many routes, a migration of many files)'
   + ' or needs results cross-checked at that scale, say so and offer a workflow; never start one unasked.'
-  + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.';
+  + ' A single feature, a few steps or a short loop over files you can do yourself never gets one.'
+  + ' Every agent runs on your own model unless the script names another, and dozens of agents on a top model cost many times what a cheap one does.'
+  + ' So when you propose a workflow, give each phase a model in the same message (look them up with the openchamber tool\'s models.list when you have it):'
+  + ' a cheap one for reading and checking against a fixed list, a strong one where a phase weighs judgement or writes what lands.'
+  + ' Start the run once the user agrees to the models.';
 
 /**
  * When to ask for a secret on a card, stated in every session that has the
@@ -245,9 +250,10 @@ export const WORKFLOW_GUIDANCE = 'The openchamber_workflow tool runs a script th
 export const SECRET_REQUEST_GUIDANCE = "The openchamber_secret tool asks the user for a secret (API key, token, password) on a private card in the chat."
   + " Whenever you need one, call it: never ask for a secret in the chat or tell the user to paste one there.";
 
-const buildGuidance = ({ linking, rendering, secrets, workflows, directTools }) => [
+const buildGuidance = ({ linking, naming, rendering, secrets, workflows, directTools }) => [
   linking ? SESSION_LINK_GUIDANCE : '',
-  linking ? WORK_NAME_GUIDANCE : '',
+  linking && naming ? WORK_NAME_GUIDANCE : '',
+  rendering ? UI_BLOCKS_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
   secrets ? SECRET_REQUEST_GUIDANCE : '',
   workflows ? WORKFLOW_GUIDANCE : '',
@@ -259,11 +265,11 @@ const buildGuidance = ({ linking, rendering, secrets, workflows, directTools }) 
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
-    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, rendering, secrets, workflows, directTools }),
+    [KNOWLEDGE_ENTRY_KEYS.guidance]: buildGuidance({ linking, naming, rendering, secrets, workflows, directTools }),
   };
   if (responseStyleInstruction !== undefined) {
     entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();
@@ -283,6 +289,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     isAgentMemoryEnabled,
     // Whether this session's agent has the `openchamber` tool to link with.
     isSessionLinkingAvailable = null,
+    // A linked worktree or isolated space; main checkout tasks keep session titles.
+    isWorkNamingAvailable = async () => false,
     // The checked-out branch, or '' when none is checked out. Failures throw;
     // read only while the agent has the tool.
     readCheckoutBranch = null,
@@ -385,6 +393,8 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const linking = typeof isSessionLinkingAvailable === 'function'
       ? await Promise.resolve(isSessionLinkingAvailable()).catch(() => false)
       : false;
+    const naming = linking && Boolean(directory)
+      && await Promise.resolve(isWorkNamingAvailable(directory)).catch(() => false);
     // The branch is read only while the tool that moves a session off it is there.
     const branch = linking && directory && readCheckoutBranch
       ? await Promise.resolve(readCheckoutBranch(directory)).catch(() => null)
@@ -399,7 +409,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     const workflows = await Promise.resolve(isWorkflowAvailable()).catch(() => false);
     const directTools = !(await Promise.resolve(areAgentToolsInCodeMode()).catch(() => false));
 
-    return { notes, plans, memory, linking, rendering, secrets, workflows, directTools, checkout };
+    return { notes, plans, memory, linking, naming, rendering, secrets, workflows, directTools, checkout };
   };
 
   /**

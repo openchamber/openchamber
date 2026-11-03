@@ -10,6 +10,7 @@ import type {
   PublicGuestCapabilities,
   PublicIntegration,
   PublicNotifications,
+  PublicTracker,
   PublicSessionEvents,
   PublicSourceControl,
 } from '@openchamber/sdk';
@@ -31,6 +32,8 @@ export type InstalledGuest = {
   backgroundEntry?: string;
   /** npm package.json version when the package declared one. */
   version?: string;
+  /** Times the server saw this package's files change since it started; frames reload when it moves. Absent is 0. */
+  revision?: number;
   attach?: AttachContribution;
   /** HTML the attach dialog loads instead of `entry`; only sent for dialog-mode guests that declared one. */
   attachEntry?: string;
@@ -60,6 +63,8 @@ export type InstalledGuest = {
   sessionEvents?: PublicSessionEvents;
   /** The notification channel from `contributes.notifications`, when the service provides `notifications`. */
   notifications?: PublicNotifications;
+  /** The tracker from `contributes.tracker`, when the service provides `tracker`. */
+  tracker?: PublicTracker;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
   /** Declared `contributes.commands`; the composer routes them only for an active guest. */

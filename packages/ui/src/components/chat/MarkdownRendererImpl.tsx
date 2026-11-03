@@ -28,6 +28,7 @@ import type { ToolPopupContent } from './message/types';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath } from './markdown/streamdownPlugins';
 import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
 import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
+import { fenceUiBlocks } from './uiBlocks/taggedBlocks';
 import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
 import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
 import { MarkdownMediaProvider, type MarkdownDocumentAssets } from './markdown/MarkdownMediaContext';
@@ -48,6 +49,7 @@ import { MarkdownLink, MarkdownInlineCode } from './markdown/MarkdownLink';
 import { MarkdownCode } from './markdown/MarkdownCode';
 import { MarkdownTable, MarkdownTableCell } from './markdown/MarkdownTable';
 import { MarkdownMermaid } from './markdown/MarkdownMermaid';
+import { MarkdownUiBlock } from './markdown/MarkdownUiBlock';
 import { MarkdownBlockquote } from './markdown/MarkdownBlockquote';
 import { createMarkdownCodePlugin } from './markdown/streamdownCode';
 import { confirmCodePaths, confirmMarkdownFile, resolveMarkdownFile } from './markdown/markdownFileReferences';
@@ -156,7 +158,11 @@ const components: Components = {
     </summary>
   ),
 };
-const renderers = [{ language: 'mermaid', component: MarkdownMermaid }];
+const renderers = [
+  { language: 'mermaid', component: MarkdownMermaid },
+  // Reached only where `uiBlocks` is on (MarkdownCode); elsewhere the block stays code.
+  { language: 'openui-lang', component: MarkdownUiBlock },
+];
 const linkSafety = { enabled: false };
 const remend: StreamdownProps['remend'] = { linkMode: 'text-only', singleTilde: false };
 // Static mode renders the document whole and never reads the block split, but
@@ -221,7 +227,9 @@ function selectedCopyPayload(element: HTMLElement): { text: string; html: string
   if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
 
   const range = selection.getRangeAt(0);
-  if (!element.contains(range.startContainer) || !element.contains(range.endContainer)) return null;
+  // A selection that ends in a later row of the same long answer is copied by
+  // the row it starts in (`getMarkdownSelectionText` reads every row it crosses).
+  if (!element.contains(range.startContainer)) return null;
 
   const containingCode = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest('pre code');
   const code = containingCode(range.startContainer);
@@ -270,7 +278,6 @@ export interface MarkdownContentProps {
   documentAssets?: MarkdownDocumentAssets;
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControls;
-  allowMermaidWheelEvents?: boolean;
   purpose?: 'copy' | 'image';
   preparedHighlights?: ReadonlyMap<string, ReadonlyMap<string, HighlightResult>>;
   onExportCode?: (source: string, language: string) => void;
@@ -280,6 +287,8 @@ export interface MarkdownContentProps {
   emojiShortcodes?: EmojiShortcodes | null;
   /** A long document read in its own scroller: only the blocks near the view mount (`markdownWindow`). */
   windowed?: boolean;
+  /** `openui-lang` fences draw as UI blocks; only assistant replies set it. */
+  uiBlocks?: boolean;
 }
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
@@ -302,13 +311,13 @@ export function MarkdownContent({
   documentAssets,
   onShowPopup,
   mermaidControls = defaultMermaidControls,
-  allowMermaidWheelEvents,
   purpose,
   preparedHighlights,
   onExportCode,
   repositoryLinks,
   emojiShortcodes,
   windowed = false,
+  uiBlocks = false,
 }: MarkdownContentProps) {
   const themeSystem = useOptionalThemeSystem();
   const theme = themeSystem?.currentTheme ?? getDefaultTheme(
@@ -423,17 +432,20 @@ export function MarkdownContent({
     loopbackPreview,
     settled,
     purpose,
+    // Only an assistant reply on screen draws UI blocks; copies and image
+    // exports keep the block's source.
+    uiBlocks: uiBlocks && !purpose,
+    uiBlockReply: uiBlocks && !purpose && settled && sessionId && messageId ? { sessionId, messageId } : null,
     disableLinkSafety,
     theme,
     mermaidControls,
-    allowMermaidWheelEvents,
     onShowPopup,
     onExportCode,
     confirmFile,
     code,
   }), [
-    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, disableLinkSafety, theme,
-    mermaidControls, allowMermaidWheelEvents, onShowPopup, onExportCode, confirmFile, code,
+    directory, fileReferences, fileNavigation, loopbackPreview, settled, purpose, uiBlocks, sessionId, messageId, disableLinkSafety, theme,
+    mermaidControls, onShowPopup, onExportCode, confirmFile, code,
   ]);
 
   let body = (
@@ -535,6 +547,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   const identity = `${messageId}:${part?.id ?? ''}`;
   const initialMode: 'streaming' | 'static' = isStreaming || (part && !settledPart) ? 'streaming' : 'static';
   const [renderMode, setRenderMode] = React.useState({ identity, mode: initialMode });
+  const mode = renderMode.identity === identity ? renderMode.mode : initialMode;
   // A live part keeps its block tree when it settles. A different part starts
   // fresh; already-completed history uses the whole-document static renderer.
   if (renderMode.identity !== identity) {
@@ -543,9 +556,9 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   const body = (
     <MarkdownContent
       key={identity}
-      content={content}
+      content={variant === 'assistant' ? fenceUiBlocks(content) : content}
       singleTilde={false}
-      mode={renderMode.identity === identity ? renderMode.mode : initialMode}
+      mode={mode}
       mediaMode={variant === 'assistant' ? 'assistant' : 'local'}
       isStreaming={isStreaming}
       variant={variant}
@@ -557,6 +570,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
       onShowPopup={onShowPopup}
       enableFileReferences={enableFileReferences}
       loopbackPreview
+      uiBlocks={variant === 'assistant'}
     />
   );
 

@@ -472,6 +472,9 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           {guest.notifications ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.providesNotifications')}</p>
           ) : null}
+          {guest.tracker ? (
+            <p className="typography-meta text-foreground">{t('settings.extensions.service.providesTracker', { label: guest.tracker.label })}</p>
+          ) : null}
           {guest.service ? (
             // A security warning: stays visible.
             <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.warning')}</p>
@@ -636,8 +639,7 @@ export const ExtensionsPage: React.FC = () => {
       );
       return;
     }
-    // Open panels still run the old bundle; the next open loads the new one.
-    closeGuestTabsById(guest.id);
+    // Open panels reload with the new bundle: the update moves the catalog row's revision.
     toast.success(t('settings.extensions.toast.updated', {
       name: result.guest.name,
       version: result.guest.version ?? '',

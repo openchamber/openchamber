@@ -11,6 +11,7 @@ const gitLibraries = {
   getStatus: vi.fn(),
   createWorktree: vi.fn(),
   seedBranchTaskTitle: vi.fn(),
+  setWorktreeTaskTitle: vi.fn(),
   markGeneratedBranchName: vi.fn(),
   validateWorktreeCreate: vi.fn(),
   getWorktrees: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock('./index.js', () => ({
   getStatus: gitLibraries.getStatus,
   createWorktree: gitLibraries.createWorktree,
   seedBranchTaskTitle: gitLibraries.seedBranchTaskTitle,
+  setWorktreeTaskTitle: gitLibraries.setWorktreeTaskTitle,
   markGeneratedBranchName: gitLibraries.markGeneratedBranchName,
   validateWorktreeCreate: gitLibraries.validateWorktreeCreate,
   getWorktrees: gitLibraries.getWorktrees,
@@ -117,6 +119,28 @@ const createMockResponse = () => {
     },
   };
 };
+
+describe('worktree title ownership', () => {
+  it.each([[undefined, 'user'], ['user', 'user'], ['agent', 'agent']])('accepts %s ownership as %s', async (by, expected) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    gitLibraries.setWorktreeTaskTitle.mockResolvedValueOnce({ title: 'Task', branch: 'fix/task', applied: true });
+    const response = createMockResponse();
+    await getRoute('PUT', '/api/git/worktrees/title')({ query: { directory: '/wt' }, body: { title: 'Task', by } }, response);
+    expect(response.statusCode).toBe(200);
+    expect(gitLibraries.setWorktreeTaskTitle).toHaveBeenLastCalledWith('/wt', { title: 'Task', by: expected });
+  });
+
+  it('refuses unknown ownership', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+    const calls = gitLibraries.setWorktreeTaskTitle.mock.calls.length;
+    await getRoute('PUT', '/api/git/worktrees/title')({ query: { directory: '/wt' }, body: { title: 'Task', by: 'unknown' } }, response);
+    expect(response.statusCode).toBe(400);
+    expect(gitLibraries.setWorktreeTaskTitle.mock.calls.length).toBe(calls);
+  });
+});
 
 describe('git diff failures', () => {
   it.each([

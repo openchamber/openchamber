@@ -11,8 +11,10 @@ const sortedUnique = (values) => [...new Set(values)].sort();
 /**
  * @typedef {{ events: string[], content: boolean }} SessionEventsScope
  * @typedef {{ kind: 'fixed', origin: string } | { kind: 'user' }} NotificationsScope
- * @typedef {{ exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean }, sessionEvents?: SessionEventsScope, notifications?: NotificationsScope }} ServiceScope
- * @param {{ filesystem?: string[], integration?: object, service?: { provides?: string[], permissions?: { exec?: string[], sockets?: Array<{ id: string }> } }, sourceControl?: { instances: { defaultInstances: string[], custom: boolean } }, sessionEvents?: { events: string[], content?: true }, notifications?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' } } }} guest
+ * @typedef {{ kind: 'fixed', origin: string } | { kind: 'user' }} TrackerInstanceScope
+ * @typedef {{ instances: TrackerInstanceScope, oauth: { authorizeUrl: string, tokenUrl: string } | null, urls: string[] }} TrackerScope
+ * @typedef {{ exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean }, sessionEvents?: SessionEventsScope, notifications?: NotificationsScope, tracker?: TrackerScope }} ServiceScope
+ * @param {{ filesystem?: string[], integration?: object, service?: { provides?: string[], permissions?: { exec?: string[], sockets?: Array<{ id: string }> } }, sourceControl?: { instances: { defaultInstances: string[], custom: boolean } }, sessionEvents?: { events: string[], content?: true }, notifications?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' } }, tracker?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' }, auth: { oauth?: { authorizeUrl: string, tokenUrl: string } }, urls: { item: string[] } } }} guest
  * @returns {{ filesystem?: string[], apiOrigin?: string, service?: ServiceScope }}
  */
 export const guestGrantScope = (guest) => {
@@ -67,6 +69,20 @@ export const guestGrantScope = (guest) => {
         ? { kind: 'fixed', origin: guest.notifications.instances.origin }
         : { kind: 'user' };
     }
+    // A tracker sends the user's items and comments to the server its accounts
+    // live on, mints tokens at its OAuth endpoints and claims the links its
+    // templates name; the approval covers all three. Absent for every other service.
+    if (serviceProvides(guest.service, 'tracker') && guest.tracker) {
+      scope.service.tracker = {
+        instances: guest.tracker.instances.kind === 'fixed'
+          ? { kind: 'fixed', origin: guest.tracker.instances.origin }
+          : { kind: 'user' },
+        oauth: guest.tracker.auth.oauth
+          ? { authorizeUrl: guest.tracker.auth.oauth.authorizeUrl, tokenUrl: guest.tracker.auth.oauth.tokenUrl }
+          : null,
+        urls: sortedUnique(guest.tracker.urls.item),
+      };
+    }
   }
   return scope;
 };
@@ -99,6 +115,14 @@ const sameSessionEvents = (a, b) => (
 /** Both without the notifications role, or both with it sending to the same place. */
 const sameNotifications = (a, b) => (
   (!a && !b) || Boolean(a && b && a.kind === b.kind && (a.origin ?? null) === (b.origin ?? null))
+);
+
+/** Both without the tracker role, or both with it on the same server, the same OAuth endpoints and the same links. */
+const sameTracker = (a, b) => (
+  (!a && !b) || Boolean(a && b
+    && a.instances.kind === b.instances.kind && (a.instances.origin ?? null) === (b.instances.origin ?? null)
+    && sameOauth(a.oauth, b.oauth)
+    && sameList(a.urls, b.urls))
 );
 
 /**
@@ -134,7 +158,8 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
       && sameList(stored.service.sockets, current.service?.sockets ?? [])
       && sameSourceControl(stored.service.sourceControl, current.service?.sourceControl)
       && sameSessionEvents(stored.service.sessionEvents, current.service?.sessionEvents)
-      && sameNotifications(stored.service.notifications, current.service?.notifications);
+      && sameNotifications(stored.service.notifications, current.service?.notifications)
+      && sameTracker(stored.service.tracker, current.service?.tracker);
   }
   return true;
 });

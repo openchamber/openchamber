@@ -18,7 +18,8 @@ import {
 
 type OverviewIssueState = OverviewSessionFacts['issues'][number];
 import { useWorktreeChangeRequests } from './useWorktreeChangeRequests';
-import { readOverviewWorktreeGit, sessionsInWorktree, type OverviewWorktreeGit, type OverviewWorktreeTarget } from './overviewActions';
+import { sessionsInWorktree } from '@/lib/worktrees/worktreeUse';
+import { readOverviewWorktreeGit, type OverviewWorktreeGit, type OverviewWorktreeTarget } from './overviewActions';
 import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { spaceProjectDirectoryIn, useSpacesStore } from '@/lib/spaces/spaces-store';

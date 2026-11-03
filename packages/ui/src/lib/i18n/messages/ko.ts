@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -24,8 +25,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -178,6 +181,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n.ko,
   ...htmlRenderI18n.ko,
   ...documentToolbarI18n.ko,
+  ...uiBlocksI18n.ko,
   ...updateDialogCanaryI18n.ko,
   ...secretRequestI18n.ko,
   ...sessionNoticesI18n.ko,
@@ -188,8 +192,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ko,
   ...consoleBudgetsI18n.ko,
   ...imageToolI18n.ko,
+  ...agentStatusI18n.ko,
   ...snippetsI18n.ko,
   ...sidebarWorkI18n.ko,
+  ...sidebarSectionsI18n.ko,
   ...worktreeArchiveI18n.ko,
   ...overviewI18n.ko,
   ...isolatedSpacesI18n.ko,
@@ -470,6 +476,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '먼저 프로젝트를 선택하세요',
   'sessions.scheduledTasks.dialog.toast.loadFailed': '예약 작업 로드 실패',
   'sessions.scheduledTasks.dialog.toast.saved': '예약 작업 저장됨',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': '작업이 이제 새 위치에서 실행되지만 이전 사본을 삭제하지 못했습니다. 작업이 두 번 실행되지 않도록 해당 위치에서 삭제하세요.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': '작업 업데이트 실패',
   'sessions.scheduledTasks.dialog.toast.deleted': '예약 작업 삭제됨',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': '작업 삭제 실패',
@@ -619,6 +626,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.actions.more': '더 보기',
   'sessions.sidebar.header.actions.exitSelection': '선택 종료',
   'sessions.sidebar.header.actions.selectSessions': '세션 선택',
+  'sessions.sidebar.header.actions.markAllRead': '모두 읽음으로 표시',
   'sessions.sidebar.header.actions.sortProjects': '프로젝트 정렬',
   'sessions.sidebar.header.actions.sessionDisplayMode': '세션 표시 모드',
   'sessions.sidebar.header.displayMode.label': '표시 모드',
@@ -1786,6 +1794,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.error.switchToEditMode': '문제를 수정하려면 편집 모드로 전환하세요.',
   'filesView.error.readFileFailed': '파일 읽기 실패',
   'filesView.editor.htmlPreviewTitle': 'HTML 미리보기',
+  'filesView.editor.htmlPreviewRelayUnavailable': '릴레이를 통해서는 HTML 미리보기를 사용할 수 없습니다',
+  'filesView.editor.htmlPreviewShowCode': '코드 보기',
   'filesView.editor.htmlAnnotate.intro': 'HTML 파일 미리보기에서 주석을 단 선택 영역입니다.',
   'filesView.diagram.closeDiagramView': '다이어그램 보기 닫기',
   'filesView.diagram.saveDiagram': '다이어그램 저장',
@@ -2426,7 +2436,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '낮은 우선순위',
   'chat.statusRow.actions.stopGeneratingAria': '생성 중지',
   'chat.statusRow.tasksTitle': '작업',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model}: {status}',
   'chat.statusRow.summary.activeLeft': '{active}개 활성 · {left}개 남음',
   'chat.revertIndicator.redo': '다시 실행',
   'chat.revertIndicator.redoAria': '다시 실행 — 되돌린 메시지 복원',
@@ -3013,7 +3023,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconDiscovered': '프로젝트 아이콘을 찾았습니다',
   'openInApp.actions.open': '열기',
   'openInApp.actions.openInAria': '{app}에서 열기',
-  'openInApp.actions.chooseAppAria': '열 앱 선택',
   'openInApp.actions.copyPath': '경로 복사',
   'openInApp.actions.refreshApps': '앱 새로고침',
   'openInApp.toast.pathCopied': '경로를 클립보드에 복사했습니다',
@@ -3895,12 +3904,16 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': '실행 후에도 워크트리와 브랜치가 남아 결과를 확인할 수 있습니다.',
   'sessions.scheduledTasks.editor.worktree.notRepo': '프로젝트 폴더는 git 저장소가 아닙니다. 실행은 체크아웃을 그대로 사용합니다.',
   'sessions.scheduledTasks.dialog.usesDefaults': '세션 기본값',
-  'sessions.moveChatToProject.menu': '프로젝트로 이동…',
-  'sessions.moveChatToProject.hint': '이 대화를 프로젝트 안에서 이어가기',
-  'sessions.moveChatToProject.title': '채팅을 프로젝트로 이동',
-  'sessions.moveChatToProject.description': '대화는 프로젝트 폴더에서 이어집니다. 채팅이 만든 파일은 그대로 남습니다.',
-  'sessions.moveChatToProject.success': '채팅을 프로젝트로 옮겼습니다',
-  'sessions.moveChatToProject.failed': '채팅을 옮길 수 없습니다',
+  'sessions.moveSession.menu': '세션 이동…',
+  'sessions.moveSession.hint': '파일은 이전 폴더에 남습니다',
+  'sessions.moveSession.title': '세션 이동',
+  'sessions.moveSession.description': '세션은 선택한 폴더에서 계속됩니다. 파일은 그대로 남습니다.',
+  'sessions.moveSession.chooseFolder': '폴더 선택…',
+  'sessions.moveSession.current': '현재 폴더',
+  'sessions.moveSession.success': '세션을 이동했습니다',
+  'sessions.moveSession.failed': '세션을 이동할 수 없습니다',
+  'chat.folderMissing.text': '{name} 폴더가 더 이상 없습니다',
+  'chat.folderMissing.action': '세션 이동',
   'chat.worktreeSetup.running': 'worktree 준비 중: 프로젝트 설정 명령을 실행하고 있습니다…',
   'chat.draft.creatingSession': '세션을 만드는 중…',
   'desktopHostSwitcher.startup.fellBackToLocal': '연결을 열지 못해 OpenChamber가 Local로 시작했습니다. 접속할 수 있게 되면 인스턴스 전환기에서 연결하세요.',

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { DIRECT_TOOLS_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
+import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
@@ -39,7 +40,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries',
+    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -202,7 +203,7 @@ describe('when to link', () => {
     });
     const entries = await entriesFor(runtime, NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${WORK_NAME_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
     expect(entries[PINNED]).toBe('');
     expect(entries[MEMORY]).toBe('');
   });
@@ -210,6 +211,20 @@ describe('when to link', () => {
   test('asks for the task name in the language of the user, the branch in English', () => {
     expect(WORK_NAME_GUIDANCE).toContain("in the language of the user's latest message");
     expect(WORK_NAME_GUIDANCE).toContain('A branch name stays in English.');
+  });
+
+  test('naming guidance is restricted to linked worktrees and spaces', async () => {
+    const runtime = createRuntime({
+      isSessionLinkingAvailable: async () => true,
+      isWorkNamingAvailable: async (directory) => directory === '/linked' || directory === '/spaces/abcdef123456/project',
+    });
+    for (const directory of ['/linked', '/spaces/abcdef123456/project']) {
+      expect((await entriesFor(runtime, NO_PINS, directory))[GUIDANCE]).toContain(WORK_NAME_GUIDANCE);
+    }
+    for (const directory of ['/main', '/plain']) {
+      expect((await entriesFor(runtime, NO_PINS, directory))[GUIDANCE]).not.toContain(WORK_NAME_GUIDANCE);
+    }
+    expect((await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true, isWorkNamingAvailable: async () => { throw new Error('unavailable'); } })))[GUIDANCE]).not.toContain(WORK_NAME_GUIDANCE);
   });
 
   test('is left out without the tool, or when the check fails', async () => {
@@ -229,8 +244,9 @@ describe('when to draw a page', () => {
   test('is told in a session whose agent has the render tool', async () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${RENDER_PAGE_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
-    expect(entries[GUIDANCE]).toContain('Skip it for a few numbers');
+    expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toContain('Not for a few numbers');
+    expect(entries[GUIDANCE]).toContain('root = Stack([...])');
   });
 
   test('is left out without the tool, or when the check fails', async () => {

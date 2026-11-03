@@ -31,6 +31,8 @@ import {
     type KeyBinding,
 } from '@codemirror/view';
 
+import { createPortal } from 'react-dom';
+import { PopupOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
 import { cn } from '@/lib/utils';
 import type { ComposerLanguageContext } from '../language/tokenize';
 import type { ComposerAutoCorrect } from './autocorrect';
@@ -249,6 +251,8 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
         } = props;
 
         const hostRef = React.useRef<HTMLDivElement | null>(null);
+        // The mounted view, for the overlay scrollbar drawn inside its editor element.
+        const [mountedView, setMountedView] = React.useState<EditorView | null>(null);
         const viewRef = React.useRef<EditorView | null>(null);
 
         // CodeMirror defers Enter on iOS and Chrome Android, then re-dispatches
@@ -296,9 +300,11 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                 // re-reads its geometry now that it is back in the document.
                 keptView.requestMeasure();
                 viewRef.current = keptView;
+                setMountedView(keptView);
                 return () => {
                     keptView.dom.remove();
                     viewRef.current = null;
+                    setMountedView(null);
                 };
             }
 
@@ -407,6 +413,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             });
 
             viewRef.current = view;
+            setMountedView(view);
             if (store) store.view = view;
 
             // Record the real modifier state after CodeMirror decides to defer
@@ -431,6 +438,7 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
             return () => {
                 clearDeferredEnterModifiers();
                 viewRef.current = null;
+                setMountedView(null);
                 // A stored view is detached, not destroyed: the store owns its
                 // lifetime now, and whoever owns the store ends it.
                 if (store) {
@@ -675,21 +683,29 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
         }), []);
 
         return (
-            <div
-                ref={hostRef}
-                data-testid={props['data-testid']}
-                data-chat-input={props.dataChatInput ?? 'true'}
-                onMouseDown={handleHostMouseDown}
-                className={cn(
-                    'composer-editor w-full',
-                    // The editor fills the host so its content box can cover
-                    // the whole clickable area rather than just the text.
-                    '[&_.cm-editor]:h-full',
-                    fillContainer && 'flex min-h-0 flex-1 flex-col',
-                    className,
-                    contentClassName,
-                )}
-            />
+            <>
+                <div
+                    ref={hostRef}
+                    data-testid={props['data-testid']}
+                    data-chat-input={props.dataChatInput ?? 'true'}
+                    onMouseDown={handleHostMouseDown}
+                    className={cn(
+                        'composer-editor w-full',
+                        // The editor fills the host so its content box can cover
+                        // the whole clickable area rather than just the text.
+                        '[&_.cm-editor]:h-full',
+                        fillContainer && 'flex min-h-0 flex-1 flex-col',
+                        className,
+                        contentClassName,
+                    )}
+                />
+                {/* Inside the editor element, the scroller's positioned parent:
+                    past the line cap the text scrolls under the app's thumb. */}
+                {mountedView ? createPortal(
+                    <PopupOverlayScrollbar scroller={mountedView.scrollDOM} disableHorizontal />,
+                    mountedView.dom,
+                ) : null}
+            </>
         );
     },
 ));

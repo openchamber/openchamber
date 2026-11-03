@@ -281,6 +281,13 @@ describe("renderedPage", () => {
     expect(renderedPage("openchamber_render", stopped)?.ask).toEqual({ kind: "unanswered" })
   })
 
+  test("reads a ui page, which waits and is answered like an html page", () => {
+    const input = { action: "render.page", parameters: { ui: "root = Stack([])", title: "Pick", awaitAnswer: true } }
+    expect(renderedPage("openchamber_render", running(input))).toEqual({ html: "", ui: "root = Stack([])", title: "Pick", ask: { kind: "waiting" } })
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: true, answer: { answered: false, reason: "ui-not-drawn" } } }))?.ask)
+      .toEqual({ kind: "not-drawn" })
+  })
+
   test("waits on an awaitAnswer a harness stringified, as the plugin normalizes it", () => {
     // The plugin sends the server "true"/"false" normalized to a real boolean
     // and waits there; OpenCode stores the input as it arrived. A string read

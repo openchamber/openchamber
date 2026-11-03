@@ -3465,7 +3465,7 @@ describe('git remote arguments with option-like names', () => {
     const head = runGit(repository, ['rev-parse', 'HEAD']).trim();
     runGit(repository, ['update-ref', `refs/remotes/${OPTION_LIKE_REMOTE}/gone`, head]);
 
-    const branches = await getBranches(repository);
+    const branches = await getBranches(repository, { remote: 'live' });
 
     expect(branches.all).toContain(`remotes/${OPTION_LIKE_REMOTE}/react`);
     expect(branches.all).not.toContain(`remotes/${OPTION_LIKE_REMOTE}/gone`);
@@ -5578,7 +5578,7 @@ describe.runIf(canRunGit())('getBranches', () => {
     const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
     fs.rmSync(remote, { recursive: true, force: true });
 
-    const branches = await getBranches(repository);
+    const branches = await getBranches(repository, { remote: 'live' });
 
     expect(branches.all).toContain('remotes/origin/react');
   });
@@ -5616,7 +5616,7 @@ describe.runIf(canRunGit())('getBranches', () => {
     runGit(collaborator, ['push', 'origin', 'feature-remote-only']);
     runGit(collaborator, ['push', 'origin', ':feature-stale']);
 
-    const branches = await getBranches(repository);
+    const branches = await getBranches(repository, { remote: 'live' });
 
     expect(branches.all).toContain('remotes/origin/feature-remote-only');
     expect(branches.all).toContain('remotes/origin/feature-known');
@@ -5663,17 +5663,18 @@ describe.runIf(canRunGit())('getBranches', () => {
 
   it('reuses a remote\'s answer until its local tracking refs change', async () => {
     const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
-    expect((await getBranches(repository)).all).not.toContain('remotes/origin/later');
+    const live = { remote: 'live' };
+    expect((await getBranches(repository, live)).all).not.toContain('remotes/origin/later');
     const collaborator = createTempDir();
     runGit(collaborator, ['clone', remote, '.']);
     runGit(collaborator, ['checkout', '-b', 'later']);
     runGit(collaborator, ['push', 'origin', 'later']);
 
     // Within the freshness window the remote is not asked again.
-    expect((await getBranches(repository)).all).not.toContain('remotes/origin/later');
+    expect((await getBranches(repository, live)).all).not.toContain('remotes/origin/later');
     // A fetch here changes the tracking refs, so the remote is read again.
     runGit(repository, ['fetch', 'origin']);
-    expect((await getBranches(repository)).all).toContain('remotes/origin/later');
+    expect((await getBranches(repository, live)).all).toContain('remotes/origin/later');
   });
 });
 
@@ -5688,7 +5689,6 @@ describe('parseRemoteListing', () => {
       '',
     ].join('\r\n');
     expect(parseRemoteListing(['bare', 'mirror', 'origin'], listing)).toEqual([
-      { name: 'bare', fetchUrl: 'bare', pushUrl: 'bare' },
       { name: 'mirror', fetchUrl: 'https://example.com/a b.git', pushUrl: 'https://example.com/a b.git' },
       { name: 'origin', fetchUrl: 'git@github.com:owner/repo.git', pushUrl: 'git@github.com:owner/push.git' },
     ]);
@@ -5709,7 +5709,6 @@ describe('parseRemoteListing', () => {
       '',
     ].join('\n');
     expect(parseRemoteListing(['bare', 'future', 'mirror', 'origin'], listing)).toEqual([
-      { name: 'bare', fetchUrl: 'bare', pushUrl: 'bare' },
       { name: 'future', fetchUrl: 'https://example.com/f.git', pushUrl: 'https://example.com/f.git' },
       { name: 'mirror', fetchUrl: 'https://example.com/repo.git', pushUrl: 'https://example.com/repo.git' },
       { name: 'origin', fetchUrl: 'git@github.com:owner/repo.git', pushUrl: 'git@github.com:owner/repo.git' },
@@ -5735,6 +5734,7 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
     });
 
     expect(remotes).toEqual(expected);
+    expect(remotes.map(({ name }) => name)).toEqual(['origin', 'rewritten']);
     expect(remotes.find((remote) => remote.name === 'rewritten')?.fetchUrl).toBe('https://github.com/other/repo.git');
     expect(remotes.find((remote) => remote.name === 'origin')?.pushUrl).toBe('git@github.com:owner/push.git');
   });
@@ -5752,6 +5752,75 @@ describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
       name: 'origin',
       fetchUrl: 'git@github.com:owner/repo.git',
       pushUrl: 'git@github.com:owner/repo.git',
+    });
+  });
+
+  it('leaves out a remote with no fetch URL, such as a git-annex special remote (#5995)', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['remote', 'add', 'origin', 'https://github.com/owner/repo.git']);
+    runGit(repository, ['config', 'remote.storage.annex-externaltype', 'example']);
+    runGit(repository, ['config', 'remote.storage.annex-uuid', '00000000-0000-0000-0000-000000000000']);
+    runGit(repository, ['config', 'remote.pushonly.pushurl', 'https://example.com/push.git']);
+
+    expect(await getRepositoryRemoteUrls(repository)).toEqual([{
+      name: 'origin',
+      fetchUrl: 'https://github.com/owner/repo.git',
+      pushUrl: 'https://github.com/owner/repo.git',
+    }]);
+  });
+
+  // The wrapper fails selected commands and delegates every other read to Git.
+  describe.skipIf(process.platform === 'win32')('when git remote -v fails', () => {
+    it.each([
+      { scenario: 'keeps configured fetch remotes', hasFetchUrl: true, configFailure: false },
+      { scenario: 'treats config exit 1 as no matching URL keys', hasFetchUrl: false, configFailure: false },
+      { scenario: 'preserves the fail-loud fallback on other config failures', hasFetchUrl: true, configFailure: true },
+    ])('$scenario', async ({ hasFetchUrl, configFailure }) => {
+      const repository = createTempDir();
+      runGit(repository, ['init', '-b', 'main']);
+      if (hasFetchUrl) {
+        runGit(repository, ['remote', 'add', 'up.stream', 'https://github.com/owner/repo.git']);
+        runGit(repository, ['config', 'remote.up.stream.pushurl', 'git@github.com:owner/push.git']);
+      }
+      runGit(repository, ['config', 'remote.storage.annex-uuid', '00000000-0000-0000-0000-000000000000']);
+      runGit(repository, ['config', 'remote.pushonly.pushurl', 'https://example.com/push.git']);
+
+      const wrapperDirectory = createTempDir();
+      const invocations = path.join(wrapperDirectory, 'invocations');
+      const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+      fs.writeFileSync(path.join(wrapperDirectory, 'git'), `#!/bin/sh
+echo "$*" >> "${invocations}"
+if [ "$1" = remote ] && [ "$2" = -v ]; then exit 2; fi
+${configFailure ? 'if [ "$1" = config ]; then exit 2; fi' : ''}
+exec "${realGit}" "$@"
+`);
+      fs.chmodSync(path.join(wrapperDirectory, 'git'), 0o755);
+      vi.stubEnv('PATH', `${wrapperDirectory}${path.delimiter}${process.env.PATH || ''}`);
+
+      let remotes;
+      try {
+        remotes = await getRepositoryRemoteUrls(repository);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+
+      const fetchRemote = {
+        name: 'up.stream',
+        fetchUrl: 'https://github.com/owner/repo.git',
+        pushUrl: 'git@github.com:owner/push.git',
+      };
+      expect(remotes).toEqual(configFailure ? [
+        { name: 'pushonly', fetchUrl: 'pushonly', pushUrl: 'https://example.com/push.git' },
+        { name: 'storage', fetchUrl: 'storage', pushUrl: 'storage' },
+        fetchRemote,
+      ] : hasFetchUrl ? [fetchRemote] : []);
+      const commands = fs.readFileSync(invocations, 'utf8').trim().split('\n');
+      expect(commands).toContain('remote -v');
+      expect(commands).toContain('config --name-only --get-regexp ^remote\\..*\\.url$');
+      if (!configFailure) {
+        expect(commands.some((command) => command.startsWith('remote get-url') && /(?:storage|pushonly)$/.test(command))).toBe(false);
+      }
     });
   });
 });
@@ -6108,6 +6177,27 @@ describe.runIf(canRunGit())('getRangeDiff', () => {
     await expect(
       getRangeDiff(repository, { base: 'remotes/origin/never-fetched', head: 'next' })
     ).rejects.toThrow(/is not available locally/);
+  });
+
+  it('fetches an unfetched remote base branch before comparing, as for a stacked pull request', async () => {
+    const { repository } = createRepositoryWithRemote({ defaultBranch: 'react' });
+    // The parent branch of the stack is on the remote, but this clone never fetched it.
+    runGit(repository, ['checkout', '-b', 'parent']);
+    fs.writeFileSync(path.join(repository, 'parent.txt'), 'parent\n');
+    runGit(repository, ['add', 'parent.txt']);
+    runGit(repository, ['commit', '-m', 'parent']);
+    runGit(repository, ['push', 'origin', 'parent']);
+    runGit(repository, ['update-ref', '-d', 'refs/remotes/origin/parent']);
+    runGit(repository, ['checkout', '-b', 'child']);
+    runGit(repository, ['branch', '-D', 'parent']);
+    fs.writeFileSync(path.join(repository, 'child.txt'), 'child\n');
+    runGit(repository, ['add', 'child.txt']);
+    runGit(repository, ['commit', '-m', 'child']);
+
+    const files = await getRangeFiles(repository, { base: 'origin/parent', head: 'child' });
+
+    expect(files.map((file) => file.path)).toEqual(['child.txt']);
+    expect(await getRangeDiff(repository, { base: 'origin/parent', head: 'child' })).not.toContain('parent.txt');
   });
 });
 
@@ -6745,13 +6835,26 @@ describe('worktree task titles', () => {
     const entryOf = async () => (await getWorktrees(repo)).find((worktree) => fs.realpathSync(worktree.path) === fs.realpathSync(linked));
 
     expect((await entryOf())?.pinnedAt).toBeUndefined();
-    expect(await setWorktreePinned(linked, true, 1234)).toEqual({ pinned: true, branch: 'feature/task' });
+    expect(await setWorktreePinned(linked, true, null, 1234)).toEqual({ pinned: true, branch: 'feature/task' });
     expect((await entryOf())?.pinnedAt).toBe(1234);
     // Pinning again keeps the first pin's time.
-    await setWorktreePinned(linked, true, 5678);
+    await setWorktreePinned(linked, true, null, 5678);
     expect((await entryOf())?.pinnedAt).toBe(1234);
 
     expect(await setWorktreePinned(linked, false)).toEqual({ pinned: false, branch: 'feature/task' });
     expect((await entryOf())?.pinnedAt).toBeUndefined();
+  });
+
+  it('files a pinned worktree into a pin list and back, keeping the first pin time', async () => {
+    const { repo, linked } = createLinkedWorktree();
+    const entryOf = async () => (await getWorktrees(repo)).find((worktree) => fs.realpathSync(worktree.path) === fs.realpathSync(linked));
+
+    await setWorktreePinned(linked, true, 'release', 1234);
+    expect(await entryOf()).toMatchObject({ pinnedAt: 1234, pinList: 'release' });
+    await setWorktreePinned(linked, true, null, 5678);
+    const entry = await entryOf();
+    expect(entry?.pinnedAt).toBe(1234);
+    expect(entry?.pinList).toBeUndefined();
+    await expect(setWorktreePinned(linked, true, 'bad list')).rejects.toMatchObject({ status: 400 });
   });
 });

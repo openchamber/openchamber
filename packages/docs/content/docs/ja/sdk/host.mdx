@@ -257,6 +257,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 どのプロジェクトをどのルームやチャンネルに送るかは拡張機能が決めます。通知には `directory` と `sessionName` が含まれます。エンタープライズモードでは、スマートフォンと同じく汎用的なタイトルだけが含まれます。`notification-webhook` の例は完成したチャネルで、試すための受信側も付いています。
 
+## トラッカー
+
+サービスは、Linear の隣に並ぶ作業アイテムのトラッカーになれます。`provides: ["tracker"]` を宣言し、`contributes.tracker` でトラッカーを記述します。OpenChamber は、サービスが一度も動く前に、マニフェストだけを基にトラッカーが現れるすべての場所で Linear の隣にそれを並べます。
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+ユーザーは、拡張機能のアカウント にあるトラッカーのカードでアカウントを接続します。トークンか、`auth.oauth` を宣言した場合はブラウザーでのサインインです（OpenChamber はユーザーが入力した client id でサインインを実行し、トークンを保持します）。サービスが認証情報を見ることはありません。`urls.item` はアイテムのアドレスのテンプレートで、`{id}` が識別子を表します（クエリで渡される場合は `?name={id}` の形も使えます）。OpenChamber がこれをコンパイルするので、貼り付けたリンクはリンクされたアイテムになります。`identifier` はキーの形を示します。`key-number`（`PROJ-42`）、`number`、`short-code` のいずれかです。
+
+OpenChamber は 9 種類の呼び出しを `POST /tracker` に転送します。`auth.probe` と `auth.verify`、読み取りの `items.list`、`items.get`、`items.liveSummaries`、`states.list`、`containers.list`、書き込みの `items.updateState` と `comments.create` です。それぞれ `readTrackerProviderRequest` で読み取り、中立的なアイテムの形で応答し、トラッカーのサーバーには送信ヘルパー経由でのみアクセスします。ヘルパーは呼び出しのハンドルを付けてリクエストを OpenChamber に送り、OpenChamber が認証情報を加え、リクエストをアカウントのサーバーに限定します。読み取りのハンドルは `GET` しか送れません。
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+ユーザーがセッションコメントをオンにすると、OpenChamber は "session started"、"completed"、"failed" とセッションへのリンクを付けて `comments.create` をそれぞれ 1 回呼び出します。コメントにはそれ以外何も含まれません。`tracker-provider` の例は完成したトラッカーで、試すための偽のサーバーも付いています。
+
 ## ファイル
 
 相対パスは開いているプロジェクトの中を指し、`files` 権限が必要です。`/` または `~/` で始まるパスは、宣言済みの `contributes.filesystem` パターンに一致する必要があり、`filesystem` 権限が必要です。規則は [拡張機能を作る](/sdk/#ファイル) を参照してください。

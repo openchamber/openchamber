@@ -25,7 +25,8 @@ const compiles = (source: string): boolean => {
   }
 };
 
-const patternSchema = z.string().min(1).max(256).refine(compiles);
+// Compiled by the server from a template of at most 256 characters; anchors, escapes and bounded placeholders make it longer.
+const patternSchema = z.string().min(1).max(2_048).refine(compiles);
 
 // A capability an older server does not name is off.
 const flag = z.boolean().catch(false);
@@ -49,10 +50,16 @@ const descriptorSchema = z.object({
     hostAccess: flag,
   }),
   stateFilters: z.array(z.string().min(1).max(32)).max(32),
-  // A pattern that does not compile is dropped; the tracker still lists.
-  urlPatterns: z.array(z.object({ host: z.string().min(1).max(256), path: patternSchema }).nullable().catch(null))
+  // A pattern that does not compile is dropped; the tracker still lists. `query`
+  // names the parameter that carries the identifier (an extension tracker's
+  // `?selectedIssue={id}` template); a malformed one reads as a path pattern.
+  urlPatterns: z.array(z.object({
+    host: z.string().min(1).max(256),
+    path: patternSchema,
+    query: z.object({ name: z.string().min(1).max(64) }).optional().catch(undefined),
+  }).nullable().catch(null))
     .max(8)
-    .transform((patterns) => patterns.filter((pattern): pattern is { host: string; path: string } => pattern !== null)),
+    .transform((patterns) => patterns.filter((pattern): pattern is { host: string; path: string; query?: { name: string } } => pattern !== null)),
   identifierPattern: patternSchema,
 }) satisfies z.ZodType<TrackerDescriptor>;
 

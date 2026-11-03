@@ -37,6 +37,13 @@ export interface EasterEggCopy {
     /** Midnight to 05:00. Titles contain `{time}`. */
     smallHours: readonly ToastLine[];
   };
+  /**
+   * Said in place of "thinking" for about one block of reasoning in four.
+   * Each line is a predicate like the agent status phrases: it follows the
+   * model's name through `chat.statusRow.modelStatus` ("Opus is mulling it
+   * over") and stands alone with a capital first letter.
+   */
+  thinking: readonly string[];
   /** A commit that removes clearly more lines than it adds. Titles contain `{count}`. */
   netDeletionCommit: readonly { title: CountedText; description: string }[];
 }

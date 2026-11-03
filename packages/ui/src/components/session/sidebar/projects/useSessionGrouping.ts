@@ -1,4 +1,4 @@
-import { matchesRankQuery } from '@/lib/search/fuzzySearch';
+import { matchesRankQuery, SIDEBAR_SEARCH } from '@/lib/search/fuzzySearch';
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -17,6 +17,7 @@ import { getWorktreeFirstSeenAt } from './worktreeFirstSeen';
 import { buildProjectWorktreeIndex, findPrefixWorktreeEntry } from '../worktreeIndex';
 import type { SpaceMark } from '@/lib/spaces/spaces-store';
 import { resolveSessionNestingParentId } from '@/lib/sessionWorkLineage';
+import { listedChildren } from '../listedChildren';
 
 type Args = {
   homeDirectory: string | null;
@@ -103,12 +104,12 @@ export const useSessionGrouping = (args: Args) => {
         if (isIdQuery && isArchivedSession(node.session)) return [];
         const nodeMatches = isIdQuery
           ? node.session.id.toLowerCase() === normalizedQuery
-          : matchesRankQuery([buildSessionSearchText(node.session)], query);
+          : matchesRankQuery([buildSessionSearchText(node.session)], query, SIDEBAR_SEARCH);
         if (nodeMatches) {
           return [node];
         }
 
-        const filteredChildren = filterSessionNodesForSearch(node.children, query);
+        const filteredChildren = filterSessionNodesForSearch([...listedChildren(node)], query);
         if (filteredChildren.length === 0) {
           return [];
         }

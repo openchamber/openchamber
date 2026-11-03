@@ -10,11 +10,11 @@ import {
 const WORKTREE = '/worktrees/feature';
 const SHA = 'abc123';
 
-const session = (id: string, directory = WORKTREE): Session => ({
+const session = (id: string): Session => ({
   id,
   projectID: 'app',
   title: id,
-  directory,
+  directory: WORKTREE,
   cost: 0,
   tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   time: { created: 1, updated: 1 },
@@ -29,9 +29,8 @@ const candidate: MergedWorktreeCandidate = {
 
 const setup = (options: {
   sessions?: Session[];
-  busy?: string[];
-  open?: string[];
-  worktreeOpen?: boolean;
+  use?: 'free' | 'busy' | 'inUse' | 'unknown';
+  switchedRuntime?: boolean;
   handled?: boolean;
   archiveFails?: boolean;
   removing?: boolean;
@@ -41,15 +40,16 @@ const setup = (options: {
   const handled = new Set<string>(options.handled ? [WORKTREE] : []);
   const archived: string[][] = [];
   const reports: MergedWorktreeOutcome[] = [];
-  const calls = { archived, reports };
+  const calls = { archived, reports, failed: 0 };
   const deps = {
     listCandidates: () => [candidate],
     isHandled: (entry: MergedWorktreeCandidate) => handled.has(entry.worktree.path),
     markHandled: (entry: MergedWorktreeCandidate) => { handled.add(entry.worktree.path); },
-    getActiveSessions: () => options.sessions ?? [session('a'), session('elsewhere', '/projects/app')],
-    isSessionIdle: (id: string) => !(options.busy ?? []).includes(id),
-    isSessionOpen: (id: string) => (options.open ?? []).includes(id),
-    isWorktreeOpen: () => options.worktreeOpen ?? false,
+    // Stands for the delay: a failed worktree waits until the test lets it retry.
+    markFailed: (entry: MergedWorktreeCandidate) => { handled.add(entry.worktree.path); calls.failed += 1; },
+    getWorktreeSessions: () => options.sessions ?? [session('a')],
+    readWorktreeUse: async () => options.use ?? 'free',
+    isCurrentRuntime: () => !options.switchedRuntime,
     isWorktreeRemoving: () => options.removing ?? false,
     takeRestored: () => {
       const answer = restored;
@@ -91,13 +91,21 @@ describe('runMergedWorktreeCleanup', () => {
     expect(calls.reports.map((entry) => entry.kind)).toEqual(['archived']);
   });
 
-  test('a busy agent, an open session or an open draft there leaves it for a later pass', async () => {
-    for (const options of [{ busy: ['a'] }, { open: ['a'] }, { worktreeOpen: true }]) {
+  test('a busy agent, the worktree on screen or an unanswered host leaves it for a later pass', async () => {
+    for (const use of ['busy', 'inUse', 'unknown'] as const) {
+      const options = { use };
       const { deps, calls, handled } = setup(options);
       await runMergedWorktreeCleanup(deps);
       expect(calls.archived).toEqual([]);
       expect(handled.size).toBe(0);
     }
+  });
+
+  test('a server switch while the host answers stops the pass', async () => {
+    const { deps, calls, handled } = setup({ switchedRuntime: true });
+    await runMergedWorktreeCleanup(deps);
+    expect(calls.archived).toEqual([]);
+    expect(handled.size).toBe(0);
   });
 
   test('a worktree without sessions is archived too', async () => {
@@ -121,10 +129,15 @@ describe('runMergedWorktreeCleanup', () => {
     expect(handled.size).toBe(1);
   });
 
-  test('a failed archive is reported and not tried again on every pass', async () => {
-    const { deps, calls } = setup({ archiveFails: true });
+  test('a failed archive waits out its delay instead of being marked done', async () => {
+    const { deps, calls, handled } = setup({ archiveFails: true });
     await runMergedWorktreeCleanup(deps);
     await runMergedWorktreeCleanup(deps);
     expect(calls.reports.map((entry) => entry.kind)).toEqual(['failed']);
+    expect(calls.failed).toBe(1);
+
+    handled.clear();
+    await runMergedWorktreeCleanup(deps);
+    expect(calls.failed).toBe(2);
   });
 });

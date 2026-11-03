@@ -82,10 +82,13 @@ Auto. There is no env gate — the feature shipped dark behind
 - Routing failures keep the user's own behaviour: a Jev error, timeout, unknown
   category or low confidence routes to the fallback model, and the decision
   carries the reason.
-- The routing question sends `ROUTING_INSTRUCTIONS` as one string, the same
-  form as the Test probe. TypeSafe also accepts a list there, but a
-  self-hosted System One server may not: Kev answers a list with 400, so Auto
-  fell back on every send while Test passed (#4175).
+- The routing and safety-net questions send `ROUTING_INSTRUCTIONS` and
+  `SAFETY_INSTRUCTIONS` as one string each, the same form as the Test probe,
+  and the safety-net `ask` question passes `SAFETY_CRITERIA` (`true` / `false`)
+  on `criteria`. TypeSafe and Ollama's `kev` runner accept a list for
+  `instructions`, while `@kev-ai/server` answers a list with 400 (#4175);
+  without `criteria` on `ask`, Ollama `kev` also scored `brew install` and
+  `git checkout -- .` below the 0.6 hold threshold (#6028).
 - The safety net accepts only on a verdict from Jev. With no usable
   classification provider it holds quietly (the session behaves like `ask`);
   when Jev fails it holds, broadcasts `openchamber:routing.safety-skipped` with

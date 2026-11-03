@@ -12,6 +12,7 @@
  * here when they are part of the same directory/session workflows.
  */
 
+import { isLocationNotFoundError } from "./location-errors"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
 import type {
   FileDiffInfo,
@@ -333,6 +334,17 @@ const isEventStreamUrl = (url: URL): boolean => url.pathname.endsWith("/event") 
 /** Header the server reads to resolve a Location; the value is URI-encoded on both ends. */
 const OPENCODE_DIRECTORY_HEADER = "x-opencode-directory"
 
+/**
+ * The directory as OpenCode is sent it. The UI keeps a Windows network share
+ * as `//server/share`; OpenCode on Windows reads any path that starts with
+ * "/" as POSIX and collapses it to `/server/share`, a folder that does not
+ * exist. Backslashes keep it a UNC path there. A path that starts with
+ * exactly two slashes only comes from a UNC path: POSIX servers and OpenCode
+ * collapse a leading `//` to `/` before the UI ever sees it.
+ */
+const toOpenCodeDirectory = (directory: string): string =>
+  /^\/\/[^/]/.test(directory) ? directory.replace(/\//g, "\\") : directory
+
 type RuntimeOpencodeClientConfig = {
   baseUrl: string
   directory?: string
@@ -426,7 +438,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
   }
   return OpenCode.make({
     baseUrl: toOpencodeClientRoot(config.baseUrl),
-    headers: config.directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(config.directory) } : undefined,
+    headers: config.directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(toOpenCodeDirectory(config.directory)) } : undefined,
     // A folder whose configuration runs code is refused until the user trusts
     // it (lib/opencodeTrust.ts). The request waits for the answer and goes out
     // again once trust is saved; a declined one returns the refusal.
@@ -757,7 +769,7 @@ class OpencodeService {
     return (sessionID) => cleanup(async ({ fetch, baseUrl }) => {
       const client = OpenCode.make({
         baseUrl: ensureAbsoluteBaseUrl(baseUrl || "/"),
-        headers: directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(directory) } : undefined,
+        headers: directory ? { [OPENCODE_DIRECTORY_HEADER]: encodeURIComponent(toOpenCodeDirectory(directory)) } : undefined,
         fetch,
       })
       try {
@@ -1046,6 +1058,24 @@ class OpencodeService {
     return readDirectoryAvailability(normalized)
   }
 
+  /**
+   * Whether OpenCode itself can no longer work in a folder. The stat above runs
+   * on OpenChamber's machine, which is not OpenCode's when `OPENCODE_HOST` names
+   * another one, so only OpenCode's refusal makes a folder missing. The stat
+   * comes first: a folder that is there never takes this read, and the refused
+   * read starts nothing.
+   */
+  async getLocationAvailability(directory: string): Promise<DirectoryAvailability> {
+    const stat = await this.getDirectoryAvailability(directory)
+    if (stat !== "missing") return stat
+    try {
+      await this.listAgents(directory)
+      return "available"
+    } catch (error) {
+      return error instanceof Error && isLocationNotFoundError(error) ? "missing" : "unknown"
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Sessions
   // -------------------------------------------------------------------------
@@ -1056,7 +1086,7 @@ class OpencodeService {
     const client = directory ? this.getScopedSdkClient(directory) : this.client
     const response = await call("session.list", () =>
       client.session.list({
-        directory,
+        directory: directory ? toOpenCodeDirectory(directory) : undefined,
         limit: options.limit ?? DEFAULT_SESSION_PAGE_LIMIT,
         order: options.order,
         search: options.search,
@@ -1092,7 +1122,7 @@ class OpencodeService {
         // session on; the first send puts the session on Auto through the
         // model switch the server intercepts.
         model: !params?.model || isAutoModel(params.model.providerID, params.model.id) ? undefined : toModelRef(params.model),
-        location: requestDirectory ? { directory: requestDirectory } : undefined,
+        location: requestDirectory ? { directory: toOpenCodeDirectory(requestDirectory) } : undefined,
         metadata: params?.metadata,
       }),
     )
@@ -1128,7 +1158,7 @@ class OpencodeService {
   async moveSession(id: string, toDirectory: string, options?: { delivery?: SessionInboxDelivery }): Promise<void> {
     const directory = this.normalizeCandidatePath(toDirectory) ?? toDirectory
     await call("session.move", () =>
-      this.client.session.move({ sessionID: id, directory, delivery: options?.delivery }),
+      this.client.session.move({ sessionID: id, directory: toOpenCodeDirectory(directory), delivery: options?.delivery }),
     )
   }
 
@@ -1641,6 +1671,33 @@ class OpencodeService {
     await call("session.background", () => this.clientFor(directory).session.background({ sessionID: id }))
   }
 
+  /**
+   * Hands the agent input the user gave outside the composer, such as the
+   * choices in a UI block of its last reply, and starts its next turn. The
+   * input is a synthetic message: the chat shows no user bubble for it, and
+   * `metadata` lets the chat find it again.
+   */
+  async resumeWithSyntheticInput(params: {
+    runtimeKey: string
+    /** Client-minted, so a retry after a lost response is refused as a repeat instead of landing twice. */
+    id: string
+    sessionId: string
+    directory?: string | null
+    text: string
+    metadata: Metadata
+  }): Promise<void> {
+    this.assertRuntimeUnchanged(params.runtimeKey)
+    await call("session.synthetic", () =>
+      this.clientFor(params.directory).session.synthetic({
+        sessionID: params.sessionId,
+        id: params.id,
+        text: params.text,
+        metadata: params.metadata,
+        resume: true,
+      }),
+    )
+  }
+
   /** Runs a shell command inside the session transcript. Returns the shell message id. */
   async shellSession(params: {
     runtimeKey?: string
@@ -2073,7 +2130,8 @@ class OpencodeService {
    * The store keeps image models out of the chat pickers.
    *
    * `fresh`: a request already in flight started before the caller's reason to re-read (a
-   * catalog event), so it may carry the old catalog. Wait it out and read again.
+   * catalog event), so it may carry the old catalog. Wait out ordinary reads;
+   * callers waiting on that read share the replacement started after their call.
    */
   async getProvidersForConfig(directory?: string | null, options?: { fresh?: boolean }): Promise<ProviderCatalog> {
     const isCurrent = captureRuntimeInstance()

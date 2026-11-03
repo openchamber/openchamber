@@ -227,3 +227,38 @@ describe('provider read cache', () => {
     expect(calls).toBe(2);
   });
 });
+
+describe('provider read cache with trackers that attach while the server runs', () => {
+  it('caches and clears a tracker\'s reads only while the registry lists it', async () => {
+    const trackers = ['linear'];
+    const changed = [];
+    const cache = createProviderReadCache({ now: () => 1_000, trackerIds: () => trackers, onChange: (provider) => changed.push(provider) });
+    const app = express();
+    app.use(cache.middleware);
+    let reads = 0;
+    app.get('/api/tracker/:provider/items/list', (_req, res) => { reads += 1; res.json({ connected: true, items: [], cursor: null, hasMore: false }); });
+    app.post('/api/tracker/:provider/items/update', (_req, res) => res.json({ connected: true, item: null }));
+
+    // Not listed yet: every read reaches the tracker and a write clears nothing.
+    await request(app).get('/api/tracker/ext-yt/items/list?state=open');
+    await request(app).get('/api/tracker/ext-yt/items/list?state=open');
+    expect(reads).toBe(2);
+    await request(app).post('/api/tracker/ext-yt/items/update').send({});
+    expect(changed).toEqual([]);
+
+    trackers.push('ext-yt');
+    await request(app).get('/api/tracker/ext-yt/items/list?state=open');
+    await request(app).get('/api/tracker/ext-yt/items/list?state=open');
+    expect(reads).toBe(3);
+    await request(app).post('/api/tracker/ext-yt/items/update').send({});
+    expect(changed).toEqual(['ext-yt']);
+    await request(app).get('/api/tracker/ext-yt/items/list?state=open');
+    expect(reads).toBe(4);
+
+    // The legacy Linear alias follows the same live membership.
+    app.get('/api/linear/issues/list', (_req, res) => { reads += 1; res.json({ connected: true, issues: [] }); });
+    await request(app).get('/api/linear/issues/list');
+    await request(app).get('/api/linear/issues/list');
+    expect(reads).toBe(5);
+  });
+});

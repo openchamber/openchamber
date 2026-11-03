@@ -69,6 +69,9 @@ export type SourceControlStatus = ChangeRequestStatus & {
     headSha?: string;
     mergeable?: boolean | null;
     mergeableState?: string | null;
+    isInMergeQueue?: boolean;
+    mergeQueueEntry?: { state: string; position: number } | null;
+    autoMergeRequest?: { enabledAt: string; mergeMethod: string } | null;
   } | null;
   checks?: CISummary | null;
   repo?: {
@@ -456,29 +459,6 @@ const getFreshestBoundPrEntryForBranch = (
   return best;
 };
 
-const getFreshestLegacyPrEntryForBranch = (
-  entries: Record<string, PrStatusEntry>,
-  identity: SourceControlIdentity,
-  directory: string,
-  branch: string,
-): PrStatusEntry | null => {
-  const runtimeKey = getRuntimeKey();
-  let best: PrStatusEntry | null = null;
-  for (const [key, entry] of Object.entries(entries)) {
-    if (!entry.status) continue;
-    const parsed = parseStatusKey(key);
-    if (!parsed
-      || parsed.accountId
-      || parsed.runtimeKey !== runtimeKey
-      || parsed.provider !== identity.provider
-      || parsed.instance !== identity.instance
-      || parsed.directory !== directory
-      || parsed.branch !== branch) continue;
-    if (!best || entry.lastRefreshAt > best.lastRefreshAt) best = entry;
-  }
-  return best;
-};
-
 const getFreshestSourceControlEntryForBranch = (
   entries: Record<string, PrStatusEntry>,
   contexts: SourceControlReadContext[],
@@ -529,9 +509,68 @@ export const getActiveSourceControlStatusKeys = (
   return [...keys];
 };
 
-export const getFreshestPrStatusForBranch = (
-  entries: Record<string, PrStatusEntry>, directory: string, branch: string,
-): SourceControlStatus | null => getFreshestLegacyPrEntryForBranch(entries, GITHUB_IDENTITY, directory, branch)?.status ?? null;
+/**
+ * Bound entries of a branch outside any registration, when they all come from
+ * one repository binding. Live answers refresh any entry, so freshness cannot
+ * tell which of two bindings is current; with more than one nothing is
+ * trusted until a row registers the directory's contexts again.
+ */
+const getSoleBindingEntries = (
+  entries: Record<string, PrStatusEntry>,
+  runtimeKey: string,
+  directory: string,
+  branch: string,
+): Array<[string, PrStatusEntry]> => {
+  const matching: Array<[string, PrStatusEntry]> = [];
+  const bindings = new Set<string>();
+  for (const [key, entry] of Object.entries(entries)) {
+    const parsed = parseStatusKey(key);
+    if (!parsed?.accountId || parsed.runtimeKey !== runtimeKey || parsed.directory !== directory || parsed.branch !== branch) continue;
+    bindings.add(JSON.stringify([parsed.provider, parsed.instance, parsed.accountId, parsed.repositoryId, parsed.bindingRevision]));
+    matching.push([key, entry]);
+  }
+  return bindings.size === 1 ? matching : [];
+};
+
+/**
+ * The bound entry keys a background follower keeps live for these branches,
+ * without a row on screen: the registered contexts' entries, or the sole
+ * binding's when none is registered.
+ */
+export const getBoundStatusKeysForBranches = (
+  state: Pick<SourceControlStatusStore, 'entries' | 'activeContextRegistrations'>,
+  targets: ReadonlyArray<{ directory: string; branch: string }>,
+): string[] => {
+  const runtimeKey = getRuntimeKey();
+  return targets.flatMap(({ directory, branch }) => {
+    const registrations = state.activeContextRegistrations[getActiveContextsDirectoryKey(runtimeKey, directory)];
+    if (registrations) return getActiveContexts(registrations).map((context) => getSourceControlStatusKey(context, branch));
+    return getSoleBindingEntries(state.entries, runtimeKey, directory, branch).map(([key]) => key);
+  });
+};
+
+/**
+ * The branch status a background reader should trust, outside any row: the
+ * one the sidebar reads while the directory's contexts are registered, and
+ * otherwise the sole binding's freshest answer, so a project collapsed since
+ * the merge still answers.
+ */
+export const getFreshestBranchStatusForDirectory = (
+  state: Pick<SourceControlStatusStore, 'entries' | 'activeContextRegistrations'>,
+  directory: string,
+  branch: string,
+): SourceControlStatus | null => {
+  const runtimeKey = getRuntimeKey();
+  // A registration, even an empty one (no authorized binding now), is the
+  // authority; only a directory with none falls back to cached answers.
+  const registrations = state.activeContextRegistrations[getActiveContextsDirectoryKey(runtimeKey, directory)];
+  if (registrations) return getFreshestSourceControlEntryForBranch(state.entries, getActiveContexts(registrations), branch)?.status ?? null;
+  let best: PrStatusEntry | null = null;
+  for (const [, entry] of getSoleBindingEntries(state.entries, runtimeKey, directory, branch)) {
+    if (entry.status && (!best || entry.lastRefreshAt > best.lastRefreshAt)) best = entry;
+  }
+  return best?.status ?? null;
+};
 
 const getKeysBySignature = (entries: Record<string, PrStatusEntry>, signature: string): string[] => {
   return Object.entries(entries)
@@ -692,6 +731,9 @@ const persistedPrStatusEntrySchema = z.object({
       headSha: z.string().optional(),
       mergeable: z.boolean().nullable().optional(),
       mergeableState: z.string().nullable().optional(),
+      isInMergeQueue: z.boolean().optional(),
+      mergeQueueEntry: z.object({ state: z.string(), position: z.number().int().nonnegative() }).nullish(),
+      autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullish(),
     }).strip().nullable().optional(),
     checks: z.object({
       state: z.enum(['success', 'failure', 'pending', 'unknown']),
@@ -828,6 +870,9 @@ const applyLiveSummary = (
     && pr.title === summary.title
     && (pr.mergeable ?? null) === summary.mergeable
     && (pr.mergeableState ?? null) === summary.mergeableState
+    && (pr.isInMergeQueue ?? false) === (summary.isInMergeQueue ?? false)
+    && JSON.stringify(pr.mergeQueueEntry ?? null) === JSON.stringify(summary.mergeQueueEntry ?? null)
+    && JSON.stringify(pr.autoMergeRequest ?? null) === JSON.stringify(summary.autoMergeRequest ?? null)
     && (!summary.headSha || pr.headSha === summary.headSha)
     && (!summary.base || pr.base === summary.base)
     && sameChecks(getStatusChecks(status), summary.checks);
@@ -842,6 +887,9 @@ const applyLiveSummary = (
     base: summary.base ?? pr.base,
     mergeable: summary.mergeable,
     mergeableState: summary.mergeableState,
+    isInMergeQueue: summary.isInMergeQueue ?? false,
+    mergeQueueEntry: summary.mergeQueueEntry ?? null,
+    autoMergeRequest: summary.autoMergeRequest ?? null,
   };
   const ci: CI | null = summary.checks ? { ...status.ci, summary: summary.checks } : null;
   return {

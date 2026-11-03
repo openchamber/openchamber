@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
+import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
+  toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
@@ -324,6 +325,10 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.notifications) {
     guest.notifications = parsed.manifest.contributes.notifications;
   }
+  // The work item tracker a `tracker` service provides; the parse requires it exactly then.
+  if (parsed.manifest.contributes.tracker) {
+    guest.tracker = parsed.manifest.contributes.tracker;
+  }
   return { ok: true, guest };
 };
 
@@ -370,6 +375,9 @@ export const toPublicGuest = (guest) => {
   }
   if (typeof guest.version === 'string' && guest.version) {
     row.version = guest.version;
+  }
+  if (guest.revision > 0) {
+    row.revision = guest.revision;
   }
   // Git installs remember where they came from so the UI can offer updates.
   // The URL is the one the user typed at install; it carries no credentials.
@@ -448,6 +456,10 @@ export const toPublicGuest = (guest) => {
   if (guest.notifications) {
     row.notifications = toPublicNotifications(guest.notifications);
   }
+  // What the approval dialog and the tracker's account card name: the tracker, where its accounts live, how one signs in.
+  if (guest.tracker) {
+    row.tracker = toPublicTracker(guest.tracker);
+  }
   return row;
 };
 
@@ -482,6 +494,38 @@ export const invalidateGuestCatalog = (persistPath) => {
   }
 };
 onExtensionStoreWrite(invalidateGuestCatalog);
+
+/**
+ * How many times each package's files changed under this host: an install
+ * over it, a Git update, or an edit to a folder install. Frames key on it, so
+ * an open panel loads the new files. Kept in memory: it starts at 0 with the
+ * host, which reloads a frame at most once after a restart.
+ * @type {Map<string, Map<string, number>>}
+ */
+const packageRevisions = new Map();
+
+/**
+ * The last row each package root loaded with in this host run, and whether
+ * the root fails to load now and is listed from that row instead.
+ * shortcut: a folder that stays broken keeps its old row until the host restarts; age it out if that confuses anyone.
+ * @type {Map<string, { guest: NonNullable<Awaited<ReturnType<typeof loadGuestFromPackageRoot>>>, unloaded: boolean }>}
+ */
+const lastLoadedGuests = new Map();
+
+export const lastLoadedGuestAt = (packageRoot) => lastLoadedGuests.get(packageRoot)?.guest ?? null;
+
+/**
+ * A root listed from its last loaded row: its files on disk are not what the
+ * row's declarations and grants describe, so no service starts from them.
+ */
+export const isGuestPackageUnloaded = (packageRoot) => lastLoadedGuests.get(packageRoot)?.unloaded === true;
+
+export const noteGuestPackageChanged = (persistPath, id) => {
+  const revisions = packageRevisions.get(persistPath) ?? new Map();
+  revisions.set(id, (revisions.get(id) ?? 0) + 1);
+  packageRevisions.set(persistPath, revisions);
+  invalidateGuestCatalog(persistPath);
+};
 
 /**
  * Enterprise mode, applied on every read after the cache so a policy change
@@ -556,7 +600,13 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
     }
     // Already-installed packages stay listed even if engines.openchamber is newer
     // than this host. Install is the gate.
-    const guest = await loadGuestFromPackageRoot(root, { skipEngineCheck: true });
+    const loaded = await loadGuestFromPackageRoot(root, { skipEngineCheck: true });
+    const previous = lastLoadedGuests.get(root);
+    if (loaded || previous) lastLoadedGuests.set(root, { guest: loaded ?? previous.guest, unloaded: !loaded });
+    // A folder rebuilt in place fails to load while its build has emptied the
+    // output. Its last loaded row stays listed meanwhile, so no reader drops its
+    // tabs or roles before the finished build replaces it.
+    const guest = loaded ?? previous?.guest;
     if (!guest || seen.has(guest.id) || isReservedBuiltInId(guest.id)) {
       continue;
     }
@@ -584,6 +634,7 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
       ),
       enabled: !stored.disabledGuests?.[guest.id],
       socketBindings,
+      revision: packageRevisions.get(persistPath)?.get(guest.id) ?? 0,
       storageDescriptor: { id: guest.id, storedPath, builtIn: false },
     });
   }

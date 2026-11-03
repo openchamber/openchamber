@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -24,8 +25,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -178,6 +181,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n.ja,
   ...htmlRenderI18n.ja,
   ...documentToolbarI18n.ja,
+  ...uiBlocksI18n.ja,
   ...updateDialogCanaryI18n.ja,
   ...secretRequestI18n.ja,
   ...sessionNoticesI18n.ja,
@@ -188,8 +192,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.ja,
   ...consoleBudgetsI18n.ja,
   ...imageToolI18n.ja,
+  ...agentStatusI18n.ja,
   ...snippetsI18n.ja,
   ...sidebarWorkI18n.ja,
+  ...sidebarSectionsI18n.ja,
   ...worktreeArchiveI18n.ja,
   ...overviewI18n.ja,
   ...isolatedSpacesI18n.ja,
@@ -470,6 +476,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '先にプロジェクトを選択してください',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'スケジュールタスクの読み込みに失敗しました',
   'sessions.scheduledTasks.dialog.toast.saved': 'スケジュールタスクを保存しました',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'タスクは新しい場所で実行されるようになりましたが、古いコピーを削除できませんでした。タスクが二重に実行されないよう、元の場所で削除してください。',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'タスクの更新に失敗しました',
   'sessions.scheduledTasks.dialog.toast.deleted': 'スケジュールタスクを削除しました',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'タスクの削除に失敗しました',
@@ -619,6 +626,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.actions.more': 'その他',
   'sessions.sidebar.header.actions.exitSelection': '選択を終了',
   'sessions.sidebar.header.actions.selectSessions': 'セッションを選択',
+  'sessions.sidebar.header.actions.markAllRead': 'すべて既読にする',
   'sessions.sidebar.header.actions.sortProjects': 'プロジェクトを並べ替え',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'セッション表示モード',
   'sessions.sidebar.header.displayMode.label': '表示モード',
@@ -1782,6 +1790,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.error.switchToEditMode': '編集モードに切り替えて問題を修正してください。',
   'filesView.error.readFileFailed': 'ファイルの読み込みに失敗しました',
   'filesView.editor.htmlPreviewTitle': 'HTMLプレビュー',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'リレー経由では HTML プレビューを利用できません',
+  'filesView.editor.htmlPreviewShowCode': 'コードを表示',
   'filesView.editor.htmlAnnotate.intro': 'これはHTMLファイルのプレビューで注釈を付けた選択範囲です。',
   'filesView.diagram.closeDiagramView': 'ダイアグラムビューを閉じる',
   'filesView.diagram.saveDiagram': 'ダイアグラムを保存',
@@ -2422,7 +2432,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '低優先度',
   'chat.statusRow.actions.stopGeneratingAria': '生成を停止',
   'chat.statusRow.tasksTitle': 'タスク',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model}: {status}',
   'chat.statusRow.summary.activeLeft': '{active}アクティブ · {left}残り',
   'chat.revertIndicator.redo': 'やり直し',
   'chat.revertIndicator.redoAria': 'やり直し — 元に戻したメッセージを復元',
@@ -3012,7 +3022,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconDiscovered': 'プロジェクトアイコンを検出しました',
   'openInApp.actions.open': '開く',
   'openInApp.actions.openInAria': '{app}で開く',
-  'openInApp.actions.chooseAppAria': '開くアプリを選択',
   'openInApp.actions.copyPath': 'パスをコピー',
   'openInApp.actions.refreshApps': 'アプリを更新',
   'openInApp.toast.pathCopied': 'パスをクリップボードにコピーしました',
@@ -3895,12 +3904,16 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': '実行後もワークツリーとブランチは残り、結果を確認できます。',
   'sessions.scheduledTasks.editor.worktree.notRepo': 'プロジェクトフォルダーはGitリポジトリではありません。実行はチェックアウトをそのまま使います。',
   'sessions.scheduledTasks.dialog.usesDefaults': 'セッションの既定値',
-  'sessions.moveChatToProject.menu': 'プロジェクトへ移動…',
-  'sessions.moveChatToProject.hint': 'この会話をプロジェクト内で続ける',
-  'sessions.moveChatToProject.title': 'チャットをプロジェクトへ移動',
-  'sessions.moveChatToProject.description': '会話はプロジェクトのフォルダーで続きます。チャットが作成したファイルはそのまま残ります。',
-  'sessions.moveChatToProject.success': 'チャットをプロジェクトへ移動しました',
-  'sessions.moveChatToProject.failed': 'チャットを移動できませんでした',
+  'sessions.moveSession.menu': 'セッションを移動…',
+  'sessions.moveSession.hint': 'ファイルは元のフォルダーに残ります',
+  'sessions.moveSession.title': 'セッションを移動',
+  'sessions.moveSession.description': 'セッションは選択したフォルダーで続きます。ファイルは今の場所に残ります。',
+  'sessions.moveSession.chooseFolder': 'フォルダーを選択…',
+  'sessions.moveSession.current': '現在のフォルダー',
+  'sessions.moveSession.success': 'セッションを移動しました',
+  'sessions.moveSession.failed': 'セッションを移動できませんでした',
+  'chat.folderMissing.text': 'フォルダー {name} はもう存在しません',
+  'chat.folderMissing.action': 'セッションを移動',
   'chat.worktreeSetup.running': 'worktree を準備中: プロジェクトのセットアップコマンドを実行しています…',
   'chat.draft.creatingSession': 'セッションを作成中…',
   'desktopHostSwitcher.startup.fellBackToLocal': '接続を開けなかったため、OpenChamber は Local で起動しました。到達できるようになったら、インスタンス切り替えから接続してください。',

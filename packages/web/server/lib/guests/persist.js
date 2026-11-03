@@ -61,6 +61,15 @@ const capabilityScopeSchema = z.object({
       z.object({ kind: z.literal('fixed'), origin: z.string().min(1) }),
       z.object({ kind: z.literal('user') }),
     ]).optional(),
+    // Where a tracker's accounts live, its OAuth endpoints and the links it claims (`grant-scope.js`); absent for other services.
+    tracker: z.object({
+      instances: z.union([
+        z.object({ kind: z.literal('fixed'), origin: z.string().min(1) }),
+        z.object({ kind: z.literal('user') }),
+      ]),
+      oauth: z.object({ authorizeUrl: z.string().min(1), tokenUrl: z.string().min(1) }).nullable(),
+      urls: z.array(z.string().min(1)),
+    }).optional(),
   }).optional(),
 });
 

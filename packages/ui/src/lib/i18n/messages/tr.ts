@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -23,8 +24,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -116,6 +119,7 @@ export const dict = {
   ...fileEditorAidsI18n.tr,
   ...htmlRenderI18n.tr,
   ...documentToolbarI18n.tr,
+  ...uiBlocksI18n.tr,
   ...updateDialogCanaryI18n.tr,
   ...secretRequestI18n.tr,
   ...sessionNoticesI18n.tr,
@@ -126,8 +130,10 @@ export const dict = {
   ...heapSnapshotI18n.tr,
   ...consoleBudgetsI18n.tr,
   ...imageToolI18n.tr,
+  ...agentStatusI18n.tr,
   ...snippetsI18n.tr,
   ...sidebarWorkI18n.tr,
+  ...sidebarSectionsI18n.tr,
   ...worktreeArchiveI18n.tr,
   ...overviewI18n.tr,
   ...isolatedSpacesI18n.tr,
@@ -391,6 +397,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Önce bir proje seçin',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Zamanlanmış görevler yüklenemedi',
   'sessions.scheduledTasks.dialog.toast.saved': 'Zamanlanmış görev kaydedildi',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'Görev artık yeni yerinde çalışıyor ancak eski kopya silinemedi. Görevin iki kez çalışmaması için onu orada silin.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Görev güncellenemedi',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Zamanlanmış görev silindi',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Görev silinemedi',
@@ -540,6 +547,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'Daha fazla',
   'sessions.sidebar.header.actions.exitSelection': 'Seçimden çık',
   'sessions.sidebar.header.actions.selectSessions': 'Session\'ları seç',
+  'sessions.sidebar.header.actions.markAllRead': 'Tümünü okundu olarak işaretle',
   'sessions.sidebar.header.actions.sortProjects': 'Projeleri sırala',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Session görüntüleme modu',
   'sessions.sidebar.header.displayMode.label': 'Görüntüleme modu',
@@ -1661,6 +1669,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'Sorunu düzeltmek için düzenleme moduna geçin.',
   'filesView.error.readFileFailed': 'Dosya okunamadı',
   'filesView.editor.htmlPreviewTitle': 'HTML Önizleme',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'HTML önizleme relay üzerinden kullanılamıyor',
+  'filesView.editor.htmlPreviewShowCode': 'Kodu göster',
   'filesView.editor.htmlAnnotate.intro': 'Bu, bir HTML dosyası önizlemesinden alınmış açıklamalı bir seçimdir.',
   'filesView.diagram.closeDiagramView': 'Diyagram görünümünü kapat',
   'filesView.diagram.saveDiagram': 'Diyagramı kaydet',
@@ -2284,7 +2294,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'Düşük öncelik',
   'chat.statusRow.actions.stopGeneratingAria': 'Üretmeyi durdur',
   'chat.statusRow.tasksTitle': 'Görevler',
-  'chat.statusRow.modelStatus': '{model}: {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} etkin · {left} kaldı',
   'chat.revertIndicator.redo': 'Yinele',
   'chat.revertIndicator.redoAria': 'Yinele — geri alınan mesajları geri yükle',
@@ -2830,7 +2840,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'Proje ikonu keşfedildi',
   'openInApp.actions.open': 'Aç',
   'openInApp.actions.openInAria': '{app} içinde aç',
-  'openInApp.actions.chooseAppAria': 'Açılacak uygulamayı seç',
   'openInApp.actions.copyPath': 'Yolu Kopyala',
   'openInApp.actions.refreshApps': 'Uygulamaları Yenile',
   'openInApp.toast.pathCopied': 'Yol panoya kopyalandı',
@@ -3893,12 +3902,16 @@ export const dict = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': 'Worktree ve dalı koşudan sonra kalır; sonucu inceleyebilirsin.',
   'sessions.scheduledTasks.editor.worktree.notRepo': 'Proje klasörü bir git deposu değil; çalıştırmalar mevcut checkoutu kullanır.',
   'sessions.scheduledTasks.dialog.usesDefaults': 'Oturum varsayılanları',
-  'sessions.moveChatToProject.menu': 'Projeye taşı…',
-  'sessions.moveChatToProject.hint': 'Bu konuşmaya bir proje içinde devam et',
-  'sessions.moveChatToProject.title': 'Sohbeti bir projeye taşı',
-  'sessions.moveChatToProject.description': 'Konuşma projenin klasöründe devam eder. Sohbetin oluşturduğu dosyalar olduğu yerde kalır.',
-  'sessions.moveChatToProject.success': 'Sohbet projeye taşındı',
-  'sessions.moveChatToProject.failed': 'Sohbet taşınamadı',
+  'sessions.moveSession.menu': 'Oturumu taşı…',
+  'sessions.moveSession.hint': 'Dosyalar eski klasörde kalır',
+  'sessions.moveSession.title': 'Oturumu taşı',
+  'sessions.moveSession.description': 'Oturum seçilen klasörde devam eder. Dosyalar olduğu yerde kalır.',
+  'sessions.moveSession.chooseFolder': 'Klasör seç…',
+  'sessions.moveSession.current': 'Geçerli klasör',
+  'sessions.moveSession.success': 'Oturum taşındı',
+  'sessions.moveSession.failed': 'Oturum taşınamadı',
+  'chat.folderMissing.text': '{name} klasörü artık yok',
+  'chat.folderMissing.action': 'Oturumu taşı',
   'chat.worktreeSetup.running': 'Worktree hazırlanıyor: projenin kurulum komutları çalışıyor…',
   'chat.draft.creatingSession': 'Oturum oluşturuluyor…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'Bağlantısı açılamadı, bu yüzden OpenChamber Local ile başladı. Erişilebilir olduğunda örnek değiştiriciden bağlanın.',

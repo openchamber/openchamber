@@ -8,6 +8,7 @@ import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
 import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { runtimeFetch } from '@/lib/runtime-fetch';
@@ -155,7 +156,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     return (
       <p className="flex items-center justify-center">
         <span className="whitespace-pre">{before}</span>
-        <Icon name="loader" className="size-3.5 animate-spin" />
+        <Spinner className="size-3.5" />
         <span className="whitespace-pre">{after}</span>
       </p>
     );

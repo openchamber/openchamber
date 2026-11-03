@@ -36,8 +36,32 @@ export function createTrackerSessionStatus({
     });
   };
 
-  const processPayload = (payload) => {
-    for (const id of registry.list()) {
+  /** A tracker that left the registry (an extension paused or removed): its runtime stops and its state goes. */
+  const forget = (id) => {
+    const state = states.get(id);
+    if (!state) return;
+    states.delete(id);
+    try {
+      state.runtime?.stop?.();
+    } catch (error) {
+      warn(`[trackers] ${id}: session status runtime did not stop:`, error?.message || error);
+    }
+  };
+
+  /**
+   * Host events only. A session inside an isolated space runs its own OpenCode
+   * and its own trackers; the hub hands such events only to subscribers that
+   * asked for spaces (`server/index.js` does not), and one that arrives marked
+   * with a space is dropped here as well, so no comment ever names a space's
+   * session with the host's link.
+   */
+  const processPayload = (payload, { spaceId = null } = {}) => {
+    if (spaceId) return;
+    const current = registry.list();
+    for (const id of [...states.keys()]) {
+      if (!current.includes(id)) forget(id);
+    }
+    for (const id of current) {
       const state = states.get(id);
       if (state?.runtime) {
         state.runtime.processPayload(payload);
@@ -54,5 +78,5 @@ export function createTrackerSessionStatus({
     }
   };
 
-  return { processPayload };
+  return { processPayload, forget };
 }

@@ -1,0 +1,54 @@
+---
+title: İş akışları
+description: Bir agent'ın büyük bir görevi arka planda çalışan birçok agent'a dağıtmasına izin verin.
+---
+
+# İş akışları
+
+Bir iş akışı büyük bir görevi birçok küçük parçaya böler ve her parçaya kendi agent'ını verir. Oturumunuzdaki agent, hangi agent'ların başlatılacağını ve her birine ne sorulacağını belirten kısa bir betik yazar. OpenChamber betiği arka planda çalıştırır; agent'lar çalışırken oturumunuz serbest kalır. Çalıştırma bittiğinde raporu oturuma geri gelir.
+
+İş akışları birbirine benzeyen, bağımsız birçok parçadan oluşan işlere uyar: değişen her dosyanın incelenmesi, her API rotasının denetlenmesi, çok sayıda dosyaya yayılan bir geçiş ya da her kaynağın ayrı ayrı kontrol edildiği bir araştırma. Tek bir özellik ya da birkaç adımlık bir iş tek oturumda daha hızlı biter.
+
+## Açma
+
+İş akışı aracı varsayılan olarak kapalıdır. **Ayarlar → Genel → OpenChamber Araçları** bölümünü açın ve **Workflow aracı** ayarını açın. Çalışan oturumlar aracı bir sonraki turda alır; aracı yeniden kapattığınızda araç ve onunla ilgili talimatlar tüm oturumlardan kalkar ve İş akışları paneli gizlenir. Mevcut çalıştırmalar aracı yeniden açtığınızda geri gelir.
+
+İş akışları OpenChamber'ın kendi OpenCode sunucusunu gerektirir. OpenChamber `OPENCODE_HOST` ya da skip-start ile harici bir OpenCode sunucusuna bağlandığında ve VS Code eklentisi içinde kullanılamaz.
+
+## İş akışı çalıştırma
+
+1. Düz dille isteyin, örneğin: "Bu branch'te değişen her dosyayı inceleyen ve bulduğu hataları listeleyen bir iş akışı çalıştır."
+2. Agent bir plan ve her aşama için bir model önerir. Çalıştırma başlamadan önce modellerde anlaşın: bkz. [Modeller ve maliyet](#modeller-ve-maliyet).
+3. Sohbette planı gösteren bir kart belirir. Başlatmak için **Workflow'u çalıştır**, vazgeçmek için **Çalıştırma** seçeneğini seçin. Siz seçene kadar hiçbir şey çalışmaz.
+4. Çalışırken kart her aşamayı ve agent'ı gösterir. Kenar çubuğundaki oturum satırında **İş akışı çalışıyor** yazar ve iş durumu panelinin **Workflow'lar** bölümü çalıştırmayı listeler. Erken bitirmek için **Durdur** seçeneğini seçin.
+5. Çalıştırma bittiğinde raporu oturuma mesaj olarak gelir. Biten ya da başarısız olan bir çalıştırma agent'ı uyandırır, böylece agent sonuca göre hareket edebilir; durdurduğunuz ya da çalıştırmadığınız bir çalıştırma bunu yapmaz.
+
+Durdurulmuş ya da başarısız bir çalıştırma **Sürdür** ile devam ettirilebilir. Zaten yanıt vermiş agent'lar yanıtlarını korur, yalnızca geri kalanlar yeniden çalışır.
+
+Çalışan bir iş akışının agent'ları kendi iş akışlarını başlatamaz.
+
+## Modeller ve maliyet
+
+Betik başka bir model belirtmedikçe iş akışındaki her agent oturumunuzun modeliyle çalışır. Onlarca agent'ı üst düzey bir modelde çalıştırmak, aynı işi küçük bir modelde yapmanın kat kat fazlasına mal olur. Bu yüzden agent her aşama için bir model önerir: okuma ve sabit bir listeye göre kontrol için ucuz bir model, bir aşamanın muhakeme yaptığı ya da projenize girecek içeriği yazdığı yerde daha güçlü bir model. Seçim size uymuyorsa çalıştırmayı onaylamadan önce değiştirin.
+
+Aynı anda en fazla 8 agent çalışır ve bir çalıştırma tüm denemeleri boyunca en fazla 200 agent başlatır.
+
+## İş akışları paneli
+
+Sağ raydaki **İş akışları** paneli projenin çalıştırmalarını gösterir: agent'ları, günlüğü, sonucu ve betiği, her agent'ın modeli ve token kullanımıyla birlikte. Bir agent'ın tüm konuşmasını okumak için oturumunu buradan ya da sohbet kartından açın. Simge, projede bir çalıştırma ya da kaydedilmiş bir iş akışı olduğunda görünür.
+
+Tek bir çalıştırma yüzlerce agent başlatabildiği için iş akışı agent'ları oturum kenar çubuğunda görünmez. Çalıştırmanın kartından ve İş akışları panelinden erişilebilir kalırlar.
+
+**Çalıştırmayı sil** biten bir çalıştırmayı panelden kaldırır. Agent'ların oturumları kalır.
+
+## Kaydedilmiş iş akışları
+
+Yeniden çalıştırmak istediğiniz bir iş akışını kaydetmesini agent'tan isteyin. İş akışı projede `.openchamber/workflows/<name>.js` olarak saklanır, böylece deponun geri kalanıyla birlikte commit edebilirsiniz.
+
+Kaydedilmiş bir iş akışını panelin çalıştırma seçicisindeki **Kaydedilmiş iş akışları** bölümünden çalıştırın. Hemen, açık oturumda ya da yeni bir oturumda başlar ve raporu o oturuma geri gelir. Agent'tan iş akışını adıyla çalıştırmasını da isteyebilirsiniz.
+
+## İlgili
+
+- [Agent kontrol aracı](/tr/agent-control-tool/): agent'ların aldığı diğer OpenChamber araçları
+- [Proje Notları, Yapılacaklar ve Planlar](/tr/notes-todos-plans/): proje bilgisi ve hafıza araçları
+- [Kullanım ve kotalar](/tr/usage/): oturumlarınızın maliyeti

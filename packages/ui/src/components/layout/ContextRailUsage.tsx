@@ -1,43 +1,10 @@
 import React from 'react';
 
-import { DEFAULT_CONTEXT_LIMIT } from '@/components/chat/work-status/contextUsage';
 import { useSubagentCostRollup } from '@/components/chat/work-status/useSubagentCostRollup';
-import { useContextWindowLimits } from '@/hooks/useContextWindowLimits';
 import { useI18n } from '@/lib/i18n';
-import type { Message } from '@/lib/opencode/model';
 import { formatMoney } from '@/lib/money';
 import { cn } from '@/lib/utils';
-import { findLatestContextFill } from '@/stores/utils/tokenUtils';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessagesSelector } from '@/sync/sync-context';
-
-type ContextFillReading = { state: 'measured'; totalTokens: number } | { state: 'compacted' } | null;
-
-const selectContextFill = (messages: Message[]): ContextFillReading => {
-  const fill = findLatestContextFill(messages);
-  if (!fill) return null;
-  return fill.state === 'measured' ? { state: 'measured', totalTokens: fill.totalTokens } : { state: 'compacted' };
-};
-
-const isSameContextFill = (a: ContextFillReading, b: ContextFillReading): boolean => {
-  if (a === null || b === null) return a === b;
-  if (a.state !== b.state) return false;
-  return a.state === 'compacted' || (b.state === 'measured' && a.totalTokens === b.totalTokens);
-};
-
-/**
- * The current session's context fill. A streamed step replaces the message
- * list many times while the fill stays the same, so callers re-render only
- * when a response reports a new token count or a compaction finishes.
- */
-const useCurrentContextReading = () => {
-  const sessionId = useSessionUIStore((state) => state.currentSessionId);
-  const directory = useSessionUIStore((state) => state.currentSessionDirectory) ?? undefined;
-  const fill = useSessionMessagesSelector(sessionId ?? '', directory, selectContextFill, isSameContextFill);
-  const { context } = useContextWindowLimits(sessionId, directory);
-  const limit = context > 0 ? context : DEFAULT_CONTEXT_LIMIT;
-  return { sessionId, fill, limit };
-};
+import { useCurrentContextReading } from './useCurrentContextReading';
 
 const formatTokens = (tokens: number): string => {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
@@ -50,16 +17,9 @@ const RING_STROKE = 2;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-/**
- * Rail icon for the Context surface: an outline ring whose arc is the share of
- * the context window in use. Drawn in the button's own colour, so it follows
- * the rail's idle, hover and active states like the other icons. An empty
- * track means nothing is measured yet, or a compaction made the fill unknown.
- */
-export const ContextUsageRingIcon: React.FC<{ className?: string }> = ({ className }) => {
-  const { fill, limit } = useCurrentContextReading();
-  const percent = fill?.state === 'measured' ? Math.min(100, (fill.totalTokens / limit) * 100) : 0;
-
+/** The ring alone; `arcColor` paints the filled arc, the track stays in the text colour. */
+export const ContextRing: React.FC<{ percent: number; arcColor?: string; className?: string }> = ({ percent: rawPercent, arcColor = 'currentColor', className }) => {
+  const percent = Math.min(100, Math.max(0, rawPercent));
   return (
     <svg viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} className={cn('shrink-0', className)} aria-hidden="true">
       <circle
@@ -77,7 +37,7 @@ export const ContextUsageRingIcon: React.FC<{ className?: string }> = ({ classNa
           cy={RING_SIZE / 2}
           r={RING_RADIUS}
           fill="none"
-          stroke="currentColor"
+          stroke={arcColor}
           strokeWidth={RING_STROKE}
           strokeLinecap="round"
           strokeDasharray={RING_CIRCUMFERENCE}

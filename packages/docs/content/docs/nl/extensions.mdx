@@ -75,6 +75,18 @@ Pauzeert u de extensie, dan verdwijnt de host tot u haar weer inschakelt, en uw 
 
 De OpenChamber SDK bevat een werkend voorbeeld, `examples/source-control-provider`, om mee te beginnen als u er zelf een bouwt. Zie [Een extensie bouwen](/nl/sdk/).
 
+## Een extensie als tracker
+
+Een extensie kan een tracker voor werkitems toevoegen naast Linear: YouTrack, Jira, Plane of een eigen tracker. Het toestemmingsvenster heeft dan een regel die begint met **Werkt als de tracker** en de tracker noemt. De regel zegt ook wat OpenChamber ernaartoe stuurt: uw zoekopdrachten en de items die u opent, en dat hij wordt gevraagd hun status te wijzigen en namens u sessiereacties te plaatsen.
+
+Staat u het toe, dan krijgt de tracker een eigen kaart bij **Instellingen → Integraties** onder **Extensieaccounts**. Verbind daar een account: met een token, of door in de browser in te loggen nadat u de client-ID hebt ingevoerd van de app die u bij de tracker hebt geregistreerd, en eerst het adres van de server als de kaart daarom vraagt. Daarna staan zijn items overal waar die van Linear staan: in het menu **+** van de chat en de kiezer, in New Worktree, bij de gekoppelde items van een sessie en in de livestatus van items die u volgt. Een geplakte link naar een van zijn items wordt op dezelfde manier herkend. Wat elk hiervan doet, staat bij [Linear](/nl/integrations/#linear).
+
+Uw tokens blijven in OpenChamber. De extensie vraagt OpenChamber om de tracker voor haar aan te roepen, en OpenChamber voegt de inloggegevens aan elke aanroep toe, alleen voor de server die u hebt verbonden. De extensie krijgt ze nooit, en alleen haar aanroepen voor statuswijzigingen en reacties mogen daar iets schrijven.
+
+Pauzeert u de extensie, dan verdwijnt de tracker tot u haar weer inschakelt, en uw accounts blijven bewaard. Verwijdert u de extensie, dan worden ze vergeten. VS Code toont geen trackers; op de telefoon worden de items van de tracker getoond, en accounts verbindt u vanuit de web- of desktop-app.
+
+De OpenChamber SDK bevat een werkend voorbeeld, `examples/tracker-provider`, met een neptracker om ernaast te draaien. Zie [Een extensie bouwen](/nl/sdk/).
+
 ## Het account verbinden
 
 Een extensie die met een dienst communiceert, krijgt bij **Instellingen → Integraties** een kaart onder **Extensieaccounts**. Afhankelijk van de dienst vraagt die om een API-token, gebruikersnaam en token of client-ID voor een aanmeldprocedure. Kies **Verbinden**. **Verbinding verbreken** wist het opgeslagen token. Extra velden van de extensie worden automatisch opgeslagen wanneer u het veld verlaat.

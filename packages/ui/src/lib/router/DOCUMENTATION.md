@@ -29,6 +29,8 @@ window focus, acknowledgement deadlines, and document-navigation fallback.
   client does not prevent trying another client or opening a window.
 - Message ports and listeners are released after use. Expired requests cannot
   navigate a page after the worker's fallback deadline.
+- Windows unread jump-list links require a known session before changing selection.
+  They wait for the global list on a cold launch; stale entries leave selection unchanged.
 
 ## Decisions
 

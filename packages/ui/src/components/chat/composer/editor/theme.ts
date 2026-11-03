@@ -28,6 +28,9 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
         // The content box must cover the whole editor, not just the text, so
         // clicking the empty space below the last line still lands in it.
         minHeight: '100%',
+        // Let reference chips shrink within the flex scroller instead of
+        // making their intrinsic width the wrapping width for every line.
+        minWidth: '0',
     },
     // The caret is NOT the native one. `drawSelection()` hides that with
     // `caret-color: transparent !important` at the highest precedence and

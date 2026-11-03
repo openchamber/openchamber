@@ -28,6 +28,7 @@ import {
 } from '@/lib/spaces/spaces-api';
 import { openExternalUrl } from '@/lib/url';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const JOB_POLL_MS = 2_000;
 
@@ -93,7 +94,7 @@ const CommandLine: React.FC<{ command: string }> = ({ command }) => {
   return (
     <div className="flex max-w-md items-center gap-1 rounded bg-muted/50 ps-2">
       {/* A shell command reads left to right in every language. */}
-      <code dir="ltr" className="typography-code min-w-0 flex-1 overflow-x-auto whitespace-nowrap py-1 text-xs text-foreground">{command}</code>
+      <ScrollableOverlay as="code" dir="ltr" outerClassName="overlay-scrollbar-wrapper--no-gutter min-w-0 flex-1" fillContainer={false} className="typography-code whitespace-nowrap py-1 text-xs text-foreground">{command}</ScrollableOverlay>
       <Button
         variant="ghost"
         size="icon"
@@ -218,7 +219,7 @@ export const DockerSetupNotice: React.FC<DockerSetupNoticeProps> = ({ place, onR
                 <Icon name={showOutput ? 'arrow-down-s' : 'arrow-right-s'} className="ms-0.5 inline h-3.5 w-3.5" />
               </button>
               {/* The command's own output, as it printed it: text to show. */}
-              {showOutput ? <pre dir="ltr" className="typography-code max-h-40 max-w-md overflow-auto whitespace-pre-wrap break-words rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground">{job.failure.output}</pre> : null}
+              {showOutput ? <ScrollableOverlay as="pre" dir="ltr" outerClassName="max-h-40 max-w-md rounded bg-muted/50" className="typography-code whitespace-pre-wrap break-words px-2 py-1 text-xs text-muted-foreground" disableHorizontal>{job.failure.output}</ScrollableOverlay> : null}
             </>
           ) : null}
         </div>

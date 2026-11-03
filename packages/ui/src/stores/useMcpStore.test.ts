@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { useMcpStore } from './useMcpStore';
+import { useMcpConfigStore, type McpDraft } from './useMcpConfigStore';
 
 const DIRECTORY = '/workspace/project';
 
@@ -12,13 +13,16 @@ type ServerState = McpServerStatus['status'];
 let server: ServerState | null;
 const spies: Array<{ mockRestore: () => void }> = [];
 let disconnects = 0;
+let connects = 0;
 
 beforeEach(() => {
   disconnects = 0;
+  connects = 0;
   useMcpStore.getState().resetForRuntimeSwitch();
   spies.push(
     spyOn(opencodeClient, 'listMcpServers').mockImplementation(async () => (server ? [{ name: 'lab', status: server }] : [])),
     spyOn(opencodeClient, 'connectMcpServer').mockImplementation(async () => {
+      connects += 1;
       server = { status: 'connected' };
     }),
     spyOn(opencodeClient, 'disconnectMcpServer').mockImplementation(async () => {
@@ -75,5 +79,68 @@ describe('testConnection', () => {
 
     expect(disconnects).toBe(0);
     expect(after).toBe('connected');
+  });
+});
+
+describe('setEnabled', () => {
+  const configStore = useMcpConfigStore.getState();
+  let updates: Array<[string, Partial<McpDraft>, string | null | undefined]>;
+
+  // `configured` is what the config file says; null means no file defines it.
+  const withConfig = (configured: { disabled?: boolean } | null) => {
+    updates = [];
+    const entries = configured ? [{ name: 'lab', type: 'local' as const, command: ['lab'], ...configured }] : [];
+    useMcpConfigStore.setState({
+      serversByDirectory: { [DIRECTORY]: entries },
+      loadMcpConfigs: async () => true,
+      updateMcp: async (name, config, directory) => {
+        updates.push([name, config, directory]);
+        return { ok: true };
+      },
+    });
+  };
+
+  afterEach(() => {
+    useMcpConfigStore.setState({
+      serversByDirectory: {},
+      loadMcpConfigs: configStore.loadMcpConfigs,
+      updateMcp: configStore.updateMcp,
+    });
+  });
+
+  test('switching off a configured server writes it off in its config file', async () => {
+    withConfig({});
+    server = { status: 'connected' };
+    await useMcpStore.getState().setEnabled('lab', false, DIRECTORY);
+
+    expect(updates).toEqual([['lab', { disabled: true }, DIRECTORY]]);
+    expect(disconnects).toBe(1);
+  });
+
+  test('switching on a server its config turns off writes it on', async () => {
+    withConfig({ disabled: true });
+    server = { status: 'disabled' };
+    await useMcpStore.getState().setEnabled('lab', true, DIRECTORY);
+
+    expect(updates).toEqual([['lab', { disabled: false }, DIRECTORY]]);
+    expect(connects).toBe(0);
+  });
+
+  test('switching on a server its config enables reconnects without a write', async () => {
+    withConfig({});
+    server = { status: 'failed', error: 'process exited with code 1' };
+    await useMcpStore.getState().setEnabled('lab', true, DIRECTORY);
+
+    expect(updates).toEqual([]);
+    expect(useMcpStore.getState().getStatusForDirectory(DIRECTORY).lab?.status.status).toBe('connected');
+  });
+
+  test('a server no config file defines is only disconnected', async () => {
+    withConfig(null);
+    server = { status: 'connected' };
+    await useMcpStore.getState().setEnabled('lab', false, DIRECTORY);
+
+    expect(updates).toEqual([]);
+    expect(disconnects).toBe(1);
   });
 });

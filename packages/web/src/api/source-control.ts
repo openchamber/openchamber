@@ -197,11 +197,12 @@ type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise
 type PostBody =
   | { flowId: string }
   | { token: string; username?: string }
+  | { sshUrl: string | null }
   | { accountId: string }
   | { disabled: boolean }
   | CreateBody
   | UpdateBody
-  | (MutationBody<SourceControlExistingMutationTarget> & { method: MergeChangeRequestInput['method'] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { method: MergeChangeRequestInput['method']; cancel?: boolean })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
@@ -284,11 +285,13 @@ const normalizeHostInstance = (identity: SourceControlIdentity): SourceControlId
   return { provider: identity.provider, instance: host };
 };
 
-const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => (
-  (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
+const normalizeIdentity = (identity: SourceControlIdentity): SourceControlIdentity => {
+  const normalized = (providerInstances.get(identity.provider)?.format ?? 'origin') === 'host'
     ? normalizeHostInstance(identity)
-    : normalizeOriginInstance(identity)
-);
+    : normalizeOriginInstance(identity);
+  if (!identity.instanceSshUrl?.trim()) return normalized;
+  return { ...normalized, instanceSshUrl: identity.instanceSshUrl.trim() };
+};
 
 const parseRepositoryContext = (payload: RepositoryContextDTO): SourceControlRepositoryContext => {
   if (!payload || !isStringValue(payload.repositoryId) || !payload.repositoryId
@@ -582,7 +585,7 @@ const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmpty
   return {};
 };
 
-const MERGE_OUTCOMES = ['queued', 'merging'] as const;
+const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'] as const;
 const mergeOutcomeOf = (value: string): SourceControlMergeMutationResult['outcome'] | null => (
   MERGE_OUTCOMES.find((outcome) => outcome === value) ?? null
 );
@@ -1299,6 +1302,14 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       await post<ErrorResponse>(fetch, normalized, '/auth/token', tokenOptions?.username ? { token, username: tokenOptions.username } : { token });
       return parseProviderAuthStatus(await request<ProviderAuthStatusDTO & ErrorResponse>(fetch, normalized, '/auth/status'), normalized);
     },
+    authSetSshUrl: async (identity, sshUrl) => {
+      const normalized = normalizeIdentity(identity);
+      const payload = await post<{ sshUrl?: string | null; error?: string }>(fetch, normalized, '/auth/ssh-url', { sshUrl });
+      if (payload.sshUrl !== null && !isNonEmptyString(payload.sshUrl)) {
+        throw new Error('Source control response contained an invalid SSH URL');
+      }
+      return { sshUrl: payload.sshUrl ?? null };
+    },
     authDisconnect: async (identity, accountId) => {
       if (!isNonEmptyString(accountId) || accountId.trim() !== accountId) {
         throw new Error('Source control credential accountId is required');
@@ -1353,6 +1364,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/merge', {
         ...mutationBody(payload, identity, 'existing'), method: payload.method,
+        cancel: payload.cancel,
       });
       return parseMutationReceipt(result, payload, identity, parseMergeMutationResult);
     },

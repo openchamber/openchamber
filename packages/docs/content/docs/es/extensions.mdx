@@ -75,6 +75,18 @@ Pausar la extensión quita el host hasta que vuelvas a activarla, y tu cuenta se
 
 El SDK de OpenChamber tiene un ejemplo funcional, `examples/source-control-provider`, para empezar a construir uno. Consulta [Crea una extensión](/es/sdk/).
 
+## Una extensión como gestor de incidencias
+
+Una extensión puede añadir un gestor de incidencias junto a Linear: YouTrack, Jira, Plane o uno propio. Su diálogo de permisos tiene entonces una línea que empieza por **Actúa como el gestor de incidencias** y lo nombra. La línea también dice qué le envía OpenChamber: tus búsquedas y los elementos que abres, y que se le pide cambiar su estado y publicar comentarios de sesión por ti.
+
+Cuando lo permites, el gestor recibe su propia tarjeta en **Configuración → Integraciones** bajo **Cuentas de extensiones**. Conecta ahí una cuenta: con un token, o iniciando sesión en el navegador después de introducir el client id de la app que registraste en el gestor, y antes la dirección del servidor si la tarjeta la pide. A partir de ahí, sus elementos están donde están los de Linear: el menú **+** del chat y el selector, New Worktree, los elementos vinculados de una sesión y los estados en vivo de los elementos que sigues. Un enlace pegado a uno de sus elementos se reconoce igual. Qué hace cada una de estas cosas está en [Linear](/es/integrations/#linear).
+
+Tus tokens se quedan en OpenChamber. La extensión pide a OpenChamber que llame al gestor por ella, y OpenChamber añade la credencial a cada llamada, solo para el servidor que conectaste. La extensión nunca la recibe, y solo sus llamadas de cambio de estado y de comentarios pueden escribir algo allí.
+
+Pausar la extensión quita el gestor hasta que vuelvas a activarla, y tus cuentas se conservan. Quitar la extensión las olvida. VS Code no muestra gestores de incidencias; en el teléfono se muestran los elementos del gestor, y las cuentas se conectan desde la app web o de escritorio.
+
+El SDK de OpenChamber tiene un ejemplo funcional, `examples/tracker-provider`, con un gestor falso para ejecutar al lado. Consulta [Crea una extensión](/es/sdk/).
+
 ## Conectar su cuenta
 
 Una extensión que habla con un servicio recibe una tarjeta en **Configuración → Integraciones** bajo **Cuentas de extensiones**. Según el servicio, la tarjeta pide un token de API, un usuario y token, o un client id para un flujo de inicio de sesión. Elige **Conectar**; **Desconectar** olvida el token guardado. Los campos extra que declara la extensión se guardan solos al salir de ellos.

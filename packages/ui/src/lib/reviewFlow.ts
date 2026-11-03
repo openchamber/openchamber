@@ -167,6 +167,7 @@ const sendPlainMessage = async (
   const resolved = modelContext ?? resolveModelContext(sessionID);
   if (!resolved) throw new Error('Select a model before sending review flow messages');
   const selection = useSelectionStore.getState();
+  const settleModelPick = selection.captureSessionModelPickSettlement(sessionID, resolved.providerID, resolved.modelID, runtimeKey);
   selection.saveSessionModelSelection(sessionID, resolved.providerID, resolved.modelID);
   if (resolved.agent) {
     selection.saveSessionAgentSelection(sessionID, resolved.agent);
@@ -187,10 +188,10 @@ const sendPlainMessage = async (
     directory,
     context,
     onOptimisticInsert: () => requestChatForceScrollBottom(sessionID),
-    send: (messageID, context) => {
+    send: async (messageID, context) => {
       // Only a genuine change travels with the prompt; the review session was
       // created on this selection, so normally nothing is switched.
-      const selection = resolveSendSelection(sessionID, directory, resolved);
+      const selection = await resolveSendSelection(sessionID, directory, resolved);
       return opencodeClient.sendMessage({
         runtimeKey,
         id: sessionID,
@@ -204,6 +205,7 @@ const sendPlainMessage = async (
       }).then(() => undefined);
     },
   });
+  settleModelPick();
 };
 
 const requestChatForceScrollBottom = (sessionId: string): void => {

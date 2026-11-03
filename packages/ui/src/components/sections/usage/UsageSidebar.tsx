@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
-import { useQuotaStore } from '@/stores/useQuotaStore';
+import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useI18n } from '@/lib/i18n';
 import { SETTINGS_SECTION_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
@@ -35,11 +35,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
   const isLoading = useQuotaStore((state) => state.isLoading);
   const usageDisplayMode = useQuotaStore((state) => state.displayMode);
   const setUsageDisplayMode = useQuotaStore((state) => state.setDisplayMode);
-  const loadUsageSettings = useQuotaStore((state) => state.loadSettings);
-
-  React.useEffect(() => {
-    void loadUsageSettings();
-  }, [loadUsageSettings]);
+  useQuotaAutoRefresh(true, true);
 
   const persistUsageSettings = React.useCallback(async (changes: { usageDisplayMode?: 'usage' | 'remaining'; usageDropdownProviders?: string[] }) => {
     try {

@@ -27,6 +27,7 @@ import { memoryDeleteKey, noteDeleteKey, planDeleteKey, usePendingKnowledgeDelet
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionProjectContextPins } from '@/lib/sessionKnowledgeApi';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /** Lazy: the plan editor is a large view, and most panel visits never open it. */
 const PlanView = React.lazy(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
@@ -569,9 +570,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       {/* An open entry scrolls itself; nesting it in this scroller would give
           the panel two scrollbars for one document. In the split layout each
           column scrolls itself. */}
-      <div
+      <ScrollableOverlay
         ref={listScrollerRef}
-        className={cn('h-full min-w-0', split ? 'overflow-hidden' : cn('p-3', entryOpen ? 'overflow-hidden' : 'overflow-y-auto'))}
+        outerClassName="h-full min-w-0"
+        className={cn(split ? 'overflow-hidden' : cn('p-3', entryOpen && 'overflow-hidden'))}
+        disableHorizontal
       >
         {activeTab === 'notes' ? (
           <NotesSection
@@ -624,7 +627,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             />
           ) : openPlanId ? planView(openPlanId, true) : plansList
         ) : null}
-      </div>
+      </ScrollableOverlay>
       </div>
 
       <TodoSendDialog

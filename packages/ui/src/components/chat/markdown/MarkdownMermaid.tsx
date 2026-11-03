@@ -61,7 +61,7 @@ const MermaidSvg = React.memo(function MermaidSvg({ svg, viewer }: { svg: string
 });
 
 export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
-  const { theme, purpose, mermaidControls: controls, onShowPopup, allowMermaidWheelEvents } = useMarkdownPresentation();
+  const { theme, purpose, mermaidControls: controls, onShowPopup } = useMarkdownPresentation();
   const mode = useUIStore((state) => state.mermaidRenderingMode);
   const { t } = useI18n();
   const host = React.useRef<HTMLDivElement>(null);
@@ -194,9 +194,6 @@ export function MarkdownMermaid({ code, isIncomplete }: CustomRendererProps) {
         data-oc-mermaid-source={source}
         data-mermaid-render={svg ? 'svg' : 'ascii'}
         onClick={preview}
-        onWheelCapture={(event) => {
-          if (!allowMermaidWheelEvents && !event.ctrlKey && !event.metaKey) event.stopPropagation();
-        }}
       >
         <div data-streamdown="mermaid-scroll">
           {svg ? (

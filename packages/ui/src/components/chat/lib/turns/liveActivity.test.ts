@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AssistantMessage, Part, ToolPart, ToolStateCompleted } from '@/lib/opencode/model';
 import { attachSyntheticContext } from '../attachSyntheticContext';
-import { getLiveFinalMessage, getTurnsWithLaterAssistant, hasLiveActivity } from './liveActivity';
+import { getLiveFinalMessage, getShownPages, getTurnsWithLaterAssistant, hasLiveActivity } from './liveActivity';
 import { projectTurnRecords } from './projectTurnRecords';
 import { summarizeLiveActivity } from './liveActivitySummary';
 import type { ChatMessageEntry } from './types';
@@ -299,5 +299,27 @@ describe('live activity report', () => {
             { file: '/project/noop', additions: 0, deletions: 0, status: 'modified' },
             { file: '/project/empty', additions: 0, deletions: 0, status: 'added' },
         ] } })])])).toMatchObject({ files: 1, additions: 0, deletions: 0, hasCompleteDiff: true });
+    });
+});
+
+describe('getShownPages', () => {
+    test('keeps text with a UI block in view, except the final answer and code samples', () => {
+        const block = text('Overview:\n```openui-lang\nroot = Stack([])\n```');
+        const sample = text('```openui-lang literal\nroot = Stack([])\n```');
+        const step = assistant('step', [block, sample], { finish: 'tool-calls' });
+        const answer = assistant('answer', [text('```openui-lang\nroot = Stack([])\n```')], { finish: 'stop' });
+        expect(getShownPages([step, answer], answer)).toEqual([block]);
+    });
+
+    test('a form stays in view while it waits and folds with Activity once it settles; a page that only shows stays', () => {
+        const form = { action: 'render.page', parameters: { ui: 'root = Stack([])', title: 'Scope', awaitAnswer: true } };
+        const page = { action: 'render.page', parameters: { html: '<p>a</p>', title: 'Mockup' } };
+        const waiting = tool('waiting', 'openchamber_render', { status: 'running', input: form });
+        const answered = tool('answered', 'openchamber_render', { input: form, metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Minimal', data: {} } } } });
+        const inChat = tool('in-chat', 'openchamber_render', { input: form, metadata: { openchamber: { ok: true, answer: { answered: false } } } });
+        const stopped = tool('stopped', 'openchamber_render', { status: 'error', input: form, error: 'aborted' });
+        const shown = tool('shown', 'openchamber_render', { input: page, metadata: { openchamber: { ok: true } } });
+        const step = assistant('step', [waiting, answered, inChat, stopped, shown], { finish: 'tool-calls' });
+        expect(getShownPages([step]).map((part) => part.id)).toEqual(['waiting', 'shown']);
     });
 });

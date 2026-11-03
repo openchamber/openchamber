@@ -13,6 +13,7 @@ import { resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { glyphInner } from "./brand/geometry.mjs"
+import { openInAppGlyphs } from "./icons/open-in-apps.mjs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, "..")
@@ -20,6 +21,7 @@ const remixPath = resolve(repoRoot, "node_modules/@remixicon/react/index.mjs")
 const outPath = resolve(repoRoot, "packages/ui/src/components/icon/sprite.ts")
 
 const customIconData = new Map([
+  ...openInAppGlyphs,
   // The OpenChamber glyph from scripts/brand, scaled from its 32 grid to 24.
   ["openchamber", `<g transform="scale(0.75)">${glyphInner()}</g>`],
   // Command Code — corner squares + center square (official logo geometry).

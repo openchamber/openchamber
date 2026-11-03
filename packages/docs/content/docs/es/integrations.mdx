@@ -97,6 +97,12 @@ Una [extensión](/es/extensions/) puede entregar tus notificaciones a Slack, Mat
 
 Si el servidor rechaza el token más adelante, la tarjeta indica que la cuenta necesita atención; conecta de nuevo con un token nuevo. Desconecta para detener las entregas sin quitar la extensión, o pausa la extensión. Quitar la extensión olvida la cuenta.
 
+## Gestores de incidencias de extensiones
+
+Una [extensión](/es/extensions/) puede añadir un gestor de incidencias junto a Linear. Una vez que la permites en **Settings → Extensions**, recibe una tarjeta bajo **Extension accounts** en esta página. Introduce la dirección del servidor cuando la tarjeta la pida y luego conecta una cuenta: pega un token, o guarda el client id de la app que registraste en el gestor e inicia sesión en el navegador. Si el gestor admite varias cuentas, **Add account** conecta otra y **Switch to** cambia la que está en uso. La asignación de proyectos y los comentarios de sesión aparecen en la tarjeta cuando el gestor los ofrece, como ocurre con Linear.
+
+Sus elementos aparecen entonces en el selector, el menú **+** del chat, New Worktree, los elementos vinculados de una sesión y los estados en vivo de los elementos que sigues. Los tokens se quedan en OpenChamber; el servicio de la extensión llega al gestor a través de OpenChamber y nunca los ve. Si el gestor rechaza una credencial más adelante, la tarjeta indica que la cuenta necesita atención; conéctala de nuevo. Pausar la extensión quita el gestor de todos los sitios donde aparece y conserva las cuentas; quitarla las olvida.
+
 ## Claude Code
 
 Claude Code usa tu plan Claude Pro o Max a través de la CLI de Claude Code en tu equipo — sin claves de API.

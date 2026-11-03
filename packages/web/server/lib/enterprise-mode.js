@@ -76,7 +76,11 @@ import { z } from 'zod';
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
  *   An allowed extension serving as a notification channel gets the kind's
  *   generic title with no body, session name or directory, as the phone does
- *   (`notifications/runtime.js` `sendToChannels`).
+ *   (`notifications/runtime.js` `sendToChannels`). An allowed extension
+ *   serving as a tracker receives the user's searches and item identifiers,
+ *   and the session comments it posts carry a fixed label and the session
+ *   link only (`trackers/extension-tracker.js`), so no conversation content
+ *   crosses; the allowlist is its gate, as for every service.
  *
  * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
  * enterprise mode: managed OpenCode then starts only from that path, never

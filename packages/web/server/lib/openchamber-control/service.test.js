@@ -6,6 +6,9 @@ import fs from 'node:fs/promises';
 
 import { createOpenChamberControlService } from './service.js';
 import { OpenChamberControlError } from './error.js';
+import { createScheduledTaskService } from '../scheduled-tasks/service.js';
+import { createChatsScope } from '../scheduled-tasks/chats-scope.js';
+import { createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
 
 const createService = (overrides = {}) => {
   const client = {
@@ -16,6 +19,13 @@ const createService = (overrides = {}) => {
     },
     message: {
       list: vi.fn(async () => ({ data: [] })),
+    },
+    // The catalog schedule.create/update validate a named model against.
+    model: {
+      list: vi.fn(async () => ({ data: [
+        { providerID: 'provider', id: 'model' },
+        { providerID: 'b', id: 'n' },
+      ] })),
     },
   };
   const sessionService = {
@@ -30,6 +40,7 @@ const createService = (overrides = {}) => {
   const scheduledTaskService = {
     status: vi.fn(async () => ({ enabledScheduledTasksCount: 0 })),
     resolveProjectID: vi.fn(async () => 'project-1'),
+    resolveExecutionDirectory: vi.fn(async () => '/repo'),
     list: vi.fn(async () => []),
     upsert: vi.fn(),
     run: vi.fn(),
@@ -126,6 +137,182 @@ describe('OpenChamber control service', () => {
       schedule: { kind: 'daily', times: ['09:00'] },
       execution: expect.objectContaining({ providerID: 'provider', modelID: 'model', goalEnabled: true, goalTokenBudget: 5000 }),
     }));
+  });
+
+  it('rejects a model that is not in the catalog when schedule.create names one', async () => {
+    const { service, client, scheduledTaskService } = createService();
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
+    // A removed provider or a deleted model is a create-time error, not a
+    // provider.no-route hours later in a throwaway session (#5950).
+    await expect(service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Dead',
+      prompt: 'Run checks',
+      model: 'gone/dead',
+      daily: '09:00',
+    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
+    expect(scheduledTaskService.upsert).not.toHaveBeenCalled();
+    expect(client.model.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reject a named model when the project catalog has not loaded yet', async () => {
+    // A cold location's first catalog read answers empty and fills in about
+    // two seconds later; an empty answer is not evidence of absence, so the
+    // check stands down instead of rejecting a model that would fire fine.
+    const { service, client, scheduledTaskService } = createService();
+    client.model.list.mockResolvedValue({ data: [] });
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
+    await expect(service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Early',
+      prompt: 'Run checks',
+      model: 'provider/model',
+      daily: '09:00',
+    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Early' }), created: true });
+    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts the upstream modelID of a catalog entry whose id is a display override', async () => {
+    // `findCatalogModel` matches `id` first and falls back to `modelID`
+    // because the fire path dispatches `modelID` upstream; a schedule create
+    // must not reject a string the session path accepts and that fires fine.
+    const { service, client, scheduledTaskService } = createService();
+    client.model.list.mockResolvedValue({ data: [
+      { providerID: 'p', id: 'display-override', modelID: 'upstream-name' },
+    ] });
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
+
+    await expect(service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Upstream',
+      prompt: 'Run checks',
+      model: 'p/upstream-name',
+      daily: '09:00',
+    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Upstream' }), created: true });
+
+    await expect(service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Display',
+      prompt: 'Run checks',
+      model: 'p/display-override',
+      daily: '09:00',
+    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Display' }), created: true });
+
+    await expect(service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Dead',
+      prompt: 'Run checks',
+      model: 'p/neither',
+      daily: '09:00',
+    }, '/repo')).rejects.toThrow('unknown model: p/neither');
+  });
+
+  it('validates the model of a target-session task too, and accepts a known one', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
+    await expect(service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Pinned',
+      prompt: 'Run checks',
+      model: 'gone/dead',
+      daily: '09:00',
+      targetSessionId: 'ses_target',
+    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
+
+    const created = await service.execute('schedule.create', {
+      directory: '/repo',
+      name: 'Known',
+      prompt: 'Run checks',
+      model: 'provider/model',
+      daily: '09:00',
+      targetSessionId: 'ses_target',
+    }, '/repo');
+    expect(created.task.execution).toMatchObject({ providerID: 'provider', modelID: 'model' });
+  });
+
+  it.each(['schedule.create', 'schedule.update'])('uses the Chats catalog across storage and public IDs for %s', async (action) => {
+    const chatsScope = createChatsScope('/chats');
+    const task = { id: 'task-1', name: 'Chats', execution: { prompt: 'Run', providerID: 'p', modelID: 'old' } };
+    const projectConfigRuntime = { listScheduledTasks: vi.fn(async () => [task]) };
+    const scheduledTaskService = createScheduledTaskService({
+      chatsScope,
+      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'project-1', path: '/repo' }] }),
+      sanitizeProjects: (projects) => projects,
+      projectConfigRuntime,
+      scheduledTasksRuntime: { syncProject: async () => [task] },
+    });
+    vi.spyOn(scheduledTaskService, 'upsert').mockImplementation(async (_project, saved) => ({ task: saved }));
+    const { service } = createService({
+      scheduledTaskService,
+      createClient: ({ headers }) => ({
+        model: { list: async () => ({ data: [{ providerID: 'p', id: decodeURIComponent(headers['x-opencode-directory']) === '/chats' ? 'chat' : 'checkout' }] }) },
+      }),
+    });
+    const input = { projectId: 'openchamber:chats', taskId: 'task-1', name: 'Chats', prompt: 'Run', daily: '09:00' };
+    await expect(service.execute(action, { ...input, model: 'p/chat' }, '/repo')).resolves.toHaveProperty('task');
+    expect(scheduledTaskService.upsert).toHaveBeenCalledWith(chatsScope.id, expect.any(Object));
+    await expect(service.execute(action, { ...input, model: 'p/checkout' }, '/repo')).rejects.toThrow('unknown model: p/checkout');
+    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['schedule.create', { targetSessionId: 'ses_target' }, '/worktree'],
+    ['schedule.update', {}, '/worktree'],
+    ['schedule.update', { targetSessionId: 'ses_other' }, '/other-worktree'],
+    ['schedule.update', { targetSessionId: '' }, '/repo'],
+  ])('validates the effective target catalog for %s with %j', async (action, target, directory) => {
+    const projects = [{ id: 'project-1', path: '/repo' }];
+    const task = { id: 'task-1', name: 'Pinned', targetSessionId: 'ses_target', execution: { prompt: 'Run', providerID: 'p', modelID: 'old' } };
+    const existingSessionTasks = createExistingSessionTasks({
+      listProjects: async () => projects,
+      createClient: () => ({ session: { get: async ({ sessionID }) => ({
+        id: sessionID, location: { directory: sessionID === 'ses_target' ? '/worktree' : '/other-worktree' },
+      }) } }),
+      resolvePrimaryWorktreeRoot: async () => ({ root: '/repo' }),
+    });
+    const scheduledTaskService = createScheduledTaskService({
+      readSettingsFromDiskMigrated: async () => ({ projects }),
+      sanitizeProjects: (entries) => entries,
+      scheduledTasksRuntime: { syncProject: async () => [task], validateTarget: existingSessionTasks.validateTarget },
+    });
+    vi.spyOn(scheduledTaskService, 'upsert').mockImplementation(async (_project, saved) => ({ task: saved }));
+    const { service } = createService({
+      scheduledTaskService,
+      createClient: ({ headers }) => ({
+        model: { list: async () => ({ data: [{ providerID: 'p', id: decodeURIComponent(headers['x-opencode-directory']) === directory ? 'selected' : 'wrong-directory' }] }) },
+      }),
+    });
+    const input = { projectId: 'project-1', taskId: 'task-1', name: 'Pinned', prompt: 'Run', daily: '09:00', ...target };
+    await expect(service.execute(action, { ...input, model: 'p/selected' }, '/repo')).resolves.toHaveProperty('task');
+    await expect(service.execute(action, { ...input, model: 'p/wrong-directory' }, '/repo')).rejects.toThrow('unknown model: p/wrong-directory');
+    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks only the model an update names, so a stored dead model stays editable', async () => {
+    const { service, client, scheduledTaskService } = createService();
+    const existing = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['09:00'] },
+      execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead' },
+    };
+    scheduledTaskService.list.mockResolvedValue([existing]);
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: false }));
+
+    // Disabling or retiming a task whose stored model has vanished must not
+    // require fixing the model first.
+    await service.execute('schedule.update', { taskId: 'task-1', disabled: false, timezone: 'UTC' }, '/repo');
+    expect(client.model.list).not.toHaveBeenCalled();
+
+    await expect(service.execute('schedule.update', {
+      taskId: 'task-1',
+      model: 'gone/dead',
+    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
+    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
+
+    await service.execute('schedule.update', { taskId: 'task-1', model: 'b/n' }, '/repo');
+    expect(scheduledTaskService.upsert.mock.calls[1][1].execution).toMatchObject({ providerID: 'b', modelID: 'n' });
   });
 
   it('updates a scheduled task in place, changing only the named fields', async () => {
@@ -248,6 +435,12 @@ describe('OpenChamber control service', () => {
     await expect(service.execute('work.name', { title: 'Login fix' }, '/wt/a', { contextSessionId: 'ses_caller' }))
       .resolves.toEqual({ task: 'worktree', title: 'Login fix', named: true });
     expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'Login fix', by: 'agent' });
+
+    client.session.get = vi.fn(async () => ({ id: 'ses_caller', title: 'Original title', location: { directory: '/repo' } }));
+    client.session.update = vi.fn();
+    await expect(service.execute('work.name', { title: 'Agent replacement' }, '/repo', { contextSessionId: 'ses_caller' }))
+      .resolves.toMatchObject({ named: false, title: 'Original title' });
+    expect(client.session.update).not.toHaveBeenCalled();
 
     const { service: without } = createService();
     await expect(without.execute('work.name', { title: 'Login fix' }, '/repo', { contextSessionId: 'ses_caller' }))
@@ -760,15 +953,23 @@ describe('render.page', () => {
     expect(await named(page)).toBe('Page');
   });
 
-  it('asks for html and title in one call when html is missing', async () => {
+  it('asks for the page and its title in one call when the page is missing', async () => {
     const { service } = createService();
     await expect(service.execute('render.page', { title: 'Coverage' }, '/repo'))
-      .rejects.toMatchObject({ message: expect.stringContaining('Send html and title together in one call') });
+      .rejects.toMatchObject({ message: expect.stringContaining('Send it and title together in one call') });
+  });
+
+  it('shows a ui program the way it shows html, named by its title', async () => {
+    const { service } = createService();
+    const result = await service.execute('render.page', { ui: 'root = Stack([Text("hi")])', title: 'Pick' }, '/repo');
+    expect(result).toMatchObject({ shown: true, title: 'Pick' });
   });
 
   it.each([
-    [{ title: 'Coverage' }, 'html is required'],
-    [{ html: '   ', title: 'Coverage' }, 'html is required'],
+    [{ title: 'Coverage' }, 'html or ui is required'],
+    [{ html: '   ', title: 'Coverage' }, 'html or ui is required'],
+    [{ html: page, ui: 'root = Stack([])', title: 'Coverage' }, 'not both'],
+    [{ ui: 'x'.repeat(200_001), title: 'Coverage' }, 'ui is 200001 characters'],
     [{ html: 'x'.repeat(200_001), title: 'Coverage' }, 'the limit is 200000'],
     [{ html: page, title: 't'.repeat(121) }, 'the limit is 120'],
   ])('refuses %o with a reason the agent can act on', async (input, reason) => {
@@ -788,6 +989,18 @@ describe('render.page', () => {
     const call = { contextSessionId: 'ses_1', contextCallId: 'call_1' };
     // The call starts waiting once its checks have run.
     const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('hands the agent the errors when a client cannot draw its ui', async () => {
+      const { service } = createService();
+      const pending = service.execute('render.page', { ui: 'root = Stack([Text(1)])', title: 'Pick', awaitAnswer: true }, '/repo', call);
+      await settle();
+
+      expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', notDrawn: ['Text /markdown: expects string'] })).toEqual({ answered: false });
+      const result = await pending;
+
+      expect(result).toMatchObject({ answer: { answered: false, reason: 'ui-not-drawn' } });
+      expect(result.note).toContain('Text /markdown: expects string');
+    });
 
     it('waits until the user answers and returns the answer', async () => {
       const { service } = createService();

@@ -1,4 +1,5 @@
 import React from 'react';
+import { isWorkflowAgentSession } from '@/lib/sessionWorkflowMetadata';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
@@ -18,6 +19,7 @@ import { useOpenChildSession } from './useOpenChildSession';
 import { formatCost } from './subagentCost';
 import { computeRollup } from './useSubagentCostRollup';
 import type { State } from '@/sync/types';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 type Props = {
   sessionId: string | null;
@@ -43,14 +45,17 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   const liveSessions = useAllLiveSessions();
   const statuses = useAllSessionStatuses();
   // A workflow's agents are child sessions too; the Workflows section lists
-  // them under their run, so they stay out of this list.
+  // them under their run, so they stay out of this list: by their mark, and
+  // by the runs for agents started before sessions carried one.
   const workflowRuns = useSessionWorkflowRuns(sessionId);
   const workflowAgentIds = React.useMemo(
     () => new Set(workflowRuns.flatMap((run) => run.agents.flatMap((agent) => (agent.sessionId ? [agent.sessionId] : [])))),
     [workflowRuns],
   );
   const children = React.useMemo(
-    () => (sessionId ? liveSessions.filter((candidate) => candidate.parentID === sessionId && !workflowAgentIds.has(candidate.id)) : []),
+    () => (sessionId ? liveSessions.filter((candidate) => (
+      candidate.parentID === sessionId && !workflowAgentIds.has(candidate.id) && !isWorkflowAgentSession(candidate)
+    )) : []),
     [liveSessions, sessionId, workflowAgentIds],
   );
 
@@ -147,7 +152,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       defaultExpanded
       summary={busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
     >
-      <div className="max-h-56 overflow-y-auto">
+      <ScrollableOverlay outerClassName="max-h-56" disableHorizontal>
         {rows.map(({ child, blocked, asked, busy, failed, done }) => {
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           let icon: IconName = 'time';
@@ -203,7 +208,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
             />
           );
         })}
-      </div>
+      </ScrollableOverlay>
     </WorkStatusCollapsibleSection>
   );
 };

@@ -217,6 +217,7 @@ const readInput = (input: ToolInput | undefined): ParsedInput => inputSchema.par
 
 const renderPageFields = z.object({
   html: z.string().optional().catch(undefined),
+  ui: z.string().optional().catch(undefined),
   title: optionalText,
   awaitAnswer: booleanish,
 })
@@ -368,6 +369,8 @@ export type RenderedPageAsk =
   | { kind: "answered-in-chat" }
   /** The user had written in the chat before the page appeared, so it did not wait. */
   | { kind: "chat-sent-earlier" }
+  /** The chat could not draw the page's ui; the agent got the parser's errors. */
+  | { kind: "not-drawn" }
   | { kind: "unanswered" }
 
 // A page sent without a title is named after its own <title>, else its first
@@ -396,28 +399,32 @@ const pageTitleFromHtml = (html: string): string => (
 export function renderedPage(
   toolName: ToolName,
   state: ToolState,
-): { html: string; title: string; ask: RenderedPageAsk } | null {
+): { html: string; ui?: string; title: string; ask: RenderedPageAsk } | null {
   if (!isRenderTool(toolName)) return null
   const parsed = renderPageInputSchema.parse(state.input ?? {})
-  const html = parsed.parameters?.html ?? parsed.html
-  if (!html?.trim()) return null
+  const html = parsed.parameters?.html ?? parsed.html ?? ""
+  // A ui page (the UI block language) is drawn by the chat's own components.
+  const ui = parsed.parameters?.ui ?? parsed.ui
+  const page = ui?.trim() ? { html: "", ui } : html.trim() ? { html } : null
+  if (!page) return null
   // Empty when neither the call nor the page names it; the chat shows its own word then.
   const title = (parsed.parameters?.title ?? parsed.title)?.trim() || pageTitleFromHtml(html)
   // A page that waited stays in the chat when its call ends without an
   // answer (the user stopped the turn), so the question it asked is still there.
   if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true) {
-    if (state.status === "running") return { html, title, ask: { kind: "waiting" } }
-    if (state.status === "error") return { html, title, ask: { kind: "unanswered" } }
+    if (state.status === "running") return { ...page, title, ask: { kind: "waiting" } }
+    if (state.status === "error") return { ...page, title, ask: { kind: "unanswered" } }
   }
   if (state.status !== "completed") return null
   const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
   if (result?.ok !== true) return null
   const answer = result.answer
-  if (answer?.answered === true) return { html, title, ask: { kind: "answered", summary: answer.summary, data: answer.data } }
+  if (answer?.answered === true) return { ...page, title, ask: { kind: "answered", summary: answer.summary, data: answer.data } }
   if (answer?.answered === false) {
-    return { html, title, ask: { kind: answer.reason === "chat-sent-earlier" ? "chat-sent-earlier" : "answered-in-chat" } }
+    const kind = answer.reason === "chat-sent-earlier" ? "chat-sent-earlier" : answer.reason === "ui-not-drawn" ? "not-drawn" : "answered-in-chat"
+    return { ...page, title, ask: { kind } }
   }
-  return { html, title, ask: { kind: "show" } }
+  return { ...page, title, ask: { kind: "show" } }
 }
 
 const secretRequestFields = z.object({
@@ -570,7 +577,8 @@ export function generatedImagePaths(toolName: ToolName, state: ToolState): strin
  * from `openchamber_render`, the run a `workflow.run` call proposed, the
  * images `image.generate` made, or a secret card from `openchamber_secret`.
  * The user is meant to see all of them, so they are hoisted to the answer when
- * Activity is collapsed.
+ * Activity is collapsed; one that asked the user, only while it waits
+ * (`getShownPages`).
  */
 export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean => (
   renderedPage(toolName, state) !== null

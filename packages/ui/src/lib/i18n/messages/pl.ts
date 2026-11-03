@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -24,8 +25,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -178,6 +181,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n.pl,
   ...htmlRenderI18n.pl,
   ...documentToolbarI18n.pl,
+  ...uiBlocksI18n.pl,
   ...updateDialogCanaryI18n.pl,
   ...secretRequestI18n.pl,
   ...sessionNoticesI18n.pl,
@@ -188,8 +192,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n.pl,
   ...consoleBudgetsI18n.pl,
   ...imageToolI18n.pl,
+  ...agentStatusI18n.pl,
   ...snippetsI18n.pl,
   ...sidebarWorkI18n.pl,
+  ...sidebarSectionsI18n.pl,
   ...worktreeArchiveI18n.pl,
   ...overviewI18n.pl,
   ...isolatedSpacesI18n.pl,
@@ -458,6 +464,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.actions.more': 'Więcej',
   'sessions.sidebar.header.actions.exitSelection': 'Wyjdź z zaznaczenia',
   'sessions.sidebar.header.actions.selectSessions': 'Wybierz sesje',
+  'sessions.sidebar.header.actions.markAllRead': 'Oznacz wszystkie jako przeczytane',
   'sessions.sidebar.header.actions.sortProjects': 'Sortuj projekty',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Tryb wyświetlania sesji',
   'sessions.sidebar.header.displayMode.label': 'Tryb wyświetlania',
@@ -642,6 +649,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Najpierw wybierz projekt',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Nie udało się załadować zaplanowanych zadań',
   'sessions.scheduledTasks.dialog.toast.saved': 'Zaplanowane zadanie zapisane',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'Zadanie działa teraz w nowym miejscu, ale nie udało się usunąć starej kopii. Usuń ją tam, aby zadanie nie uruchamiało się dwa razy.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Nie udało się zaktualizować zadania',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Zaplanowane zadanie usunięte',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Nie udało się usunąć zadania',
@@ -1012,7 +1020,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': 'Niski priorytet',
   'chat.statusRow.actions.stopGeneratingAria': 'Zatrzymaj generowanie',
   'chat.statusRow.tasksTitle': 'Zadania',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} aktywne · {left} pozostało',
   'chat.revertIndicator.redo': 'Ponów',
   'chat.revertIndicator.redoAria': 'Ponów — przywróć cofnięte wiadomości',
@@ -2352,6 +2360,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.symbols.noneInFile': 'W tym pliku nie znaleziono funkcji, klas ani nagłówków',
   'filesView.symbols.noMatches': 'Brak pasujących symboli',
   'filesView.editor.htmlPreviewTitle': 'Podgląd HTML',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'Podgląd HTML nie jest dostępny przez relay',
+  'filesView.editor.htmlPreviewShowCode': 'Pokaż kod',
   'filesView.editor.htmlAnnotate.intro': 'To jest opatrzony adnotacją fragment z podglądu pliku HTML.',
   'filesView.diagram.closeDiagramView': 'Zamknij widok diagramu',
   'filesView.diagram.saveDiagram': 'Zapisz diagram',
@@ -3017,7 +3027,6 @@ export const dict: Record<I18nKey, string> = {
   'openCodeStatusDialog.toast.copiedDescription': 'Dziennik diagnostyczny skopiowany do schowka',
   'openCodeStatusDialog.toast.copiedTitle': 'Skopiowano',
   'openCodeStatusDialog.toast.copyFailed': 'Nie udało się skopiować dziennika diagnostycznego',
-  'openInApp.actions.chooseAppAria': 'Wybierz aplikację do otwarcia',
   'openInApp.actions.copyPath': 'Kopiuj ścieżkę',
   'openInApp.actions.open': 'Otwórz',
   'openInApp.actions.openInAria': 'Otwórz w {app}',
@@ -3900,12 +3909,16 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': 'Worktree i jego gałąź zostają po uruchomieniu, żeby można było obejrzeć wynik.',
   'sessions.scheduledTasks.editor.worktree.notRepo': 'Folder projektu nie jest repozytorium git; uruchomienia użyją checkoutu bez zmian.',
   'sessions.scheduledTasks.dialog.usesDefaults': 'Domyślne ustawienia sesji',
-  'sessions.moveChatToProject.menu': 'Przenieś do projektu…',
-  'sessions.moveChatToProject.hint': 'Kontynuuj tę rozmowę w projekcie',
-  'sessions.moveChatToProject.title': 'Przenieś czat do projektu',
-  'sessions.moveChatToProject.description': 'Rozmowa toczy się dalej w folderze projektu. Pliki utworzone przez czat zostają na miejscu.',
-  'sessions.moveChatToProject.success': 'Czat przeniesiono do projektu',
-  'sessions.moveChatToProject.failed': 'Nie udało się przenieść czatu',
+  'sessions.moveSession.menu': 'Przenieś sesję…',
+  'sessions.moveSession.hint': 'Pliki zostają w starym folderze',
+  'sessions.moveSession.title': 'Przenieś sesję',
+  'sessions.moveSession.description': 'Sesja będzie kontynuowana w wybranym folderze. Pliki zostają tam, gdzie są.',
+  'sessions.moveSession.chooseFolder': 'Wybierz folder…',
+  'sessions.moveSession.current': 'Bieżący folder',
+  'sessions.moveSession.success': 'Sesja przeniesiona',
+  'sessions.moveSession.failed': 'Nie udało się przenieść sesji',
+  'chat.folderMissing.text': 'Folder {name} już nie istnieje',
+  'chat.folderMissing.action': 'Przenieś sesję',
   'chat.worktreeSetup.running': 'Przygotowywanie worktree: uruchamianie poleceń konfiguracyjnych projektu…',
   'chat.draft.creatingSession': 'Tworzenie sesji…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'Nie udało się nawiązać połączenia, więc OpenChamber uruchomił się na Local. Połącz się z przełącznika instancji, gdy będzie dostępna.',

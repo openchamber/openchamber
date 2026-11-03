@@ -74,6 +74,20 @@ export function onRowExpand(container: HTMLElement, listener: () => void): () =>
     return () => container.removeEventListener(ROW_EXPAND_EVENT, listener);
 }
 
+// Something about to move the viewport itself (a quote reveal stepping
+// through a long answer's rows) asks the list's navigation hold on a target
+// to let go, as the reader's own scroll would.
+const NAVIGATION_RELEASE_EVENT = 'openchamber:navigation-release';
+
+export function dispatchNavigationRelease(scroller: HTMLElement): void {
+    scroller.dispatchEvent(new CustomEvent(NAVIGATION_RELEASE_EVENT));
+}
+
+export function onNavigationRelease(scroller: HTMLElement, listener: () => void): () => void {
+    scroller.addEventListener(NAVIGATION_RELEASE_EVENT, listener);
+    return () => scroller.removeEventListener(NAVIGATION_RELEASE_EVENT, listener);
+}
+
 // A page waiting for the reader's answer (`openchamber_render` with
 // `awaitAnswer`) raises this from its block when it appears and whenever its
 // height changes, so the timeline holding it can bring it into view. The

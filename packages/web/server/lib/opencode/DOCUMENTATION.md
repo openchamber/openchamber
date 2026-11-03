@@ -83,7 +83,12 @@ in that user's sessions. On the fallback path the same rules are merged into
 - `packages/web/server/lib/opencode/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization). With no project stored, the legacy migration turns a stored `lastDirectory` into the first project, except a folder inside the chats roots (`chatRoots` dep, compared lexically and by realpath): with no project open the UI's last directory is usually a chat's, and a chat belongs to no project.
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep. `lastDirectory: ''` is kept as written: the UI sends it when the last project is removed, and every reader (the warm-up, the legacy last-directory-to-project migration, request directory resolution) treats it as unset.
 - `packages/web/server/lib/opencode/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring. Project records keep `labelSource` beside `label` so every client can tell a derived label from one the user typed; an unknown value, or a source without a label, is dropped.
-- `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes.
+- `packages/web/server/lib/opencode/theme-runtime.js`: custom theme JSON validation and theme directory loading runtime for settings utility routes. A theme file that stops loading (a half-written save, a typo, an oversized or unreadable file) keeps serving the last version of that file this process loaded, so the theme on screen stays put while it is edited; a file that never loaded is skipped, and a removed file drops its theme at once.
+- `packages/web/server/lib/opencode/theme-watch.js`: watches the custom themes folder and sends `openchamber:themes-changed` on the control stream, with nothing in it, once a `.json` file there was added, removed or rewritten and then held still for one check; every client reads `GET /api/config/themes` again. Imports and deletes through the routes are announced the same way, so other windows follow them. The first look is taken at creation, so a save right after start is announced. The feature routes runtime owns the one watch: registering routes again replaces it, and graceful shutdown stops it.
+
+  ### Why themes use folder signals with a safety poll
+
+  Node `fs.watch` signals coalesce into fingerprint checks after 1 second, with another check 1 second later to settle a change. The shared scheduler in `../fs/folder-change-watch.js` also checks and reopens the watcher every 30 seconds because Linux/Windows watchers can silently retain a deleted folder; pure watching misses recreation, while pure polling lists and stats themes every idle second. Missing folders and unavailable, errored or closed watchers retain the 1-second fallback until the safety poll restores the watcher. OpenCode's experimental file watch requires a project location and misses new files, so it cannot own the custom themes folder.
 
   `POST /api/config/themes` saves a converted VS Code palette. The runtime validates
   literal colors and required authored roles, assigns a content-derived filename,
@@ -388,6 +393,7 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `waitForAgentPresence(agentName, timeoutMs?, intervalMs?)`
   - `refreshOpenCodeAfterConfigChange(reason, options?)`
   - `bootstrapOpenCodeAtStartup()`
+  - `scheduleBootstrapRetry(bootstrap, onAlreadyRunning)`: when the last bootstrap left no managed OpenCode, runs `bootstrap` again after 5, 15, 30 and then every 60 seconds, or `onAlreadyRunning` if a restart has started OpenCode by then, and answers whether it scheduled a run
   - `startHealthMonitoring(healthCheckIntervalMs)`
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
@@ -430,6 +436,8 @@ Upstream health is probed with `GET /api/info` (OpenCode 2.0.8 removed `/api/hea
 Transport-triggered health checks share the periodic monitor's failure accounting interval. Rapid WS reconnect callbacks therefore cannot exhaust the managed-process restart threshold using one cached unhealthy result; an exited managed process still restarts immediately.
 
 Managed health failures are classified as `timeout`, `connection_refused`, `connection_reset`, `invalid_response`, or `error`. The lifecycle retains the latest counted failure with a bounded detail string and source. Managed process wrappers continue capturing a sanitized, bounded stderr tail after readiness and retain exit code/signal. Before replacing a managed process, lifecycle snapshots the reason, latest health failure, process diagnostics/aliveness, busy-session count, and timestamp into `lastOpenCodeRestartDiagnostics`; successful startup does not clear this snapshot, and `/health` exposes it for post-restart diagnosis without process environment or credentials.
+
+A bootstrap that leaves no managed OpenCode is retried for as long as the server runs, because the health monitor only watches a running process and nothing else would start one. `index.js` skips the steps that need OpenCode (health monitoring, the global watcher, legacy migrations) until a run succeeds. A retry and a restart never start OpenCode at once: a retry waits for a restart in flight, and a restart waits for a retry in flight and then still restarts, since that run may have read the configuration the restart is for. `lastOpenCodeError` keeps the last failure during a retry, so the UI goes on showing the real reason. A rejected binary (invalid path, unsupported version) is not retried, since it fails the same way until the user changes it; an external server is not retried, since OpenChamber does not start it.
 
 Managed process ownership starts at spawn. The registry and runtime process
 handle include children that have not announced readiness yet, so shutdown can

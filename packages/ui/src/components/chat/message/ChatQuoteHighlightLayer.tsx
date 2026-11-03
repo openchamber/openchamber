@@ -29,8 +29,8 @@
 import React from 'react';
 
 import {
-    findChatQuoteRoot,
-    resolveChatQuoteAnchor,
+    findChatQuoteRoots,
+    resolveChatQuoteRanges,
     type ChatQuoteAnchor,
 } from '@/lib/chatQuoteAnchor';
 
@@ -39,6 +39,7 @@ import { ChatColumnSessionContext } from '../chatColumnSession';
 import { ChatQuoteMarkPopover } from './ChatQuoteMarkPopover';
 import type { HtmlRenderMark } from './parts/htmlRender';
 import { onPageMarkClick, revealPageMark, setPageMarks } from './pageQuoteBridge';
+import { dispatchNavigationRelease } from '../lib/scroll/timelineScrollIntent';
 
 const MARK_HIGHLIGHT = 'oc-chat-quote';
 const FOCUS_HIGHLIGHT = 'oc-chat-quote-focus';
@@ -91,14 +92,29 @@ interface ChatQuoteHighlightLayerProps {
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
 }
 
-function markAtPoint(ranges: Map<string, Range>, x: number, y: number): string | null {
-    for (const [id, range] of ranges) {
-        for (const rect of range.getClientRects()) {
-            if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return id;
+function markAtPoint(ranges: Map<string, Range[]>, x: number, y: number): string | null {
+    for (const [id, parts] of ranges) {
+        for (const range of parts) {
+            for (const rect of range.getClientRects()) {
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) return id;
+            }
         }
     }
     return null;
 }
+
+// The box around a quote; one that crosses a long answer's rows has a Range per row.
+const boundsOf = (parts: Range[]): DOMRect => {
+    const [first, ...rest] = parts.map((range) => range.getBoundingClientRect());
+    let { left, top, right, bottom } = first;
+    for (const rect of rest) {
+        left = Math.min(left, rect.left);
+        top = Math.min(top, rect.top);
+        right = Math.max(right, rect.right);
+        bottom = Math.max(bottom, rect.bottom);
+    }
+    return new DOMRect(left, top, right - left, bottom - top);
+};
 
 // A mark inside a page's frame has no Range here: its popover opens from the
 // frame's click report, follows the frame through `measure`, and renders in
@@ -108,6 +124,26 @@ type PopoverState = {
     rect: DOMRect;
     measure?: () => DOMRect;
     portal?: HTMLElement | null;
+};
+
+
+// A long answer's rows: the lowest one drawn says whether the message goes
+// on below it (`data-message-continues`); scrolling past it mounts the next.
+const lowestRowOf = (scrollNode: HTMLElement, messageId: string): Element | null => {
+    let lowest: Element | null = null;
+    for (const message of scrollNode.querySelectorAll(`[data-message-id="${CSS.escape(messageId)}"]`)) {
+        if (!lowest || message.getBoundingClientRect().bottom > lowest.getBoundingClientRect().bottom) lowest = message;
+    }
+    return lowest;
+};
+
+const messageContinuesBelow = (scrollNode: HTMLElement, messageId: string): boolean => (
+    lowestRowOf(scrollNode, messageId)?.hasAttribute('data-message-continues') === true
+);
+
+const scrollToNextSlice = (scrollNode: HTMLElement, messageId: string): void => {
+    const lowest = lowestRowOf(scrollNode, messageId);
+    if (lowest) scrollNode.scrollTop += lowest.getBoundingClientRect().bottom - scrollNode.getBoundingClientRect().top;
 };
 
 export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLayer({
@@ -123,7 +159,7 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     const [editing, setEditing] = React.useState(false);
     const focusedMarkId = chipFocusedMarkId ?? popover?.markId ?? null;
     // Resolved ranges of the marks currently mounted, for hit-testing.
-    const rangesRef = React.useRef(new Map<string, Range>());
+    const rangesRef = React.useRef(new Map<string, Range[]>());
     const [owners] = React.useState(() => ({
         marks: { layer: 'marks' } satisfies PaintOwner,
         focus: { layer: 'focus' } satisfies PaintOwner,
@@ -161,12 +197,11 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
             ranges.clear();
             for (const mark of marks) {
                 if (mark.anchor.page) continue;
-                const root = findChatQuoteRoot(scrollNode, mark.messageId);
-                const range = root ? resolveChatQuoteAnchor(root, mark.anchor) : null;
-                if (!range) continue;
-                ranges.set(mark.id, range);
-                marked.push(range);
-                if (mark.id === focusedMarkId) focused.push(range);
+                const parts = resolveChatQuoteRanges(findChatQuoteRoots(scrollNode, mark.messageId), mark.anchor);
+                if (!parts) continue;
+                ranges.set(mark.id, parts);
+                marked.push(...parts);
+                if (mark.id === focusedMarkId) focused.push(...parts);
             }
             paint(MARK_HIGHLIGHT, owners.marks, marked);
             paint(FOCUS_HIGHLIGHT, owners.focus, focused);
@@ -268,23 +303,35 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
             }
             // Scrolling through the timeline controller releases live follow
             // and mounts the row when the virtualized list dropped it.
-            const mounted = scrollNodeRef.current ? findChatQuoteRoot(scrollNodeRef.current, messageId) : null;
+            const mounted = scrollNodeRef.current ? findChatQuoteRoots(scrollNodeRef.current, messageId).length > 0 : false;
             const scrolled = await scrollToMessage(messageId, { behavior: 'auto' }).catch(() => false);
             if (!isCurrent() || !scrollNode) return;
             if (!scrolled && !mounted) return;
+            let steps = 0;
             const tryReveal = () => {
                 frame = null;
                 if (!isCurrent()) { cancel(); return; }
-                const root = findChatQuoteRoot(scrollNode, messageId);
+                const roots = findChatQuoteRoots(scrollNode, messageId);
                 // A lazy fallback can contain raw Markdown on mobile. Wait for
                 // the renderer before treating a failed match as final.
-                if (!root || root.querySelector('[data-chat-quote-pending]')) return;
-                const range = resolveChatQuoteAnchor(root, anchor);
+                if (roots.length === 0 || roots.some((root) => root.querySelector('[data-chat-quote-pending]'))) return;
+                const parts = resolveChatQuoteRanges(roots, anchor);
+                // A long answer's later rows mount as they near the view: step
+                // down past the lowest one drawn while the message continues.
+                if (!parts && steps < REVEAL_ATTEMPTS && messageContinuesBelow(scrollNode, messageId)) {
+                    // Navigation holds the message's first row in place
+                    // (`settleNavigationTarget`); it lets go first, or the
+                    // two would fight.
+                    dispatchNavigationRelease(scrollNode);
+                    scrollToNextSlice(scrollNode, messageId);
+                    steps += 1;
+                    return;
+                }
                 cancel();
-                if (!range) return;
-                range.startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
+                if (!parts) return;
+                parts[0].startContainer.parentElement?.scrollIntoView({ block: 'center', inline: 'nearest' });
                 if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
-                paintFlash([range]);
+                paintFlash(parts);
                 flashTimerRef.current = window.setTimeout(() => {
                     flashTimerRef.current = null;
                     paintFlash([]);
@@ -329,10 +376,10 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     // must not start the close.
     const isInPopoverCorridor = React.useCallback((x: number, y: number): boolean => {
         const open = popoverRef.current;
-        const range = open ? rangesRef.current.get(open.markId) : null;
+        const parts = open ? rangesRef.current.get(open.markId) : null;
         const box = popoverElementRef.current?.getBoundingClientRect();
-        if (!range || !box) return false;
-        const mark = range.getBoundingClientRect();
+        if (!parts || !box) return false;
+        const mark = boundsOf(parts);
         return x >= Math.min(mark.left, box.left) - CORRIDOR_PADDING_PX
             && x <= Math.max(mark.right, box.right) + CORRIDOR_PADDING_PX
             && y >= Math.min(mark.top, box.top) - CORRIDOR_PADDING_PX
@@ -372,9 +419,9 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
     }), [clearTimers, closePopover]);
 
     const showPopover = React.useCallback((markId: string) => {
-        const range = rangesRef.current.get(markId);
-        if (!range) return;
-        setPopover({ markId, rect: range.getBoundingClientRect() });
+        const parts = rangesRef.current.get(markId);
+        if (!parts) return;
+        setPopover({ markId, rect: boundsOf(parts) });
     }, []);
 
     const scheduleClose = React.useCallback(() => {
@@ -461,8 +508,8 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
             if (frame !== null) return;
             frame = window.requestAnimationFrame(() => {
                 frame = null;
-                const range = rangesRef.current.get(openMarkId);
-                const rect = range ? range.getBoundingClientRect() : popoverRef.current?.measure?.();
+                const parts = rangesRef.current.get(openMarkId);
+                const rect = parts ? boundsOf(parts) : popoverRef.current?.measure?.();
                 if (!rect) {
                     closePopover();
                     return;

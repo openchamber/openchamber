@@ -48,6 +48,20 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 
 ## Decisions
 
+### Why events and not polling
+
+The runtime broadcasts `openchamber:terminal-sessions-changed` after creation,
+exit, restart and removal, including idle cleanup, replacement and shutdown.
+The event carries no terminal data or command text. The existing OpenChamber
+control broadcaster reaches global WebSocket and control SSE clients, including
+relay and mobile clients. Consumers coalesce invalidations into authoritative
+list reads and read again on connection and visibility recovery. The old
+five-second loop generated idle requests whenever the header was mounted.
+
+### Why older Bun uses node-pty
+
+bun-pty 0.6.0 imports successfully on Bun below stable 1.4.0 but throws when spawning. Provider selection checks the Bun version before caching the provider, so older Bun, 1.4.0 prereleases, and Node use node-pty. Early 1.4.0 canaries lack the required FFI buffer_length type. The bun-pty patch retains up to 512 KiB of UTF-8-safe output until the first data listener attaches; 0.6.0 does not yet include that upstream fix.
+
 ### Why replay parsing carries bounded fragments
 
 A growing pending prefix made an unterminated control string copy and rescan all previous output on every callback. Bounded fragments let the parser scan only new input and assemble a retained sequence once at its terminator. UTF-16 copies preserve split surrogate pairs and prevent a short suffix from retaining a larger callback allocation.

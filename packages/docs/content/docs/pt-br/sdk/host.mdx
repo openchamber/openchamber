@@ -257,6 +257,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 Para qual sala ou canal um projeto vai é escolha da sua extensão: a notificação carrega `directory` e `sessionName`. No modo empresarial, ela carrega só o título genérico, como o celular. O exemplo `notification-webhook` é um canal completo com um receptor para testá-lo.
 
+## Rastreadores
+
+Um serviço pode ser um rastreador de itens de trabalho ao lado do Linear: declare `provides: ["tracker"]` e descreva o rastreador em `contributes.tracker`. O OpenChamber passa a listá-lo ao lado do Linear em todo lugar onde rastreadores aparecem, só a partir do manifesto, antes de o serviço sequer rodar.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+O usuário conecta contas no card do rastreador sob Contas de extensões: um token, ou um login pelo navegador quando você declara `auth.oauth` (o OpenChamber conduz o login com o client id que o usuário informa e guarda os tokens). O seu serviço nunca vê uma credencial. `urls.item` são modelos para o endereço de um item, com `{id}` no lugar do identificador (também como `?name={id}` quando ele viaja na query); o OpenChamber os compila para que links colados virem itens vinculados. `identifier` diz como a chave se parece: `key-number` (`PROJ-42`), `number` ou `short-code`.
+
+O OpenChamber encaminha nove chamadas para `POST /tracker`: `auth.probe` e `auth.verify`, as leituras `items.list`, `items.get`, `items.liveSummaries`, `states.list` e `containers.list`, e as escritas `items.updateState` e `comments.create`. Leia cada uma com `readTrackerProviderRequest`, responda nas formas neutras de item e alcance o servidor do rastreador só pelo helper de saída, que envia a sua requisição ao OpenChamber com o handle da chamada; o OpenChamber adiciona a credencial e mantém a requisição no servidor da conta. O handle de uma leitura envia só `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Quando o usuário liga os comentários de sessão, o OpenChamber chama `comments.create` com "session started", "completed" ou "failed" e um link para a sessão, uma vez cada; o comentário não carrega mais nada. O exemplo `tracker-provider` é um rastreador completo com um servidor falso para testá-lo.
+
 ## Arquivos
 
 Um caminho relativo fica dentro do projeto aberto e precisa da capacidade `files`. Um caminho que começa com `/` ou `~/` precisa bater com um padrão declarado em `contributes.filesystem` e precisa da capacidade `filesystem`. Veja [Crie uma extensão](/sdk/#arquivos) para as regras.

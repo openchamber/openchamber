@@ -121,7 +121,7 @@ import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createAutoReviewRuntime } from './lib/auto-review/runtime.js';
 import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createPrWatchRuntime } from './lib/pr-watch/runtime.js';
-import { isWorkflowFeatureAvailable } from './lib/workflows/feature-flag.js';
+import { createMergeFollowRuntime } from './lib/github/merge-follow.js';
 import { createWorkflowAgentSessions } from './lib/workflows/agent-session.js';
 import { createWorkflowRuntime } from './lib/workflows/runtime.js';
 import { createWorkflowRunStore } from './lib/workflows/store.js';
@@ -151,6 +151,7 @@ import { createSpacesHost } from './lib/spaces/host.js';
 import { createSpaceArchive } from './lib/spaces/space-archive.js';
 import { readIdleStopSetting, startIdleStop } from './lib/spaces/idle-stop.js';
 import { permissionDefaultOf, readSpacePermissionDefault } from './lib/spaces/space-permission-default.js';
+import { createInsideSpaceTaskNaming, SPACE_TASK_TITLE_ROUTE } from './lib/spaces/task-title.js';
 import { dockerHostOf } from './lib/spaces/places/ssh-host.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
@@ -161,6 +162,7 @@ import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.j
 import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
+import { createClientPushAccess } from './lib/notifications/client-push-access.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService, relayBlockedByEnterprise } from './lib/relay/service.js';
@@ -185,6 +187,7 @@ import { createOpenChamberControlService } from './lib/openchamber-control/servi
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
 import { createSessionLinker } from './lib/openchamber-sessions/session-link.js';
+import { linkedWorktreeOf } from './lib/openchamber-sessions/work-naming.js';
 import { createFileOpenRequester } from './lib/openchamber-control/file-open.js';
 import { createSecretFiles } from './lib/openchamber-control/secret-request.js';
 import { applyConnectAttemptTimeout } from './lib/network-defaults.js';
@@ -533,6 +536,8 @@ const pushRuntime = createPushRuntime({
   PUSH_SUBSCRIPTIONS_FILE_PATH,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
+  // clientPushAccess needs this runtime, so it is created later: read it per send.
+  getInvalidSessionKeys: () => clientPushAccess.invalidSessionKeys(),
 });
 
 const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
@@ -571,6 +576,7 @@ const apnsRuntime = createApnsRuntime({
   APNS_TOKENS_FILE_PATH,
   readSettingsFromDiskMigrated,
   relayKeyStore,
+  getInvalidSessionKeys: () => clientPushAccess.invalidSessionKeys(),
 });
 
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
@@ -1153,6 +1159,10 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
     return settings?.agentControlToolEnabled !== false;
   },
   readCheckoutBranch: getCheckedOutBranch,
+  isWorkNamingAvailable: async (directory) => {
+    if (/^\/spaces\/[0-9a-f]{12}(?:\/|$)/.test(directory)) return true;
+    return linkedWorktreeOf(directory, await getWorktrees(directory)) !== null;
+  },
   readPlaceholderBranch: readRenameableGeneratedBranch,
   isPageRenderingAvailable: async () => {
     if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
@@ -1165,9 +1175,9 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
     return settings?.agentSecretToolEnabled !== false;
   },
   isWorkflowAvailable: async () => {
-    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START || !isWorkflowFeatureAvailable()) return false;
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentWorkflowToolEnabled !== false;
+    if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) return false;
+    // Declared further down; only ever called after startup.
+    return isWorkflowToolEnabled();
   },
   areAgentToolsInCodeMode: async () => {
     const settings = await readSettingsFromDiskMigrated().catch(() => null);
@@ -1345,44 +1355,41 @@ const prWatchRuntime = createPrWatchRuntime({
   insideSpace: Boolean(process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE),
 });
 prWatchRuntime.start(globalMessageStreamHub);
+const mergeFollowRuntime = createMergeFollowRuntime({
+  dataDir: OPENCHAMBER_DATA_DIR,
+  notify: (notification) => notificationTriggerRuntime.notifyPullRequest(notification),
+});
 
 // Agent workflows: scripts that fan a task out to many agents, run here while
-// the agent that asked stays free. Absent entirely unless the build flag is set.
+// the agent that asked stays free. Off until the user turns the tool on.
 const isWorkflowToolEnabled = async () => {
-  if (!isWorkflowFeatureAvailable()) return false;
   const settings = await readSettingsFromDiskMigrated().catch(() => null);
-  return settings?.agentWorkflowToolEnabled !== false;
+  return settings?.agentWorkflowToolEnabled === true;
 };
-const workflowAgentSessions = isWorkflowFeatureAvailable()
-  ? createWorkflowAgentSessions({
-    buildOpenCodeUrl,
-    getOpenCodeAuthHeaders,
-    // Declared further down; only ever called after startup.
-    waitForOpenCodeReady: (...args) => waitForOpenCodeReady(...args),
-    globalEventHub: globalMessageStreamHub,
-  })
-  : null;
-const workflowRuntime = workflowAgentSessions
-  ? createWorkflowRuntime({
-    store: createWorkflowRunStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
-    agentSessions: workflowAgentSessions,
-    postSynthetic: workflowAgentSessions.postSynthetic,
-    // Declared further down; only ever called after startup.
-    broadcast: (event) => broadcastOpenChamberUiEvent(event),
-    isEnabled: isWorkflowToolEnabled,
-    fsPromises,
-    path,
-  })
-  : null;
-if (workflowRuntime) {
-  void workflowRuntime.start().catch((error) => {
-    console.warn('[workflows] failed to restore runs:', error?.message ?? error);
-  });
-  // Reports wait for OpenCode, which answers once the event hub connects.
-  globalMessageStreamHub.subscribeStatus((status) => {
-    if (status?.type === 'connect') void workflowRuntime.deliverPending();
-  });
-}
+const workflowAgentSessions = createWorkflowAgentSessions({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  // Declared further down; only ever called after startup.
+  waitForOpenCodeReady: (...args) => waitForOpenCodeReady(...args),
+  globalEventHub: globalMessageStreamHub,
+});
+const workflowRuntime = createWorkflowRuntime({
+  store: createWorkflowRunStore({ fsPromises, path, dataDir: OPENCHAMBER_DATA_DIR }),
+  agentSessions: workflowAgentSessions,
+  postSynthetic: workflowAgentSessions.postSynthetic,
+  // Declared further down; only ever called after startup.
+  broadcast: (event) => broadcastOpenChamberUiEvent(event),
+  isEnabled: isWorkflowToolEnabled,
+  fsPromises,
+  path,
+});
+void workflowRuntime.start().catch((error) => {
+  console.warn('[workflows] failed to restore runs:', error?.message ?? error);
+});
+// Reports wait for OpenCode, which answers once the event hub connects.
+globalMessageStreamHub.subscribeStatus((status) => {
+  if (status?.type === 'connect') void workflowRuntime.deliverPending();
+});
 
 // Full-text search over this server's conversations (user messages and agent
 // replies). Opt-in: off by default, and off means idle. The index is derived
@@ -1458,7 +1465,7 @@ globalMessageStreamHub.subscribeEvent((event) => {
     sessionGoalRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     contextObligatoryRuntime.processPayload(payload, directory || payload.properties?.directory || '');
     sessionWarmingRuntime.processPayload(payload);
-    trackerSessionStatus.processPayload(payload);
+    trackerSessionStatus.processPayload(payload, { spaceId: event?.spaceId ?? null });
     extensionSessionEvents.processPayload(payload, directory || payload.properties?.directory || '');
   }
 });
@@ -1633,6 +1640,10 @@ const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
   crypto,
   storePath: REMOTE_CLIENTS_FILE_PATH,
 });
+const clientPushAccess = createClientPushAccess({
+  listClients: remoteClientAuthRuntime.listClients,
+  removeDevicesOfSessions: [apnsRuntime.removeApnsDevicesOfSessions, pushRuntime.removePushDevicesOfSessions],
+});
 const clientPairingRuntime = createClientPairingRuntime({
   fsPromises,
   path,
@@ -1643,6 +1654,7 @@ const clientPairingRuntime = createClientPairingRuntime({
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
   trackers: trackerRegistry,
+  trackerSessionStatus,
 });
 const bootstrapRuntime = createBootstrapRuntime({
   createUiAuth,
@@ -2086,6 +2098,13 @@ const secretFiles = createSecretFiles({ directory: path.join(OPENCHAMBER_DATA_DI
 void secretFiles.sweep();
 setInterval(() => { void secretFiles.sweep(); }, 60 * 60 * 1000).unref();
 
+const insideSpaceTaskNaming = process.env.OPENCHAMBER_SPACE_TASK_TITLE_FILE && process.env.OPENCHAMBER_SPACE_USER_TASK_TITLE_FILE
+  ? createInsideSpaceTaskNaming({
+    agentFile: process.env.OPENCHAMBER_SPACE_TASK_TITLE_FILE,
+    userFile: process.env.OPENCHAMBER_SPACE_USER_TASK_TITLE_FILE,
+    announce: broadcastOpenChamberUiEvent,
+  }) : null;
+
 const openChamberControlService = createOpenChamberControlService({
   chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
@@ -2177,11 +2196,11 @@ const openChamberControlService = createOpenChamberControlService({
     createError: (message, status) => new OpenChamberControlError(message, status),
   }),
   workNaming: {
+    nameSpaceTask: (directory, title) => insideSpaceTaskNaming?.name(directory, title) ?? null,
     listWorktrees: getWorktrees,
     setWorktreeTaskTitle,
     readPlaceholderBranch: (directory) => readRenameableGeneratedBranch(directory),
     renamePlaceholderBranch: renameGeneratedWorktreeBranch,
-    updateMetadata: updateSessionMetadataWith,
   },
   dispatchResults: dispatchResultsRuntime,
   prWatch: prWatchRuntime,
@@ -2203,6 +2222,11 @@ const ensureGlobalWatcherStarted = async () => {
 };
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
+  // These steps need a running OpenCode; a retry runs them once it starts.
+  if (openCodeLifecycleRuntime.scheduleBootstrapRetry(bootstrapOpenCodeAtStartup, finishOpenCodeBootstrap)) return;
+  finishOpenCodeBootstrap();
+};
+const finishOpenCodeBootstrap = () => {
   scheduleOpenCodeApiDetection();
   if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();
@@ -2246,6 +2270,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   autoReviewRuntime,
   prWatchRuntime,
   messageQueueRuntime,
+  mergeFollowRuntime,
   dispatchResultsRuntime,
   workflowRuntime,
   messageSearchRuntime,
@@ -2288,6 +2313,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
   getSpacesHost: () => spacesHost,
+  stopFolderWatches: featureRoutesRuntime.stopFolderWatches,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -2336,7 +2362,6 @@ async function main(options = {}) {
     agentToolRuntime,
     limitFailoverRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
-    isWorkflowAvailable: isWorkflowFeatureAvailable,
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 
@@ -2593,6 +2618,10 @@ async function main(options = {}) {
       // the browser refuses the request at preflight, before it reaches a route.
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,Accept,X-Requested-With,Cache-Control,X-OpenCode-Directory,X-OpenCode-Directory-Encoding,Ngrok-Skip-Browser-Warning,X-OpenChamber-Surface,X-OpenChamber-Provider,X-OpenChamber-Model,X-OpenChamber-Part-Shells');
       res.setHeader('Access-Control-Expose-Headers', 'x-next-cursor');
+      // Without it the browser sends a preflight before every request: in the
+      // packaged app that was 45% of all requests while idle. Chromium caps
+      // the cache at two hours.
+      res.setHeader('Access-Control-Max-Age', '7200');
       res.setHeader('Vary', 'Origin');
       if (req.method === 'OPTIONS') {
         res.status(204).end();
@@ -2686,6 +2715,7 @@ async function main(options = {}) {
     // Re-evaluate the relay lifecycle after pairing/device changes (a revoked or
     // redeemed device can flip relay demand on or off).
     reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
+    removeClientPushDevices: clientPushAccess.removeDevicesOfClients,
     getPairingTransports: resolvePairingTransports,
     getDirectCandidateUrls: resolveDirectLanUrls,
     // Stable server identity for client-side verification of learned addresses.
@@ -2773,6 +2803,10 @@ async function main(options = {}) {
     setSwitch: spacesSwitch.setSwitch,
     setMachine: spacesSwitch.setMachine,
     getArchive: () => spaceArchive,
+  });
+  app.get(SPACE_TASK_TITLE_ROUTE, async (_req, res) => {
+    if (!insideSpaceTaskNaming) return res.status(404).json({ error: 'This server is not inside an isolated space.' });
+    res.json(await insideSpaceTaskNaming.read());
   });
   realtimeProxyRuntime = attachRealtimeProxy({
     app,
@@ -2898,6 +2932,7 @@ async function main(options = {}) {
     resolveProjectDirectory,
     resolveOptionalProjectDirectory,
     validateDirectoryPath,
+    customThemesDir: OPENCHAMBER_USER_THEMES_DIR,
     readCustomThemesFromDisk,
     saveImportedTheme,
     deleteImportedTheme,
@@ -2966,6 +3001,7 @@ async function main(options = {}) {
     autoReviewRuntime,
     prWatchRuntime,
     routingRuntime,
+    mergeFollowRuntime,
     workflowRuntime,
   });
 
@@ -3002,6 +3038,7 @@ async function main(options = {}) {
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
     environmentRuntime,
+    broadcastUiEvent: broadcastOpenChamberUiEvent,
     setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,

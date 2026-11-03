@@ -75,6 +75,18 @@ Uzantıyı duraklatmak, siz yeniden açana kadar sunucuyu kaldırır; hesabını
 
 OpenChamber SDK'sinde başlangıç için çalışan bir örnek var: `examples/source-control-provider`. Bkz. [Uzantı geliştirme](/tr/sdk/).
 
+## İzleyici olarak bir uzantı
+
+Bir uzantı Linear'ın yanına bir iş öğesi izleyicisi ekleyebilir: YouTrack, Jira, Plane ya da kendi izleyicisi. O zaman izin iletişim kutusunda izleyicinin adıyla birlikte **izleyicisi olarak çalışır** diyen bir satır bulunur. Aynı satır OpenChamber'ın ona ne gönderdiğini de söyler: aramalarınız ve açtığınız öğeler; ayrıca sizin yerinize bunların durumunu değiştirmesinin ve oturum yorumları göndermesinin istendiğini.
+
+İzin verdiğinizde izleyici, **Ayarlar → Entegrasyonlar** içinde **Uzantı hesapları** altında kendi kartını alır. Orada bir hesap bağlayın: bir jetonla ya da izleyiciye kaydettirdiğiniz uygulamanın client id'sini girdikten sonra tarayıcıda oturum açarak; kart isterse önce sunucunun adresini de girin. Bundan sonra öğeleri Linear'ınkilerin bulunduğu her yerdedir: sohbetin **+** menüsü ve seçici, New Worktree, bir oturumun bağlı öğeleri ve takip ettiğiniz öğelerin canlı durumları. Öğelerinden birine yapıştırılan bir bağlantı da aynı şekilde tanınır. Bunların her birinin ne yaptığı için bkz. [Linear](/tr/integrations/#linear).
+
+Jetonlarınız OpenChamber'da kalır. Uzantı, izleyiciyi kendisi adına çağırmasını OpenChamber'dan ister; OpenChamber kimlik bilgisini her çağrıya yalnızca bağladığınız sunucu için ekler. Uzantı onu hiçbir zaman almaz ve orada yalnızca durum değiştirme ile yorum çağrıları bir şey yazabilir.
+
+Uzantıyı duraklatmak, siz yeniden açana kadar izleyiciyi kaldırır; hesaplarınız kalır. Uzantıyı kaldırmak hesapları unutur. VS Code izleyici göstermez; telefonda izleyicinin öğeleri görünür, hesaplar ise web ya da masaüstü uygulamasından bağlanır.
+
+OpenChamber SDK'sinde çalışan bir örnek var: `examples/tracker-provider`, yanında çalıştırılacak sahte bir izleyiciyle birlikte. Bkz. [Uzantı geliştirme](/tr/sdk/).
+
 ## Hesabını bağlama
 
 Bir hizmetle konuşan uzantı, **Ayarlar → Entegrasyonlar** altında **Uzantı hesapları** bölümünde bir kart alır. Hizmete göre kart bir API jetonu, kullanıcı adı ve jeton ya da oturum açma akışı için bir client id ister. **Bağlan** seçeneğini seçin; **Bağlantıyı kes** kayıtlı jetonu unutur. Uzantının bildirdiği ek alanlar siz alandan çıkınca kendiliğinden kaydedilir.

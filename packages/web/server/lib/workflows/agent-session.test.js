@@ -34,6 +34,11 @@ const createSessionRequest = async ({ parent, allowTools, model }) => {
 };
 
 describe('workflow agent sessions', () => {
+  it('marks the session as a workflow agent, so the sidebar leaves it out', async () => {
+    const request = await createSessionRequest({ parent: null, allowTools: [], model: 'openai/gpt-6-luna' });
+    expect(request).toMatchObject({ parentID: 'ses_parent', metadata: { openchamber: { kind: 'workflow-agent' } } });
+  });
+
   it("allows the asked tools after the parent's own rules", async () => {
     const parentRule = { action: 'bash', resource: '*', effect: 'deny' };
     const request = await createSessionRequest({

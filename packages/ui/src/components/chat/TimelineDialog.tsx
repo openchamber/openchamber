@@ -19,6 +19,7 @@ import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/reg
 import { foldPromptEntries } from './lib/promptPreviews';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface TimelineDialogProps {
     open: boolean;
@@ -352,7 +353,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                     </div>
                 )}
 
-                <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
+                <ScrollableOverlay ref={listRef} outerClassName="min-h-0 flex-1" disableHorizontal>
                     {filteredMessages.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
                             {searchQuery ? t('chat.timeline.empty.search') : t('chat.timeline.empty.session')}
@@ -457,7 +458,7 @@ const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
                             );
                         })
                     )}
-                </div>
+                </ScrollableOverlay>
 
                 {isMobile ? (
                     <div className="mt-2 flex shrink-0 items-center justify-center gap-2 border-t border-edge pt-2">

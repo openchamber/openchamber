@@ -97,6 +97,12 @@ An [extension](/extensions/) can deliver your notifications to Slack, Matrix or 
 
 If the server refuses the token later, the card says the account needs attention; connect again with a new token. Disconnect to stop deliveries without removing the extension, or pause the extension. Removing the extension forgets the account.
 
+## Extension trackers
+
+An [extension](/extensions/) can add a work item tracker next to Linear. Once you allow it in **Settings → Extensions**, it gets a card under **Extension accounts** on this page. Enter the server's address when the card asks for one, then connect an account: paste a token, or save the client id of the app you registered with the tracker and sign in in the browser. Where the tracker keeps several accounts, **Add account** connects another and **Switch to** changes the one in use. Project mapping and session comments appear on the card when the tracker offers them, as they do for Linear.
+
+Its items then appear in the picker, the chat's **+** menu, New Worktree, the linked items of a session and the live states of items you follow. Tokens stay in OpenChamber; the extension's service reaches the tracker through OpenChamber and never sees them. If the tracker refuses a credential later, the card says the account needs attention; connect it again. Pausing the extension takes the tracker out of every surface and keeps the accounts; removing it forgets them.
+
 ## Claude Code
 
 Claude Code uses your Claude Pro or Max plan through the Claude Code CLI on your machine — no API keys.

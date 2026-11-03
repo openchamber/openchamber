@@ -12,7 +12,8 @@ Object.assign(globalThis, { window: browser, document: browser.document, navigat
   SVGElement: browser.SVGElement, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,
   Event: browser.Event,
   Range: browser.Range,
-  XMLSerializer: browser.XMLSerializer, IntersectionObserver: browser.IntersectionObserver, ResizeObserver: browser.ResizeObserver });
+  XMLSerializer: browser.XMLSerializer, IntersectionObserver: browser.IntersectionObserver, ResizeObserver: browser.ResizeObserver,
+  requestAnimationFrame: browser.requestAnimationFrame.bind(browser), cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser) });
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 Object.defineProperty(globalThis, 'customElements', { configurable: true, value: browser.customElements });
 const state = { codeBlockLineWrap: false, tableCellWrap: true, copyMessagesAsPlainText: false, mermaidRenderingMode: 'svg', setCodeBlockLineWrap: () => undefined, setTableCellWrap: () => undefined, openContextFile: (_directory: string, _path: string) => undefined, openContextFileAtLine: (_directory: string, _path: string, _line: number, _column: number) => undefined };
@@ -269,13 +270,17 @@ test('code rows and selection preserve intentional trailing blank lines', async 
 test('table columns preserve short content and allocate remaining width to long content', async () => {
   const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   const bounds = spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    // A heading measured at min-content is as wide as its longest word.
+    if (this.style.width === 'min-content') return new window.DOMRect(0, 0, 60, 30);
     const width = this.tagName === 'TH' || this.tagName === 'TD' ? this.textContent?.includes('long') ? 600 : 120 : 502;
     return new window.DOMRect(0, 0, width, 30);
   });
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 502 });
   try {
+    // The long heading breaks between its words, so its column stays at the
+    // narrow minimum, plus the pixel a heading keeps against subpixel wrapping.
     await render('| long heading over short values | long |\n| --- | --- |\n| `id` | `long description` |');
-    expect(Array.from(host.querySelectorAll('col'), (col) => col.style.width)).toEqual(['120px', '380px']);
+    expect(Array.from(host.querySelectorAll('col'), (col) => col.style.width)).toEqual(['121px', '379px']);
     expect(host.querySelector('td')?.style.getPropertyValue('--oc-table-code-wrap')).toBe('nowrap');
     expect(host.querySelector<HTMLElement>('td:last-child')?.style.getPropertyValue('--oc-table-code-wrap')).toBe('normal');
   } finally {
@@ -660,6 +665,34 @@ test('wrap settings update the actual Markdown root without replacing content', 
   expect(host.querySelector('p') === stable).toBe(true);
   expect(paragraph?.textContent).toBe('same source');
   state.tableCellWrap = true;
+});
+
+test('wrap toggle buttons show their pressed fill while active (#6042)', async () => {
+  const source = '```js\nconst x = 1;\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |';
+  const rerender = () => act(async () => {
+    root.render(React.createElement(I18nProvider, null, React.createElement(Renderer.MarkdownContent, { content: source, enableFileReferences: false })));
+  });
+  await render(source);
+
+  state.codeBlockLineWrap = true;
+  state.tableCellWrap = true;
+  await rerender();
+  const codeWrap = host.querySelector('[data-streamdown="code-block-actions"] button[aria-pressed="true"]');
+  expect(codeWrap).not.toBeNull();
+  // The pressed fill is what tells the user the toggle is on; aria-pressed
+  // alone was invisible on the ghost variant (#6042).
+  expect(codeWrap?.className).toContain('bg-interactive-selection');
+  const tableWrap = host.querySelector('[data-streamdown="table-controls"] button[aria-pressed="true"]');
+  expect(tableWrap).not.toBeNull();
+  expect(tableWrap?.className).toContain('bg-interactive-selection');
+
+  state.codeBlockLineWrap = false;
+  state.tableCellWrap = false;
+  await rerender();
+  const restingCodeWrap = host.querySelector('[data-streamdown="code-block-actions"] button[aria-pressed="false"]');
+  expect(restingCodeWrap?.className).not.toContain('bg-interactive-selection');
+  const restingTableWrap = host.querySelector('[data-streamdown="table-controls"] button[aria-pressed="false"]');
+  expect(restingTableWrap?.className).not.toContain('bg-interactive-selection');
 });
 
 test('same-source theme repaint keeps nodes and publishes syntax variables on the consumer root', async () => {

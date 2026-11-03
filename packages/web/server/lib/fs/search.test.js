@@ -130,7 +130,7 @@ describe('filesystem search', () => {
     }
   });
 
-  it('kills a stuck git check-ignore instead of hanging the search', async () => {
+  it.each([false, true])('kills a stuck Git ignore read without hanging, workspaceSearch=%s', async (workspaceSearch) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-fs-search-'));
     const previousTimeout = process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS;
     let guard;
@@ -150,7 +150,7 @@ describe('filesystem search', () => {
         return child;
       };
 
-      const search = createSearchRuntime(neverCloses);
+      const search = createFsSearchRuntime({ fsPromises: fs, path, spawn: neverCloses, resolveGitBinaryForSpawn: () => 'git', workspaceSearch });
       const files = await Promise.race([
         search.searchFilesystemFiles(root, { query: '', limit: 10, respectGitignore: true }),
         new Promise((_, reject) => {

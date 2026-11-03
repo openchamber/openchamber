@@ -14,6 +14,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -24,8 +25,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -178,6 +181,7 @@ export const dict: Record<I18nKey, string> = {
   ...fileEditorAidsI18n['zh-CN'],
   ...htmlRenderI18n['zh-CN'],
   ...documentToolbarI18n['zh-CN'],
+  ...uiBlocksI18n['zh-CN'],
   ...updateDialogCanaryI18n['zh-CN'],
   ...secretRequestI18n['zh-CN'],
   ...sessionNoticesI18n['zh-CN'],
@@ -188,8 +192,10 @@ export const dict: Record<I18nKey, string> = {
   ...heapSnapshotI18n['zh-CN'],
   ...consoleBudgetsI18n['zh-CN'],
   ...imageToolI18n['zh-CN'],
+  ...agentStatusI18n['zh-CN'],
   ...snippetsI18n['zh-CN'],
   ...sidebarWorkI18n['zh-CN'],
+  ...sidebarSectionsI18n['zh-CN'],
   ...worktreeArchiveI18n['zh-CN'],
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
@@ -470,6 +476,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': '请先选择一个项目',
   'sessions.scheduledTasks.dialog.toast.loadFailed': '加载计划任务失败',
   'sessions.scheduledTasks.dialog.toast.saved': '计划任务已保存',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': '任务现在会在新位置运行，但无法删除旧副本。请在原位置将其删除，以免任务运行两次。',
   'sessions.scheduledTasks.dialog.toast.updateFailed': '更新任务失败',
   'sessions.scheduledTasks.dialog.toast.deleted': '计划任务已删除',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': '删除任务失败',
@@ -619,6 +626,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.actions.more': '更多',
   'sessions.sidebar.header.actions.exitSelection': '退出选择',
   'sessions.sidebar.header.actions.selectSessions': '选择会话',
+  'sessions.sidebar.header.actions.markAllRead': '全部标为已读',
   'sessions.sidebar.header.actions.sortProjects': '排序项目',
   'sessions.sidebar.header.actions.sessionDisplayMode': '会话显示模式',
   'sessions.sidebar.header.displayMode.label': '显示模式',
@@ -1752,6 +1760,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.error.switchToEditMode': '请切换到编辑模式修复问题。',
   'filesView.error.readFileFailed': '读取文件失败',
   'filesView.editor.htmlPreviewTitle': 'HTML 预览',
+  'filesView.editor.htmlPreviewRelayUnavailable': '通过中继无法使用 HTML 预览',
+  'filesView.editor.htmlPreviewShowCode': '显示代码',
   'filesView.editor.htmlAnnotate.intro': '这是来自 HTML 文件预览的标注选区。',
   'filesView.diagram.closeDiagramView': '关闭图表视图',
   'filesView.diagram.saveDiagram': '保存图表',
@@ -2392,7 +2402,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.statusRow.todo.priority.low': '低优先级',
   'chat.statusRow.actions.stopGeneratingAria': '停止生成',
   'chat.statusRow.tasksTitle': '任务',
-  'chat.statusRow.modelStatus': '{model} · {status}',
+  'chat.statusRow.modelStatus': '{model}{status}',
   'chat.statusRow.summary.activeLeft': '{active} 个活跃 · 剩余 {left} 个',
   'chat.revertIndicator.redo': '重做',
   'chat.revertIndicator.redoAria': '重做 — 恢复已撤回的消息',
@@ -2979,7 +2989,6 @@ export const dict: Record<I18nKey, string> = {
   'projectEditDialog.toast.iconDiscovered': '项目图标已发现',
   'openInApp.actions.open': '打开',
   'openInApp.actions.openInAria': '在 {app} 中打开',
-  'openInApp.actions.chooseAppAria': '选择要打开的应用',
   'openInApp.actions.copyPath': '复制路径',
   'openInApp.actions.refreshApps': '刷新应用',
   'openInApp.toast.pathCopied': '路径已复制到剪贴板',
@@ -3896,12 +3905,16 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': '运行结束后保留 worktree 及其分支，便于查看结果。',
   'sessions.scheduledTasks.editor.worktree.notRepo': '项目文件夹不是 git 仓库；执行将直接使用当前检出。',
   'sessions.scheduledTasks.dialog.usesDefaults': '会话默认设置',
-  'sessions.moveChatToProject.menu': '移动到项目…',
-  'sessions.moveChatToProject.hint': '在项目中继续此对话',
-  'sessions.moveChatToProject.title': '将聊天移动到项目',
-  'sessions.moveChatToProject.description': '对话会在项目文件夹中继续。聊天创建的文件保留在原处。',
-  'sessions.moveChatToProject.success': '已将聊天移动到项目',
-  'sessions.moveChatToProject.failed': '无法移动聊天',
+  'sessions.moveSession.menu': '移动会话…',
+  'sessions.moveSession.hint': '文件保留在原文件夹中',
+  'sessions.moveSession.title': '移动会话',
+  'sessions.moveSession.description': '会话将在所选文件夹中继续。文件保留在原处。',
+  'sessions.moveSession.chooseFolder': '选择文件夹…',
+  'sessions.moveSession.current': '当前文件夹',
+  'sessions.moveSession.success': '会话已移动',
+  'sessions.moveSession.failed': '无法移动会话',
+  'chat.folderMissing.text': '文件夹 {name} 已不存在',
+  'chat.folderMissing.action': '移动会话',
   'chat.worktreeSetup.running': '正在设置 worktree：正在运行项目的设置命令…',
   'chat.draft.creatingSession': '正在创建会话…',
   'desktopHostSwitcher.startup.fellBackToLocal': '未能建立连接，因此 OpenChamber 以 Local 启动。待其可访问后，请在实例切换器中连接。',

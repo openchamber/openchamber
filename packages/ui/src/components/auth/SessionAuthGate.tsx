@@ -609,11 +609,11 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   }, [skipAuth, state]);
 
   React.useEffect(() => {
-    if (state === 'locked' && passwordInputRef.current) {
+    if (state === 'locked' && !isSubmitting && passwordInputRef.current) {
       passwordInputRef.current.focus();
       passwordInputRef.current.select();
     }
-  }, [state]);
+  }, [state, isSubmitting]);
 
   React.useEffect(() => {
     if (skipAuth) {

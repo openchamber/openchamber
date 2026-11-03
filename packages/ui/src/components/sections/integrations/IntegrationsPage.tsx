@@ -11,6 +11,7 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useSourceControlProviders } from '@/lib/source-control/providers/registry';
 import { useTrackerDescriptors } from '@/lib/trackers/registry';
+import { isExtensionTrackerId } from '@/lib/trackers/extension';
 import { SourceControlProviderCard } from './SourceControlProviderCard';
 import { TrackerSettings } from './TrackerSettings';
 import { CatalogExtensionsSection } from './CatalogExtensionsSection';
@@ -25,9 +26,10 @@ export const IntegrationsPage: React.FC = () => {
   // editor's own Git and GitHub integration instead.
   const sourceControlProviders = useSourceControlProviders();
   const servedSourceControl = isVSCodeRuntime() ? [] : sourceControlProviders;
-  // Trackers exist where the runtime has the API; the server says which.
+  // Trackers exist where the runtime has the API; the server says which. An
+  // extension's tracker (`ext-<id>`) is drawn under Extension accounts instead.
   const trackerDescriptors = useTrackerDescriptors();
-  const servedTrackers = getRegisteredRuntimeAPIs()?.trackers ? trackerDescriptors : [];
+  const servedTrackers = getRegisteredRuntimeAPIs()?.trackers ? trackerDescriptors.filter((descriptor) => !isExtensionTrackerId(descriptor.id)) : [];
   const guests = useGuestsStore((state) => state.guests);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
   const builtInGuests = !isVSCodeRuntime() && !isMobileSurfaceRuntime()

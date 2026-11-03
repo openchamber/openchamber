@@ -49,10 +49,18 @@ const parseModelRef = (value) => {
 };
 
 /**
+ * The mark on every workflow agent's session. A run can start a hundred
+ * agents, so the sidebar leaves sessions with this kind out of its subagent
+ * rows (`packages/ui/src/lib/sessionWorkflowMetadata.ts`); the run's card and
+ * the Workflows panel list them instead.
+ */
+const WORKFLOW_AGENT_METADATA = Object.freeze({ openchamber: Object.freeze({ kind: 'workflow-agent' }) });
+
+/**
  * Workflow agents are OpenCode child sessions of the session that started the
- * run, so the chat lists them as that session's subagents and the user can
- * open any of them. One agent is one session and one turn; a JSON answer that
- * does not match its schema gets a follow-up prompt in the same session.
+ * run, so the user can open any of them from the run's card. One agent is one
+ * session and one turn; a JSON answer that does not match its schema gets a
+ * follow-up prompt in the same session.
  */
 export const createWorkflowAgentSessions = ({
   buildOpenCodeUrl,
@@ -194,7 +202,7 @@ export const createWorkflowAgentSessions = ({
     // Like a subagent: without a model of its own the agent runs on the
     // session that started the run.
     if (!modelRef && parent?.success && parent.data.model) modelRef = parent.data.model;
-    const request = { parentID: parentSessionId, title };
+    const request = { parentID: parentSessionId, title, metadata: WORKFLOW_AGENT_METADATA };
     if (agent) request.agent = agent;
     if (modelRef) request.model = modelRef;
     // A child given permissions of its own no longer inherits its parent's, so

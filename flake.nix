@@ -40,14 +40,14 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           # The desktop's Electron: the major is read from packages/electron
-          # devDependencies ("electron": "^44.9.0") at eval time, the same
+          # devDependencies ("electron": "^45.0.0") at eval time, the same
           # file that pins the bundled CLI, so an upstream bump fails
           # evaluation with the next step named instead of reaching the
           # runtime as a startup crash (2.4.0 shipped while the flake still
           # built electron_43, and every desktop launch died on "setZoomMode
           # is not a function"). Only the major is asserted: nixpkgs' minor
-          # is allowed to trail the caret range, the 44.x headers still carry
-          # every 44.0 API the app's code uses, and they drive the node-pty
+          # is allowed to trail the caret range, the same-major headers carry
+          # the major's APIs the app's code uses, and they drive the node-pty
           # rebuild either way.
           electronSpec =
             (builtins.fromJSON (builtins.readFile ./packages/electron/package.json)).devDependencies.electron;

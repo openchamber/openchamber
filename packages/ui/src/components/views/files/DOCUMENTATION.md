@@ -332,6 +332,12 @@ the page's folder. VS Code renders `srcDoc` in the same sandbox. The server
 side (read root, CORS, CSP) is described in
 `packages/web/server/lib/fs/DOCUMENTATION.md`.
 
+On a relay connection the panel says the preview is unavailable and offers the
+code, asks for no grant, and the toolbar has no "Annotate page". The browser loads the page and its files itself,
+and a URL it loads never enters the tunnel. Reading the page through the tunnel
+into `srcDoc` was rejected: its neighbouring files would be lost, and a relative
+URL in a `srcDoc` frame resolves against the app's own address.
+
 The preview toolbar has the browser panel's "Annotate page" toggle
 (`useHtmlPreviewAnnotation`, a thin use of `components/browser/useFrameAnnotation.ts`,
 which pages in the chat share) on web and desktop; phones and VS Code do not

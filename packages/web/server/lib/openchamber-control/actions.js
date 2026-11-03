@@ -21,7 +21,7 @@ export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'session.link', title: 'Link a change or issue to a session', description: 'Add link to sessionId (default: this session); the same link again updates its title. Only the user removes links' },
   { action: 'pr.watch', title: 'Wait on a pull request', description: 'Requires url of a GitHub pull request or GitLab merge request. A message arrives in this session when a check fails or every check passes, someone comments or reviews, the branch conflicts or falls behind, or it is merged or closed. One wake ends the watch: watch again to keep waiting. Never wait with a sleep loop' },
   { action: 'pr.unwatch', title: 'Stop waiting on a pull request', description: 'This session stops waiting; no parameters' },
-  { action: 'work.name', title: 'Name the task', description: 'Name the task sessionId (default: this session) works on, in title: at most 4 words saying what the task is, in the language of the user\'s latest message; rename only when it becomes a different task. Names its worktree, or in the main checkout the session it grew from. Answers the current name; a name the user gave stays. Only while the branch of a worktree is a placeholder OpenChamber generated (its checkout context says so), it also requires branch, the branch named after the task, and renames it; any other branch stays' },
+  { action: 'work.name', title: 'Name the task', description: 'Name the worktree\'s or isolated space\'s task for sessionId (default: this session), never a session. In title: at most 4 words in the user\'s latest language; rename only for a different task. A user-given name stays. Main checkout and plain folders need no naming. A worktree on an OpenChamber-generated placeholder branch also requires branch, the English branch name after the task, and renames it; any other branch stays' },
   { action: 'schedule.status', title: 'Check scheduler status', description: 'No parameters', agentExposed: false },
   { action: 'schedule.list', title: 'List scheduled tasks', description: 'Tasks and scheduler status' },
   { action: 'schedule.create', title: 'Create a scheduled task', description: 'Requires name, prompt, one schedule selector, and model unless targetSessionId is set, which keeps that session\'s model' },
@@ -175,8 +175,8 @@ export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(
 
 /**
  * Workflows are their own tool: fanning a large task out to many agents is a
- * distinct intent with its own scripting guidance, and it ships dark behind
- * OPENCHAMBER_WORKFLOWS_ENABLE, so it has to disappear completely.
+ * distinct intent with its own scripting guidance, and the tool is off until
+ * the user turns it on, so it has to disappear completely.
  */
 export const OPENCHAMBER_WORKFLOW_ACTION_DEFINITIONS = Object.freeze([
   { action: 'workflow.check', title: 'Check a workflow', description: 'Compile script, or a saved workflow by name, without running it: its name, description and phases' },

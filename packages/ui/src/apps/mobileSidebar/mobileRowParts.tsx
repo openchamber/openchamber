@@ -1,4 +1,6 @@
 import React from 'react';
+import type { SessionNode } from '@/components/session/sidebar/types';
+import { CollapsedSessionActivityIndicator } from '@/components/session/sidebar/sessions/collapsedActivityIndicator';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
@@ -146,7 +148,7 @@ export const MobileSwipeAction: React.FC<{
  * Show more and Show less under a list, side by side, aligned with the text of
  * its rows, a step quieter than the muted titles above it, as on the desktop.
  */
-export const MobileShowControl: React.FC<{ more: boolean; fewer: boolean; indent: number; onShow: (control: 'more' | 'fewer') => void }> = ({ more, fewer, indent, onShow }) => {
+export const MobileShowControl: React.FC<{ more: boolean; fewer: boolean; hiddenNodes: SessionNode[]; indent: number; onShow: (control: 'more' | 'fewer') => void }> = ({ more, fewer, hiddenNodes, indent, onShow }) => {
   const { t } = useI18n();
   const control = (kind: 'more' | 'fewer') => (
     <button
@@ -157,6 +159,7 @@ export const MobileShowControl: React.FC<{ more: boolean; fewer: boolean; indent
     >
       <Icon name={kind === 'more' ? 'arrow-down-s' : 'arrow-up-s'} className="size-4" />
       <span className="typography-micro">{t(kind === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}</span>
+      {kind === 'more' ? <CollapsedSessionActivityIndicator nodes={hiddenNodes} /> : null}
     </button>
   );
   return (

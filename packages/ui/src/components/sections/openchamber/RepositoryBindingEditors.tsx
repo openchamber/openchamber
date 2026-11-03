@@ -1,7 +1,9 @@
 import React from 'react';
 import {
+  gitRemoteHost,
   identityAccountConnected,
   instanceHost,
+  instanceSshHostsFrom,
   remoteTraits,
   selectableIdentities,
   type RemoteTraits,
@@ -100,6 +102,8 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
   const globalGitIdentity = useGitIdentitiesStore((state) => state.globalIdentity);
   const connectedAccountIds = useConnectedAccountIds();
   const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
+  const sourceControlIdentities = useSourceControlAuthStore((state) => state.identities);
+  const instanceSshHosts = React.useMemo(() => instanceSshHostsFrom(sourceControlIdentities), [sourceControlIdentities]);
   const [pending, setPending] = React.useState('');
   const [error, setError] = React.useState(false);
   const requestRef = React.useRef(0);
@@ -169,7 +173,7 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
               identities={identities}
               onSelect={(profile) => void grant(remote.name, profile)}
               isApplying={pending === remote.name}
-              applicability={(profile) => identityApplicability(profile, traits)}
+              applicability={(profile) => identityApplicability(profile, traits, instanceSshHosts)}
               triggerClassName="shrink-0 border border-border"
               onOpen={() => void refreshIdentityAccounts(sourceControl, gitIdentityProfiles.map((profile) => profile.account))}
             />
@@ -199,6 +203,8 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
   const loadGlobalGitIdentity = useGitIdentitiesStore((state) => state.loadGlobalIdentity);
   const connectedAccountIds = useConnectedAccountIds();
   const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
+  const sourceControlIdentities = useSourceControlAuthStore((state) => state.identities);
+  const instanceSshHosts = React.useMemo(() => instanceSshHostsFrom(sourceControlIdentities), [sourceControlIdentities]);
   const repositoryAuthor = useGitIdentity(directory);
   const latest = recovery.entry?.reads.at(-1)?.operation;
   const requirements = latest?.target.operation === 'checkout-hydration'
@@ -242,16 +248,18 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
   const endpointUrl = selected?.endpoint.displayUrl ?? '';
   const endpoint = React.useMemo((): RemoteTraits | null => endpointUrl ? remoteTraits(endpointUrl) : null, [endpointUrl]);
   const applicabilityOf = React.useCallback((identity: GitIdentityProfile): IdentityApplicability =>
-    endpoint ? identityApplicability(identity, endpoint) : { applicable: true }, [endpoint]);
+    endpoint ? identityApplicability(identity, endpoint, instanceSshHosts) : { applicable: true }, [endpoint, instanceSshHosts]);
 
   /**
    * The identity this endpoint is proposed with.
    *
-   * A submodule on the repository's own host is the ordinary case, and the
-   * repository already answered who it acts as there, so that identity is
-   * offered and only has to be confirmed. An endpoint on another host is a
-   * question OpenChamber cannot answer — no identity on file speaks for it —
-   * so nothing is proposed and the person names one.
+   * A submodule or LFS server on the repository's own host is the ordinary
+   * case, and the repository already answered who it acts as there, so that
+   * identity is offered and only has to be confirmed. An endpoint also speaks
+   * for an instance whose separate SSH address names its host: a remote there
+   * still answers to that instance, and the address need not be its web one.
+   * Any other host is a question OpenChamber cannot answer — no identity on
+   * file speaks for it — so nothing is proposed and the person names one.
    */
   const proposedIdentity = React.useMemo(() => {
     const applicable = availableIdentities.filter((identity) => applicabilityOf(identity).applicable);
@@ -261,9 +269,10 @@ export const AuxiliaryBindingSettings: React.FC<SourceControlBindingSettingsProp
       : undefined;
     return signedAs
       ?? applicable.find((identity) => identity.account && endpoint?.host
-        && instanceHost(identity.account.instance) === endpoint.host)
+        && (instanceHost(identity.account.instance) === endpoint.host
+          || gitRemoteHost(instanceSshHosts[identity.account.instance] ?? '') === endpoint.host))
       ?? null;
-  }, [applicabilityOf, availableIdentities, endpoint, repositoryAuthor]);
+  }, [applicabilityOf, availableIdentities, endpoint, instanceSshHosts, repositoryAuthor]);
   const identity = (identityChoice?.endpoint === selected?.endpoint.fingerprint
     ? availableIdentities.find((entry) => entry.id === identityChoice?.id)
     : null) ?? proposedIdentity;

@@ -63,6 +63,22 @@ yields once the panel is released wider than it fits beside.
 
 The overlay form stays inside the chat column in `ChatContainer`.
 
+### Why the header carries context, Open In and the project action
+
+The card yields whenever a rail panel needs its room, so anything that lives
+only in the card disappears while the user reads a diff or a file. The context
+fill, the Open In app and the project action are what people check or press
+throughout a session, so the header carries them in every layout
+(`HeaderContextUsage`, `HeaderProjectControls`). Open In and the project
+action live only there: in the card the app icon had no reading of its own,
+and the action row added only the action's name, which the header button's
+tooltip shows. The context row stays in the card as well, because it carries
+what the header has no room for: the cache-warming switch, the cost at rest
+with its subagent split, and the note after a compaction. Hiding the header's
+context while the card shows the same figure was rejected: the reading then
+jumps between two places as panels open and close, and the user has to look
+for it each time.
+
 ### Why the card docks beside the panel instead of floating over the chat
 
 A pinned card that floats over the transcript while a side panel is open was
@@ -186,13 +202,13 @@ which requests only providers enabled for this panel.
 | PR + checks | `useFreshestSourceControlVisualSummaryForBranch` | **read-only**; follows the freshest bound-identity entry for the branch |
 | Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
-| Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only in builds with workflows |
+| Workflows | `useSessionWorkflowRuns` (`lib/workflows/store.ts`): the session's runs read once from the server, then kept current by `openchamber:workflow-run` events | only while workflows are shown: not in VS Code, and only with the workflow tool on (`selectWorkflowsShown`) |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR, and removable from the row; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed; active mounts read warm records once for the previous turn; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Keep-warm switch | `useSessionWarmingStore`, mirrored from the server's `lib/session-warming` | on the Context row, shown only while Settings chose per-session warming and for a root session outside an isolated space; the tooltip's countdown ticks only while it is open |
 | Goal | `useSessionGoal` | respects the Settings toggle |
-| MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
+| MCP | `useMcpStore` | the switch reuses the dropdown's `setEnabled` |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
 | Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
 
@@ -444,9 +460,9 @@ A workflow's agents are child sessions of the session too. The Subagents
 section leaves them out, so a run of fifty agents does not bury the session's
 own subagents and each session shows in one place.
 
-In a build without workflows the section exists in no list: the panel and the
-sections dialog both drop it (`useUnavailableWorkStatusSections`), so the name
-of an unreleased feature does not appear in the dialog. Its id stays in the
+While workflows are not shown (VS Code, or the workflow tool off) the section
+exists in no list: the panel and the sections dialog both drop it (`useUnavailableWorkStatusSections`),
+so the dialog never offers a section that stays empty. Its id stays in the
 saved order, so it comes back where the user put it.
 
 ## Section order
@@ -648,39 +664,58 @@ Rows that name something the app can already show are buttons:
 | Changes | working-tree diff (`openContextPanelTab`, `diffScope: 'working'`, no target path) |
 | Branch | git surface (`openContextSurface(dir, 'git')`) |
 | Pull request, Checks | The Tracker's branch tab (`openContextPanelTab(dir, { mode: 'pr' })`) |
-| App icon (Project heading, right) | opens the project in the chosen app (`OpenInAppButton`, desktop with a local host only); its chevron copies the path or picks another app. The project name beside the title is plain text |
-| Project action | runs or stops the selected project action (`ProjectActionsButton`); its chevron picks another action. The project's own actions come first and auto-discovery last, so with nothing picked the row offers the first configured action, or auto-discovery when there is none. The pick is stored per runtime and project (`lib/projectActionSelection.ts`) and survives remounts and restarts; a pick that no longer names an action falls back to the first one. A running action takes the row over an idle pick, and pressing the row acts on the action it shows, through the same shared-setup trust prompt as the menu. The row is a view: the runner lives in `ProjectActionsProvider` above the whole layout (see below). The header carries no action control, so a project without a repository still gets a Project section |
 | Subagent | that child session's chat tab, read-only |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
-| MCP switch | connects/disconnects the server |
+| MCP switch | turns the server on or off in its config file (`useMcpStore.setEnabled`) |
 | MCP status | the state doubles as the button that reconnects |
 | Pinned (pin icon) | unpins the message |
 | Pinned (text) | jumps the transcript to that message |
 
-### Project actions outside the panel
+### Project actions
+
+The panel shows no project action; the header button runs or stops the shown
+one. The project's own actions come first and auto-discovery last, so with
+nothing picked the button offers the first configured action, or
+auto-discovery when there is none. The pick is stored per runtime and project
+(`lib/projectActionSelection.ts`) and survives remounts and restarts; a pick
+that no longer names an action falls back to the first one. A running action
+takes the button over an idle pick, and pressing it acts on the action it
+shows, through the same shared-setup trust prompt as the menu.
 
 Auto-discovery reuses a personal action when its name identifies a dev server or its command runs a conventional dev script. A shared action needs a matching script command as well as the same trust confirmation as choosing it from the menu: renaming an already trusted shared action does not change its trust hash. Arbitrary `start` substrings and unrelated `start:*` scripts must not launch through discovery.
 
-The panel hides whenever a rail panel opens, so the actions cannot depend on
-it. `components/layout/ProjectActionsProvider` mounts one runner
+`components/layout/ProjectActionsProvider` mounts one runner
 (`useProjectActionsRunner`) in `MainLayout` for the project
-`useProjectActionsContext` resolves, which is the panel's own context. A managed
+`useProjectActionsContext` resolves. A managed
 Chat resolves to none. A draft waiting for a new space has no actions until the
 space runs, then runs them in the space (`useDraftSpaceTarget`). Three views read that runner through
 `projectActionsRunnerContext`:
 
-- the Work Status row;
+- the header's button (`HeaderProjectControls`): the shown action's
+  run state as one icon, the preview globe while it serves a page, the action
+  list on right click. It observes the run listing while mounted,
+  so a run another client started never shows as Run;
 - `ProjectActionsDialog`, opened by `open_project_actions` (`mod+alt+r`). It
-  lists the actions with their state, opens with the row's action highlighted,
+  lists the actions with their state, opens with the button's action highlighted,
   and Enter picks the action and runs or stops it;
 - the command palette's search-only "Run: name" / "Stop: name" entries and its
   "Project actions" entry.
 
-Because the runner outlives the panel, a run keeps its output watch (URL
-auto-open, exit tracking) while the card is hidden. The server terminal listing
+The runner lives above the layout, so a run keeps its output watch (URL
+auto-open, exit tracking) whatever is on screen. The server terminal listing
 still runs only on demand: each view calls `useObserveProjectActionRuns` while
-it is on screen, and the runner polls only while at least one view asks.
+it is on screen. The shared observer lists once, then refreshes on terminal
+lifecycle signals, control-stream connections, runtime switches and visibility,
+focus or online recovery. Hidden/offline clients wait for recovery.
+
+### Why events and not polling
+
+The header is nearly always mounted, so a five-second listing loop generated
+idle requests even when no action ran. Terminal create, exit, restart and removal
+invalidate the list through the existing realtime control stream. A fresh list
+on connection or visibility recovery also discovers runs started on another
+client during a disconnect, while failed reads preserve the last known state.
 
 The goal icon reproduces the **composer target button's** colour mapping, not
 the goal strip's. The two disagree today — the strip paints `paused` muted and
@@ -780,8 +815,9 @@ Two readouts had no loader of their own and appeared only after the user opened
 the matching header dropdown:
 
 - **MCP** — `McpDropdown` was the only mount-time caller of `refresh()`.
-- **Usage** — `useQuotaAutoRefresh` schedules the shared fixed three-minute
-  refresh; the *first* fetch was performed by the dropdown's open handler.
+- **Usage** — `useQuotaAutoRefresh` owns the initial fetch and the shared
+  three-minute refresh while a quota readout is shown. The panel passes its
+  visibility through the section list, so retained closing content does no work.
 - **Skills** — `loadSkills()` ran only when the composer's slash autocomplete
   opened, so the context-sources count was whatever happened to be cached. The
   section loads them itself, keyed on the directory, since skills are
@@ -794,9 +830,10 @@ which on a remote instance is not true when the UI mounts — a fetch fired at
 mount gets "nothing configured" for every provider, and since each one then has
 a result, nothing asks again until the three-minute refresh. That is why Usage
 could stay missing from the panel until Settings -> Usage forced a fresh fetch.
-`useQuotaStore.ensureLoadedForRuntime` owns both the readiness rule and the
-once-per-instance bookkeeping, so every caller can ask on each connection
-change.
+`useQuotaStore.ensureLoadedForRuntime` owns the readiness rule and runtime
+bookkeeping. `useQuotaAutoRefresh` applies the shared 15-second opening freshness
+window and suspends demand while the document or native window is hidden. The
+store documentation defines the refresh contract for all quota readouts.
 
 The visible panel's initial quota load uses the background gate's active-session
 priority. It runs ahead of queued metadata reads while keeping the same network

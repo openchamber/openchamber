@@ -75,6 +75,18 @@ Pausing the extension takes the host away until you turn it back on, and your ac
 
 The OpenChamber SDK has a working example, `examples/source-control-provider`, to start from when building one. See [Build an extension](/sdk/).
 
+## An extension as a tracker
+
+An extension can add a work item tracker next to Linear: YouTrack, Jira, Plane, or a tracker of its own. Its permission dialog then has a line that starts with **Acts as the tracker** and names it. The line also says what OpenChamber sends it: your searches and the items you open, and that it is asked to change their state and post session comments for you.
+
+Once you allow it, the tracker gets its own card in **Settings → Integrations** under **Extension accounts**. Connect an account there: with a token, or by signing in in the browser after you enter the client id of the app you registered with the tracker, and the server's address first if the card asks for one. After that its items are wherever Linear's are: the chat's **+** menu and the picker, New Worktree, the linked items of a session, and the live states of items you follow. A pasted link to one of its items is recognised the same way. See [Linear](/integrations/#linear) for what each of these does.
+
+Your tokens stay in OpenChamber. The extension asks OpenChamber to call the tracker for it, and OpenChamber adds the credential to each call, only for the server you connected. The extension never receives it, and only its state change and comment calls may write anything there.
+
+Pausing the extension takes the tracker away until you turn it back on, and your accounts stay. Removing the extension forgets them. VS Code shows no trackers; on the phone the tracker's items show, and accounts are connected from the web or desktop app.
+
+The OpenChamber SDK has a working example, `examples/tracker-provider`, with a fake tracker to run beside it. See [Build an extension](/sdk/).
+
 ## Connect its account
 
 An extension that talks to a service gets a card at **Settings → Integrations** under **Extension accounts**. Depending on the service, the card asks for an API token, a username and token, or a client id for a sign-in flow. Choose **Connect**; **Disconnect** forgets the stored token. Extra fields the extension declares save on their own as you leave them.

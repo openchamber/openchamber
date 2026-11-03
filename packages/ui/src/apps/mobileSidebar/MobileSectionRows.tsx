@@ -3,7 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { ACTIVITY_TITLE_KEY } from '@/components/session/sidebar/sessionSidebarActivityLabels';
+import { ACTIVITY_TITLE_KEY, isBuiltinActivityKey } from '@/components/session/sidebar/sessionSidebarActivityLabels';
 import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { useI18n } from '@/lib/i18n';
@@ -64,7 +64,7 @@ export const MobileZoneHeader: React.FC<{
   onToggle: () => void;
 }> = ({ row, onToggle }) => {
   const { t } = useI18n();
-  return <MobileCaption label={t(ACTIVITY_TITLE_KEY[row.activityKey])} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
+  return <MobileCaption label={row.label ?? (isBuiltinActivityKey(row.activityKey) ? t(ACTIVITY_TITLE_KEY[row.activityKey]) : '')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
 };
 
 /** The caption over the projects: closed, it folds every project away. */
@@ -73,10 +73,10 @@ export const MobileProjectsCaption: React.FC<{
   onToggle: () => void;
 }> = ({ row, onToggle }) => {
   const { t } = useI18n();
-  return <MobileCaption label={t('sessions.sidebar.activity.projectsTitle')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
+  return <MobileCaption label={row.label ?? t('sessions.sidebar.activity.projectsTitle')} collapsed={row.collapsed} forceExpanded={row.forceExpanded} onToggle={onToggle} />;
 };
 
-const HeaderIconButton: React.FC<{ icon: 'add' | 'node-tree'; label: string; onClick: () => void }> = ({ icon, label, onClick }) => (
+const HeaderIconButton: React.FC<{ icon: 'add' | 'git-branch'; label: string; onClick: () => void }> = ({ icon, label, onClick }) => (
   <button
     type="button"
     className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -159,7 +159,7 @@ export const MobileProjectHeader: React.FC<{
           <MobileProjectIcon project={project} size="xs" />
           <span className="block min-w-0 flex-1 truncate ps-1 typography-ui-label font-medium text-foreground">{label}</span>
         </button>
-        {isRepo ? <HeaderIconButton icon="node-tree" label={t('sessions.sidebar.project.actions.newWorktree')} onClick={() => actions.openNewWorktree(project.id)} /> : null}
+        {isRepo ? <HeaderIconButton icon="git-branch" label={t('sessions.sidebar.project.actions.newWorktree')} onClick={() => actions.openNewWorktree(project.id)} /> : null}
         {/* Its edge on the drawer's gutter, as the header's New chat. */}
         <HeaderIconButton icon="add" label={t('mobile.sessions.newSessionInProjectAria', { label })} onClick={onNewSession} />
       </div>

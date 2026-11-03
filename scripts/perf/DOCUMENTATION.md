@@ -10,6 +10,7 @@ or extending these scripts. The methodology rules they enforce come from
 | Command | Answers |
 |---|---|
 | `bun run profile:idle` | What the app does while nobody interacts with it. |
+| `bun run profile:soak` | What the installed desktop app, with the user's own profile, costs over many idle minutes: CPU, memory and bytes per process, spawned processes, every request, lined up per second. |
 | `bun run profile:session` | What receiving and rendering a live assistant response costs. |
 | `bun run profile:animation` | What a CSS animation costs, isolated from the app. |
 | `bun run profile:switch` | How long switching sessions from the sidebar takes, cold and warm. |
@@ -190,6 +191,65 @@ what is mounted: `--session`, `--tab`, `--panel <mode>`, `--expand-projects`,
 what a surface keeps doing once the user has left it). `--render-probe` names
 the components that keep re-rendering while nothing happens, and
 `--inject-script` runs an ablation.
+
+## profile:soak
+
+`profile:idle` measures the page on an isolated server for seconds. Idle cost
+that scales with a real profile (projects, worktrees, thousands of sessions,
+GitHub and Linear accounts, relay) only shows on the user's own app, and
+periodic work every 45 s or 5 min only shows over many minutes. `profile:soak`
+records the running installed app for `--minutes` (default 15) and only
+observes: nothing is clicked, reloaded or sent.
+
+A clone of the user's data directory is not a safe stand-in: it carries the
+relay identity, the message queue, scheduled tasks and merged-worktree cleanup,
+which would act on the real repositories and accounts. Measure the real app,
+relaunched with a debugging port when the window's requests are needed. A
+relaunch ends running agent turns, so do it with none running.
+
+```bash
+osascript -e 'quit app "OpenChamber"'; sleep 5
+open -a OpenChamber --args --remote-debugging-port=9339
+# after the app settled, with no agent running:
+sudo sh scripts/perf/soak-capture.sh tmp/soak/run1 15 &
+bun run profile:soak -- --minutes 15 --delay 0 --cdp-port 9339 --output tmp/soak/run1
+```
+
+What each source gives:
+
+- `ps` every 250 ms: CPU per process of the app's tree by role (main with the
+  server, renderer, GPU, network, OpenCode, git, other children), and every
+  process that appears. The recorder leaves out its own shell's subtree when
+  started from an agent inside the app; `--exclude-pid` leaves out another.
+- `footprint` every 30 s: physical footprint per long-lived process with its
+  largest categories.
+- `nettop` every 5 s: bytes per process, loopback and external. Loopback
+  counts a byte on both ends.
+- CDP with `--cdp-port`: every request the windows sent with the stack that
+  sent it and the number of project folders it covered, every realtime frame
+  with its event type, main-thread time, heap and DOM once a second, and DOM
+  mutations counted by where they land. CDP never reports frames of a socket
+  opened before it attached: `--reload` reloads the window once before the
+  delay so the realtime channel opens under the recorder.
+- Attribution, which adds load, so quote CPU from a run without it:
+  `--cpu-profile` samples the window; `--inspect-port` samples the main
+  process, which hosts the server, through the Node inspector of an app
+  started with `--inspect=<port>`, and reports time per source file.
+- `soak-capture.sh` under sudo: request lines on loopback to the server and to
+  OpenCode (where the server's own calls to OpenCode show), connection
+  openings and DNS lookups with the process behind them, and `eslogger exec`
+  for every spawned process when the terminal has Full Disk Access.
+
+`soak-analyze.mjs <dir>` (run at the end, and rerunnable on saved data) writes
+`summary.md` and `timeline.jsonl`. Besides totals per hour it lists the
+seconds where CPU across the tree spiked with the events in the three seconds
+before, and per kind of event the CPU above the median second in the second
+of the event and the two after it. That is an association: events that always
+arrive together share it, so confirm a suspect with an ablation.
+
+Per-process CPU does not depend on what else runs on the machine, so the user
+may keep working in other apps. Agent sessions inside the app do count: their
+OpenCode work, tool processes and streaming land in the measured processes.
 
 ## profile:session
 
@@ -1049,7 +1109,7 @@ The measurement rules are in `.agents/skills/performance-engineering/SKILL.md`, 
 
 | File | Responsibility |
 |---|---|
-| `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags and the per-run temporary Chrome profile (`resolveProfileDir`); `profile:browser` alone keeps a reusable profile, for a manually driven session. |
+| `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags and the per-run temporary Chrome profile (`resolveProfileDir`, which also removes the `openchamber-perf-*` profiles earlier runs left: those whose `SingletonLock` symlink names a dead process); `profile:browser` alone keeps a reusable profile, for a manually driven session. |
 | `metrics.mjs` | Metric derivations shared by the profilers: growth rates, percentiles, long-task, frame-budget, windowed longest-task, trace-event and per-thread summaries. |
 | `process-cpu.mjs` | CPU per process from cumulative counters: Chrome through browser-level `SystemInfo`, the server and its OpenCode child through `ps`. Unresolved processes are reported as missing, never as zero. |
 | `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. |
@@ -1070,4 +1130,5 @@ The measurement rules are in `.agents/skills/performance-engineering/SKILL.md`, 
 | `trace-analysis.mjs` | Saved-trace analysis: pipeline per second, task classification, large style recalcs. |
 | `toggle-analysis.mjs` | `profile:toggle`'s pure analysis: refresh interval and frame pacing, per-window style/layout and forced layouts from the trace, renders per window, statistics per toggle type. |
 | `source-map.mjs` | Dependency-free source-map reader for the diagnostic build. |
+| `soak-system.mjs`, `soak-cdp.mjs`, `soak-capture.sh`, `soak-analyze.mjs` | `profile:soak`: OS samplers (ps, footprint, nettop), the light CDP recorder, the privileged packet and exec capture, and the per-second analysis. Every source writes JSON lines or raw text into the run directory, so a cut-short run still analyzes. |
 | `ablations/`, `controls/` | Injected scripts: ablations switch a suspect off, controls create the effect a metric must catch. |

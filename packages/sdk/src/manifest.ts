@@ -331,11 +331,13 @@ export type PublicSocketBinding = {
  * makes the extension a Git host next to GitHub, GitLab and Gitea, described
  * by `contributes.sourceControl`. `notifications` makes it a delivery channel
  * for the user's notifications next to the desktop and the phone, described
- * by `contributes.notifications`. The contracts are in `service-providers.ts`.
+ * by `contributes.notifications`. `tracker` makes it a work item tracker next
+ * to Linear, described by `contributes.tracker`; an extension is a Git host
+ * or a tracker, never both. The contracts are in `service-providers.ts`.
  * A service that provides a role needs no panel or background entry: the host
  * starts it on the first call.
  */
-export const GUEST_SERVICE_PROVIDES = ['browser', 'source-control', 'notifications'] as const;
+export const GUEST_SERVICE_PROVIDES = ['browser', 'source-control', 'notifications', 'tracker'] as const;
 export type GuestServiceProvides = (typeof GUEST_SERVICE_PROVIDES)[number];
 
 /**
@@ -397,6 +399,177 @@ export const toPublicNotifications = (contribution: NotificationsContribution): 
   };
   if (contribution.token.createPath) token.createPath = contribution.token.createPath;
   return { label: contribution.label, instances: { ...contribution.instances }, token };
+};
+
+/** The tracker is named `ext-<panel.id>` the same way, within the same 32 characters. */
+export const TRACKER_GUEST_ID_MAX = 28;
+/** The provider id OpenChamber gives the tracker an extension provides. */
+export const trackerProviderIdOf = (guestId: string): string => `ext-${guestId}`;
+
+/** Link templates per tracker (`contributes.tracker.urls.item`). */
+export const TRACKER_URL_TEMPLATES_MAX = 8;
+/** Characters in one link template. */
+export const TRACKER_URL_TEMPLATE_MAX = 256;
+/**
+ * The placeholders a link template may use. `{id}` is the item's identifier,
+ * exactly once, in the path or as a query value (`?selectedIssue={id}`);
+ * `{segment}` is any one path segment; `{segments+}` one or more (a
+ * self-hosted server's prefix), at most once per template.
+ */
+export const TRACKER_URL_TOKENS = ['{id}', '{segment}', '{segments+}'] as const;
+// A literal template segment: no placeholder braces, no regex syntax.
+const TRACKER_URL_TEMPLATE_LITERAL = /^[A-Za-z0-9._~-]+$/;
+const TRACKER_URL_TOKEN_SET: ReadonlySet<string> = new Set(TRACKER_URL_TOKENS);
+// `?name={id}`: the query parameter that carries the identifier.
+const TRACKER_QUERY_TEMPLATE = /^([A-Za-z0-9_.-]{1,64})=\{id\}$/;
+
+/**
+ * A link template of a tracker item: `/`, segments that are each a literal or
+ * one of `TRACKER_URL_TOKENS`, and optionally `?name={id}`. `{id}` appears
+ * exactly once, in the path or as the query value; `{segments+}` at most once.
+ * The host compiles it into the pattern that recognises a pasted link; an
+ * extension never supplies a regular expression.
+ */
+export const isTrackerUrlTemplate = (value: string): boolean => {
+  if (!value.startsWith('/') || value.length > TRACKER_URL_TEMPLATE_MAX) return false;
+  const queryAt = value.indexOf('?');
+  const pathPart = queryAt === -1 ? value : value.slice(0, queryAt);
+  const queryPart = queryAt === -1 ? null : value.slice(queryAt + 1);
+  const segments = pathPart === '/' ? [] : pathPart.slice(1).split('/');
+  if (segments.some((segment) => segment === '.' || segment === '..')) return false;
+  if (segments.some((segment) => !TRACKER_URL_TOKEN_SET.has(segment) && !TRACKER_URL_TEMPLATE_LITERAL.test(segment))) return false;
+  const count = (token: string) => segments.filter((segment) => segment === token).length;
+  if (count('{segments+}') > 1) return false;
+  if (queryPart === null) return count('{id}') === 1;
+  return TRACKER_QUERY_TEMPLATE.test(queryPart) && count('{id}') === 0;
+};
+
+/** State filters every tracker offers, first in the menu; the rest are the tracker's own. */
+export const TRACKER_BASE_STATE_FILTERS = ['open', 'all'] as const;
+/** Filters a tracker may add past the base ones: the six neutral categories, then its own ids. */
+export const TRACKER_STATE_FILTERS_MAX = 16;
+
+/**
+ * The shape of an item's identifier, which OpenChamber compares
+ * case-insensitively everywhere (links, tracked items, session links):
+ * `key-number` is `PROJ-42` (Jira, YouTrack, Linear), `number` a bare number
+ * (Azure DevOps, Redmine), `short-code` letters and digits (Trello, ClickUp).
+ */
+export const TRACKER_IDENTIFIER_KINDS = ['key-number', 'number', 'short-code'] as const;
+export type TrackerIdentifierKind = (typeof TRACKER_IDENTIFIER_KINDS)[number];
+
+/** The token block of a tracker, the Git host's rules. */
+export type TrackerTokenAuth = {
+  header: 'authorization' | 'private-token';
+  scheme: 'bearer' | 'token' | 'basic' | 'none';
+  /** Settings asks for the account's username beside the token. Required with, and only with, `basic`. */
+  username?: boolean;
+  /** Scopes the Settings card asks the user to grant. */
+  scopes?: string[];
+  /** Path on the instance where tokens are created, linked from Settings. */
+  createPath?: string;
+};
+
+/**
+ * OAuth with PKCE, run by OpenChamber: the user enters the client id (and a
+ * secret, when the tracker issues one) on the card, signs in in the browser,
+ * and OpenChamber keeps the tokens. `authorizeUrl` and `tokenUrl` are https
+ * URLs, or paths on the instance (`/hub/api/rest/oauth2/auth`) for a tracker
+ * whose server the user names.
+ */
+export type TrackerOAuth = {
+  authorizeUrl: string;
+  tokenUrl: string;
+  scopes?: string[];
+};
+
+/**
+ * What the tracker can do. A capability left out is off. Host access (an SDK
+ * guest borrowing the token) is not declared: the host keeps it off for every
+ * extension, because the service itself never sees a token.
+ */
+export type TrackerCapabilities = {
+  multipleAccounts: boolean;
+  /** `items.updateState` and `states.list` are called. */
+  stateUpdate: boolean;
+  children: boolean;
+  labels: boolean;
+  priority: boolean;
+  filters: { people: boolean; priority: boolean };
+  /** `containers.list` is called, and Settings maps containers to projects. */
+  projectMapping: boolean;
+  /** `comments.create` is called with "session started / completed / failed" and a link. */
+  sessionComments: boolean;
+};
+
+/**
+ * `contributes.tracker`: the work item tracker an extension with
+ * `service.provides: ["tracker"]` adds next to Linear, declared in the manifest
+ * so OpenChamber can list it, draw its account card and recognise its links
+ * without starting the service. The provider id is not declared: OpenChamber
+ * names it `ext-<panel.id>`. Accounts and tokens are OpenChamber's; the
+ * service reaches the tracker's server through OpenChamber's outbound proxy
+ * with a per-call handle.
+ */
+export type TrackerContribution = {
+  /** Wire version of the role's service contract; `1`. */
+  wire: 1;
+  /** The product name, shown untranslated. 1 to 64 characters. */
+  label: string;
+  /**
+   * Where the accounts live: one `fixed` https origin (a cloud tracker with
+   * one address), or an origin the `user` types when connecting (a self-hosted
+   * server, a per-company site), with the field's label and an optional example.
+   */
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  /** How the user signs in: a pasted token, OAuth, or either. At least one. */
+  auth: { token?: TrackerTokenAuth; oauth?: TrackerOAuth };
+  capabilities: TrackerCapabilities;
+  /**
+   * In menu order: `open` and `all` first, then the neutral categories the
+   * tracker offers (`triage`, `backlog`, `todo`, `in-progress`, `done`,
+   * `canceled`) and its own filter ids (`inReview`). What `items.list` is asked for.
+   */
+  stateFilters: string[];
+  identifier: TrackerIdentifierKind;
+  /**
+   * Link templates of one item on the instance, made of literal segments and
+   * the `TRACKER_URL_TOKENS` placeholders, such as `/browse/{id}` or
+   * `/{segments+}?selectedIssue={id}`. OpenChamber compiles them; an extension
+   * never supplies a regular expression.
+   */
+  urls: { item: string[] };
+};
+
+/** What the extension catalog, the approval dialog and the account card show of the tracker; never a token. */
+export type PublicTracker = {
+  label: string;
+  instances: { kind: 'fixed'; origin: string } | { kind: 'user'; label: string; placeholder?: string };
+  authMethods: Array<'oauth' | 'token'>;
+  token?: { scheme: 'bearer' | 'token' | 'basic' | 'none'; username: boolean; scopes: string[]; createPath?: string };
+  oauth?: { scopes: string[] };
+};
+
+export const toPublicTracker = (contribution: TrackerContribution): PublicTracker => {
+  const view: PublicTracker = {
+    label: contribution.label,
+    instances: { ...contribution.instances },
+    // Browser sign-in first where both exist: it needs no token to be made by hand.
+    authMethods: [
+      ...(contribution.auth.oauth ? ['oauth' as const] : []),
+      ...(contribution.auth.token ? ['token' as const] : []),
+    ],
+  };
+  if (contribution.auth.token) {
+    view.token = {
+      scheme: contribution.auth.token.scheme,
+      username: contribution.auth.token.username === true,
+      scopes: [...(contribution.auth.token.scopes ?? [])],
+    };
+    if (contribution.auth.token.createPath) view.token.createPath = contribution.auth.token.createPath;
+  }
+  if (contribution.auth.oauth) view.oauth = { scopes: [...(contribution.auth.oauth.scopes ?? [])] };
+  return view;
 };
 
 /** Default instances a Git host extension may name. */
@@ -656,6 +829,8 @@ export type OpenChamberContributes = {
   sessionEvents?: SessionEventsContribution;
   /** The notification channel a `notifications` service provides; present exactly when it does. */
   notifications?: NotificationsContribution;
+  /** The work item tracker a `tracker` service provides; present exactly when it does. */
+  tracker?: TrackerContribution;
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */

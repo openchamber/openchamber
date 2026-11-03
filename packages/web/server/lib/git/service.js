@@ -1507,13 +1507,15 @@ export async function resolveRepositoryGitPaths(directory) {
 
 /**
  * Each listed remote's fetch and push URL from `git remote -v` output, as
- * `git remote get-url [--push]` reports them: the first URL of several, and a
- * remote with no URL read as a URL equal to its name, as Git does. Lines may
- * end in CRLF (Git for Windows); a kept `\r` would match no line and read
- * every remote as URL-less. Anything after the URL-kind marker — Git 2.54+
- * appends the partial-clone filter there as `[blob:none]` — is decoration
- * about the remote, never part of the URL, and is ignored whether or not its
- * shape is recognized.
+ * `git remote get-url [--push]` reports them, the first URL of several. A
+ * remote with no fetch URL is left out: Git lists it as a bare `name\t` line
+ * and `get-url` answers its name, which is no address anyone configured. A
+ * git-annex special remote is such a section. Lines may end in CRLF (Git for
+ * Windows); a kept `\r` would match no line and read every remote as
+ * URL-less. Anything after the URL-kind marker (Git 2.54+ appends the
+ * partial-clone filter there as `[blob:none]`) is decoration about the
+ * remote, never part of the URL, and is ignored whether or not its shape is
+ * recognized.
  */
 export function parseRemoteListing(names, listing) {
   const urls = new Map();
@@ -1524,9 +1526,10 @@ export function parseRemoteListing(names, listing) {
     if (entry[match[3]] === undefined) entry[match[3]] = match[2];
     urls.set(match[1], entry);
   }
-  return names.map((name) => {
-    const fetchUrl = urls.get(name)?.fetch ?? name;
-    return { name, fetchUrl, pushUrl: urls.get(name)?.push ?? fetchUrl };
+  return names.flatMap((name) => {
+    const fetchUrl = urls.get(name)?.fetch;
+    if (fetchUrl === undefined) return [];
+    return [{ name, fetchUrl, pushUrl: urls.get(name)?.push ?? fetchUrl }];
   });
 }
 
@@ -1535,8 +1538,11 @@ export function parseRemoteListing(names, listing) {
  * them (`insteadOf` rewrites applied), read with one `git remote -v` instead
  * of two Git processes per remote: repository identity is resolved several
  * times per Git operation, and a repository with many remotes spent most of
- * that time starting processes. When the listing itself fails, each remote is
- * asked on its own, so a failure never reads as URL-less remotes.
+ * that time starting processes. A remote with no fetch URL is left out
+ * (`parseRemoteListing`). When the listing itself fails, each remote is asked
+ * on its own, so a failure never reads as URL-less remotes; there the
+ * configured `remote.<name>.url` keys tell which remotes have a URL, because
+ * `get-url` answers a URL-less remote's name.
  */
 export async function getRepositoryRemoteUrls(directory) {
   const [namesResult, listResult] = await Promise.all([
@@ -1546,7 +1552,12 @@ export async function getRepositoryRemoteUrls(directory) {
   if (!namesResult.success) return [];
   const names = String(namesResult.stdout || '').split(/\r?\n/).map((name) => name.trim()).filter(Boolean).sort();
   if (listResult.success) return parseRemoteListing(names, listResult.stdout);
-  return Promise.all(names.map(async (name) => {
+  const configured = await runGitCommand(directory, ['config', '--name-only', '--get-regexp', '^remote\\..*\\.url$']);
+  // Exit 1 is "no key matched"; any other failure keeps every remote.
+  const withUrl = configured.success || configured.exitCode === 1
+    ? new Set(String(configured.stdout || '').split(/\r?\n/).filter(Boolean).map((key) => key.slice('remote.'.length, -'.url'.length)))
+    : null;
+  return Promise.all(names.filter((name) => !withUrl || withUrl.has(name)).map(async (name) => {
     const [fetchResult, pushResult] = await Promise.all([
       runGitCommand(directory, ['remote', 'get-url', name]),
       runGitCommand(directory, ['remote', 'get-url', '--push', name]),
@@ -2486,7 +2497,7 @@ const resolveExistingWorktreeSource = async (primaryWorktree, input = {}, intent
   };
 };
 
-// The branch list offers remote branches that were never fetched (it asks
+// A live branch list offers remote branches that were never fetched (it asks
 // each remote with `ls-remote`), so a worktree from one of them fetches that
 // single branch first. A failed fetch reports the branch as missing.
 const ensureLocalRemoteBranchRef = async (primaryWorktree, remoteName, branchName) => {
@@ -3557,14 +3568,24 @@ const refResolvesToCommit = async (git, ref) => git
 /**
  * The branch list includes remote-only branches that `ls-remote` reported but
  * the repository never fetched (#2098), so a comparison can name a ref that does
- * not exist locally. Say that plainly instead of letting git's "ambiguous
- * argument" surface as an opaque failure.
+ * not exist locally: typically the base of a stacked pull request in a fresh
+ * worktree. A `<remote>/<branch>` ref on a configured remote is fetched as that
+ * single branch, the way `checkoutBranch` does. Anything still unresolved is
+ * named plainly instead of letting git's "ambiguous argument" surface as an
+ * opaque failure.
  */
-async function assertRangeRefsResolve(git, refs) {
+async function assertRangeRefsResolve(git, repoRoot, refs) {
   for (const ref of refs) {
-    if (!(await refResolvesToCommit(git, ref))) {
-      throw new Error(`Ref "${ref}" is not available locally. Fetch it before comparing.`);
+    if (await refResolvesToCommit(git, ref)) continue;
+    const remoteRef = parseRemoteBranchRef(ref);
+    const remotes = remoteRef ? await git.getRemotes().catch(() => []) : [];
+    if (remoteRef && remoteRef.branch !== 'HEAD' && remotes.some((entry) => entry?.name === remoteRef.remote)) {
+      // A failed fetch (offline, branch deleted on the remote) falls through to
+      // the error below; a concurrent fetch of the same ref may already have won.
+      await fetchRemoteBranchRef(repoRoot, remoteRef.remote, remoteRef.branch).catch(() => undefined);
+      if (await refResolvesToCommit(git, ref)) continue;
     }
+    throw new Error(`Ref "${ref}" is not available locally. Fetch it before comparing.`);
   }
 }
 
@@ -3621,7 +3642,7 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
     throw new Error('base and head are required');
   }
 
-  await assertRangeRefsResolve(git, [baseRef, headRef]);
+  await assertRangeRefsResolve(git, repoRoot, [baseRef, headRef]);
 
   const args = ['diff', '--no-color', '--no-ext-diff'];
   if (typeof contextLines === 'number' && !Number.isNaN(contextLines)) {
@@ -3800,7 +3821,7 @@ export async function getRangeFiles(directory, { base, head, includeWorkingTree 
     throw new Error('base and head are required');
   }
 
-  await assertRangeRefsResolve(git, [baseRef, headRef]);
+  await assertRangeRefsResolve(git, repoRoot, [baseRef, headRef]);
 
   // `-C` (copy detection among changed files only, so cheap) makes copies
   // surface as C entries instead of plain additions; rename detection is on
@@ -4560,21 +4581,21 @@ const withoutDetachedHeadEntry = (summary) => {
 };
 
 /**
- * `remote: 'local'` answers from local refs alone, as `git branch -a` does: the
- * callers that only need local facts (publishing and worktree creation read the
- * checked-out branch and its upstream, the worktree delete dialog reads
- * `defaultBranches`) must not wait on every remote's network round trip.
+ * Answers from local refs alone, as `git branch -a` does. `remote: 'live'` also
+ * asks every remote: over SSH that is a connection the person's key or agent
+ * may have to approve, so it runs only when the person asked for the list.
  */
-export async function getBranches(directory, { remote = 'live' } = {}) {
+export async function getBranches(directory, { remote = 'local' } = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
     const result = await git.branch();
     const { all: allBranches, branches } = withoutDetachedHeadEntry(result);
     const remoteBranches = allBranches.filter(branch => branch.startsWith('remotes/'));
-    // Read-only ref discovery, not a transfer: it never writes refs and never
-    // takes the planned-operation path, so a branch pushed from elsewhere is
-    // listed and a ref deleted on the remote is pruned without a fetch first.
+    // A live listing is read-only ref discovery, not a transfer: it never writes
+    // refs and never takes the planned-operation path, so a branch pushed from
+    // elsewhere is listed and a ref deleted on the remote is pruned without a
+    // fetch first.
     const activeRemoteBranches = remote === 'local'
       ? remoteBranches
       : await filterActiveRemoteBranches(git, directory, remoteBranches);
@@ -4650,12 +4671,11 @@ async function getRemoteDefaultBranches(git) {
   return defaults;
 }
 
-// What each remote reported for its heads, per repository and remote. A
-// repository with many remotes paid one network round trip per remote on every
-// branch listing, and the Git panel lists branches several times per action.
-// An answer is reused while it is fresh and the local remote-tracking refs of
-// that remote are unchanged: a push or fetch from here changes them, so it
-// reads again. Concurrent listings share one round trip.
+// What each remote reported for its heads, per repository and remote. A live
+// listing pays one network round trip per remote. An answer is reused while it
+// is fresh and the local remote-tracking refs of that remote are unchanged: a
+// push or fetch from here changes them, so it reads again. Concurrent listings
+// share one round trip.
 const REMOTE_HEADS_TTL_MS = 30_000;
 const remoteHeadsCache = new Map();
 
@@ -4955,7 +4975,7 @@ export async function getWorktrees(directory) {
       .filter((entry) => entry.bare !== true)
       .map((entry) => {
         const title = entry.branch ? titles.get(entry.branch) : undefined;
-        const pinnedAt = entry.branch ? pins.get(entry.branch) : undefined;
+        const pin = entry.branch ? pins.get(entry.branch) : undefined;
         return {
           head: entry.head || '',
           name: path.basename(entry.worktree || ''),
@@ -4964,7 +4984,8 @@ export async function getWorktrees(directory) {
           prunable: entry.prunable === true,
           // Absent until the task is named; JSON leaves an undefined key out.
           title: title || undefined,
-          pinnedAt,
+          pinnedAt: pin?.pinnedAt,
+          pinList: pin?.list,
         };
       });
   } catch (error) {
@@ -5045,18 +5066,36 @@ const readBranchPins = async (repositoryDirectory) => {
     const newline = record.indexOf('\n');
     if (newline <= 0) continue;
     const branch = record.slice('branch.'.length, newline - BRANCH_PIN_KEY_SUFFIX.length);
-    const pinnedAt = Number(record.slice(newline + 1).trim());
-    if (branch && Number.isFinite(pinnedAt) && pinnedAt > 0) pins.set(branch, pinnedAt);
+    const pin = parseBranchPin(record.slice(newline + 1));
+    if (branch && pin) pins.set(branch, pin);
   }
   return pins;
 };
+
+/**
+ * The stored pin: the time it was pinned, then the id of the user's pin list
+ * when it is filed in one (`<at> <list>`). A build that knows no lists reads
+ * such a value as no pin, which leaves the worktree in its project.
+ */
+const parseBranchPin = (value) => {
+  const [at, list] = String(value || '').trim().split(/\s+/, 2);
+  const pinnedAt = Number(at);
+  if (!Number.isFinite(pinnedAt) || pinnedAt <= 0) return null;
+  return { pinnedAt, list: list || undefined };
+};
+const PIN_LIST_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Pin or unpin the task of the worktree at `directory`. A detached worktree
  * has no branch to keep the pin and is refused with 409. Clients re-list the
  * worktrees on the topology event published after a write.
  */
-export async function setWorktreePinned(directory, pinned, now = Date.now()) {
+export async function setWorktreePinned(directory, pinned, list = null, now = Date.now()) {
+  if (list !== null && !PIN_LIST_ID_PATTERN.test(list)) {
+    const error = new Error('The pin list id is not valid');
+    error.status = 400;
+    throw error;
+  }
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
     const error = new Error('The worktree folder does not exist');
@@ -5072,10 +5111,12 @@ export async function setWorktreePinned(directory, pinned, now = Date.now()) {
     });
   const branch = String(head.stdout || '').trim();
   const key = `branch.${branch}.openchamberPinned`;
-  const current = Number(await readGitConfigValue(directoryPath, key));
-  const isPinned = Number.isFinite(current) && current > 0;
-  if (isPinned !== pinned) {
-    await writeGitConfigValue(directoryPath, key, pinned ? String(now) : '');
+  const current = parseBranchPin(await readGitConfigValue(directoryPath, key));
+  // Moving a pin to another list keeps the time it was first pinned.
+  const next = pinned ? [String(current?.pinnedAt ?? now), ...(list ? [list] : [])].join(' ') : '';
+  const stored = current ? [String(current.pinnedAt), ...(current.list ? [current.list] : [])].join(' ') : '';
+  if (next !== stored) {
+    await writeGitConfigValue(directoryPath, key, next);
     void publishWorktreeTopologyChange(directoryPath);
   }
   return { pinned, branch };

@@ -188,6 +188,29 @@ describe('openchamber events', () => {
     }
   });
 
+  test('a listener that subscribes after the stream is ready still gets its connection, and not after a drop', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribeEarly = subscribeOpenchamberEvents(() => {});
+    const source = MockEventSource.instances[0];
+    source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:event-stream-ready', properties: { connectionId: 'conn_1' } }) });
+
+    const late: unknown[] = [];
+    const unsubscribeLate = subscribeOpenchamberEvents((event) => late.push(event));
+    await Promise.resolve();
+    expect(late).toEqual([{ type: 'event-stream-ready', connectionId: 'conn_1' }]);
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    source.onerror?.();
+    const afterDrop: unknown[] = [];
+    const unsubscribeAfterDrop = subscribeOpenchamberEvents((event) => afterDrop.push(event));
+    await Promise.resolve();
+    expect(afterDrop).toEqual([]);
+
+    unsubscribeAfterDrop();
+    unsubscribeLate();
+    unsubscribeEarly();
+  });
+
   test('dispatches externally created session events', async () => {
     const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
     const events: unknown[] = [];
@@ -399,6 +422,43 @@ describe('openchamber events', () => {
       { type: 'worktree-changed', directories: ['/repo', '/repo-linked'], changedAt: 456 },
     ]);
     unsubscribe();
+  });
+
+  test('dispatches the session announcements an SSE main stream never carries', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => {
+      if (event.type === 'control-sync') events.push(event.event);
+    });
+    const run = {
+      id: 'wf_one', parentSessionId: 'ses_1', directory: '/repo', name: 'audit', description: '', state: 'running',
+      attempt: 1, createdAt: 1, currentPhase: null, phases: [], agents: [], logs: [],
+    };
+    try {
+      for (const payload of [
+        { type: 'openchamber:workflow-run', properties: { run } },
+        { type: 'openchamber:workflow-run', properties: { run: { ...run, state: 'exploded' } } },
+        { type: 'openchamber:workflow-run-removed', properties: { runId: 'wf_one', parentSessionId: 'ses_1' } },
+        { type: 'openchamber:page-waiting', properties: { sessionID: 'ses_1', directory: '/repo', page: { id: 'call_1', title: 'Pick' } } },
+        { type: 'openchamber:page-settled', properties: { sessionID: 'ses_1', pageID: 'call_1' } },
+        { type: 'openchamber:session-assist', properties: { sessionID: 'ses_1', directory: null, pending: true } },
+        { type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: 42 } },
+        // OpenCode announces metadata itself on every transport.
+        { type: 'openchamber:session-metadata', properties: { sessionID: 'ses_1', metadata: { pinned: true } } },
+      ]) {
+        MockEventSource.instances[0].onmessage?.({ data: JSON.stringify(payload) });
+      }
+      expect(events).toEqual([
+        { type: 'openchamber.workflow-run', properties: { run } },
+        { type: 'openchamber.workflow-run-removed', properties: { runId: 'wf_one', parentSessionId: 'ses_1' } },
+        { type: 'openchamber.page-waiting', properties: { sessionID: 'ses_1', directory: '/repo', page: { id: 'call_1', title: 'Pick' } } },
+        { type: 'openchamber.page-settled', properties: { sessionID: 'ses_1', pageID: 'call_1' } },
+        { type: 'openchamber.session-assist', properties: { sessionID: 'ses_1', directory: null, pending: true } },
+        { type: 'session.patched', properties: { sessionID: 'ses_1', patch: { time: { archived: 42 } } } },
+      ]);
+    } finally {
+      unsubscribe();
+    }
   });
 
   test('dispatches a project-context invalidation only with a valid owner id', async () => {

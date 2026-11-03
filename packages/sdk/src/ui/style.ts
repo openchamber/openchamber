@@ -206,6 +206,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 10px; resize: vertical; }
 .oc-sdk-progress-label { display: flex; justify-content: space-between; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
 .oc-sdk-progress-track { height: 6px; overflow: hidden; }
 .oc-sdk-progress-fill { height: 100%; transform-origin: left; transition: transform 200ms ease-out; }
+.oc-sdk-progress-value { display: inline-flex; align-items: center; gap: 2px; }
+.oc-sdk-progress[data-done="true"] .oc-sdk-progress-value { font-weight: 600; }
 
 .oc-sdk-menu { position: relative; display: inline-flex; }
 
@@ -299,7 +301,8 @@ ${tone('success')}${tone('warning')}${tone('error')}${tone('info')}
 .oc-sdk-tabs[data-track="true"] .oc-sdk-tab[aria-selected="true"] { color: ${elevatedFg}; background: var(--oc-sdk-raised-bg); ${raised} }
 .oc-sdk-tab-count { color: ${muted}; }
 
-.oc-sdk-badge { border-radius: 9999px; background: ${hover}; color: ${muted}; }
+/* The app's neutral badge: a step of the text colour, the same in every theme. */
+.oc-sdk-badge { border-radius: 9999px; background: ${mix(fg, 6)}; color: ${muted}; }
 .oc-sdk-badge[data-tone] { color: var(--oc-sdk-tone-text, var(--oc-sdk-tone)); background: ${mix('var(--oc-sdk-tone)', 15)}; }
 
 .oc-sdk-row { border-radius: 6px; transition: background 120ms ease-out; }
@@ -325,8 +328,11 @@ ${tone('success')}${tone('warning')}${tone('error')}${tone('info')}
 .oc-sdk-separator::before, .oc-sdk-separator::after { background: ${mix(border, 40)}; }
 
 .oc-sdk-progress-label { color: ${muted}; }
-.oc-sdk-progress-track { border-radius: 9999px; background: ${border}; }
+/* The app's progress: a groove a step of the text colour, green once done. Older bundles mark done only through aria-valuenow. */
+.oc-sdk-progress-track { border-radius: 9999px; background: ${mix(fg, 6)}; }
 .oc-sdk-progress-fill { border-radius: 9999px; background: var(--oc-sdk-tone, ${primary}); }
+.oc-sdk-progress-track[aria-valuenow="100"] > .oc-sdk-progress-fill:not([data-tone]) { background: ${v('status-success', 'currentColor')}; }
+.oc-sdk-progress[data-done="true"] .oc-sdk-progress-value { color: ${v('success-text', 'inherit')}; }
 
 .oc-sdk-text a { color: ${primaryText}; text-decoration: underline; text-underline-offset: 2px; }
 .oc-sdk-text img { border-radius: 8px; border: 1px solid ${mix(border, 60)}; }

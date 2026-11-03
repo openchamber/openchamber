@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -23,8 +24,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -177,6 +180,7 @@ export const dict = {
   ...fileEditorAidsI18n.nl,
   ...htmlRenderI18n.nl,
   ...documentToolbarI18n.nl,
+  ...uiBlocksI18n.nl,
   ...updateDialogCanaryI18n.nl,
   ...secretRequestI18n.nl,
   ...sessionNoticesI18n.nl,
@@ -187,8 +191,10 @@ export const dict = {
   ...heapSnapshotI18n.nl,
   ...consoleBudgetsI18n.nl,
   ...imageToolI18n.nl,
+  ...agentStatusI18n.nl,
   ...snippetsI18n.nl,
   ...sidebarWorkI18n.nl,
+  ...sidebarSectionsI18n.nl,
   ...worktreeArchiveI18n.nl,
   ...overviewI18n.nl,
   ...isolatedSpacesI18n.nl,
@@ -469,6 +475,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'Kies eerst een project',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'Kan geplande taken niet laden',
   'sessions.scheduledTasks.dialog.toast.saved': 'Geplande taak opgeslagen',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'De taak draait nu op de nieuwe plek, maar de oude kopie kon niet worden verwijderd. Verwijder die daar, zodat de taak niet twee keer draait.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'Kan taak niet bijwerken',
   'sessions.scheduledTasks.dialog.toast.deleted': 'Geplande taak verwijderd',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'Kan taak niet verwijderen',
@@ -618,6 +625,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'Meer',
   'sessions.sidebar.header.actions.exitSelection': 'Selectie verlaten',
   'sessions.sidebar.header.actions.selectSessions': 'Sessies selecteren',
+  'sessions.sidebar.header.actions.markAllRead': 'Alles als gelezen markeren',
   'sessions.sidebar.header.actions.sortProjects': 'Projecten sorteren',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Weergavemodus sessies',
   'sessions.sidebar.header.displayMode.label': 'Weergavemodus',
@@ -1781,6 +1789,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'Schakel over naar bewerkmodus om het probleem op te lossen.',
   'filesView.error.readFileFailed': 'Kan bestand niet lezen',
   'filesView.editor.htmlPreviewTitle': 'HTML-preview',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'HTML-preview is niet beschikbaar via de relay',
+  'filesView.editor.htmlPreviewShowCode': 'Code tonen',
   'filesView.editor.htmlAnnotate.intro': 'Dit is een geannoteerde selectie uit de preview van een HTML-bestand.',
   'filesView.diagram.closeDiagramView': 'Diagramweergave sluiten',
   'filesView.diagram.saveDiagram': 'Diagram opslaan',
@@ -2426,7 +2436,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'Lage prioriteit',
   'chat.statusRow.actions.stopGeneratingAria': 'Genereren stoppen',
   'chat.statusRow.tasksTitle': 'Taken',
-  'chat.statusRow.modelStatus': '{model} is {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} actief · {left} over',
   'chat.revertIndicator.redo': 'Opnieuw',
   'chat.revertIndicator.redoAria': 'Opnieuw — teruggedraaide berichten herstellen',
@@ -3013,7 +3023,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'Projecticoon gevonden',
   'openInApp.actions.open': 'Openen',
   'openInApp.actions.openInAria': 'Openen in {app}',
-  'openInApp.actions.chooseAppAria': 'Kies de app om te openen',
   'openInApp.actions.copyPath': 'Pad kopiëren',
   'openInApp.actions.refreshApps': 'Apps vernieuwen',
   'openInApp.toast.pathCopied': 'Pad naar het klembord gekopieerd',
@@ -3895,12 +3904,16 @@ export const dict = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': 'De worktree en zijn branch blijven na de run staan, zodat je het resultaat kunt bekijken.',
   'sessions.scheduledTasks.editor.worktree.notRepo': 'De projectmap is geen git-repository; uitvoeringen gebruiken de checkout zoals die is.',
   'sessions.scheduledTasks.dialog.usesDefaults': 'Standaarden voor sessies',
-  'sessions.moveChatToProject.menu': 'Naar project verplaatsen…',
-  'sessions.moveChatToProject.hint': 'Dit gesprek binnen een project voortzetten',
-  'sessions.moveChatToProject.title': 'Chat naar een project verplaatsen',
-  'sessions.moveChatToProject.description': 'Het gesprek gaat verder in de map van het project. Bestanden die de chat maakte blijven waar ze zijn.',
-  'sessions.moveChatToProject.success': 'Chat naar het project verplaatst',
-  'sessions.moveChatToProject.failed': 'Chat kon niet worden verplaatst',
+  'sessions.moveSession.menu': 'Sessie verplaatsen…',
+  'sessions.moveSession.hint': 'Bestanden blijven in de oude map',
+  'sessions.moveSession.title': 'Sessie verplaatsen',
+  'sessions.moveSession.description': 'De sessie gaat verder in de gekozen map. Bestanden blijven waar ze zijn.',
+  'sessions.moveSession.chooseFolder': 'Map kiezen…',
+  'sessions.moveSession.current': 'Huidige map',
+  'sessions.moveSession.success': 'Sessie verplaatst',
+  'sessions.moveSession.failed': 'Kan de sessie niet verplaatsen',
+  'chat.folderMissing.text': 'Map {name} bestaat niet meer',
+  'chat.folderMissing.action': 'Sessie verplaatsen',
   'chat.worktreeSetup.running': 'Worktree wordt ingericht: de setupopdrachten van het project lopen…',
   'chat.draft.creatingSession': 'Sessie wordt aangemaakt…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'De verbinding kwam niet tot stand, dus OpenChamber is op Local gestart. Verbind haar via de instantiekiezer zodra ze bereikbaar is.',

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
+import { guestAssetContentType, hasGuestFrame, inspectGuestPackage, listInstalledGuests, noteGuestPackageChanged, resolveGuestAssetPath, resolveGuestServedFile, toPublicGuest } from './catalog.js';
 import { setCapabilityGrants, writeExtensionPaths } from './persist.js';
 
 const writeBuiltGuest = async (root) => {
@@ -486,6 +486,40 @@ describe('catalog cache under a store write', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('package revision', () => {
+  test('a changed package shows a new revision on the next listing, past the cache', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'hello');
+    await writeBuiltGuest(guestRoot);
+    await writeExtensionPaths([guestRoot], persistPath);
+
+    const [before] = await listInstalledGuests({ persistPath });
+    expect(before.revision).toBe(0);
+    expect(toPublicGuest(before).revision).toBeUndefined();
+    noteGuestPackageChanged(persistPath, 'hello');
+    const [after] = await listInstalledGuests({ persistPath });
+    expect(toPublicGuest(after).revision).toBe(1);
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test('a folder whose build emptied its output keeps the row it last loaded with', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-'));
+    const persistPath = path.join(dir, 'extensions.json');
+    const guestRoot = path.join(dir, 'hello');
+    await writeBuiltGuest(guestRoot);
+    await writeExtensionPaths([guestRoot], persistPath);
+    expect((await listInstalledGuests({ persistPath })).map((guest) => guest.id)).toEqual(['hello']);
+
+    await fs.rm(path.join(guestRoot, 'panel', 'main.js'));
+    noteGuestPackageChanged(persistPath, 'hello');
+    expect((await listInstalledGuests({ persistPath })).map((guest) => guest.id)).toEqual(['hello']);
+
+    await fs.rm(dir, { recursive: true, force: true });
   });
 });
 

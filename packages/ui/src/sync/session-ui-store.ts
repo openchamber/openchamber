@@ -199,9 +199,9 @@ export async function routeMessage(params: {
   // show, so only a genuine change travels with the prompt. Resolved when the
   // request is about to leave: a session created from a draft has its record,
   // with the model it was created on, only once `ready` settles.
-  const sendSelection = () => {
+  const sendSelection = async () => {
     const directory = sendDirectory()
-    const selection = resolveSendSelection(params.sessionId, directory, {
+    const selection = await resolveSendSelection(params.sessionId, directory, {
       providerID: params.providerID,
       modelID: params.modelID,
       variant: params.variant,
@@ -301,7 +301,7 @@ export async function routeMessage(params: {
         ...contextItems,
         ...skillInstructionContext(),
       ]
-      const selection = sendSelection()
+      const selection = await sendSelection()
       await opencodeClient.sendCommand({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
@@ -341,7 +341,7 @@ export async function routeMessage(params: {
     appendSubmissions: params.appendSubmissions,
     send: async (messageID, context) => {
       assertRuntimeCurrent()
-      const selection = sendSelection()
+      const selection = await sendSelection()
       return opencodeClient.sendMessage({
         runtimeKey: params.runtimeKey,
         id: params.sessionId,
@@ -2414,6 +2414,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       // ---- Existing session ----
       const targetSessionId = capturedTarget?.sessionId ?? options?.sessionId ?? get().currentSessionId
+      const settleModelPick = targetSessionId
+        ? useSelectionStore.getState().captureSessionModelPickSettlement(targetSessionId, providerID, modelID, capturedRuntimeKey)
+        : undefined
       const resumeAfterSend = options?.userInitiated && inputMode !== 'shell' && targetSessionId
         ? prepareUserMessageResume(targetSessionId, capturedRuntimeKey)
         : undefined
@@ -2504,6 +2507,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? { sessionId: targetSessionId, agent: effectiveAgent }
         : null
       if (carriedPick) useSelectionStore.getState().settleSessionAgentPick(carriedPick.sessionId, carriedPick.agent)
+      const settleSentSelection = targetSessionId
+        ? useSelectionStore.getState().captureSessionSelectionSentSettlement(targetSessionId, providerID, modelID, effectiveAgent, variant)
+        : undefined
       const routed = await routeMessage({
         runtimeKey: capturedRuntimeKey,
         sessionId: targetSessionId || "",
@@ -2541,6 +2547,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       })
       if (routed !== "shell" && options?.recordEffort && isCurrentRuntimeInstance()) {
         rememberEffort(providerID, modelID, variant ?? null, effortRevision)
+      }
+      if (routed !== "shell") {
+        settleModelPick?.()
+        if (isCurrentRuntimeInstance()) settleSentSelection?.()
       }
       // Keep restore failures outside the send promise and its retry path.
       void resumeAfterSend?.().catch(console.warn)
@@ -2905,9 +2915,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         get().setCurrentSession(sessionId, normalized)
         return
       }
+      const moved = normalized !== get().currentSessionDirectory
       set({ currentSessionDirectory: normalized })
       setActiveSession(normalized ?? "", sessionId)
       writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId, directory: normalized })
+      // A session opened in a folder that was gone never loaded the model list,
+      // so the composer stays on Loading until the directory follows it. A list
+      // that did load stays, and with it the session's model.
+      if (moved && normalized && !useConfigStore.getState().providersLoaded) {
+        useDirectoryStore.getState().setDirectory(normalized, { showOverlay: false })
+        opencodeClient.setDirectory(normalized)
+      }
     }
   },
 }))

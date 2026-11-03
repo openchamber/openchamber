@@ -50,9 +50,25 @@ const MAX_OCCURRENCES = 200;
  */
 const CHAT_QUOTE_ROOT_SELECTOR = '[data-chat-quote-root]';
 
-export function findChatQuoteRoot(scope: ParentNode, messageId: string): Element | null {
-    const message = scope.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
-    return message?.querySelector(CHAT_QUOTE_ROOT_SELECTOR) ?? null;
+/**
+ * The quote roots of a message that are mounted, in reading order. A long
+ * answer is drawn in several transcript rows, each with its own root
+ * (`data-message-slice`); their text streams, joined in order, are the
+ * message's stream, as one root's was before it was cut.
+ */
+export function findChatQuoteRoots(scope: ParentNode, messageId: string): Element[] {
+    return [...scope.querySelectorAll(`[data-message-id="${CSS.escape(messageId)}"]`)]
+        .flatMap((message) => message.querySelector(CHAT_QUOTE_ROOT_SELECTOR) ?? [])
+        .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
+}
+
+// The anchor's context around `index`, as far as `stream` reaches: a row of
+// a long answer that is not mounted leaves the stream short of it.
+function hasContextAt(stream: string, anchor: ChatQuoteAnchor, index: number): boolean {
+    const end = index + anchor.text.length;
+    const before = stream.slice(Math.max(0, index - anchor.prefix.length), index);
+    const after = stream.slice(end, end + anchor.suffix.length);
+    return anchor.prefix.endsWith(before) && anchor.suffix.startsWith(after);
 }
 
 /** Stream offset of a boundary point inside `root`. */
@@ -63,11 +79,26 @@ function streamOffset(root: Node, container: Node, offset: number): number {
     return probe.toString().length;
 }
 
-export function captureChatQuoteAnchor(root: Element, range: Range): ChatQuoteAnchor | null {
-    if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
-    const stream = root.textContent ?? '';
-    const start = streamOffset(root, range.startContainer, range.startOffset);
-    const end = streamOffset(root, range.endContainer, range.endOffset);
+/** The joined stream of `roots`, and where each root's part of it starts. */
+function joinStreams(roots: readonly Element[]) {
+    const bases: number[] = [];
+    let stream = '';
+    for (const root of roots) {
+        bases.push(stream.length);
+        stream += root.textContent ?? '';
+    }
+    return { stream, bases };
+}
+
+/** An anchor for `range` in the stream of `roots` (one message's roots, in order). */
+export function captureChatQuoteAnchor(roots: Element | readonly Element[], range: Range): ChatQuoteAnchor | null {
+    const list = Array.isArray(roots) ? roots : [roots];
+    const startIndex = list.findIndex((root) => root.contains(range.startContainer));
+    const endIndex = list.findIndex((root) => root.contains(range.endContainer));
+    if (startIndex < 0 || endIndex < startIndex) return null;
+    const { stream, bases } = joinStreams(list);
+    const start = bases[startIndex] + streamOffset(list[startIndex], range.startContainer, range.startOffset);
+    const end = bases[endIndex] + streamOffset(list[endIndex], range.endContainer, range.endOffset);
     const text = stream.slice(start, end);
     if (!text.trim()) return null;
     return {
@@ -93,11 +124,7 @@ export function locateChatQuote(stream: string, anchor: ChatQuoteAnchor): number
     // cannot be told apart; highlighting a guess would point at the wrong one.
     if (!anchor.prefix && !anchor.suffix) return null;
 
-    const inContext = occurrences.filter((index) => (
-        index >= anchor.prefix.length
-        && stream.startsWith(anchor.prefix, index - anchor.prefix.length)
-        && stream.startsWith(anchor.suffix, index + anchor.text.length)
-    ));
+    const inContext = occurrences.filter((index) => hasContextAt(stream, anchor, index));
     if (inContext.length === 0) return null;
     return inContext.reduce((best, index) => (
         Math.abs(index - anchor.start) < Math.abs(best - anchor.start) ? index : best
@@ -116,28 +143,120 @@ function collectTextNodes(node: Node, into: Text[]): Text[] {
     return into;
 }
 
-/** A live Range over the anchored fragment in `root`, or null when not found. */
-export function resolveChatQuoteAnchor(root: Element, anchor: ChatQuoteAnchor): Range | null {
-    const start = locateChatQuote(root.textContent ?? '', anchor);
-    if (start === null) return null;
-    const end = start + anchor.text.length;
+/**
+ * Whether `roots` hold the whole message: every row of a long answer is
+ * mounted (`data-message-row` is `index/count` on each row's message element).
+ */
+function isWholeMessage(roots: readonly Element[]): boolean {
+    const rows = new Set<string>();
+    let count = 1;
+    for (const root of roots) {
+        const row = root.closest('[data-message-id]')?.getAttribute('data-message-row');
+        if (!row) return roots.length === 1;
+        const [index, total] = row.split('/');
+        rows.add(index);
+        count = Number(total);
+    }
+    return rows.size === count;
+}
 
-    const range = root.ownerDocument.createRange();
+// The shortest stretch of a quote's text taken as its start or end on screen.
+const PARTIAL_MATCH_LENGTH = 32;
+
+/**
+ * Where the anchored text sits in the stream of part of a message (rows of a
+ * long answer above or below are not mounted), clipped to it: the whole
+ * quote, its start running past the stream's end, its end coming in at the
+ * stream's start, or a stream that lies inside the quote. Context is required,
+ * as far as the stream reaches: a lone copy here may not be the only one in
+ * the message.
+ */
+function locateInPartialStream(stream: string, anchor: ChatQuoteAnchor): { start: number; end: number } | null {
+    const { text, prefix, suffix } = anchor;
+    // A quote sent before anchors existed has no context to check: what it
+    // matches is taken only when it is the one match on the page, as the
+    // whole message's only copy was.
+    const hasContext = Boolean(prefix || suffix);
+    const occurrencesOf = (needle: string): number[] => {
+        const found: number[] = [];
+        for (let index = stream.indexOf(needle); index !== -1 && found.length < MAX_OCCURRENCES; index = stream.indexOf(needle, index + 1)) found.push(index);
+        return found;
+    };
+    const candidates: Array<{ start: number; end: number }> = [];
+    for (const index of occurrencesOf(text)) {
+        if (!hasContext || hasContextAt(stream, anchor, index)) candidates.push({ start: index, end: index + text.length });
+    }
+    if (text.length > PARTIAL_MATCH_LENGTH && (candidates.length === 0 || !hasContext)) {
+        for (const index of occurrencesOf(text.slice(0, PARTIAL_MATCH_LENGTH))) {
+            const rest = stream.slice(index);
+            if (rest.length < text.length && text.startsWith(rest)
+                && prefix.endsWith(stream.slice(Math.max(0, index - prefix.length), index))) {
+                candidates.push({ start: index, end: stream.length });
+            }
+        }
+        for (const index of occurrencesOf(text.slice(-PARTIAL_MATCH_LENGTH))) {
+            const end = index + PARTIAL_MATCH_LENGTH;
+            if (end < text.length && text.endsWith(stream.slice(0, end))
+                && suffix.startsWith(stream.slice(end, end + suffix.length))) {
+                candidates.push({ start: 0, end });
+            }
+        }
+        if (stream.length >= PARTIAL_MATCH_LENGTH && stream.length < text.length && text.includes(stream)) {
+            candidates.push({ start: 0, end: stream.length });
+        }
+    }
+    if (hasContext) return candidates[0] ?? null;
+    // One stretch can match two ways (a stream that is the quote's start also lies inside it).
+    const distinct = new Set(candidates.map((candidate) => `${candidate.start}:${candidate.end}`));
+    return distinct.size === 1 ? candidates[0] : null;
+}
+
+/**
+ * Live Ranges over the anchored fragment in the stream of `roots` (one
+ * message's roots, in order), one per root it crosses; null when not found.
+ * When rows of the message are not mounted, the part of the quote they hold
+ * is left out: the Ranges cover what is on the page.
+ */
+export function resolveChatQuoteRanges(roots: readonly Element[], anchor: ChatQuoteAnchor): Range[] | null {
+    const { stream } = joinStreams(roots);
+    let start: number | null;
+    let end: number;
+    if (isWholeMessage(roots)) {
+        start = locateChatQuote(stream, anchor);
+        end = (start ?? 0) + anchor.text.length;
+    } else {
+        const span = locateInPartialStream(stream, anchor);
+        start = span?.start ?? null;
+        end = span?.end ?? 0;
+    }
+    if (start === null || end <= start) return null;
+
+    const ranges: Range[] = [];
     let offset = 0;
-    let startSet = false;
-    for (const node of collectTextNodes(root, [])) {
-        const length = node.data.length;
-        if (!startSet && start < offset + length) {
-            range.setStart(node, start - offset);
-            startSet = true;
+    for (const root of roots) {
+        let range: Range | null = null;
+        for (const node of collectTextNodes(root, [])) {
+            const length = node.data.length;
+            if (!range && start < offset + length && end > offset) {
+                range = root.ownerDocument.createRange();
+                range.setStart(node, Math.max(0, start - offset));
+                range.setEnd(root, root.childNodes.length);
+            }
+            if (range && end <= offset + length) {
+                range.setEnd(node, end - offset);
+                ranges.push(range);
+                return ranges;
+            }
+            offset += length;
         }
-        if (startSet && end <= offset + length) {
-            range.setEnd(node, end - offset);
-            return range;
-        }
-        offset += length;
+        if (range) ranges.push(range);
     }
     return null;
+}
+
+/** A live Range over the anchored fragment in `root`, or null when not found. */
+export function resolveChatQuoteAnchor(root: Element, anchor: ChatQuoteAnchor): Range | null {
+    return resolveChatQuoteRanges([root], anchor)?.[0] ?? null;
 }
 
 // Streamdown 2.7.1 exports GFM as a plugin/options tuple, typed as Pluggable.

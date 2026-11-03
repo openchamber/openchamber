@@ -64,6 +64,7 @@ const createDirectoryState = (status: GitStatus): DirectoryGitState => ({
   lastBranchesFetch: 0,
   lastIdentityFetch: 0,
   logMaxCount: 25,
+  askedRemoteOnlyBranches: [],
   isLoadingStatus: false,
   isLoadingLog: false,
   isLoadingBranches: false,
@@ -519,6 +520,63 @@ describe('useGitStore', () => {
     await first;
 
     expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.current).toBe('new');
+  });
+
+  test('asks the remotes only for an explicit live request, and a later local refresh keeps what they reported', async () => {
+    const asked: Array<string | undefined> = [];
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitBranches: async (_directory: string, options?: { remote?: 'local' | 'live' }) => {
+        asked.push(options?.remote);
+        const detail = { current: false, name: '', commit: '', label: '' };
+        const local = ['main', 'remotes/origin/main'];
+        return {
+          all: options?.remote === 'live' ? [...local, 'remotes/origin/teammate'] : local,
+          current: 'main',
+          branches: { main: detail, 'remotes/origin/main': detail },
+        };
+      },
+    };
+
+    await useGitStore.getState().fetchBranches('/repo', git);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).not.toContain('remotes/origin/teammate');
+
+    await useGitStore.getState().fetchBranches('/repo', git, { remote: 'live' });
+    await useGitStore.getState().fetchBranches('/repo', git);
+
+    expect(asked).toEqual(['local', 'live', 'local']);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).toContain('remotes/origin/teammate');
+  });
+
+  test('a live answer outrun by a local refresh still adds what the remotes reported', async () => {
+    const live = createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>();
+    const git = {
+      ...createGitApi(async () => createStatus()),
+      getGitBranches: async (_directory: string, options?: { remote?: 'local' | 'live' }) => (
+        options?.remote === 'live' ? live.promise : { all: ['main', 'created-meanwhile'], current: 'main', branches: {} }
+      ),
+    };
+
+    const request = useGitStore.getState().fetchBranches('/repo', git, { remote: 'live' });
+    await useGitStore.getState().fetchBranches('/repo', git);
+    live.resolve({ all: ['main', 'remotes/origin/teammate'], current: 'main', branches: {} });
+    await request;
+
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).toEqual(['main', 'created-meanwhile', 'remotes/origin/teammate']);
+    await useGitStore.getState().fetchBranches('/repo', git);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.branches?.all).toContain('remotes/origin/teammate');
+  });
+
+  test('reports a live request only while it runs', async () => {
+    const live = createDeferred<Awaited<ReturnType<GitAPI['getGitBranches']>>>();
+    const git = { ...createGitApi(async () => createStatus()), getGitBranches: () => live.promise };
+
+    const request = useGitStore.getState().fetchBranches('/repo', git, { remote: 'live' });
+    expect(useGitStore.getState().isAskingRemotes('/repo')).toBe(true);
+    live.resolve({ all: ['main'], current: 'main', branches: {} });
+    await request;
+
+    expect(useGitStore.getState().isAskingRemotes('/repo')).toBe(false);
   });
 
   test('optimistically stages modified files and preserves untouched file references', () => {

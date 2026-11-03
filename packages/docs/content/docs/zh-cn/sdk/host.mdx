@@ -257,6 +257,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 哪个项目发到哪个房间或频道由你的扩展自己决定。通知携带 `directory` 和 `sessionName`。在企业模式下它只携带通用标题，和手机一样。示例 `notification-webhook` 是一个完整的渠道，并带有一个可以用来试验的接收端。
 
+## 跟踪器
+
+服务可以成为 Linear 旁边的工作项跟踪器。声明 `provides: ["tracker"]`，并在 `contributes.tracker` 中描述这个跟踪器。OpenChamber 随后会在跟踪器出现的所有地方把它列在 Linear 旁边，仅凭清单即可，在服务运行之前就已生效。
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+用户在 扩展账户 下该跟踪器的卡片上连接账户：令牌，或者在你声明了 `auth.oauth` 时在浏览器中登录（OpenChamber 用用户输入的 client id 完成登录并保管令牌）。你的服务永远看不到凭据。`urls.item` 是条目地址的模板，`{id}` 代表标识符（当它出现在查询参数中时也可以写成 `?name={id}`）；OpenChamber 会编译这些模板，让粘贴的链接变成关联条目。`identifier` 说明键的形式：`key-number`（`PROJ-42`）、`number` 或 `short-code`。
+
+OpenChamber 把九种调用转发到 `POST /tracker`：`auth.probe` 和 `auth.verify`，读取调用 `items.list`、`items.get`、`items.liveSummaries`、`states.list` 和 `containers.list`，以及写入调用 `items.updateState` 和 `comments.create`。每种都用 `readTrackerProviderRequest` 读取，以中性的条目形式应答，并且只通过出站助手访问跟踪器的服务器。助手把你的请求连同调用的句柄一起发给 OpenChamber，OpenChamber 加上凭据，并把请求限制在该账户的服务器上。读取调用的句柄只能发送 `GET`。
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+用户开启会话评论后，OpenChamber 会带着 "session started"、"completed" 或 "failed" 以及会话链接调用 `comments.create`，各一次；评论不携带其他任何内容。示例 `tracker-provider` 是一个完整的跟踪器，并带有一个可以用来试验的假服务器。
+
 ## 文件
 
 相对路径位于打开的项目中，需要 `files` 能力。以 `/` 或 `~/` 开头的路径必须匹配已声明的 `contributes.filesystem` 模式，需要 `filesystem` 能力。规则见[构建扩展](/sdk/#文件)。

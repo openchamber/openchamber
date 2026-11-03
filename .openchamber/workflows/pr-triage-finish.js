@@ -11,7 +11,9 @@ export const meta = {
 // READY PR after the maintainer's go, which rebases onto current main first.
 const SKILL = '.agents/skills/triage-prs/SKILL.md';
 const SOL = 'openai/gpt-6.1-sol';
-const models = { fix: SOL, review: SOL, apply: SOL, ...(args.models || {}) };
+// The review runs on another model than the fix, so it reads what Sol read past.
+const OPUS = 'claude-agent/opus#medium';
+const models = { fix: SOL, review: OPUS, apply: SOL, ...(args.models || {}) };
 const requested = Array.isArray(args.prs) ? args.prs : [];
 if (requested.length === 0 || !requested.every((number) => Number.isInteger(number) && number > 0)) {
   throw new Error('args.prs is required: a list of positive integer PR numbers');
@@ -136,7 +138,7 @@ const review = (number, fixed) => agent(`Review a local change: the commit ${fix
 ${briefs ? `The maintainer's decisions for it are the section for #${number} in ${briefs}: a finding that argues against one of them is out of scope.` : ''}
 Read the "Skeptical scope pass" paragraph and "Standing decisions" in ${SKILL}: a hidden product decision, coupling to a third-party plugin, tool, format or one user's setup, size out of proportion, or slop in this commit is a finding too.
 
-Report concrete defects only, each with the file, the scenario, the cause and what the fix has to do. An empty list when the change is clean. No edits.`, { label: `Review #${number}`, phase: 'Review', agent: 'review', model: models.review, schema: findingsSchema });
+Report concrete defects only, each with the file, the scenario, the cause and what the fix has to do. An empty list when the change is clean. No edits.`, { label: `Review #${number}`, phase: 'Review', agent: 'review-changes', model: models.review, schema: findingsSchema });
 
 const apply = (number, fixed, findings) => limited(() => agent(`A reviewer checked the commit that lands OpenChamber PR #${number}, at HEAD of ${worktree(number)}. Weigh its findings and fix the confirmed ones.
 

@@ -16,7 +16,7 @@ on:
         default: false
         type: boolean
       finish_published_release:
-        description: 'Finish an already published release: build and add only macOS, skip npm, Windows and Linux'
+        description: 'Finish a release whose macOS build failed: build and add only macOS, rebuild the Windows update manifests from the installers on the release, skip npm, Windows and Linux. Publishes only when everything succeeds'
         required: false
         default: false
         type: boolean
@@ -65,13 +65,12 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
-          # A release being finished is already public; keep it that way.
-          # Every later upload step sets draft: true. Without it the action
+          # Every upload step sets draft: true. Without it the action
           # publishes the draft after uploading, and updaters would see the
           # release before every platform and manifest is on it. Only
-          # finalize-release publishes. On a release that is already public,
-          # draft: true changes nothing.
-          draft: ${{ github.event.inputs.finish_published_release != 'true' }}
+          # finalize-release publishes. The action keeps the draft state of
+          # a release that exists, so a public one being finished stays public.
+          draft: true
           generate_release_notes: false
           body_path: artifacts/release-notes.md
           name: ${{ steps.release_notes.outputs.name }}
@@ -571,7 +570,9 @@ jobs:
 
       - name: Finalize combined manifests
         env:
-          MAC_ONLY: ${{ github.event.inputs.finish_published_release == 'true' && '1' || '' }}
+          WINDOWS_FROM_RELEASE: ${{ github.event.inputs.finish_published_release == 'true' && '1' || '' }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
           GH_REPO: ${{ github.repository }}
           OPENCHAMBER_VERSION: ${{ needs.create-release.outputs.version }}

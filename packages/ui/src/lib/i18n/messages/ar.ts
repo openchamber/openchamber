@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -23,8 +24,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -419,6 +422,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'اختر مشروعًا أولًا',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'تعذّر تحميل المهام المجدولة',
   'sessions.scheduledTasks.dialog.toast.saved': 'تم حفظ المهمة المجدولة',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'تعمل المهمة الآن في مكانها الجديد، لكن تعذّر حذف النسخة القديمة. احذفها هناك حتى لا تعمل المهمة مرتين.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'تعذّر تحديث المهمة',
   'sessions.scheduledTasks.dialog.toast.deleted': 'تم حذف المهمة المجدولة',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'تعذّر حذف المهمة',
@@ -568,6 +572,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'المزيد',
   'sessions.sidebar.header.actions.exitSelection': 'إنهاء التحديد',
   'sessions.sidebar.header.actions.selectSessions': 'تحديد الجلسات',
+  'sessions.sidebar.header.actions.markAllRead': 'تعليم الكل كمقروء',
   'sessions.sidebar.header.actions.sortProjects': 'فرز المشاريع',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'وضع عرض الجلسات',
   'sessions.sidebar.header.displayMode.label': 'وضع العرض',
@@ -1719,6 +1724,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'بدّل إلى وضع التحرير لإصلاح المشكلة.',
   'filesView.error.readFileFailed': 'تعذّرت قراءة الملف',
   'filesView.editor.htmlPreviewTitle': 'معاينة HTML',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'معاينة HTML غير متاحة عبر المرحّل',
+  'filesView.editor.htmlPreviewShowCode': 'عرض الكود',
   'filesView.editor.htmlAnnotate.intro': 'هذا تحديد عليه تعليق توضيحي من معاينة ملف HTML.',
   'filesView.diagram.closeDiagramView': 'إغلاق عرض المخطط',
   'filesView.diagram.saveDiagram': 'حفظ المخطط',
@@ -2354,7 +2361,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'أولوية منخفضة',
   'chat.statusRow.actions.stopGeneratingAria': 'إيقاف التوليد',
   'chat.statusRow.tasksTitle': 'المهام',
-  'chat.statusRow.modelStatus': '{model}: {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} نشطة · {left} متبقية',
   'chat.revertIndicator.redo': 'إعادة',
   'chat.revertIndicator.redoAria': 'إعادة — استعادة الرسائل التي تم التراجع عنها',
@@ -2941,7 +2948,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'تم اكتشاف أيقونة المشروع',
   'openInApp.actions.open': 'فتح',
   'openInApp.actions.openInAria': 'فتح في {app}',
-  'openInApp.actions.chooseAppAria': 'اختيار التطبيق للفتح',
   'openInApp.actions.copyPath': 'نسخ المسار',
   'openInApp.actions.refreshApps': 'تحديث التطبيقات',
   'openInApp.toast.pathCopied': 'تم نسخ المسار إلى الحافظة',
@@ -3821,12 +3827,16 @@ export const dict = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': 'تبقى شجرة العمل وفرعها بعد التشغيل لتراجع النتيجة.',
   'sessions.scheduledTasks.editor.worktree.notRepo': 'مجلد المشروع ليس مستودع git؛ ستستخدم التشغيلات الخروج الحالي كما هو.',
   'sessions.scheduledTasks.dialog.usesDefaults': 'الإعدادات الافتراضية للجلسة',
-  'sessions.moveChatToProject.menu': 'نقل إلى مشروع…',
-  'sessions.moveChatToProject.hint': 'متابعة هذه المحادثة داخل مشروع',
-  'sessions.moveChatToProject.title': 'نقل المحادثة إلى مشروع',
-  'sessions.moveChatToProject.description': 'تستمر المحادثة في مجلد المشروع. تبقى الملفات التي أنشأتها المحادثة في مكانها.',
-  'sessions.moveChatToProject.success': 'تم نقل المحادثة إلى المشروع',
-  'sessions.moveChatToProject.failed': 'تعذّر نقل المحادثة',
+  'sessions.moveSession.menu': 'نقل الجلسة…',
+  'sessions.moveSession.hint': 'تبقى الملفات في المجلد القديم',
+  'sessions.moveSession.title': 'نقل الجلسة',
+  'sessions.moveSession.description': 'تتابع الجلسة في المجلد المحدد. تبقى الملفات في مكانها.',
+  'sessions.moveSession.chooseFolder': 'اختيار مجلد…',
+  'sessions.moveSession.current': 'المجلد الحالي',
+  'sessions.moveSession.success': 'تم نقل الجلسة',
+  'sessions.moveSession.failed': 'تعذّر نقل الجلسة',
+  'chat.folderMissing.text': 'لم يعد المجلد {name} موجودًا',
+  'chat.folderMissing.action': 'نقل الجلسة',
   'chat.worktreeSetup.running': 'جارٍ إعداد شجرة العمل: تشغيل أوامر الإعداد الخاصة بالمشروع…',
   'chat.draft.creatingSession': 'جارٍ إنشاء الجلسة…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'لم يُفتح اتصالها، لذا بدأ OpenChamber على النسخة المحلية. اتصل بها من مبدّل النسخ عندما يصبح الوصول إليها ممكنًا.',
@@ -3855,6 +3865,7 @@ export const dict = {
   ...fileEditorAidsI18n.ar,
   ...htmlRenderI18n.ar,
   ...documentToolbarI18n.ar,
+  ...uiBlocksI18n.ar,
   ...updateDialogCanaryI18n.ar,
   ...secretRequestI18n.ar,
   ...sessionNoticesI18n.ar,
@@ -3865,8 +3876,10 @@ export const dict = {
   ...heapSnapshotI18n.ar,
   ...consoleBudgetsI18n.ar,
   ...imageToolI18n.ar,
+  ...agentStatusI18n.ar,
   ...snippetsI18n.ar,
   ...sidebarWorkI18n.ar,
+  ...sidebarSectionsI18n.ar,
   ...worktreeArchiveI18n.ar,
   ...overviewI18n.ar,
   ...isolatedSpacesI18n.ar,

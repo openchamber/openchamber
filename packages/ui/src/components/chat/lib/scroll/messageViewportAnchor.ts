@@ -6,6 +6,8 @@
 export interface MessageViewportAnchor {
     readonly messageId: string;
     readonly offsetTop: number;
+    /** Which row of a long answer the anchor sits in (`data-message-slice`); absent for its first. */
+    readonly slice?: string;
 }
 
 export type ViewportAnchorAlignment = 'missing' | 'moved' | 'aligned';
@@ -56,5 +58,6 @@ export const captureMessageViewportAnchor = (container: HTMLElement): MessageVie
     const chosen = best ?? fallback;
     const messageId = chosen?.node.dataset.messageId;
     if (!chosen || !messageId) return null;
-    return { messageId, offsetTop: chosen.top - containerTop };
+    const slice = chosen.node.dataset.messageSlice;
+    return slice ? { messageId, offsetTop: chosen.top - containerTop, slice } : { messageId, offsetTop: chosen.top - containerTop };
 };

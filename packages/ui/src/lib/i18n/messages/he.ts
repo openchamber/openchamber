@@ -13,6 +13,7 @@ import { fileContentSearchI18n } from './file-content-search.i18n';
 import { fileEditorAidsI18n } from './file-editor-aids.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
 import { documentToolbarI18n } from './document-toolbar.i18n';
+import { uiBlocksI18n } from './ui-blocks.i18n';
 import { updateDialogCanaryI18n } from './update-dialog-canary.i18n';
 import { secretRequestI18n } from './secret-request.i18n';
 import { sessionNoticesI18n } from './session-notices.i18n';
@@ -23,8 +24,10 @@ import { compactionSettingsI18n } from './compaction-settings.i18n';
 import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
+import { agentStatusI18n } from './agent-status.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
+import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -419,6 +422,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.error.chooseProjectFirst': 'יש לבחור פרויקט קודם',
   'sessions.scheduledTasks.dialog.toast.loadFailed': 'טעינת המשימות המתוזמנות נכשלה',
   'sessions.scheduledTasks.dialog.toast.saved': 'המשימה המתוזמנת נשמרה',
+  'sessions.scheduledTasks.dialog.toast.moveLeftOriginal': 'המשימה רצה עכשיו במקום החדש, אבל לא ניתן היה למחוק את העותק הישן. מחקו אותו שם כדי שהמשימה לא תרוץ פעמיים.',
   'sessions.scheduledTasks.dialog.toast.updateFailed': 'עדכון המשימה נכשל',
   'sessions.scheduledTasks.dialog.toast.deleted': 'המשימה המתוזמנת נמחקה',
   'sessions.scheduledTasks.dialog.toast.deleteFailed': 'מחיקת המשימה נכשלה',
@@ -568,6 +572,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'עוד',
   'sessions.sidebar.header.actions.exitSelection': 'צא ממצב בחירה',
   'sessions.sidebar.header.actions.selectSessions': 'בחר הפעלות',
+  'sessions.sidebar.header.actions.markAllRead': 'סמן הכול כנקרא',
   'sessions.sidebar.header.actions.sortProjects': 'מיון פרויקטים',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'מצב תצוגת הפעלות',
   'sessions.sidebar.header.displayMode.label': 'מצב תצוגה',
@@ -1719,6 +1724,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'יש לעבור למצב עריכה כדי לתקן את הבעיה.',
   'filesView.error.readFileFailed': 'קריאת הקובץ נכשלה',
   'filesView.editor.htmlPreviewTitle': 'תצוגה מקדימה של HTML',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'תצוגה מקדימה של HTML אינה זמינה דרך הממסר',
+  'filesView.editor.htmlPreviewShowCode': 'הצג קוד',
   'filesView.editor.htmlAnnotate.intro': 'זוהי בחירה עם הערות מתצוגה מקדימה של קובץ HTML.',
   'filesView.diagram.closeDiagramView': 'סגור את תצוגת התרשים',
   'filesView.diagram.saveDiagram': 'שמור תרשים',
@@ -2354,7 +2361,7 @@ export const dict = {
   'chat.statusRow.todo.priority.low': 'עדיפות נמוכה',
   'chat.statusRow.actions.stopGeneratingAria': 'עצור יצירה',
   'chat.statusRow.tasksTitle': 'משימות',
-  'chat.statusRow.modelStatus': '{model} במצב {status}',
+  'chat.statusRow.modelStatus': '{model} {status}',
   'chat.statusRow.summary.activeLeft': '{active} פעילות · {left} נותרו',
   'chat.revertIndicator.redo': 'בצע שוב',
   'chat.revertIndicator.redoAria': 'בצע שוב — שחזור ההודעות שבוטלו',
@@ -2941,7 +2948,6 @@ export const dict = {
   'projectEditDialog.toast.iconDiscovered': 'סמל הפרויקט אותר',
   'openInApp.actions.open': 'פתח',
   'openInApp.actions.openInAria': 'פתח ב-{app}',
-  'openInApp.actions.chooseAppAria': 'בחר יישום לפתיחה',
   'openInApp.actions.copyPath': 'העתק נתיב',
   'openInApp.actions.refreshApps': 'רענן יישומים',
   'openInApp.toast.pathCopied': 'הנתיב הועתק ללוח',
@@ -3821,12 +3827,16 @@ export const dict = {
   'sessions.scheduledTasks.editor.worktree.cleanup.keepHint': 'ה-worktree והענף שלו נשארים לאחר ההרצה כדי שתוכל לבדוק את התוצאה.',
   'sessions.scheduledTasks.editor.worktree.notRepo': 'תיקיית הפרויקט אינה מאגר git; ההרצות ישתמשו ב-checkout הקיים כמות שהוא.',
   'sessions.scheduledTasks.dialog.usesDefaults': 'ברירות המחדל של ההפעלה',
-  'sessions.moveChatToProject.menu': 'העבר לפרויקט…',
-  'sessions.moveChatToProject.hint': 'המשך את השיחה הזו בתוך פרויקט',
-  'sessions.moveChatToProject.title': 'העברת הצ\'אט לפרויקט',
-  'sessions.moveChatToProject.description': 'השיחה תימשך בתיקיית הפרויקט. קבצים שהצ\'אט יצר יישארו במקומם.',
-  'sessions.moveChatToProject.success': 'הצ\'אט הועבר לפרויקט',
-  'sessions.moveChatToProject.failed': 'לא ניתן היה להעביר את הצ\'אט',
+  'sessions.moveSession.menu': 'העברת הסשן…',
+  'sessions.moveSession.hint': 'הקבצים נשארים בתיקייה הישנה',
+  'sessions.moveSession.title': 'העברת הסשן',
+  'sessions.moveSession.description': 'הסשן ימשיך בתיקייה שנבחרה. הקבצים נשארים במקומם.',
+  'sessions.moveSession.chooseFolder': 'בחירת תיקייה…',
+  'sessions.moveSession.current': 'התיקייה הנוכחית',
+  'sessions.moveSession.success': 'הסשן הועבר',
+  'sessions.moveSession.failed': 'לא ניתן להעביר את הסשן',
+  'chat.folderMissing.text': 'התיקייה {name} כבר לא קיימת',
+  'chat.folderMissing.action': 'העברת הסשן',
   'chat.worktreeSetup.running': 'מכין את עץ העבודה: מריץ את פקודות ההכנה של הפרויקט…',
   'chat.draft.creatingSession': 'יוצר הפעלה…',
   'desktopHostSwitcher.startup.fellBackToLocal': 'החיבור אליו לא נפתח, ולכן OpenChamber הופעל על המופע המקומי. אפשר להתחבר אליו ממחליף המופעים כשהוא יהיה זמין.',
@@ -3855,6 +3865,7 @@ export const dict = {
   ...fileEditorAidsI18n.he,
   ...htmlRenderI18n.he,
   ...documentToolbarI18n.he,
+  ...uiBlocksI18n.he,
   ...updateDialogCanaryI18n.he,
   ...secretRequestI18n.he,
   ...sessionNoticesI18n.he,
@@ -3865,8 +3876,10 @@ export const dict = {
   ...heapSnapshotI18n.he,
   ...consoleBudgetsI18n.he,
   ...imageToolI18n.he,
+  ...agentStatusI18n.he,
   ...snippetsI18n.he,
   ...sidebarWorkI18n.he,
+  ...sidebarSectionsI18n.he,
   ...worktreeArchiveI18n.he,
   ...overviewI18n.he,
   ...isolatedSpacesI18n.he,

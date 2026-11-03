@@ -6,7 +6,7 @@ import React from 'react';
 import { create } from 'zustand';
 import { z } from 'zod';
 
-import { listSpaces, readSpaceCustomProviders, type SpaceCustomProvider, type SpaceEntry, type SpaceFailure, type SpaceGrant } from './spaces-api';
+import { listSpaces, readSpaceCustomProviders, spaceTaskTitleSchema, type SpaceTaskTitle, type SpaceCustomProvider, type SpaceEntry, type SpaceFailure, type SpaceGrant } from './spaces-api';
 import { spaceIdOfDirectory } from './space-route';
 import { normalizePath } from '@/lib/pathNormalization';
 import type { SpaceProgress } from '@/sync/event-pipeline';
@@ -21,6 +21,7 @@ export type SpaceListState = 'complete' | 'partial' | 'stale' | 'unknown';
 export type SpaceMark = {
   id: string;
   name: string;
+  taskTitle?: SpaceTaskTitle | null;
   state: SpaceListState;
   /** The registered host project the space was made for, or null when the host no longer has it. */
   projectDirectory: string | null;
@@ -31,6 +32,7 @@ export type SpaceMark = {
 export const spaceMarkSchema = z.object({
   id: z.string().regex(/^[0-9a-f]{12}$/),
   name: z.string().default(''),
+  taskTitle: spaceTaskTitleSchema.nullish(),
   state: z.enum(['complete', 'partial', 'stale', 'unknown']),
   projectDirectory: z.string().nullable().default(null),
   directory: z.string().nullable().default(null),
@@ -64,6 +66,7 @@ type SpacesState = {
   applyJourney: (entries: readonly SpaceEntry[], revision: number) => void;
   /** A creation step announced by the host. Resolves whether the space was known to the list. */
   noteProgress: (progress: SpaceProgress) => boolean;
+  noteTaskTitle: (spaceId: string, taskTitle: SpaceTaskTitle | null) => boolean;
   /** A creation this window started, shown at once, before the next read of the list. */
   addJourneyEntry: (entry: SpaceEntry) => void;
   /**
@@ -155,6 +158,17 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
     journey.set(entry.id, entry);
     return { journey, progressRevision };
   }),
+  noteTaskTitle: (spaceId, taskTitle) => {
+    const current = get();
+    const entry = current.journey?.get(spaceId);
+    const mark = current.spaces.get(spaceId);
+    const progressRevision = current.progressRevision + 1;
+    progressAt.set(spaceId, progressRevision);
+    const journey = entry ? new Map(current.journey).set(spaceId, { ...entry, taskTitle }) : current.journey;
+    const spaces = mark ? new Map(current.spaces).set(spaceId, { ...mark, taskTitle }) : current.spaces;
+    set({ journey, spaces, progressRevision });
+    return Boolean(entry);
+  },
   noteGrantGiven: (spaceId, grant) => set((current) => {
     const entry = current.journey?.get(spaceId);
     if (!entry) return current;
@@ -360,10 +374,13 @@ export const useSpaceDirectoryStopped = (directory: string | null | undefined): 
  * appears the moment it exists. A journey-only space has no session list yet, so it is not stale.
  */
 const mergeSidebarSpaces = (marks: ReadonlyMap<string, SpaceMark>, journey: ReadonlyMap<string, SpaceEntry> | null): SpaceMark[] => {
-  const merged = Array.from(marks.values());
+  const merged = Array.from(marks.values(), (mark) => {
+    const entry = journey?.get(mark.id);
+    return entry ? { ...mark, taskTitle: entry.taskTitle ?? null } : mark;
+  });
   for (const entry of journey?.values() ?? []) {
     if (marks.has(entry.id) || entry.projectDirectory === null || entry.directory === null) continue;
-    merged.push({ id: entry.id, name: entry.name, state: 'complete', projectDirectory: entry.projectDirectory, directory: entry.directory });
+    merged.push({ id: entry.id, name: entry.name, taskTitle: entry.taskTitle ?? null, state: 'complete', projectDirectory: entry.projectDirectory, directory: entry.directory });
   }
   return merged;
 };

@@ -19,6 +19,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -40,7 +41,7 @@ import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/l
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
-import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
+import { ensurePierreThemeRegistered, getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
 import { useFileViewVirtualizer, type FileViewVirtualizer } from './useFileViewVirtualizer';
@@ -62,6 +63,7 @@ import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/file
 import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { isFilePathMoveInFlight, rebaseMovedPath, rebaseMovedPathKeys, subscribeToFilePathMoves } from '@/lib/filePathMoves';
 import { DiagramEditor } from '@/components/diagram';
@@ -129,7 +131,6 @@ import {
 import { useFileTreeDisclosure } from './files/useFileTreeDisclosure';
 import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
-import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { DIFFS_HIGHLIGHTER, toDiffsLanguage } from '@/lib/shiki/diffsHighlighter';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
@@ -185,33 +186,6 @@ const getParentDirectoryPath = (path: string): string => {
     return `${parent}/`;
   }
   return parent;
-};
-
-const OpenInAppListIcon = ({ label, iconDataUrl }: { label: string; iconDataUrl?: string }) => {
-  const [failed, setFailed] = React.useState(false);
-  const initial = label.trim().slice(0, 1).toUpperCase() || '?';
-
-  if (iconDataUrl && !failed) {
-    return (
-      <img
-        src={iconDataUrl}
-        alt=""
-        className="size-4 rounded-sm"
-        onError={() => setFailed(true)}
-      />
-    );
-  }
-
-  return (
-    <span
-      className={cn(
-        'size-4 rounded-sm flex items-center justify-center',
-        'oc-tile-inset text-[0.5625rem] font-medium text-muted-foreground'
-      )}
-    >
-      {initial}
-    </span>
-  );
 };
 
 const sortNodes = (items: FileNode[]) =>
@@ -824,7 +798,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   const [showMobilePageContent, setShowMobilePageContent] = React.useState(false);
-  const [wrapLines, setWrapLines] = React.useState(true);
+  const wrapLines = useUIStore((state) => state.fileEditorWrapLines);
+  const setWrapLines = useUIStore((state) => state.setFileEditorWrapLines);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   // The canvas lives in one place at a time (docked or fullscreen), so moving
   // it carries unsaved edits over through the draft, as the source toggle does.
@@ -900,11 +875,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     () => availableThemes.find((theme) => theme.metadata.id === darkThemeId) ?? getDefaultTheme(true),
     [availableThemes, darkThemeId],
   );
-
-  React.useEffect(() => {
-    ensurePierreThemeRegistered(lightTheme);
-    ensurePierreThemeRegistered(darkTheme);
-  }, [lightTheme, darkTheme]);
 
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
   const openPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.openPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
@@ -3689,7 +3659,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (shikiLanguage) {
       extensions.push(codeHighlightExtension({
         language: shikiLanguage,
-        themeName: currentTheme.metadata.id,
+        themeName: getThemeRenderName(currentTheme),
         theme: getCodeTokenTheme(currentTheme),
       }));
     }
@@ -3741,8 +3711,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension]);
 
   const pierreTheme = React.useMemo(
-    () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
-    [lightTheme.metadata.id, darkTheme.metadata.id],
+    () => ({ light: ensurePierreThemeRegistered(lightTheme), dark: ensurePierreThemeRegistered(darkTheme) }),
+    [lightTheme, darkTheme],
   );
 
   // PDFs, audio, video and fonts are handed to the browser as a URL it owns
@@ -3761,8 +3731,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     [runtimeKey, selectedFile?.path, usesRawAssetUrl, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
+  // The browser loads an HTML preview and its neighbouring files itself, and a
+  // URL it loads never enters the relay tunnel.
+  const htmlPreviewUnreachable = isRelayModeActive();
   const htmlPreviewRequest = React.useMemo(
-    () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
+    () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode && !htmlPreviewUnreachable
       ? {
         path: selectedFile.path,
         directory: root || '',
@@ -3770,7 +3743,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         outsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace,
       }
       : null),
-    [selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
+    [selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, htmlPreviewUnreachable, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
@@ -3881,7 +3854,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               content={`\`\`\`mermaid\n${fileContent}\n\`\`\``}
               className="markdown-mermaid-fullscreen h-full"
               enableFileReferences={false}
-              allowMermaidWheelEvents
             />
           </ErrorBoundary>
         </div>
@@ -4223,7 +4195,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             className="flex items-center gap-2"
             onClick={() => void handleOpenInApp(app)}
           >
-            <OpenInAppListIcon label={app.label} iconDataUrl={app.iconDataUrl} />
+            <Icon name={app.icon} className="size-4" />
             <span className="typography-ui-label text-foreground">{app.label}</span>
           </DropdownMenuItem>
         ))}
@@ -4299,7 +4271,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
     // Annotation needs the rendered page: from the source it switches to the
     // preview and starts once the page has loaded.
-    const annotateAction: ToolbarAction | null = isHtml && !isMobile && !runtime.isVSCode ? {
+    const annotateAction: ToolbarAction | null = isHtml && !isMobile && !runtime.isVSCode && !htmlPreviewUnreachable ? {
       id: 'annotate',
       label: t('contextPanel.browser.annotate.toggle'),
       icon: 'markup',
@@ -4615,10 +4587,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // Above the scroller, so an editor opened far down the file is on screen.
   // The fullscreen overlay shows it instead while it is open: one editor at a time.
   const wholeFileCommentPanel = wholeFileComment.editor || wholeFileComment.cards ? (
-    <div className="max-h-[50%] shrink-0 overflow-y-auto border-b border-edge-muted">
+    <ScrollableOverlay outerClassName="max-h-[50%] shrink-0 border-b border-edge-muted" disableHorizontal>
       {wholeFileComment.editor}
       {wholeFileComment.cards}
-    </div>
+    </ScrollableOverlay>
   ) : null;
 
   const fileViewer = (
@@ -4850,7 +4822,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 </div>
               }
             >
-              <div className="h-full overflow-auto">
+              <div className="h-full">
                 <JsonTreeView
                   className="h-full"
                   jsonString={fileContent}
@@ -4865,7 +4837,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           ) : selectedFile && isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="relative h-full min-h-0">
               <div
-                className="oc-file-preview h-full overflow-auto p-3 outline-none"
+                className="oc-file-preview overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-3 outline-none"
                 // Focusable so Cmd/Ctrl+F reaches the find bar: the keybind only
                 // fires when the event target sits inside this container, and a
                 // plain div never holds focus. -1 keeps it out of the tab order.
@@ -4906,6 +4878,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                   </div>
                 </ErrorBoundary>
               </div>
+              <OverlayScrollbar containerRef={mdPreviewContainerRef} />
               {!isFullscreen && (
                 <MarkdownPreviewSearch
                   containerRef={mdPreviewContainerRef}
@@ -4915,6 +4888,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 />
               )}
             </div>
+          ) : selectedFile && isHtml && htmlViewMode === 'preview' && htmlPreviewUnreachable ? (
+            <ContentState
+              icon={<FileTypeIcon filePath={selectedFile.path} className="size-10" />}
+              title={t('filesView.editor.htmlPreviewRelayUnavailable')}
+              actions={(
+                // For this file only: leaving this message is not choosing code
+                // as the default, which would follow the user to a direct host.
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    htmlViewModeByPathRef.current[selectedFile.path] = 'edit';
+                    setHtmlViewMode('edit');
+                  }}
+                >
+                  {t('filesView.editor.htmlPreviewShowCode')}
+                </Button>
+              )}
+            />
           ) : selectedFile && isHtml && htmlViewMode === 'preview' ? (
             !runtime.isVSCode && htmlPreview.status === 'loading' ? (
               <div className="flex h-full items-center justify-center text-muted-foreground typography-ui-label">
@@ -5154,7 +5147,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             // highlighted by the search it drives.
             <div className="relative h-full min-h-0">
             <div
-              className="oc-file-preview h-full overflow-auto p-4 outline-none"
+              className="oc-file-preview overlay-scrollbar-target overlay-scrollbar-container h-full overflow-auto p-4 outline-none"
               tabIndex={-1}
               onMouseDown={focusMdPreviewContainer}
               ref={setFullscreenMarkdownScroller}
@@ -5194,6 +5187,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 </div>
               </ErrorBoundary>
             </div>
+              <OverlayScrollbar containerRef={mdFullscreenPreviewContainerRef} />
               <MarkdownPreviewSearch
                 containerRef={mdFullscreenPreviewContainerRef}
                 open={mdPreviewFindOpen}

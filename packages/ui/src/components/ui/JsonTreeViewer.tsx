@@ -10,6 +10,7 @@ import {
   type FlatJsonNode,
 } from '@/lib/jsonTreeUtils';
 import { Icon } from '@/components/icon/Icon';
+import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { FileTreeIndentGuides } from '@/components/views/files/FileTreeRowParts';
 import { fileTreeRowPaddingLeft } from '@/components/views/files/fileTreeRow';
 import { cn } from '@/lib/utils';
@@ -209,7 +210,7 @@ const ROW_HEIGHT = 24;
 
 const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: () => void }, JsonTreeViewerProps>(
   function JsonTreeViewer(
-    { data, className, maxHeight = '100%', initiallyExpandedDepth = 2, onCopyPath },
+    { data, className, maxHeight, initiallyExpandedDepth = 2, onCopyPath },
     ref,
   ) {
     const jsonString = React.useMemo(() => {
@@ -236,8 +237,8 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
     );
 
     const shouldVirtualize = flatNodes.length > VIRTUALIZE_THRESHOLD;
-    const parentRef = React.useRef<HTMLDivElement>(null);
-    const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    const parentRef = React.useRef<HTMLElement>(null);
+    const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
       count: flatNodes.length,
       enabled: shouldVirtualize,
       getScrollElement: () => parentRef.current,
@@ -278,11 +279,11 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
 
     if (shouldVirtualize) {
       return (
-        <div
+        <ScrollableOverlay
           ref={parentRef}
           dir="ltr"
-          className={className}
-          style={{ maxHeight, overflow: 'auto' }}
+          outerClassName={className}
+          outerStyle={{ maxHeight }}
         >
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((item) => {
@@ -304,16 +305,16 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
               );
             })}
           </div>
-        </div>
+        </ScrollableOverlay>
       );
     }
 
     return (
-      <div
+      <ScrollableOverlay
         ref={parentRef}
         dir="ltr"
-        className={className}
-        style={{ maxHeight, overflow: 'auto' }}
+        outerClassName={className}
+        outerStyle={{ maxHeight }}
       >
         {flatNodes.map((flatNode) => (
           <JsonRow
@@ -323,7 +324,7 @@ const JsonTreeViewer = React.forwardRef<{ expandAll: () => void; collapseAll: ()
             onCopyPath={onCopyPath}
           />
         ))}
-      </div>
+      </ScrollableOverlay>
     );
   },
 );

@@ -12,7 +12,7 @@ import {
     type MessageViewportAnchor,
     type ViewportAnchorAlignment,
 } from '@/components/chat/lib/scroll/messageViewportAnchor';
-import { readSessionScrollPosition, rememberSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
+import { readSessionScrollPosition, rememberOutgoingSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
 import {
     peekMessageFocus,
     releaseMessageFocusOutside,
@@ -136,6 +136,7 @@ interface UseChatTimelineScrollResult {
     scrollNode: HTMLDivElement | null;
     isPinned: boolean;
     registerList: (list: TimelineListHandle | null, sessionKey?: string) => void;
+    captureOutgoingPosition: () => void;
     onIsAtEndChange: (isAtEnd: boolean) => void;
     onListMetricsChange: (metrics: { readonly headerSize: number; readonly footerSize: number }) => void;
     onManualNavigation: () => void;
@@ -226,10 +227,20 @@ interface FollowStop {
     readonly bottom: number;
 }
 
+// A turn is several list rows (`timelineRows.ts`); its prompt row names it
+// (`data-turn-id`), the others carry `data-turn-row`.
+const turnIdOf = (element: HTMLElement): string | undefined => (
+    element.closest<HTMLElement>('[data-turn-row]')?.dataset.turnRow
+        ?? element.closest<HTMLElement>('[data-turn-id]')?.dataset.turnId
+);
+
 const readFollowStop = (node: HTMLElement, element: HTMLElement): FollowStop => {
     const rect = element.getBoundingClientRect();
     const offset = node.scrollTop - node.getBoundingClientRect().top;
-    const header = element.closest('[data-turn-id]')?.querySelector<HTMLElement>(':scope > [data-turn-sticky-header]');
+    const turnId = turnIdOf(element);
+    const header = turnId
+        ? node.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(turnId)}"] > [data-turn-sticky-header]`)
+        : null;
     const headerHeight = header ? header.getBoundingClientRect().height : 0;
     return {
         element,
@@ -240,18 +251,19 @@ const readFollowStop = (node: HTMLElement, element: HTMLElement): FollowStop => 
 
 // The list places rows in pooled containers, so document order is not
 // timeline order: a new turn often lands in a container that comes earlier in
-// the document. The latest turn is the one lowest in the content.
-const findLatestTurn = (node: HTMLElement): HTMLElement | null => {
+// the document. The latest turn owns the row lowest in the content; its prompt
+// row may be far above and unmounted.
+const findLatestTurnId = (node: HTMLElement): string | undefined => {
     let latest: HTMLElement | null = null;
     let latestTop = Number.NEGATIVE_INFINITY;
-    for (const turn of node.querySelectorAll<HTMLElement>('[data-turn-id]')) {
-        const top = turn.getBoundingClientRect().top;
+    for (const row of node.querySelectorAll<HTMLElement>('[data-turn-id], [data-turn-row]')) {
+        const top = row.getBoundingClientRect().top;
         if (top > latestTop) {
-            latest = turn;
+            latest = row;
             latestTop = top;
         }
     }
-    return latest;
+    return latest ? turnIdOf(latest) : undefined;
 };
 
 const findStreamingReply = (node: HTMLElement): HTMLElement | null => lastMatch(node, '[data-streaming-reply]');
@@ -266,11 +278,24 @@ const findStreamingReply = (node: HTMLElement): HTMLElement | null => lastMatch(
  */
 const findFollowStops = (node: HTMLElement, stopAfterUserMessage: boolean, reply: HTMLElement | null): FollowStop[] => {
     const stops: FollowStop[] = [];
-    // The turn's work starts right after the reader's message: the sticky
-    // header, or the message row itself when the header does not stick.
-    const turn = stopAfterUserMessage ? findLatestTurn(node) : null;
-    const work = turn?.children[1];
-    if (work instanceof HTMLElement) stops.push(readFollowStop(node, work));
+    // The turn's work starts at the first row after the reader's message,
+    // the topmost of its rows (pooled containers are not in timeline order).
+    const turnId = stopAfterUserMessage ? findLatestTurnId(node) : undefined;
+    // The work ends with the turn's last row: "taller than the screen" counts
+    // all of it, as it did when the work was one element.
+    let work: HTMLElement | null = null;
+    let workBottom = Number.NEGATIVE_INFINITY;
+    if (turnId) {
+        for (const row of node.querySelectorAll<HTMLElement>(`[data-turn-row="${CSS.escape(turnId)}"]`)) {
+            const rect = row.getBoundingClientRect();
+            if (!work || rect.top < work.getBoundingClientRect().top) work = row;
+            workBottom = Math.max(workBottom, rect.bottom);
+        }
+    }
+    if (work) {
+        const stop = readFollowStop(node, work);
+        stops.push({ ...stop, bottom: workBottom + node.scrollTop - node.getBoundingClientRect().top });
+    }
     if (reply) stops.push(readFollowStop(node, reply));
     return stops;
 };
@@ -509,13 +534,10 @@ export const useChatTimelineScroll = ({
     // same link is a new request and is shown again.
     const linkServedRef = React.useRef<{ key: string; serial: number } | null>(null);
 
-    // Called while the outgoing list is still in the document: React detaches
-    // a list's ref before removing its nodes. This runs inside the commit, so
-    // the end check reads the list's own measurements; only a reader who left
-    // away from the end costs a DOM read.
+    // KeepAlive captures before its visibility mutation. Ref detach also tries
+    // for ordinary unmounts, but a retained list may already be hidden then.
     const rememberOutgoingPosition = React.useCallback((node: HTMLElement, list: TimelineListHandle | null) => {
         const sessionKey = listSessionKeyRef.current;
-        listSessionKeyRef.current = null;
         // A list detached before its entry was decided was never read; this
         // is also Strict Mode's detach/reattach right after mount, which must
         // not erase the position the entry is about to restore.
@@ -523,10 +545,20 @@ export const useChatTimelineScroll = ({
         const state = list?.getState();
         // A hidden container measures nothing; keep what was recorded before.
         if (!state || state.scrollLength <= 0) return;
+        // An unknown at-end answer is not "at the end": missing measurements
+        // must not clear the record either (#6045).
         const atEnd = (modeRef.current === 'following-end' && isAtEndRef.current)
-            || resolveTimelineIsAtEnd(state) !== false;
-        rememberSessionScrollPosition(sessionKey, atEnd ? null : captureMessageViewportAnchor(node));
+            || resolveTimelineIsAtEnd(state) === true;
+        rememberOutgoingSessionScrollPosition(
+            sessionKey,
+            atEnd,
+            atEnd ? null : captureMessageViewportAnchor(node),
+        );
     }, []);
+
+    const captureOutgoingPosition = React.useCallback(() => {
+        if (scrollRef.current) rememberOutgoingPosition(scrollRef.current, listRef.current);
+    }, [rememberOutgoingPosition]);
 
     // ── scroll commands ─────────────────────────────────────────────────────
     const goToBottomReassertTimersRef = React.useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -658,6 +690,7 @@ export const useChatTimelineScroll = ({
         let frame: number | null = null;
         let frames = 0;
         let stable = first === 'aligned' ? 1 : 0;
+        let readyStable = 0;
         let settled = false;
         let finished = false;
         const settle = () => {
@@ -705,7 +738,11 @@ export const useChatTimelineScroll = ({
             // Two still frames: shown where it belongs. The hold continues
             // for late measurements (images, highlighted code) above it.
             if (stable >= 2) settle();
-            if (result === 'missing' || stable >= ANCHOR_HOLD_STABLE_FRAMES || frames >= ANCHOR_HOLD_MAX_FRAMES) {
+            // Markdown still loading lands later at its own heights: the hold
+            // counts still frames only from when it has drawn.
+            const loading = node.querySelector(`[data-message-id="${CSS.escape(anchor.messageId)}"] [data-chat-quote-pending]`) !== null;
+            readyStable = result === 'aligned' && !loading ? readyStable + 1 : 0;
+            if (result === 'missing' || readyStable >= ANCHOR_HOLD_STABLE_FRAMES || frames >= ANCHOR_HOLD_MAX_FRAMES) {
                 finish();
                 return;
             }
@@ -846,15 +883,13 @@ export const useChatTimelineScroll = ({
         listRef.current = list;
         scrollRef.current = node;
         setScrollNode(node);
-        if (node) {
-            listSessionKeyRef.current = sessionKey ?? currentSessionKeyRef.current;
-        }
+        listSessionKeyRef.current = node ? sessionKey ?? currentSessionKeyRef.current : null;
         if (previousNode && previousNode !== node) {
             retireScrollContent(previousNode, () => scrollRef.current === previousNode);
         }
     }, [rememberOutgoingPosition]);
 
-    const onIsAtEndChange = React.useCallback((isAtEnd: boolean) => {
+    const applyIsAtEnd = React.useCallback((isAtEnd: boolean) => {
         // While an automatic movement owns the viewport, leaving the end is our
         // own doing (the glide trails its target between corrections) — not a
         // reason to offer the pill. Only a
@@ -888,6 +923,48 @@ export const useChatTimelineScroll = ({
             scheduleShowScrollButton();
         }
     }, [hideScrollButton, isLiveFollowActive, scheduleShowScrollButton]);
+
+    // The end reaching a released reader is judged once the list has
+    // finished the pass that reported it. Mid-pass the list can read as
+    // ending at the reader with screens still below: it reports a new total
+    // before it moves the viewport for rows above the reader that measured
+    // smaller than estimated, sometimes a frame later, and rows it has just
+    // added below (a long answer cut into rows as its turn ends) count at
+    // their estimated height until measured, short enough in a session of
+    // short rows that the browser clamps the scroll to them. Taken at once,
+    // the follow re-armed and pulled the reader down to the end. The check
+    // waits for the frame after the pass (a microtask first, so it runs after
+    // any frame work the pass scheduled) and reads the list's state again
+    // there, within `band` of the end.
+    const endArrivalPendingRef = React.useRef(false);
+    const endArrivalFrameRef = React.useRef<number | null>(null);
+    const endArrivalBandRef = React.useRef(0);
+    const confirmEndArrived = React.useCallback((band: number) => {
+        endArrivalBandRef.current = endArrivalPendingRef.current ? Math.max(endArrivalBandRef.current, band) : band;
+        if (endArrivalPendingRef.current) return;
+        endArrivalPendingRef.current = true;
+        queueMicrotask(() => {
+            if (!endArrivalPendingRef.current) return;
+            endArrivalFrameRef.current = window.requestAnimationFrame(() => {
+                endArrivalFrameRef.current = null;
+                endArrivalPendingRef.current = false;
+                if (isAtEndRef.current) return;
+                const state = listRef.current?.getState();
+                if (!state || state.contentLength === undefined) return;
+                if (state.contentLength - state.scroll - state.scrollLength <= endArrivalBandRef.current) applyIsAtEnd(true);
+            });
+        });
+    }, [applyIsAtEnd]);
+    // Only once the turn has ended: while it runs, a reader who scrolled
+    // back to the end is followed at once, before the next block of the
+    // answer can carry the end past the band.
+    const onIsAtEndChange = React.useCallback((isAtEnd: boolean) => {
+        if (isAtEnd && userOwnsScrollRef.current && !isAtEndRef.current && !isTurnRunning()) {
+            confirmEndArrived(TIMELINE_FOLLOW_REARM_THRESHOLD_PX);
+            return;
+        }
+        applyIsAtEnd(isAtEnd);
+    }, [applyIsAtEnd, confirmEndArrived]);
 
     // The list reports reaching the end once. A report held above while the
     // turn ran does not repeat when it ends, and the pill stayed up under a
@@ -1136,6 +1213,9 @@ export const useChatTimelineScroll = ({
         glideRef.current = null;
         if (pageRevealFrameRef.current !== null) window.cancelAnimationFrame(pageRevealFrameRef.current);
         pageRevealFrameRef.current = null;
+        if (endArrivalFrameRef.current !== null) window.cancelAnimationFrame(endArrivalFrameRef.current);
+        endArrivalFrameRef.current = null;
+        endArrivalPendingRef.current = false;
     }, []);
 
     const onTimelineDataChange = React.useCallback(() => {
@@ -1185,7 +1265,7 @@ export const useChatTimelineScroll = ({
             const state = list.getState();
             const below = state.contentLength === undefined ? null : state.contentLength - state.scroll - state.scrollLength;
             if (!isAtEndRef.current) {
-                if (below !== null && below <= 1) onIsAtEndChange(true);
+                if (below !== null && below <= 1) confirmEndArrived(1);
                 return;
             }
             // A row opened on the end that grew less than the band leaves the
@@ -1198,7 +1278,7 @@ export const useChatTimelineScroll = ({
                 } else if (opened.grew) {
                     rowExpandReleaseRef.current = null;
                     isAtEndRef.current = false;
-                    onIsAtEndChange(true);
+                    applyIsAtEnd(true);
                     return;
                 }
             }
@@ -1235,7 +1315,7 @@ export const useChatTimelineScroll = ({
         // at 45% of the stream time spent 500-1600px behind at 420x640.
         if (modeRef.current !== 'following-end') return;
         followEnd();
-    }, [followEnd, isLiveFollowActive, onIsAtEndChange, revealWaitingPage, scheduleShowScrollButton]);
+    }, [applyIsAtEnd, confirmEndArrived, followEnd, isLiveFollowActive, revealWaitingPage, scheduleShowScrollButton]);
 
     // The streaming tail grows inside one row without changing the entries
     // array, so data-change callbacks are silent for the entire stream. The
@@ -1690,31 +1770,29 @@ export const useChatTimelineScroll = ({
         });
         spy.setContainer(container);
 
-        const elementByTurnId = new Map<string, HTMLElement>();
+        // Every row of a turn counts: a long turn's prompt row unmounts while
+        // the reader is deep in its answer.
+        const TURN_ROW_SELECTOR = '[data-turn-id], [data-turn-row]';
+        const turnIdOfRow = (node: HTMLElement) => node.dataset.turnId ?? node.dataset.turnRow;
         const registerTurnNode = (node: HTMLElement) => {
-            const turnId = node.dataset.turnId;
+            const turnId = turnIdOfRow(node);
             if (!turnId) return false;
-            elementByTurnId.set(turnId, node);
             spy.register(node, turnId);
             return true;
         };
         const unregisterTurnNode = (node: HTMLElement) => {
-            const turnId = node.dataset.turnId;
-            if (!turnId) return false;
-            if (elementByTurnId.get(turnId) !== node) return false;
-            elementByTurnId.delete(turnId);
-            spy.unregister(turnId);
+            spy.unregister(node);
             return true;
         };
         const collectTurnNodes = (node: Node): HTMLElement[] => {
             if (!(node instanceof HTMLElement)) return [];
             const collected: HTMLElement[] = [];
-            if (node.matches('[data-turn-id]')) collected.push(node);
-            node.querySelectorAll<HTMLElement>('[data-turn-id]').forEach((el) => collected.push(el));
+            if (node.matches(TURN_ROW_SELECTOR)) collected.push(node);
+            node.querySelectorAll<HTMLElement>(TURN_ROW_SELECTOR).forEach((el) => collected.push(el));
             return collected;
         };
 
-        container.querySelectorAll<HTMLElement>('[data-turn-id]').forEach(registerTurnNode);
+        container.querySelectorAll<HTMLElement>(TURN_ROW_SELECTOR).forEach(registerTurnNode);
         spy.markDirty();
 
         const mutationObserver = new MutationObserver((records) => {
@@ -1750,6 +1828,7 @@ export const useChatTimelineScroll = ({
         scrollNode,
         isPinned,
         registerList,
+        captureOutgoingPosition,
         onIsAtEndChange,
         onListMetricsChange,
         onManualNavigation,

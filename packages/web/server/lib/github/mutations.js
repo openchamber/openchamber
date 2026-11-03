@@ -1,5 +1,6 @@
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
+import { cancelWaitingMerge, enableMergeWhenReady, readWaitingMerge } from './merge-when-ready.js';
 import {
   invalidProviderPayload,
   isPlainObject,
@@ -174,7 +175,10 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
   if (operation === 'merge') {
     const method = requiredText(body.method, 'method');
     if (!['merge', 'squash', 'rebase'].includes(method)) throw mutationError('merge method is invalid');
-    return { input: { method }, digest: (target) => digestOf({ target, method }) };
+    if (body.cancel !== undefined && body.cancel !== true && body.cancel !== false) throw mutationError('cancel is invalid');
+    return body.cancel === true
+      ? { input: { method, cancel: true }, digest: (target) => digestOf({ target, method, cancel: true }) }
+      : { input: { method }, digest: (target) => digestOf({ target, method }) };
   }
   if (operation === 'ready') return { input: {}, digest: (target) => digestOf({ target }) };
   if (operation === 'labels' || operation === 'issue-labels' || operation === 'discussion-labels') {
@@ -353,6 +357,10 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     return { merged: data.merged };
   };
   const mergePullRequest = async (octokit, project, target, method) => {
+    const whenReady = async () => {
+      try { return await enableMergeWhenReady(octokit, project, target, method); }
+      catch (error) { throw graphqlRejection(error); }
+    };
     const route = { owner: project.owner, repo: project.name, pull_number: target.number };
     let answer;
     try {
@@ -362,7 +370,20 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       answer = mergeAsyncAnswer(response?.data);
     } catch (error) {
       const status = error?.response?.status ?? error?.status;
-      if (status === 404) return mergeClassic(octokit, project, target, method);
+      if (status === 404) {
+        try { return await mergeClassic(octokit, project, target, method); }
+        catch (classicError) {
+          if ([403, 405, 422].includes(classicError?.response?.status ?? classicError?.status)) {
+            const waiting = await whenReady();
+            if (waiting) return waiting;
+          }
+          throw providerRejection(classicError);
+        }
+      }
+      if ([400, 403, 405, 422].includes(status)) {
+        const waiting = await whenReady();
+        if (waiting) return waiting;
+      }
       // A merge of this PR already requested is followed instead of asked
       // again; any other refusal (a moved head, a conflict) is GitHub's reason.
       if (status !== 409 || !isMergeAsyncAnswer(error.response?.data)) throw providerRejection(error);
@@ -381,6 +402,8 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       }
     }
     if (answer.status === 'failed') {
+      const waiting = await whenReady();
+      if (waiting) return waiting;
       throw mutationError(answer.message ?? 'GitHub could not merge the pull request', 'SOURCE_CONTROL_MUTATION_REJECTED', 422);
     }
     if (answer.status === 'merged') return { merged: true };
@@ -664,6 +687,11 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
       // Still open says nothing certain: GitHub may be merging it in the
       // background or holding it in a merge queue. The live state follows.
       if (pr.merged === true || isProviderString(pr.merged_at)) return { state: 'succeeded', result: { merged: true } };
+      const { pull } = await readWaitingMerge(octokit, project, target);
+      if (input.cancel) return !pull.isInMergeQueue && !pull.autoMergeRequest
+        ? { state: 'succeeded', result: { merged: false, outcome: 'cancelled' } } : unknownOutcome();
+      if (pull.isInMergeQueue) return { state: 'succeeded', result: { merged: false, outcome: 'queued' } };
+      if (pull.autoMergeRequest) return { state: 'succeeded', result: { merged: false, outcome: 'auto-merge' } };
     } else if (operation === 'state') {
       // A merged pull request reads `closed` too, and can no longer be reopened.
       if (pr.state === input.state) return { state: 'succeeded', result: { state: pr.state } };
@@ -801,6 +829,10 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return {};
       }
       case 'merge':
+        if (input.cancel) {
+          try { return await cancelWaitingMerge(octokit, project, target); }
+          catch (error) { throw graphqlRejection(error); }
+        }
         return mergePullRequest(octokit, project, target, input.method);
       case 'labels':
       case 'issue-labels':

@@ -1,6 +1,8 @@
 import React from 'react';
 
 import type { ToolPart } from '@/lib/opencode/model';
+import type { ShownPart } from '../../lib/turns/liveActivity';
+import AssistantTextPart from './AssistantTextPart';
 import { generatedImagePaths, proposedWorkflowRunId, requestedSecret } from '@/lib/opencode/tools';
 import { WorkflowRunCard } from '@/components/chat/workflows/WorkflowRunCard';
 import type { ToolPopupContent } from '../types';
@@ -21,4 +23,21 @@ export function ShownToolCard({ part, onShowPopup }: { part: ToolPart; onShowPop
   if (images.length > 0) return <GeneratedImages part={part} paths={images} onShowPopup={onShowPopup} />;
   if (secret) return <SecretRequestCard part={part} request={secret} />;
   return <ShownPage part={part} />;
+}
+
+/**
+ * A part a collapsed Activity keeps in view (`getShownPages`): a call drawn in
+ * place, or the text with a UI block the agent wrote before a later step.
+ */
+export function ShownPartCard({ part, onShowPopup }: { part: ShownPart; onShowPopup?: (content: ToolPopupContent) => void }) {
+  if (part.type === 'tool') return <ShownToolCard part={part} onShowPopup={onShowPopup} />;
+  return (
+    <AssistantTextPart
+      part={part}
+      sessionId={part.sessionID}
+      messageId={part.messageID}
+      streamPhase={part.time?.end === undefined ? 'streaming' : 'completed'}
+      onShowPopup={onShowPopup}
+    />
+  );
 }

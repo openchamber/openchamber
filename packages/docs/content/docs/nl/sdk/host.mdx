@@ -281,6 +281,48 @@ if (url.pathname === NOTIFICATIONS_PROVIDER_PATH) {
 
 Naar welke ruimte of welk kanaal een project gaat, bepaalt uw extensie zelf: de melding draagt `directory` en `sessionName`. In de enterprise-modus draagt ze alleen de algemene titel, net als de telefoon. Het voorbeeld `notification-webhook` is een compleet kanaal met een ontvanger om het tegen te testen.
 
+## Trackers
+
+Een service kan een tracker voor werkitems zijn naast Linear: geef `provides: ["tracker"]` op en beschrijf de tracker in `contributes.tracker`. OpenChamber zet hem dan naast Linear overal waar trackers verschijnen, alleen op basis van het manifest, nog voordat de service ooit draait.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["tracker"] },
+"tracker": {
+  "wire": 1,
+  "label": "YouTrack",
+  "instances": { "kind": "user", "label": "Server address", "placeholder": "https://youtrack.example.com" },
+  "auth": { "token": { "header": "authorization", "scheme": "bearer", "createPath": "/users/me?tab=account-security" } },
+  "capabilities": { "stateUpdate": true, "labels": true, "priority": true, "projectMapping": true, "sessionComments": true },
+  "stateFilters": ["open", "all", "todo", "in-progress", "done"],
+  "identifier": "key-number",
+  "urls": { "item": ["/issue/{id}", "/{segments+}/issue/{id}"] }
+}
+```
+
+De gebruiker verbindt accounts op de kaart van de tracker onder Extensieaccounts: een token, of inloggen in de browser wanneer u `auth.oauth` opgeeft (OpenChamber voert het inloggen uit met de client-ID die de gebruiker invoert en bewaart de tokens). Uw service ziet nooit inloggegevens. `urls.item` zijn sjablonen voor het adres van een item, met `{id}` voor de identificatie (ook als `?name={id}` wanneer die in de query meereist); OpenChamber compileert ze zodat geplakte links gekoppelde items worden. `identifier` zegt hoe de sleutel eruitziet: `key-number` (`PROJ-42`), `number` of `short-code`.
+
+OpenChamber stuurt negen aanroepen door naar `POST /tracker`: `auth.probe` en `auth.verify`, de leesaanroepen `items.list`, `items.get`, `items.liveSummaries`, `states.list` en `containers.list`, en de schrijfaanroepen `items.updateState` en `comments.create`. Lees elke aanroep met `readTrackerProviderRequest`, antwoord in de neutrale itemvormen en bereik de server van de tracker alleen via de outbound-helper, die uw verzoek met de handle van de aanroep naar OpenChamber stuurt; OpenChamber voegt de inloggegevens toe en houdt het verzoek op de server van het account. De handle van een leesaanroep verstuurt alleen `GET`.
+
+```ts
+import { TRACKER_PROVIDER_PATH, createTrackerOutbound, readTrackerProviderRequest } from "@openchamber/sdk";
+
+const outbound = createTrackerOutbound({ env: process.env });
+
+// inside your service's request handler, after the bearer check
+if (url.pathname === TRACKER_PROVIDER_PATH) {
+  const request = readTrackerProviderRequest(body);
+  if (!request) return json(res, 400, { ok: false, error: { message: "not a tracker call" } });
+  if (request.method === "items.get") {
+    const answer = await outbound.request(request.session.handle, { method: "GET", path: `/api/issues/${encodeURIComponent(String(request.input.id))}` });
+    if (answer.status === 404) return json(res, 200, { ok: true, data: { item: null } });
+    if (answer.status !== 200) return json(res, 200, { ok: false, error: { message: `YouTrack answered ${answer.status}`, status: answer.status } });
+    return json(res, 200, { ok: true, data: { item: toTrackerItem(JSON.parse(answer.body)) } });
+  }
+}
+```
+
+Wanneer de gebruiker sessiereacties inschakelt, roept OpenChamber `comments.create` aan met "session started", "completed" of "failed" en een link naar de sessie, elk één keer; de reactie draagt verder niets. Het voorbeeld `tracker-provider` is een complete tracker met een nepserver om het tegen te testen.
+
 ## Bestanden
 
 Een relatief pad ligt binnen het geopende project en vereist `files`. Een pad met `/` of `~/` moet passen bij een opgegeven `contributes.filesystem`-patroon en vereist `filesystem`. Zie [Een extensie bouwen](/nl/sdk/#bestanden) voor de regels.

@@ -70,7 +70,7 @@ describe('agent tool action allowlist', () => {
 
   it('asks for the task name in the language of the user', () => {
     const workName = OPENCHAMBER_CONTROL_ACTION_DEFINITIONS.find(({ action }) => action === 'work.name');
-    expect(workName.description).toContain("in the language of the user's latest message");
+    expect(workName.description).toContain("in the user's latest language");
   });
 
   it.each([
@@ -672,13 +672,13 @@ describe('managed agent tool runtime', () => {
     expect(tool.openchamber_image.description.length).toBeLessThanOrEqual(2048);
   });
 
-  it('exposes render as its own tool carrying only the page and its title', async () => {
+  it('exposes render as its own tool carrying only the page (html or ui) and its title', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeRender: true });
     const tool = await loadTools(dataDir, 'render');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_render']);
-    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['awaitAnswer', 'html', 'title']);
+    expect(Object.keys(tool.openchamber_render.input.properties.parameters.properties).sort()).toEqual(['awaitAnswer', 'html', 'title', 'ui']);
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('html');
     // How to write the page rides on its input, which no client cuts short.
     expect(tool.openchamber_render.input.properties.parameters.properties.html.description).toContain('--chart-1');

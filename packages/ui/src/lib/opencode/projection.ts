@@ -307,6 +307,7 @@ export function projectInboxMessage(
         text: item.payload.text,
         description: item.payload.description,
         metadata: item.payload.metadata,
+        pending: true,
       }),
       parts: null,
     }

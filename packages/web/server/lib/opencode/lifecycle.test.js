@@ -635,6 +635,135 @@ describe('OpenCode lifecycle', () => {
     expect(terminalEvents).toHaveLength(1);
   });
 
+  describe('bootstrap retry', () => {
+    const failingBootstrapRuntime = (error, stateOverrides) => createRuntime({
+      syncFromHmrState: vi.fn(() => {
+        throw error;
+      }),
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+    }, stateOverrides);
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('keeps retrying a failed managed start at growing intervals', async () => {
+      vi.useFakeTimers();
+      const runtime = failingBootstrapRuntime(new Error('listener unavailable'));
+      const bootstrap = vi.fn(async () => {
+        await runtime.bootstrapOpenCodeAtStartup();
+        runtime.scheduleBootstrapRetry(bootstrap);
+      });
+
+      await runtime.bootstrapOpenCodeAtStartup();
+      expect(runtime.scheduleBootstrapRetry(bootstrap)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(bootstrap).toHaveBeenCalledTimes(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(bootstrap).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(bootstrap).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(30_000 + 60_000 + 60_000);
+      expect(bootstrap).toHaveBeenCalledTimes(5);
+    });
+
+    it('makes a restart asked for during a retry wait for it and then really restart', async () => {
+      vi.useFakeTimers();
+      const runtime = failingBootstrapRuntime(new Error('listener unavailable'));
+      const retryRun = Promise.withResolvers();
+      await runtime.bootstrapOpenCodeAtStartup();
+      runtime.scheduleBootstrapRetry(() => retryRun.promise, vi.fn());
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      const child = createMockChild();
+      spawnMock.mockImplementationOnce(() => {
+        queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+        return child;
+      });
+      const restart = runtime.restartOpenCode();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(spawnMock).not.toHaveBeenCalled();
+
+      retryRun.resolve();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await restart;
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      await runtime.testState.openCodeProcess.close();
+    });
+
+    it('waits for a restart in flight before retrying', async () => {
+      vi.useFakeTimers();
+      const runtime = failingBootstrapRuntime(new Error('listener unavailable'));
+      const bootstrap = vi.fn(async () => {});
+      await runtime.bootstrapOpenCodeAtStartup();
+      runtime.scheduleBootstrapRetry(bootstrap, vi.fn());
+
+      const restart = Promise.withResolvers();
+      runtime.testState.currentRestartPromise = restart.promise;
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(bootstrap).not.toHaveBeenCalled();
+
+      runtime.testState.currentRestartPromise = null;
+      restart.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bootstrap).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts nothing when a restart has started OpenCode before the retry fires', async () => {
+      vi.useFakeTimers();
+      const runtime = failingBootstrapRuntime(new Error('listener unavailable'));
+      const bootstrap = vi.fn(async () => {});
+      const onAlreadyRunning = vi.fn();
+      await runtime.bootstrapOpenCodeAtStartup();
+      runtime.scheduleBootstrapRetry(bootstrap, onAlreadyRunning);
+
+      runtime.testState.openCodeProcess = { close: vi.fn() };
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(bootstrap).not.toHaveBeenCalled();
+      expect(onAlreadyRunning).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the last error readable while a retry runs', async () => {
+      const startFailure = new Error('spawn opencode ENOENT');
+      const applyOpencodeBinaryFromSettings = vi.fn(async () => {
+        expect(runtime.testState.lastOpenCodeError).toBe('earlier failure');
+        throw startFailure;
+      });
+      const runtime = createRuntime({
+        applyOpencodeBinaryFromSettings,
+        reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      }, { lastOpenCodeError: 'earlier failure' }, { ENV_CONFIGURED_OPENCODE_PORT: null, ENV_EFFECTIVE_PORT: null });
+
+      await runtime.bootstrapOpenCodeAtStartup();
+
+      expect(applyOpencodeBinaryFromSettings).toHaveBeenCalled();
+      expect(runtime.testState.lastOpenCodeError).toBe(startFailure.message);
+    });
+
+    it('schedules nothing after a successful start', async () => {
+      const runtime = createRuntime({
+        reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      }, { openCodeProcess: { close: vi.fn() }, openCodePort: 45678 });
+      await runtime.bootstrapOpenCodeAtStartup();
+      expect(runtime.scheduleBootstrapRetry(vi.fn())).toBe(false);
+    });
+
+    it('does not retry a binary the user has to change, an external server or a shutdown', async () => {
+      const rejected = Object.assign(new Error('binary not found'), { code: 'OPENCODE_BINARY_INVALID' });
+      const cases = [
+        failingBootstrapRuntime(rejected),
+        failingBootstrapRuntime(new Error('down'), { isExternalOpenCode: true }),
+        failingBootstrapRuntime(new Error('down'), { isShuttingDown: true }),
+      ];
+      for (const runtime of cases) {
+        await runtime.bootstrapOpenCodeAtStartup();
+        expect(runtime.scheduleBootstrapRetry(vi.fn())).toBe(false);
+      }
+    });
+  });
+
   it('does not count rapid transport-triggered checks as independent health failures', async () => {
     const close = vi.fn(async () => {});
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

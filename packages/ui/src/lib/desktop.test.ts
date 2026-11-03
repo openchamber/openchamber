@@ -122,7 +122,7 @@ describe('desktop local origin', () => {
 });
 
 describe('pending desktop session links', () => {
-  type PendingLink = { sessionId: string; messageId?: string; runtimeKey?: string };
+  type PendingLink = { sessionId: string; messageId?: string; runtimeKey?: string; requireKnownSession?: boolean };
 
   const installWindow = (pending: PendingLink[]) => {
     Object.defineProperty(globalThis, 'window', {
@@ -147,8 +147,15 @@ describe('pending desktop session links', () => {
       { sessionId: 'ses_b', messageId: 'msg_1' },
     ]);
     expect(await takePendingDesktopSessionLinks()).toEqual([
-      { sessionId: 'ses_a', messageId: null, runtimeKey: 'host:h1' },
-      { sessionId: 'ses_b', messageId: 'msg_1', runtimeKey: null },
+      { sessionId: 'ses_a', messageId: null, runtimeKey: 'host:h1', requireKnownSession: false },
+      { sessionId: 'ses_b', messageId: 'msg_1', runtimeKey: null, requireKnownSession: false },
+    ]);
+  });
+
+  test('keeps the known-session requirement of a cold jump-list launch', async () => {
+    installWindow([{ sessionId: 'ses_jump', requireKnownSession: true }]);
+    expect(await takePendingDesktopSessionLinks()).toEqual([
+      { sessionId: 'ses_jump', messageId: null, runtimeKey: null, requireKnownSession: true },
     ]);
   });
 });

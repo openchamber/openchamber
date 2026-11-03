@@ -16,7 +16,6 @@ import { flushSync } from 'react-dom';
  * them all until it collapses. A block the reader opened or plays stays.
  */
 
-const INITIAL_BLOCKS = 24;
 export const BLOCK_INDEX = 'data-oc-block-index';
 export const BLOCK_KEY = 'data-oc-block-key';
 
@@ -48,11 +47,13 @@ export const blockKey = (index: number, content: string): string => {
 
 const windows = new WeakMap<Element, MarkdownWindow>();
 
+// Blocks rendered before the window knows where it is: the top of a document
+// opened at its start paints in the first frame.
+const INITIAL_BLOCKS = 24;
+
 export class MarkdownWindow {
   private container: HTMLElement | null = null;
   private scroller: HTMLElement | null = null;
-  // Before it is attached, the first blocks render: the top of the document
-  // paints in the first frame.
   private attached = false;
   private near = new Set<number>();
   private pins = new Map<number, number>();
@@ -64,6 +65,7 @@ export class MarkdownWindow {
   private kept = new Set<string>();
   private listeners = new Set<() => void>();
   private stop: (() => void) | null = null;
+  private frame: number | null = null;
   charsPerLine = 80;
 
   subscribe = (listener: () => void) => {
@@ -92,13 +94,26 @@ export class MarkdownWindow {
       return;
     }
     const doc = container.ownerDocument;
+    const view = doc.defaultView;
     const update = () => this.update();
+    // A list may place the document after it mounts, and the content around
+    // it may grow without a scroll: both move it against the view.
+    const updateInFrame = () => {
+      if (this.frame !== null || !view) return;
+      this.frame = view.requestAnimationFrame(() => {
+        this.frame = null;
+        this.update();
+      });
+    };
     const resize = globalThis.ResizeObserver ? new ResizeObserver(() => {
-      this.charsPerLine = Math.max(20, Math.round(scroller.clientWidth / 7.5));
+      this.charsPerLine = Math.max(20, Math.round(container.clientWidth / 7.5));
       this.update();
+      updateInFrame();
     }) : null;
     resize?.observe(scroller);
-    this.charsPerLine = Math.max(20, Math.round(scroller.clientWidth / 7.5));
+    resize?.observe(container);
+    this.charsPerLine = Math.max(20, Math.round(container.clientWidth / 7.5));
+    updateInFrame();
     const selectionChange = () => {
       const selection = doc.getSelection();
       const range = selection && !selection.isCollapsed && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
@@ -127,6 +142,8 @@ export class MarkdownWindow {
     container.addEventListener('click', click, true);
     doc.addEventListener('selectionchange', selectionChange);
     this.stop = () => {
+      if (this.frame !== null) view?.cancelAnimationFrame(this.frame);
+      this.frame = null;
       resize?.disconnect();
       scroller.removeEventListener('scroll', update);
       container.removeEventListener('click', click, true);
@@ -140,8 +157,11 @@ export class MarkdownWindow {
     if (this.container) windows.delete(this.container);
     this.container = null;
     this.scroller = null;
+    // The selection that held every block is no longer heard collapsing.
+    const releaseSelection = this.selectionRelease;
     this.selectionRelease = null;
     this.selecting = false;
+    releaseSelection?.();
   }
 
   /** Keeps one block (`index`) or, without one, every block mounted until released. */
@@ -172,6 +192,9 @@ export class MarkdownWindow {
     if (!container || !scroller || !root) return;
     const wrappers = Array.from(root.children).filter((child): child is HTMLElement => child instanceof HTMLElement && child.hasAttribute(BLOCK_INDEX));
     const view = scroller.getBoundingClientRect();
+    // A hidden scroller (a kept-alive session, a closed panel) has no view to
+    // window against; its blocks stay as they are until it shows.
+    if (view.height === 0) return;
     const from = view.top - view.height;
     const to = view.bottom + view.height;
     let low = 0;

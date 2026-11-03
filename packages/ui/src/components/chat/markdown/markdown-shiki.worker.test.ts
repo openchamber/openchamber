@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from 'bun:test';
 
 import { themes } from '@/lib/theme/themes';
-import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
+import { getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
 import { toHexColor } from '@/lib/theme/color';
 import type { MarkdownWorkerRequest, MarkdownWorkerResponse } from './markdown-worker-protocol';
 
@@ -24,7 +24,7 @@ const ask = (build: (id: number) => MarkdownWorkerRequest): Promise<MarkdownWork
 
 const theme = themes[0];
 const tokenTheme = getCodeTokenTheme(theme);
-const themeName = theme.metadata.id;
+const themeName = getThemeRenderName(theme);
 const comment = toHexColor(theme.colors.syntax.base.comment)?.toLowerCase();
 
 test('editor tokens use the concrete app theme for both highlighters', async () => {

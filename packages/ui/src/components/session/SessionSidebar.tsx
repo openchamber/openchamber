@@ -1,4 +1,6 @@
 import React from 'react';
+import { MobilePinToSheet } from '@/apps/mobileSidebar/MobilePinToSheet';
+import { NewPinListDialog } from './sidebar/sections/NewPinListDialog';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
@@ -772,6 +774,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           openNewSessionDraft({ directoryOverride: worktreePath, preserveDirectoryOverride: true });
         }}
       />
+
+      <NewPinListDialog />
+      {mobileVariant ? <MobilePinToSheet /> : null}
 
     </div>
     </TooltipProvider>
