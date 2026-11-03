@@ -85,6 +85,12 @@ the effect that switches read-only files to the view mode; the jump runs there.
 If no editor is on screen the jump ends, so the waiting mask never hides a
 loaded file.
 
+The editor's Git change markers ask Git which repository actually owns the open
+file, then read status and the HEAD baseline relative to that repository. The
+repository selected in another Git surface does not decide the baseline. Sibling
+and deeper nested repositories under a non-Git project root keep accurate
+markers, and an untracked file uses the status from its own repository.
+
 Sidebar root/runtime changes remount the scoped tree. Its bounded module cache
 provides continuity between mounts; request cancellation for collapsed paths
 stops queued batches, while already-started reads may populate the same-scope

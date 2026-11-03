@@ -100,6 +100,8 @@ import { TableArtifact } from './files/previews/TableArtifact';
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 import { useHtmlPreviewUrl } from './files/useHtmlPreviewUrl';
 import { useRawAssetUrl } from './files/useRawAssetUrl';
+import { resolveGitFileLocation } from './files/gitFileLocation';
+import { resolveGitRepositoryPrefix } from '@/lib/gitApi';
 import { useHtmlPreviewAnnotation } from './files/useHtmlPreviewAnnotation';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
@@ -3547,52 +3549,84 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // server answers an empty original both for a new file and for one git does
   // not track at all (ignored, outside the repo's HEAD), so an empty baseline
   // counts only when git status lists the file as new.
-  const selectedRelativePath = selectedFile?.path && root && selectedFile.path.startsWith(`${root}/`)
-    ? selectedFile.path.slice(root.length + 1)
-    : null;
-  // Refetch when the file's own status or the branch changes (a commit,
-  // checkout or stash moves its HEAD version), not on every status refresh:
-  // the selector returns a string, so unrelated refreshes do not re-render.
-  const gitBaselineKey = useGitStore((state) => {
-    if (!selectedRelativePath || !root) return null;
-    // Keyed like the tree's own git status lookup.
-    const status = state.directories.get(currentDirectory)?.status;
-    const entry = status?.files.find((file) => file.path === selectedRelativePath) ?? null;
-    return JSON.stringify([selectedRelativePath, status?.current ?? null, entry]);
-  });
-  const [gitBaseline, setGitBaseline] = React.useState<{ path: string; text: string | null } | null>(null);
+  const [gitFileLocation, setGitFileLocation] = React.useState<{
+    runtimeKey: string;
+    filePath: string;
+    directory: string;
+    path: string;
+  } | null>(null);
   React.useEffect(() => {
-    if (!selectedRelativePath || !root || !gitBaselineKey) {
-      setGitBaseline(null);
-      return;
-    }
+    const filePath = selectedFile?.path;
+    setGitFileLocation(null);
+    if (!visible || !filePath) return;
     let cancelled = false;
-    git.getGitFileDiff(root, { path: selectedRelativePath })
-      .then((diff) => {
-        if (cancelled) return;
-        const entry = useGitStore.getState().directories.get(currentDirectory)?.status?.files
-          .find((file) => file.path === selectedRelativePath);
-        const isNewInGit = entry !== undefined
-          && (entry.index === '?' || entry.index === 'A' || entry.working_dir === '?');
-        const usable = !diff.isBinary && !diff.submodule && (diff.original !== '' || isNewInGit);
-        setGitBaseline({ path: selectedRelativePath, text: usable ? diff.original : null });
+    void resolveGitFileLocation(filePath, resolveGitRepositoryPrefix)
+      .then((location) => {
+        if (!cancelled && getRuntimeKey() === runtimeKey && location) {
+          setGitFileLocation({ runtimeKey, filePath, ...location });
+        }
       })
       .catch(() => {
-        if (!cancelled) setGitBaseline({ path: selectedRelativePath, text: null });
+        if (!cancelled && getRuntimeKey() === runtimeKey) setGitFileLocation(null);
       });
     return () => {
       cancelled = true;
     };
-    // gitBaselineKey carries the status fields that decide a refetch.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDirectory, git, gitBaselineKey, root]);
+  }, [runtimeKey, selectedFile?.path, visible]);
+  const activeGitFileLocation = visible
+    && gitFileLocation?.runtimeKey === runtimeKey
+    && gitFileLocation.filePath === selectedFile?.path
+    ? gitFileLocation
+    : null;
+  const selectedGitDirectory = activeGitFileLocation?.directory ?? null;
+  const selectedRelativePath = activeGitFileLocation?.path ?? null;
+  const selectedGitFileKey = selectedFile?.path && selectedGitDirectory
+    ? JSON.stringify([runtimeKey, selectedGitDirectory, selectedFile.path])
+    : null;
+  React.useEffect(() => {
+    if (!visible || !selectedGitDirectory) return;
+    void useGitStore.getState().ensureStatus(selectedGitDirectory, git);
+  }, [git, selectedGitDirectory, visible]);
+  // Refetch when the file's own status or the branch changes (a commit,
+  // checkout or stash moves its HEAD version), not on every status refresh:
+  // the selector returns a string, so unrelated refreshes do not re-render.
+  const gitBaselineKey = useGitStore((state) => {
+    if (!selectedRelativePath || !selectedGitDirectory) return null;
+    const status = state.directories.get(selectedGitDirectory)?.status;
+    const entry = status?.files.find((file) => file.path === selectedRelativePath) ?? null;
+    return JSON.stringify([runtimeKey, selectedGitDirectory, selectedRelativePath, status?.current ?? null, entry]);
+  });
+  const [gitBaseline, setGitBaseline] = React.useState<{ key: string; text: string | null } | null>(null);
+  React.useEffect(() => {
+    if (!selectedRelativePath || !selectedGitDirectory || !selectedGitFileKey || !gitBaselineKey) {
+      setGitBaseline(null);
+      return;
+    }
+    let cancelled = false;
+    git.getGitFileDiff(selectedGitDirectory, { path: selectedRelativePath })
+      .then((diff) => {
+        if (cancelled) return;
+        const entry = useGitStore.getState().directories.get(selectedGitDirectory)?.status?.files
+          .find((file) => file.path === selectedRelativePath);
+        const isNewInGit = entry !== undefined
+          && (entry.index === '?' || entry.index === 'A' || entry.working_dir === '?');
+        const usable = !diff.isBinary && !diff.submodule && (diff.original !== '' || isNewInGit);
+        setGitBaseline({ key: selectedGitFileKey, text: usable ? diff.original : null });
+      })
+      .catch(() => {
+        if (!cancelled) setGitBaseline({ key: selectedGitFileKey, text: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [git, gitBaselineKey, selectedGitDirectory, selectedGitFileKey, selectedRelativePath]);
   const gitBaselineRef = React.useRef(gitBaseline);
   gitBaselineRef.current = gitBaseline;
   const applyGitBaseline = React.useCallback((view: EditorView | null) => {
     if (!view) return;
     const baseline = gitBaselineRef.current;
-    setGitChangeBaseline(view, baseline && baseline.path === selectedRelativePath ? baseline.text : null);
-  }, [selectedRelativePath]);
+    setGitChangeBaseline(view, baseline && baseline.key === selectedGitFileKey ? baseline.text : null);
+  }, [selectedGitFileKey]);
   React.useEffect(() => {
     applyGitBaseline(editorViewRef.current);
   }, [applyGitBaseline, gitBaseline]);
