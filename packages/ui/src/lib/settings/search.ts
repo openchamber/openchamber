@@ -1367,6 +1367,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
   },
   {
+    // Opens the Antigravity CLI sub-page, which needs the OpenChamber server
+    // that runs agy (VS Code has none).
+    id: 'providers.antigravity',
+    page: 'providers',
+    titleKey: 'settings.providers.antigravity.page.title',
+    descriptionKey: 'settings.providers.antigravity.page.description',
+    keywords: ['antigravity', 'agy', 'gemini', 'google ai', 'subscription', 'delegate', 'delegation', 'subagent', 'cli'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'providers.custom',
     page: 'providers',
     titleKey: 'settings.providers.page.custom.title',

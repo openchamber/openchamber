@@ -391,6 +391,7 @@ The runtime maintains active-session count incrementally from idempotent activit
   - `startHealthMonitoring(healthCheckIntervalMs)`
   - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
+  - `isExternalOpenCode()`: true while the app talks to a server it did not start; the Antigravity delegation status uses it to disable that feature.
 
 Managed OpenCode launch also merges the environment returned by the agent-tool
 runtime and the opt-in system prompt optimizer, each appending its `file://`
@@ -403,7 +404,8 @@ and cannot be replaced by injected or inherited values; OpenCode 2 prefers
 `OPENCODE_PASSWORD`, so both carry the managed password. A user-provided
 password is read with the same precedence, and Basic auth always uses the
 `opencode` username because OpenCode 2 accepts no other. External OpenCode processes receive no
-OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
+OpenChamber tool injection, and Antigravity delegation therefore reports
+`managed: false` there. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
 path (#2588).
 
@@ -1219,11 +1221,18 @@ under a running child.
 - `OPENCHAMBER_AGENT_TOOL_URL` and a fresh `OPENCHAMBER_AGENT_TOOL_TOKEN` are
   always in the child environment, including while every managed tool is off —
   a tool switched on later then reaches a process that can already call back.
+  `OPENCHAMBER_ANTIGRAVITY_URL` and a fresh `OPENCHAMBER_ANTIGRAVITY_TOKEN` sit
+  beside them for the delegation plugin (`../antigravity/runtime.js`), always
+  present for the same reason; the run route re-checks the setting and
+  enterprise mode on every call.
 - `persistSettings` rewrites the file (temp + rename) whenever
   `agentControlToolEnabled`, `agentScheduleToolEnabled`, `agentWebToolEnabled`, `agentMemoryToolEnabled`,
-  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentSecretToolEnabled`, `agentWorkflowToolEnabled` or `agentToolsCodeMode` changes. Plugin directories are written before the
+  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentSecretToolEnabled`, `agentWorkflowToolEnabled`, `agentToolsCodeMode` or
+  `antigravityDelegationEnabled` changes. Plugin directories are written before the
   file names them, and a disabled plugin is removed from the list. OpenCode
-  reloads within a couple of seconds; no restart is involved.
+  reloads within a couple of seconds; no restart is involved. The Antigravity
+  plugin is listed only while delegation is on, enterprise mode is off, and the
+  CLI is installed on this machine.
 - Fallback: when the user's own environment already sets `OPENCODE_CONFIG`,
   OpenChamber does not take it over. It merges its plugin directories into
   `OPENCODE_CONFIG_CONTENT` instead, and those installs keep the old behavior —

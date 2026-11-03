@@ -51,6 +51,18 @@ Aracı, adı olan bir ayardır. Bir model, bir kişilik ve ne yapmasına izin ve
    - **prompt** — her zaman izlediği kalıcı yönergeler
    - **tool rules** — hangi araçları kullanabileceği
 
+## Antigravity'ye iş devretme
+
+Antigravity CLI (`agy`), Google AI Plus, Pro veya Ultra aboneliğinizle ajan için sınırları belirli bir işi çalıştırabilir. Bir sohbet sağlayıcısı değil, devredilmiş bir işçidir; bu yüzden modelleri model seçicide görünmez.
+
+1. Antigravity CLI'yi OpenCode'un çalıştığı makineye kurun ve oturum açmak için `agy`'yi bir kez çalıştırın.
+2. **Ayarlar → Sağlayıcılar → Antigravity CLI** sayfasını açın. Kurulu sürüm ve hesabınızın kullanabileceği modeller görünür.
+3. Bir varsayılan model seçin ve devretmeyi açın.
+
+Ajanlar `agy` aracını alır ve bir işi devretmek için sohbete `/agy` yazabilirsiniz. Antigravity oturum dizininde kendi araçları ve izinleriyle çalışır; devreden ajan sonucu inceler. Headless çalışmalar onay gösteremez, bu yüzden onay gereken bir araç reddedilir ve sonuç hangisi olduğunu söyler. "Komutları sormadan çalıştır" kapalıdır ve komutları her zaman Antigravity'nin terminal korumalı alanında tutar.
+
+Devretme, OpenCode'u OpenChamber'ın başlatmasını gerektirir. OpenChamber harici bir OpenCode sunucusuna bağlıysa sayfa anahtarı devre dışı bırakır. VS Code'ta OpenChamber sunucusu yoktur, bu yüzden Antigravity ayarları da yoktur.
+
 ## Oturum açmalarınız nerede tutulur
 
 Sağlayıcı oturum açmaları OpenChamber'da değil OpenCode'da saklanır. Bu yüzden OpenCode CLI ile paylaşılır. Aynı sağlayıcıyı birden fazla yerde ayarlarsanız en özel ayar kazanır. Proje düzeyindeki ayar, kişisel ayarın üzerine yazar.

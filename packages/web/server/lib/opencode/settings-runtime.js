@@ -79,6 +79,9 @@ const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
   'agentSecretToolEnabled',
   'agentWorkflowToolEnabled',
   'agentToolsCodeMode',
+  // The Antigravity delegation plugin is listed from this switch; its model
+  // and approval choice are read on each run, so they need no rewrite.
+  'antigravityDelegationEnabled',
   // The limit failover plugin loads only while one of these is set.
   'fallbackModel',
   'accountSwitchProviders',

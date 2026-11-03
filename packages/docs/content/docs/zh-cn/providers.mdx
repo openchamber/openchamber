@@ -39,6 +39,18 @@ description: 连接 AI 提供商、选择模型并设置智能体。
    - **prompt** — 它始终遵循的固定指令
    - **tool rules** — 它可以使用哪些工具
 
+## 将工作委派给 Antigravity
+
+Antigravity CLI（`agy`）可以使用你的 Google AI Plus、Pro 或 Ultra 订阅为代理执行范围明确的任务。它是被委派的执行者，不是聊天提供商，因此其模型不会出现在模型选择器中。
+
+1. 在运行 OpenCode 的机器上安装 Antigravity CLI，并运行一次 `agy` 以登录。
+2. 打开 **设置 → 提供商 → Antigravity CLI**。页面显示已安装的版本以及你的账户可用的模型。
+3. 选择默认模型并启用委派。
+
+代理会获得 `agy` 工具，你也可以在聊天中输入 `/agy` 来交付任务。Antigravity 在会话目录中使用自己的工具和权限工作；委派的代理会检查结果。无界面运行无法显示批准提示，因此需要批准的工具会被拒绝，结果会说明是哪一个。“不经询问运行命令”默认关闭，并始终让命令留在 Antigravity 的终端沙箱内。
+
+委派需要由 OpenChamber 启动 OpenCode。当 OpenChamber 连接到外部 OpenCode 服务器时，页面会禁用开关。VS Code 没有 OpenChamber 服务器，因此也没有 Antigravity 设置。
+
 ## 你的登录信息存储在哪里
 
 提供商登录信息由 OpenCode 存储，而非 OpenChamber，因此它们与 OpenCode CLI 共享。如果你在多个地方设置了同一个提供商，最具体的设置会生效：按项目的设置会覆盖你的个人设置。

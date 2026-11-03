@@ -22,10 +22,11 @@ import { SETTINGS_CALLOUT_TITLE_CLASS, SettingsSection } from '@/components/sect
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useEnterpriseMode, useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useRoutingStore } from '@/stores/useRoutingStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { openExternalUrl } from '@/lib/url';
-import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { openExternalUrl } from '@/lib/url';import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
 
 const PROVIDER_POLICIES_DOCS_URL = 'https://opencode.ai/v2/docs/policies/';
 
@@ -141,6 +142,38 @@ const ClassificationCard: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
   );
 };
 
+/**
+ * Antigravity delegation is not an OpenCode provider: it adds the `agy` tool
+ * and `/agy`, and Antigravity stays out of the model picker. It still belongs
+ * on this page, where people look for the services their subscription covers.
+ */
+const AntigravityCard: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
+  const { t } = useI18n();
+  const enabled = useUIStore((state) => state.antigravityDelegationEnabled);
+  const enterpriseLocked = useEnterpriseMode();
+  // The CLI runs beside the OpenChamber server; VS Code has none, so there is
+  // nothing to set up there.
+  if (isVSCodeRuntime()) return null;
+  return (
+    <SettingsCard
+      icon={<Icon name="app-antigravity" className="size-5" />}
+      title={t('settings.providers.antigravity.page.title')}
+      subtitle="agy"
+      badges={(
+        <SettingsCardPill tone={enterpriseLocked ? 'neutral' : enabled ? 'success' : 'neutral'}>
+          {enterpriseLocked
+            ? t('settings.providers.enterpriseTitle')
+            : enabled
+              ? t('settings.providers.antigravity.card.enabled')
+              : t('settings.providers.antigravity.card.notSetUp')}
+        </SettingsCardPill>
+      )}
+      footer={<span className="min-w-0 truncate">{t('settings.providers.antigravity.card.usedFor')}</span>}
+      onOpen={onOpen}
+    />
+  );
+};
+
 type GridProvider = Provider & { models: Model[] };
 
 interface ProviderGridProps {
@@ -151,6 +184,7 @@ interface ProviderGridProps {
   onSelect: (providerId: string) => void;
   onConnect: () => void;
   onOpenClassification: () => void;
+  onOpenAntigravity: () => void;
   /** Providers turned off in the user's config; null where the runtime cannot tell. */
   disabledProviders?: readonly string[] | null;
   onEnableProvider?: (providerId: string) => void;
@@ -212,7 +246,7 @@ const StatusPill: React.FC<{ status: ProviderCardStatus }> = ({ status }) => {
 };
 
 /** Browse view of the Providers page: one card per provider OpenCode reports. */
-export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, disabledProviders, onEnableProvider }) => {
+export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrations, directory, onSelect, onConnect, onOpenClassification, onOpenAntigravity, disabledProviders, onEnableProvider }) => {
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const projectIds = useProjectProviderIds(providers, directory);
@@ -253,6 +287,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
           />
         )}
         {hasQuery ? null : <ClassificationCard onOpen={onOpenClassification} />}
+        {hasQuery ? null : <AntigravityCard onOpen={onOpenAntigravity} />}
         {filtered.map((provider) => {
           const status = getProviderCardStatus({
             integrations,

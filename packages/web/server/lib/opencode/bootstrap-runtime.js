@@ -11,6 +11,7 @@ export const createBootstrapRuntime = (dependencies) => {
     registerNotificationRoutes,
     registerOpenChamberRoutes,
     registerAgentToolRoutes = () => {},
+    registerAntigravityRoutes = () => {},
     express,
   } = dependencies;
 
@@ -67,6 +68,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getCachedZenModels,
       setAutoAcceptSession,
       agentToolRuntime,
+      antigravityRuntime,
       limitFailoverRuntime,
       pluginNotificationEmitter,
       desktopUpdater,
@@ -103,6 +105,7 @@ export const createBootstrapRuntime = (dependencies) => {
     registerCommonRequestMiddleware(app, { express, verboseRequestLogs, skipBodyParsing });
 
     registerAgentToolRoutes(app, { express, agentToolRuntime });
+    registerAntigravityRoutes(app, { express, antigravityRuntime });
     limitFailoverRuntime?.registerRoutes(app, express);
 
     const notificationEmitRoutes = registerNotificationEmitRoutes(app, {

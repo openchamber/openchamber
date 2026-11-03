@@ -166,6 +166,7 @@ import { createRelayService, relayBlockedByEnterprise } from './lib/relay/servic
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createRelayKeyStore } from './lib/relay/key-store.js';
 import { createAgentToolRuntime } from './lib/agent-tool/runtime.js';
+import { createAntigravityRuntime } from './lib/antigravity/runtime.js';
 import { createBrowserControlBroker } from './lib/browser-control/broker.js';
 import { createBrowserControlRouter } from './lib/browser-control/provider.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
@@ -373,6 +374,7 @@ const deleteImportedTheme = (...args) => themeRuntime.deleteImportedTheme(...arg
 
 let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
+let antigravityRuntime = null;
 let limitFailoverRuntime = null;
 let managedConfigRuntime = null;
 
@@ -1646,6 +1648,7 @@ const bootstrapRuntime = createBootstrapRuntime({
   registerNotificationRoutes,
   registerOpenChamberRoutes,
   registerAgentToolRoutes: (app, options) => options.agentToolRuntime.registerRoutes(app, options.express),
+  registerAntigravityRoutes: (app, options) => options.antigravityRuntime?.registerRoutes(app, options.express),
   express,
 });
 const tunnelWiringRuntime = createTunnelWiringRuntime({
@@ -2313,6 +2316,23 @@ async function main(options = {}) {
     // A pipe listener reports a string here, which has no address to bind back to.
     getActiveHost: () => server?.address?.()?.address ?? null,
   });
+  antigravityRuntime = createAntigravityRuntime({
+    crypto,
+    fs,
+    fsPromises,
+    path,
+    spawn,
+    instanceDir,
+    readSettings: () => readSettingsFromDiskMigrated(),
+    resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
+    getActivePort: () => {
+      const address = server?.address?.();
+      return typeof address === 'object' && address ? address.port : null;
+    },
+    getActiveHost: () => server?.address?.()?.address ?? null,
+    getUiAuthController: () => uiAuthController,
+    isExternalOpenCode: () => openCodeLifecycleRuntime.isExternalOpenCode(),
+  });
   limitFailoverRuntime = createLimitFailoverRuntime({
     fsPromises,
     path,
@@ -2327,6 +2347,7 @@ async function main(options = {}) {
     instanceDir,
     env: process.env,
     agentToolRuntime,
+    antigravityRuntime,
     limitFailoverRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
   });
@@ -2726,6 +2747,7 @@ async function main(options = {}) {
     getCachedZenModels,
     setAutoAcceptSession,
     agentToolRuntime,
+    antigravityRuntime,
     limitFailoverRuntime,
     desktopUpdater,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,

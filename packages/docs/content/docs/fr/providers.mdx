@@ -39,6 +39,18 @@ Un agent est une configuration nommée — un modèle, une personnalité et ce q
    - **prompt** — les instructions permanentes qu’il suit toujours
    - **tool rules** — les outils qu’il peut utiliser
 
+## Déléguer du travail à Antigravity
+
+La CLI Antigravity (`agy`) peut exécuter une tâche cadrée pour l’agent avec votre abonnement Google AI Plus, Pro ou Ultra. C’est un travailleur délégué, pas un fournisseur de chat, donc ses modèles n’apparaissent pas dans le sélecteur de modèles.
+
+1. Installez la CLI Antigravity sur la machine qui exécute OpenCode, puis lancez `agy` une fois pour vous connecter.
+2. Ouvrez **Paramètres → Fournisseurs → Antigravity CLI**. La page affiche la version installée et les modèles que votre compte peut utiliser.
+3. Choisissez un modèle par défaut et activez la délégation.
+
+Les agents reçoivent alors l’outil `agy`, et vous pouvez taper `/agy` dans le chat pour confier une tâche. Antigravity travaille dans le dossier de la session avec ses propres outils et permissions ; l’agent qui délègue vérifie le résultat. Les exécutions sans interface ne peuvent pas afficher d’approbation, donc un outil qui en a besoin est refusé et le résultat l’indique. « Exécuter les commandes sans demander » est désactivé et garde les commandes dans le bac à sable de terminal d’Antigravity.
+
+La délégation exige qu’OpenChamber démarre OpenCode. Quand OpenChamber est connecté à un serveur OpenCode externe, la page désactive l’interrupteur. VS Code n’a pas de serveur OpenChamber et donc pas de réglages Antigravity.
+
 ## Où vivent vos connexions
 
 Les connexions aux fournisseurs sont stockées par OpenCode, pas OpenChamber ; elles sont donc partagées avec la CLI OpenCode. Si vous définissez le même fournisseur à plusieurs endroits, le réglage le plus spécifique gagne : un réglage par projet remplace votre réglage personnel.

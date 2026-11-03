@@ -2,7 +2,6 @@ import { appendManagedPermissions, appendManagedPlugin } from './managed-plugin-
 import { managedPermissionRules } from '../agent-tool/runtime.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
-
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
 
 /**
@@ -61,6 +60,7 @@ export const createManagedConfigRuntime = ({
   instanceDir,
   env = process.env,
   agentToolRuntime = null,
+  antigravityRuntime = null,
   limitFailoverRuntime = null,
   readSettings,
 }) => {
@@ -116,6 +116,11 @@ export const createManagedConfigRuntime = ({
     if (agentToolRuntime && limitFailoverRuntime && isLimitFailoverConfigured(settings)) {
       directories.push(await limitFailoverRuntime.materializePlugin());
     }
+    // Delegation to the Antigravity CLI: its own plugin, present only while the
+    // user turned it on, the administrator allows model services, and the CLI
+    // is installed. Verified in the runtime, not from the setting alone.
+    const antigravityDirectory = antigravityRuntime ? await antigravityRuntime.materializePlugin() : null;
+    if (antigravityDirectory) directories.push(antigravityDirectory);
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
     const disabled = includeImage ? [...DISABLED_BUILTIN_PLUGINS, BUILTIN_IMAGE_PLUGIN] : DISABLED_BUILTIN_PLUGINS;
     return { disabled, directories, permissions };
@@ -129,16 +134,17 @@ export const createManagedConfigRuntime = ({
   const buildManagedChildEnv = async () => {
     const enabled = await materializeEnabledPlugins();
     const childEnv = agentToolRuntime ? agentToolRuntime.createChildEnv() : {};
+    const antigravityEnv = antigravityRuntime ? await antigravityRuntime.createChildEnv() : {};
     if (ownsConfigFile()) {
       await writeConfigFile(enabled);
-      return { ...childEnv, OPENCODE_CONFIG: filePath };
+      return { ...childEnv, ...antigravityEnv, OPENCODE_CONFIG: filePath };
     }
     let content = env.OPENCODE_CONFIG_CONTENT;
     for (const directory of [...enabled.disabled, ...enabled.directories]) {
       content = appendManagedPlugin(content, directory, 'managed plugin');
     }
     if (enabled.permissions.length > 0) content = appendManagedPermissions(content, enabled.permissions);
-    return { ...childEnv, OPENCODE_CONFIG_CONTENT: content };
+    return { ...childEnv, ...antigravityEnv, OPENCODE_CONFIG_CONTENT: content };
   };
 
   /**

@@ -67,6 +67,17 @@ writes when the dialog closes, while a new file is only created on confirm.
 
 ## Providers
 
+The Antigravity CLI entry is `providers/AntigravityProvidersPage.tsx`, opened
+from a card in `ProviderGrid` that is hidden in VS Code. It is not an OpenCode
+provider and has no model in the picker: it turns the CLI into the `agy` tool
+and `/agy`, so its card lives beside the classification card rather than in the
+connect flow. Its status comes from `GET /api/antigravity/status`
+(`packages/web/server/lib/antigravity/runtime.js`), which runs `agy models` on
+the host; the page refuses to enable delegation without a model list, and the
+server materializes the plugin only when the CLI is present. The warning under
+"Run commands without asking" stays visible because it changes what Antigravity
+may do to the project.
+
 `providers/` is not an autosave page. Connecting a provider is an action, not a
 setting: an API key is submitted, an OAuth flow is completed, a credential is
 removed. OpenCode owns the credential store and announces every change

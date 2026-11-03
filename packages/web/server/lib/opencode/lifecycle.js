@@ -1556,6 +1556,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   return {
     /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
+    /** True while this app talks to an OpenCode server it did not start. */
+    isExternalOpenCode: () => state.isExternalOpenCode === true,
     /** The directory to scope a server-side OpenCode read that has none, or null once none is usable. */
     getDefaultOpenCodeDirectory: () => getValidatedDefaultDirectory(),
     /**

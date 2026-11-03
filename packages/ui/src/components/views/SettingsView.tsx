@@ -450,6 +450,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       useUIStore.getState().setSettingsProvidersClassificationRequested(true);
     }
 
+    if (result.id === 'providers.antigravity') {
+      useUIStore.getState().setSettingsProvidersOpenRequested('__antigravity__');
+    }
+
     if (result.id === 'plugins.create') {
       return 'plugins.spec';
     }

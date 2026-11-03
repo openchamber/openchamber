@@ -52,6 +52,18 @@ An agent is a named setup — a model, a personality, and what it's allowed to d
    - **prompt** — standing instructions it always follows
    - **tool rules** — which tools it may use
 
+## Delegate work to Antigravity
+
+The Antigravity CLI (`agy`) can run a scoped task for the agent, using your Google AI Plus, Pro or Ultra subscription. It is a delegated worker, not a chat provider, so its models do not appear in the model picker.
+
+1. Install the Antigravity CLI on the machine that runs OpenCode and run `agy` once to sign in.
+2. Open **Settings → Providers → Antigravity CLI**. The page shows the installed version and the models your account can use.
+3. Pick a default model and turn on delegation.
+
+Agents then get an `agy` tool, and you can type `/agy` in chat to hand over a task. Antigravity works in the session's directory with its own tools and permissions; the agent that delegates reviews the result. Headless runs cannot show approval prompts, so a tool that needs one is denied and the result says which. "Run commands without asking" is off by default and always keeps commands inside Antigravity's terminal sandbox.
+
+Delegation needs OpenChamber to start OpenCode. When OpenChamber is connected to an external OpenCode server, the page disables the switch. VS Code has no OpenChamber server, so it has no Antigravity settings.
+
 ## Where your sign-ins live
 
 Provider sign-ins are stored by OpenCode, not OpenChamber, so they're shared with the OpenCode CLI. If you set the same provider in more than one place, the most specific setting wins: a per-project setting overrides your personal one.

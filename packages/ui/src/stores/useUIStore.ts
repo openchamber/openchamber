@@ -1160,6 +1160,12 @@ interface UIStore {
   agentWorkflowToolEnabled: boolean;
   /** Whether OpenChamber's agent tools sit behind OpenCode's Code Mode instead of being direct tools. */
   agentToolsCodeMode: boolean;
+  /** Antigravity delegation: the `agy` tool and `/agy`, never a session model. */
+  antigravityDelegationEnabled: boolean;
+  /** `agy` model id the delegated task uses unless it names one. */
+  antigravityDelegationModel: string;
+  /** Run Antigravity's commands without asking, inside its terminal sandbox. */
+  antigravityDelegationSkipPermissions: boolean;
   /** The isolated-spaces switch as saved; the server applies it at its next start. */
   isolatedSpacesEnabled: boolean;
   /** The permission mode the server writes onto each new top-level session. */
@@ -1462,6 +1468,9 @@ interface UIStore {
   setAgentSecretToolEnabled: (value: boolean) => void;
   setAgentWorkflowToolEnabled: (value: boolean) => void;
   setAgentToolsCodeMode: (value: boolean) => void;
+  setAntigravityDelegationEnabled: (value: boolean) => void;
+  setAntigravityDelegationModel: (value: string) => void;
+  setAntigravityDelegationSkipPermissions: (value: boolean) => void;
   setIsolatedSpacesEnabled: (value: boolean) => void;
   setPermissionDefaultMode: (value: PermissionMode) => void;
   setAgentMemoryFeatureAvailable: (value: boolean) => void;
@@ -1710,6 +1719,9 @@ export const useUIStore = create<UIStore>()(
         agentSecretToolEnabled: true,
         agentWorkflowToolEnabled: false,
         agentToolsCodeMode: false,
+        antigravityDelegationEnabled: false,
+        antigravityDelegationModel: '',
+        antigravityDelegationSkipPermissions: false,
         isolatedSpacesEnabled: false,
         permissionDefaultMode: 'ask',
         agentMemoryFeatureAvailable: false,
@@ -3371,6 +3383,15 @@ export const useUIStore = create<UIStore>()(
         setAgentImageModel: (value) => {
           set({ agentImageModel: value });
         },
+        setAntigravityDelegationEnabled: (value) => {
+          set({ antigravityDelegationEnabled: value });
+        },
+        setAntigravityDelegationModel: (value) => {
+          set({ antigravityDelegationModel: value });
+        },
+        setAntigravityDelegationSkipPermissions: (value) => {
+          set({ antigravityDelegationSkipPermissions: value });
+        },
         setAgentRenderToolEnabled: (value) => {
           set({ agentRenderToolEnabled: value });
         },
@@ -3939,6 +3960,9 @@ export const useUIStore = create<UIStore>()(
           agentSecretToolEnabled: state.agentSecretToolEnabled,
           agentWorkflowToolEnabled: state.agentWorkflowToolEnabled,
           agentToolsCodeMode: state.agentToolsCodeMode,
+          antigravityDelegationEnabled: state.antigravityDelegationEnabled,
+          antigravityDelegationModel: state.antigravityDelegationModel,
+          antigravityDelegationSkipPermissions: state.antigravityDelegationSkipPermissions,
           isolatedSpacesEnabled: state.isolatedSpacesEnabled,
           permissionDefaultMode: state.permissionDefaultMode,
           agentMemoryViewedAt: state.agentMemoryViewedAt,

@@ -63,6 +63,11 @@ import { z } from 'zod';
  *   is hidden (`packages/ui` IntegrationsPage). The plugin itself is not
  *   refused: OpenCode's `provider.use` policy covers `claude-code` like any
  *   other provider.
+ * - Delegation to the Antigravity CLI is off: the managed plugin is not
+ *   materialized, its run route refuses every call, and the status route does
+ *   not start the CLI at all (`antigravity/runtime.js`). The CLI reaches Google
+ *   with a sign-in OpenChamber does not manage, so it is a model service
+ *   outside the OpenCode config.
  * - The server listens only on this machine unless network access is allowed
  *   (`allowNetworkAccess` / `OPENCHAMBER_ALLOW_NETWORK_ACCESS`): it refuses
  *   to start on a network address and drops connections from other machines

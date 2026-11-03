@@ -310,6 +310,11 @@ export const SETTINGS_REGISTRY = {
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),
   agentKnowledgeToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentKnowledgeToolEnabled', (v) => useUIStore.getState().setAgentKnowledgeToolEnabled(v)) }),
   agentWorkflowToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWorkflowToolEnabled', (v) => useUIStore.getState().setAgentWorkflowToolEnabled(v)) }),
+  // Delegation to the Antigravity CLI: an agent tool and a slash command, never
+  // a session model. The server materializes its plugin from these values.
+  antigravityDelegationEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('antigravityDelegationEnabled', (v) => useUIStore.getState().setAntigravityDelegationEnabled(v)) }),
+  antigravityDelegationModel: field({ scope: 'instance', parse: parseNonEmptyString, ui: uiStore('antigravityDelegationModel', (v) => useUIStore.getState().setAntigravityDelegationModel(v)) }),
+  antigravityDelegationSkipPermissions: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('antigravityDelegationSkipPermissions', (v) => useUIStore.getState().setAntigravityDelegationSkipPermissions(v)) }),
   // The isolated-spaces switch. The server reads it once at start; a change takes effect at the
   // next start, which the settings row says. Never shown in VS Code (decision 16 of the design).
   isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('isolatedSpacesEnabled', (v) => useUIStore.getState().setIsolatedSpacesEnabled(v)) }),

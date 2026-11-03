@@ -66,6 +66,48 @@ describe('managed OpenCode config file', () => {
     }
   });
 
+  it('adds the Antigravity plugin and its callback credentials only while its runtime offers them', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
+    temporaryDirectories.push(dataDir);
+    const antigravityDirectory = path.join(dataDir, 'antigravity', 'openchamber-antigravity');
+    await fs.mkdir(antigravityDirectory, { recursive: true });
+    const titleDirectory = path.join(dataDir, 'session-title', 'openchamber-session-title');
+    const antigravityRuntime = {
+      materializePlugin: vi.fn(async () => antigravityDirectory),
+      createChildEnv: vi.fn(async () => ({ OPENCHAMBER_ANTIGRAVITY_URL: 'http://127.0.0.1:3901/api/antigravity/run', OPENCHAMBER_ANTIGRAVITY_TOKEN: 'agy-token' })),
+    };
+    const runtime = createManagedConfigRuntime({
+      fsPromises: fs,
+      path,
+      instanceDir: dataDir,
+      env: {},
+      agentToolRuntime: { materializePlugin: vi.fn(async () => null), createChildEnv: () => ({}) },
+      antigravityRuntime,
+      readSettings: () => ({
+        agentControlToolEnabled: false,
+        agentScheduleToolEnabled: false,
+        agentWebToolEnabled: false,
+        agentKnowledgeToolEnabled: false,
+        agentRenderToolEnabled: false,
+        agentSecretToolEnabled: false,
+        antigravityDelegationEnabled: true,
+      }),
+    });
+    const readConfig = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
+
+    const childEnv = await runtime.buildManagedChildEnv();
+    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', antigravityDirectory, titleDirectory] });
+    expect(childEnv.OPENCHAMBER_ANTIGRAVITY_TOKEN).toBe('agy-token');
+
+    // The runtime refuses (off, enterprise mode, CLI absent) by returning null;
+    // the managed config must then drop the plugin and its credentials.
+    antigravityRuntime.materializePlugin.mockResolvedValue(null);
+    antigravityRuntime.createChildEnv.mockResolvedValue({});
+    const nextEnv = await runtime.buildManagedChildEnv();
+    expect(await readConfig()).toEqual({ plugins: ['-opencode.browser', titleDirectory] });
+    expect(nextEnv.OPENCHAMBER_ANTIGRAVITY_TOKEN).toBeUndefined();
+  });
+
   it('lists the limit failover plugin only while a fallback model or an account switch is set', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
     temporaryDirectories.push(dataDir);

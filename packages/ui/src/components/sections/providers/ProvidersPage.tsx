@@ -42,6 +42,7 @@ import {
 import { ProviderGrid } from './ProviderGrid';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
+import { AntigravityProvidersPage } from './AntigravityProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import { ProviderAccounts } from './ProviderAccounts';
 import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
@@ -85,6 +86,8 @@ const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<vo
 const ADD_PROVIDER_ID = '__add_provider__';
 /** Not an OpenCode provider id: the page for OpenChamber's own classification providers (Jev). */
 const CLASSIFICATION_PAGE_ID = '__classification__';
+/** Not an OpenCode provider id: delegation to the Antigravity CLI. */
+export const ANTIGRAVITY_PAGE_ID = '__antigravity__';
 
 interface ProviderSourceInfo {
   exists: boolean;
@@ -301,7 +304,7 @@ export const ProvidersPage: React.FC = () => {
   }, [selectedProviderId, editingCustomProviderId]);
 
   React.useEffect(() => {
-    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID) {
+    if (!selectedProviderId || selectedProviderId === ADD_PROVIDER_ID || selectedProviderId === CLASSIFICATION_PAGE_ID || selectedProviderId === ANTIGRAVITY_PAGE_ID) {
       return;
     }
 
@@ -565,6 +568,10 @@ export const ProvidersPage: React.FC = () => {
     return <ClassificationProvidersPage titleLeading={backButton} onOpenProvider={openProviderForKey} />;
   }
 
+  if (selectedProviderId === ANTIGRAVITY_PAGE_ID) {
+    return <AntigravityProvidersPage titleLeading={backButton} />;
+  }
+
   // Enterprise mode: the way in stays hidden and the server refuses anyway.
   if (isAddMode && !enterpriseLocked && !candidateProviderId) {
     return (
@@ -666,6 +673,7 @@ export const ProvidersPage: React.FC = () => {
         onSelect={setSelectedProvider}
         onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
         onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
+        onOpenAntigravity={() => setSelectedProvider(ANTIGRAVITY_PAGE_ID)}
         disabledProviders={disabledProviders}
         onEnableProvider={(providerId) => void handleProviderDisabled(providerId, false)}
       />

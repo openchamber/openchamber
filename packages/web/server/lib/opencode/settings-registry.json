@@ -201,6 +201,15 @@
     "agentWorkflowToolEnabled": {
       "scope": "instance"
     },
+    "antigravityDelegationEnabled": {
+      "scope": "instance"
+    },
+    "antigravityDelegationModel": {
+      "scope": "instance"
+    },
+    "antigravityDelegationSkipPermissions": {
+      "scope": "instance"
+    },
     "isolatedSpacesEnabled": {
       "scope": "instance"
     },

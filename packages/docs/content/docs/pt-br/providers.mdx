@@ -39,6 +39,18 @@ Um agente é uma configuração nomeada — um modelo, uma personalidade e o que
    - **prompt** — instruções permanentes que ele sempre segue
    - **tool rules** — quais ferramentas ele pode usar
 
+## Delegar trabalho ao Antigravity
+
+A CLI do Antigravity (`agy`) pode executar uma tarefa bem definida para o agente com sua assinatura Google AI Plus, Pro ou Ultra. Ela é um executor delegado, não um provedor de chat, então os modelos não aparecem no seletor de modelos.
+
+1. Instale a CLI do Antigravity na máquina que executa o OpenCode e execute `agy` uma vez para entrar.
+2. Abra **Configurações → Provedores → Antigravity CLI**. A página mostra a versão instalada e os modelos que sua conta pode usar.
+3. Escolha um modelo padrão e ative a delegação.
+
+Os agentes passam a ter a ferramenta `agy`, e você pode digitar `/agy` no chat para entregar uma tarefa. O Antigravity trabalha no diretório da sessão com as próprias ferramentas e permissões; o agente que delegou revisa o resultado. Execuções sem interface não podem mostrar aprovações, então uma ferramenta que precise de uma é negada e o resultado indica qual. "Executar comandos sem perguntar" fica desligado e mantém os comandos dentro do sandbox de terminal do Antigravity.
+
+A delegação exige que o OpenChamber inicie o OpenCode. Quando o OpenChamber está conectado a um servidor OpenCode externo, a página desativa o interruptor. O VS Code não tem servidor do OpenChamber, então não tem ajustes do Antigravity.
+
 ## Onde ficam seus logins
 
 Os logins de provedores são armazenados pelo OpenCode, não pelo OpenChamber, então são compartilhados com a CLI do OpenCode. Se você definir o mesmo provedor em mais de um lugar, a configuração mais específica vence: uma configuração por projeto sobrescreve a sua pessoal.

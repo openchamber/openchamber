@@ -925,6 +925,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentToolsCodeMode === 'boolean') {
       result.agentToolsCodeMode = candidate.agentToolsCodeMode;
     }
+    if (candidate.antigravityDelegationEnabled === true || candidate.antigravityDelegationEnabled === false) {
+      result.antigravityDelegationEnabled = candidate.antigravityDelegationEnabled;
+    }
+    // An id from `agy models`; the CLI rejects anything else, so only the shape
+    // is checked here (a model id may carry dots and dashes).
+    const antigravityModel = asNonEmptyString(candidate.antigravityDelegationModel);
+    if (antigravityModel && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(antigravityModel)) {
+      result.antigravityDelegationModel = antigravityModel;
+    }
+    if (candidate.antigravityDelegationSkipPermissions === true || candidate.antigravityDelegationSkipPermissions === false) {
+      result.antigravityDelegationSkipPermissions = candidate.antigravityDelegationSkipPermissions;
+    }
     if (typeof candidate.isolatedSpacesEnabled === 'boolean') {
       result.isolatedSpacesEnabled = candidate.isolatedSpacesEnabled;
     }
