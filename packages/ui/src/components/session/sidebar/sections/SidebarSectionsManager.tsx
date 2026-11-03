@@ -21,6 +21,7 @@ import {
 import { SettingsChipGroup } from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { projectPathFromId } from '@/lib/projectId';
 import {
   createSidebarSectionFromTemplate,
   DEFAULT_PIN_LIST,
@@ -561,7 +562,9 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
                 <span className="flex h-6 shrink-0 items-center typography-ui-label text-muted-foreground">{categoryLabel}</span>
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 py-0.5">
                   {values.map((value) => {
-                    const label = options.find((option) => option.value === value)?.label ?? value;
+                    const path = projectPathFromId(value);
+                    const label = options.find((option) => option.value === value)?.label
+                      ?? (path ? formatDirectoryName(path, null) : value);
                     return (
                       <span key={value} className="oc-tile-inset inline-flex h-5 min-w-0 max-w-full items-center gap-0.5 rounded ps-1.5 typography-micro text-foreground">
                         <span className="min-w-0 truncate" dir="auto">{label}</span>
