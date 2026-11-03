@@ -9,7 +9,9 @@
  */
 import * as React from 'react';
 
+import { isVideoSource } from '@/components/chat/markdown/markdownVideo';
 import type { RepositoryReference } from '@/lib/api/types';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
@@ -47,10 +49,10 @@ export const rewriteProjectUploads = (markdown: string, urls: ProjectUploadUrls)
     return result + rewrite(markdown.slice(last));
 };
 
-const uploadUrls = (context: SourceControlReadContext, project: RepositoryReference['sourceRepo']): ProjectUploadUrls => ({
-    // Signed with the token current at the time, so every item read later
-    // gets a fresh one; a clip whose token expired retries (markdownVideo.ts).
-    media: (path) => new URL(getRuntimeUrlResolver().authenticatedAsset(`/api/source-control/${encodeURIComponent(context.provider)}${path}`, {
+export const uploadUrls = (context: SourceControlReadContext, project: RepositoryReference['sourceRepo']): ProjectUploadUrls => {
+    const link = (path: string) => new URL(`${joinProjectPath(project.owner, project.repo)}${path}`, `${context.instance.replace(/\/+$/, '')}/`).toString();
+    const route = (path: string) => `/api/source-control/${encodeURIComponent(context.provider)}${path}`;
+    const query = {
         instance: context.instance,
         directory: context.directory,
         repositoryId: context.repositoryId,
@@ -59,9 +61,24 @@ const uploadUrls = (context: SourceControlReadContext, project: RepositoryRefere
         primaryRemote: context.primaryRemote,
         owner: project.owner,
         repo: project.repo,
-    }), window.location.href).toString(),
-    link: (path) => new URL(`${joinProjectPath(project.owner, project.repo)}${path}`, `${context.instance.replace(/\/+$/, '')}/`).toString(),
-});
+    };
+    return {
+        media: (path) => {
+            // A URL the browser loads itself never enters the relay tunnel. A
+            // picture keeps the server path, which the media owner reads through
+            // the tunnel; a clip can be too large to read whole, so it points at
+            // the file on the host and falls back to a link when it cannot play.
+            if (isRelayModeActive()) {
+                if (isVideoSource(path)) return link(path);
+                return `${route(path)}?${new URLSearchParams({ ...query, bindingRevision: String(query.bindingRevision) })}`;
+            }
+            // Signed with the token current at the time, so every item read later
+            // gets a fresh one; a clip whose token expired retries (markdownVideo.ts).
+            return new URL(getRuntimeUrlResolver().authenticatedAsset(route(path), query), window.location.href).toString();
+        },
+        link,
+    };
+};
 
 /**
  * How an item's description and notes read for display, or null when nothing
