@@ -604,9 +604,10 @@ const pendingSessionLinksSchema = z.array(z.object({
   sessionId: z.string().min(1),
   messageId: z.string().min(1).optional(),
   runtimeKey: z.string().min(1).optional(),
+  requireKnownSession: z.boolean().optional(),
 }));
 
-type PendingDesktopSessionLink = { sessionId: string; messageId: string | null; runtimeKey: string | null };
+type PendingDesktopSessionLink = { sessionId: string; messageId: string | null; runtimeKey: string | null; requireKnownSession: boolean };
 
 /**
  * Session links (`openchamber://session/...`) that reached the desktop app
@@ -624,6 +625,7 @@ export const takePendingDesktopSessionLinks = async (): Promise<PendingDesktopSe
         sessionId: link.sessionId,
         messageId: link.messageId ?? null,
         runtimeKey: link.runtimeKey ?? null,
+        requireKnownSession: link.requireKnownSession === true,
       }))
       : [];
   } catch (error) {

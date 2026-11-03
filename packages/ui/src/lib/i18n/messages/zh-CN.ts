@@ -626,6 +626,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.actions.more': '更多',
   'sessions.sidebar.header.actions.exitSelection': '退出选择',
   'sessions.sidebar.header.actions.selectSessions': '选择会话',
+  'sessions.sidebar.header.actions.markAllRead': '全部标为已读',
   'sessions.sidebar.header.actions.sortProjects': '排序项目',
   'sessions.sidebar.header.actions.sessionDisplayMode': '会话显示模式',
   'sessions.sidebar.header.displayMode.label': '显示模式',

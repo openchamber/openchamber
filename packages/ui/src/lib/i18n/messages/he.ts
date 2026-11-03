@@ -572,6 +572,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'עוד',
   'sessions.sidebar.header.actions.exitSelection': 'צא ממצב בחירה',
   'sessions.sidebar.header.actions.selectSessions': 'בחר הפעלות',
+  'sessions.sidebar.header.actions.markAllRead': 'סמן הכול כנקרא',
   'sessions.sidebar.header.actions.sortProjects': 'מיון פרויקטים',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'מצב תצוגת הפעלות',
   'sessions.sidebar.header.displayMode.label': 'מצב תצוגה',

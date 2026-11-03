@@ -384,6 +384,23 @@ An exit requested during entry remains queued in Electron even after an explicit
 
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart. While disabled, Desktop skips the native tray controller, tray-specific subscriptions, polling, and quota refresh. Dock badges remain independent: unread activity, session membership, and badge preferences still update the Dock through the shared IPC command. Turning off the Dock badge clears its count without enabling the menu bar item.
 
+The Dock's context menu lists up to 10 unread sessions, newest completed turn
+first, from the same sidebar-visible set as its badge. A session opens through
+the tray's session action route. Mark all as read reaches the renderer even
+with the menu bar disabled. Turning off the Dock badge also clears this menu;
+an empty unread list offers no actions. Native labels follow the preferred UI locale.
+
+Packaged Windows exposes the same unread set in a custom taskbar jump-list
+category and a Mark all as read task. Session items launch the executable with
+the existing session deep link, strictly validating its ID and checking global
+session membership before selection. Mark-all launches with `--mark-all-read`;
+main queues it until the renderer has registered its action listener, and the
+renderer waits for the global list. Unchanged lists are not rewritten. Empty
+lists clear the custom jump list. Windows-removed items are excluded by their
+launch arguments before deduplication, so re-adding one cannot drop the category.
+Development skips jump lists because Electron's
+executable needs a separate app-path argument to relaunch this checkout.
+
 An enabled tray loads the dropdown providers' quota once after renderer runtime
 initialization when no sample has loaded. The native Menu `menu-will-show` event
 requests a quota refresh through `openchamber:tray-action` before or as the menu

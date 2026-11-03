@@ -625,6 +625,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'Meer',
   'sessions.sidebar.header.actions.exitSelection': 'Selectie verlaten',
   'sessions.sidebar.header.actions.selectSessions': 'Sessies selecteren',
+  'sessions.sidebar.header.actions.markAllRead': 'Alles als gelezen markeren',
   'sessions.sidebar.header.actions.sortProjects': 'Projecten sorteren',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Weergavemodus sessies',
   'sessions.sidebar.header.displayMode.label': 'Weergavemodus',

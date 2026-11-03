@@ -19,6 +19,7 @@ import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
 import { attachWindowVisibility, isNativeWindowVisible } from './window-visibility.mjs';
 import { createTrayController } from './tray.mjs';
+import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
@@ -1973,6 +1974,9 @@ const setTaskbarProgress = (value) => {
 };
 
 const pendingDeepLinks = [];
+let pendingMarkAllRead = process.platform === 'win32' && process.argv.includes('--mark-all-read');
+let mainWindowTrayActionsReady = false;
+let lastJumpListKey = '';
 const PENDING_SESSION_LINK_FALLBACK_MS = 10_000;
 
 // A session link (`openchamber://session/<id>`) can also name the message to
@@ -1981,6 +1985,7 @@ const PENDING_SESSION_LINK_FALLBACK_MS = 10_000;
 // another host in that host's window, as for a notification click.
 const sessionDeepLinkTarget = (link) => {
   const target = { sessionId: link.value };
+  if (readDeepLinkQueryParam(link.raw, 'source') === 'jump-list') target.requireKnownSession = true;
   const messageId = readDeepLinkQueryParam(link.raw, 'message');
   if (messageId) target.messageId = messageId;
   const runtimeKey = runtimeKeyForDeepLinkHost(readDeepLinkQueryParam(link.raw, 'host'));
@@ -2014,6 +2019,8 @@ const parseDeepLink = (raw) => {
     const value = segments.length > 0
       ? decodeURIComponent(segments.join('/'))
       : '';
+    if (url.searchParams.get('source') === 'jump-list'
+      && (type !== 'session' || !isJumpListSessionId(value) || segments.length !== 1)) return null;
     return { type, value, raw: trimmed };
   } catch {
     return null;
@@ -2719,6 +2726,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   browserWindow.on('closed', () => {
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
+      mainWindowTrayActionsReady = false;
       state.mainWindow = null;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2810,6 +2818,11 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   // same fallback a window that has not reported yet uses.
   browserWindow.webContents.on('did-navigate', (_event, url) => {
     if (!isAppUiNavigationTarget(url)) browserWindow.__ocRuntimeKey = null;
+  });
+  browserWindow.webContents.on('did-start-navigation', (details) => {
+    if (browserWindow === state.mainWindow && details.isMainFrame && !details.isSameDocument) {
+      mainWindowTrayActionsReady = false;
+    }
   });
 
   // An extension frame navigating itself would carry data out in the URL;
@@ -4728,6 +4741,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return true;
     }
 
+    case 'desktop_tray_actions_ready':
+      if (browserWindow !== state.mainWindow) return null;
+      mainWindowTrayActionsReady = true;
+      if (pendingMarkAllRead) {
+        pendingMarkAllRead = false;
+        void dispatchTrayAction({ type: 'mark-all-read' });
+      }
+      return null;
+
     case 'desktop_tray_update':
       if (state.trayController) {
         try {
@@ -4743,6 +4765,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         const rawCount = args && typeof args.dockBadgeCount === 'number' ? args.dockBadgeCount : 0;
         const badgeCount = Number.isFinite(rawCount) ? Math.max(0, Math.floor(rawCount)) : 0;
         applyDockBadge(app, badgeCount);
+        if (process.platform === 'darwin' && app.dock) {
+          const template = buildDockMenuTemplate(args, {
+            locale: normalizeMenuLocale(readPreferredLocale()),
+            onAction: (action) => { void dispatchTrayAction(action); },
+          });
+          app.dock.setMenu(template.length > 0 ? Menu.buildFromTemplate(template) : null);
+        }
+        if (process.platform === 'win32' && app.isPackaged) {
+          const jumpList = buildUnreadJumpList(args, {
+            execPath: process.execPath, locale: normalizeMenuLocale(readPreferredLocale()),
+            removedItems: app.getJumpListSettings().removedItems,
+          });
+          const key = JSON.stringify(jumpList);
+          if (key !== lastJumpListKey) {
+            const result = app.setJumpList(jumpList);
+            if (result === 'ok') lastJumpListKey = key;
+            else log.warn('[electron] unread jump list update failed', { result });
+          }
+        }
       } catch (error) {
         log.warn('[electron] dock badge update failed', error);
       }
@@ -5837,6 +5878,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_get_lan_address',
   'desktop_capture_page_rect',
   'desktop_tray_update',
+  'desktop_tray_actions_ready',
   // A remote page can only dismiss delivered notifications of a session id it names.
   'desktop_clear_session_notifications',
 ]);
@@ -6091,7 +6133,7 @@ const dispatchTrayAction = async (action) => {
   }
 
   // Responding to a permission doesn't need to steal focus — just deliver it.
-  if (action.type === 'respond-permission') {
+  if (action.type === 'respond-permission' || action.type === 'mark-all-read') {
     const target = (state.mainWindow && !state.mainWindow.isDestroyed())
       ? state.mainWindow
       : await revealMainWindow();
@@ -6177,6 +6219,13 @@ app.on('before-quit', (event) => {
 });
 
 const handleSecondInstance = (argv) => {
+  if (process.platform === 'win32' && Array.isArray(argv) && argv.includes('--mark-all-read')) {
+    pendingMarkAllRead = true;
+    if (mainWindowTrayActionsReady) {
+      pendingMarkAllRead = false;
+      void dispatchTrayAction({ type: 'mark-all-read' });
+    }
+  }
   const urls = Array.isArray(argv)
     ? argv.filter((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`))
     : [];

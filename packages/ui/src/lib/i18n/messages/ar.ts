@@ -572,6 +572,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'المزيد',
   'sessions.sidebar.header.actions.exitSelection': 'إنهاء التحديد',
   'sessions.sidebar.header.actions.selectSessions': 'تحديد الجلسات',
+  'sessions.sidebar.header.actions.markAllRead': 'تعليم الكل كمقروء',
   'sessions.sidebar.header.actions.sortProjects': 'فرز المشاريع',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'وضع عرض الجلسات',
   'sessions.sidebar.header.displayMode.label': 'وضع العرض',

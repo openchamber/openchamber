@@ -626,6 +626,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.actions.more': 'その他',
   'sessions.sidebar.header.actions.exitSelection': '選択を終了',
   'sessions.sidebar.header.actions.selectSessions': 'セッションを選択',
+  'sessions.sidebar.header.actions.markAllRead': 'すべて既読にする',
   'sessions.sidebar.header.actions.sortProjects': 'プロジェクトを並べ替え',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'セッション表示モード',
   'sessions.sidebar.header.displayMode.label': '表示モード',

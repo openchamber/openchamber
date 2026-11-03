@@ -8,7 +8,7 @@ kept at this root in `types.ts` and `utils.tsx`.
   layout-owned synchronization, authoritative cleanup, and nearby-session prefetch.
 - `projects/` owns project zones, grouping, ordering, scroller behavior, project
   view state, repository state, and worktree presentation.
-- `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators. A collapsed group or folder shows one indicator for its hidden sessions: a pending permission (shield) outranks a pending question, which outranks a running turn, which outranks unread. Pending requests are read from the cross-directory `global-blocking-requests` index, so a project never opened in this launch still shows them; running and unread come from the global status index and the notification store.
+- `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators. Collapsed headers and Show more controls share one indicator for their hidden sessions: a pending permission (shield) outranks a pending question, which outranks a running turn, which outranks unread. Pending requests are read from the cross-directory `global-blocking-requests` index, so a project never opened in this launch still shows them; running and unread come from the global status index and the global session store.
 - `recent/` owns the In work and timeline row projections and session
   locations (the name predates the removal of Recent).
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.
@@ -513,8 +513,11 @@ then Sections…, which opens the sections manager beside the sidebar (the order
 each section's visibility, "Also show in work under projects" under In work
 (`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default) and the user's
 own sections), Detailed rows, "Name worktrees by branch", then Collapse all /
-Expand all. The phone's display menu keeps its toggles and lists the user's
-sections as toggles too; it has no manager.
+Expand all, and last Mark all as read, which marks every unread session the
+client knows of seen (`markAllSessionsViewed`), hidden sections included, and
+is disabled while none is unread. The phone's display menu keeps its toggles
+and lists the user's sections as toggles too; it has no manager. It ends with
+the same Mark all as read.
 
 - Chats rows are one line with the tree's slot (`'tree-chat'`). Chats open
   with a reveal of 3 and 7 more per Show more; pinned chats are always shown
@@ -1032,6 +1035,9 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   something is hidden, Show less once more than the first batch shows
   (maintainer, 2026-10-27). Reveal
   controls change the logical list, not the viewport's bounded mounted window.
+  Show more carries the collapsed-header activity indicator after its label,
+  covering only the sessions it hides, including runs and worktree contents.
+  Desktop and phone mount its activity subscriptions only while Show more exists.
 - Archiving or deleting a session includes its OpenCode subsessions and linked review sessions on every surface. Forks and promoted `/btw` sessions stay active. Rows pass only their `parentID` descendants (`collectParentIdDescendantIds`); `collectSessionSubtreeIds` adds global action lineage from `stores/sessionLineage.ts`, including reviews linked by `originalSessionID`, even when a row renders no children or a review lives in another directory. Archive reaches active descendants below archived intermediates without restamping those intermediates; delete includes archived descendants too. Restore brings back archived subsessions and reviews, stopping at active intermediates. `sessions/sessionSubtreeActions.ts` owns the store calls, partial-failure toasts and exact-ID Undo. The project menu's "Archive all" includes descendants of each selected session in the same batch; its dialog and success toast count top-level sessions.
 - Subsessions belong to the agent run that spawned them, not to the user. They appear only nested under an active parent: the archive (sidebar bucket, auto folders and the Archive page) lists top-level sessions only, an archived subsession or one under an archived parent is hidden rather than promoted to a row of its own, and there is no restore for a subsession; it comes back when its parent is restored. A subsession whose parent is not loaded yet stays visible as a root.
 - Folder membership may contain both a parent session and its descendants. Rendering treats only the highest assigned ancestors as folder roots because their normal session trees already include assigned descendants; persisted membership remains unchanged for cleanup and move semantics.

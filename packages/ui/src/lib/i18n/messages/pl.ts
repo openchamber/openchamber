@@ -464,6 +464,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.actions.more': 'Więcej',
   'sessions.sidebar.header.actions.exitSelection': 'Wyjdź z zaznaczenia',
   'sessions.sidebar.header.actions.selectSessions': 'Wybierz sesje',
+  'sessions.sidebar.header.actions.markAllRead': 'Oznacz wszystkie jako przeczytane',
   'sessions.sidebar.header.actions.sortProjects': 'Sortuj projekty',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Tryb wyświetlania sesji',
   'sessions.sidebar.header.displayMode.label': 'Tryb wyświetlania',

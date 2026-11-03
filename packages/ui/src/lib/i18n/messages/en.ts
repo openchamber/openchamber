@@ -625,6 +625,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'More',
   'sessions.sidebar.header.actions.exitSelection': 'Exit selection',
   'sessions.sidebar.header.actions.selectSessions': 'Select sessions',
+  'sessions.sidebar.header.actions.markAllRead': 'Mark all as read',
   'sessions.sidebar.header.actions.sortProjects': 'Sort projects',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Session display mode',
   'sessions.sidebar.header.displayMode.label': 'Display mode',

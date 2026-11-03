@@ -573,6 +573,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'Mehr',
   'sessions.sidebar.header.actions.exitSelection': 'Auswahl beenden',
   'sessions.sidebar.header.actions.selectSessions': 'Sitzungen auswählen',
+  'sessions.sidebar.header.actions.markAllRead': 'Alle als gelesen markieren',
   'sessions.sidebar.header.actions.sortProjects': 'Projekte sortieren',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Sitzungs-Anzeigemodus',
   'sessions.sidebar.header.displayMode.label': 'Anzeigemodus',

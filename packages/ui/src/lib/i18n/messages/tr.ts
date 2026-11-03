@@ -547,6 +547,7 @@ export const dict = {
   'sessions.sidebar.header.actions.more': 'Daha fazla',
   'sessions.sidebar.header.actions.exitSelection': 'Seçimden çık',
   'sessions.sidebar.header.actions.selectSessions': 'Session\'ları seç',
+  'sessions.sidebar.header.actions.markAllRead': 'Tümünü okundu olarak işaretle',
   'sessions.sidebar.header.actions.sortProjects': 'Projeleri sırala',
   'sessions.sidebar.header.actions.sessionDisplayMode': 'Session görüntüleme modu',
   'sessions.sidebar.header.displayMode.label': 'Görüntüleme modu',
