@@ -20,6 +20,7 @@ import { persistMainWindowState } from './window-state.mjs';
 import { attachWindowVisibility, isNativeWindowVisible } from './window-visibility.mjs';
 import { createTrayController } from './tray.mjs';
 import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
+import { createSessionLinkGate } from './session-link-gate.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
@@ -37,6 +38,7 @@ import {
   buildMainWindowOptions,
   buildRendererAdditionalArguments,
   buildStartupSplashUrl,
+  isStartupSplashUrl,
   getLoginItemOptions,
   getWindowIconPath,
   installPackagedUiRequestHandler,
@@ -2180,8 +2182,8 @@ const dispatchDeepLink = (link) => {
 
 // Session links wait for the renderer to take them (desktop_take_pending_session_links)
 // once its listener is mounted: an event sent when the page has merely loaded
-// reached no listener on a cold start and the link was lost. The late flush
-// still delivers them to a renderer that never asks (an older remote UI).
+// reached no listener on a cold start and the link was lost. The gate's fallback
+// still delivers them to a renderer that never asks (a remote page).
 const flushPendingDeepLinks = ({ includeSessions }) => {
   const kept = [];
   while (pendingDeepLinks.length > 0) {
@@ -2195,6 +2197,11 @@ const flushPendingDeepLinks = ({ includeSessions }) => {
   pendingDeepLinks.push(...kept);
 };
 
+const mainWindowSessionLinkGate = createSessionLinkGate({
+  fallbackMs: PENDING_SESSION_LINK_FALLBACK_MS,
+  onFallback: () => flushPendingDeepLinks({ includeSessions: true }),
+});
+
 const isMainWindowReadyForDeepLink = () =>
   Boolean(state.mainWindow)
   && !state.mainWindow.isDestroyed()
@@ -2204,7 +2211,7 @@ const handleDeepLinks = (urls) => {
   for (const raw of urls) {
     const parsed = parseDeepLink(raw);
     if (!parsed) continue;
-    if (isMainWindowReadyForDeepLink()) {
+    if (isMainWindowReadyForDeepLink() && (parsed.type !== 'session' || mainWindowSessionLinkGate.isListening())) {
       dispatchDeepLink(parsed);
     } else {
       pendingDeepLinks.push(parsed);
@@ -2727,6 +2734,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       mainWindowTrayActionsReady = false;
+      mainWindowSessionLinkGate.documentReplaced();
       state.mainWindow = null;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2818,6 +2826,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   // same fallback a window that has not reported yet uses.
   browserWindow.webContents.on('did-navigate', (_event, url) => {
     if (!isAppUiNavigationTarget(url)) browserWindow.__ocRuntimeKey = null;
+    // On commit: a navigation that only started can still leave this document in place.
+    if (browserWindow === state.mainWindow) mainWindowSessionLinkGate.documentReplaced();
   });
   browserWindow.webContents.on('did-start-navigation', (details) => {
     if (browserWindow === state.mainWindow && details.isMainFrame && !details.isSameDocument) {
@@ -2878,11 +2888,12 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
     }
-    if (state.mainWindow && browserWindow.id === state.mainWindow.id && pendingDeepLinks.length > 0) {
-      const timer = setTimeout(() => flushPendingDeepLinks({ includeSessions: false }), 400);
-      if (typeof timer?.unref === 'function') timer.unref();
-      const lateTimer = setTimeout(() => flushPendingDeepLinks({ includeSessions: true }), PENDING_SESSION_LINK_FALLBACK_MS);
-      if (typeof lateTimer?.unref === 'function') lateTimer.unref();
+    if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
+      if (pendingDeepLinks.length > 0) {
+        const timer = setTimeout(() => flushPendingDeepLinks({ includeSessions: mainWindowSessionLinkGate.isListening() }), 400);
+        if (typeof timer?.unref === 'function') timer.unref();
+      }
+      if (!isStartupSplashUrl(browserWindow.webContents.getURL())) mainWindowSessionLinkGate.applicationDocumentLoaded();
     }
   });
 
@@ -3416,9 +3427,7 @@ const resolveMiniChatRuntimeConfig = (browserWindow, args = {}) => {
 const showSplashStatus = (text) => {
   const mainWindow = state.mainWindow;
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  // Development shows the splash as a data: URL, packaged builds as /__splash.
-  const url = mainWindow.webContents.getURL();
-  if (!url.startsWith('data:') && !url.endsWith('/__splash')) return;
+  if (!isStartupSplashUrl(mainWindow.webContents.getURL())) return;
   const script = `(() => {
     const show = () => {
     const stack = document.querySelector('.stack');
@@ -5332,6 +5341,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_take_pending_session_links':
       // Session links open in the main window only.
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
+      mainWindowSessionLinkGate.documentAsked();
       return takePendingSessionDeepLinks();
 
     case 'desktop_open_host_session': {
@@ -5364,7 +5374,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // No live main window (e.g. "Open in main window" from a mini-chat after
       // the main window was closed): create one and open the session in it. A
       // fresh window can't take an immediate emit, so queue the session as a
-      // pending deep-link and let did-finish-load flush it once ready.
+      // pending deep-link for its renderer to take once it listens.
       if (!hasMainWindow) {
         if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId });
         await openMainWindow();
@@ -6078,8 +6088,8 @@ const revealMainWindow = async () => {
 
 // Open a session in the main window, creating one first if none is alive. A
 // freshly created window can't receive an immediate emit (its renderer hasn't
-// mounted its listeners yet), so we queue the session as a pending deep-link —
-// the did-finish-load handler flushes it once the window is ready.
+// mounted its listeners yet), so we queue the session as a pending deep-link
+// for its renderer to take once it listens.
 const focusMainWindowWithSession = async (sessionId, directory) => {
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     if (state.mainWindow.isMinimized()) state.mainWindow.restore();
