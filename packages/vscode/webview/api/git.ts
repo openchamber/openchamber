@@ -31,7 +31,6 @@ import type {
   GitNetworkOperationTarget,
   GitNetworkTransport,
   GitNetworkTransportMode,
-  GitNetworkSyncStepResult,
 } from '@openchamber/ui/lib/api/types';
 
 const requestWorktreeBootstrapStatus = (directory: string): Promise<GitWorktreeBootstrapStatus> => {
@@ -49,11 +48,11 @@ const writeStoredProfiles = (profiles: GitIdentityProfile[]): void => {
   storedProfiles = gitIdentityProfilesSchema.parse(profiles);
 };
 
-// Network operations. The shared Git surfaces plan and execute push, pull,
-// fetch, sync and remote-branch deletion through the operation lifecycle. The
-// webview maps each plan onto the standard Git bridge messages so system Git on
-// the extension host performs the transfer with the user's own credentials.
-const VSCODE_GIT_UNSUPPORTED_MESSAGE = 'Contributor, clone and checkout hydration Git operations are not supported in the VS Code runtime';
+// Network operations. Remote-branch deletion is the only one the VS Code
+// surfaces mount; the webview maps its plan onto the standard remote-branches
+// bridge message so system Git on the extension host performs it with the
+// user's own credentials. Push, pull, fetch and sync have no bridge message.
+const VSCODE_GIT_UNSUPPORTED_MESSAGE = 'Only remote branch deletion is supported as a Git network operation in the VS Code runtime';
 
 const unsupportedNetworkOperation = async (): Promise<never> => {
   throw new GitNetworkOperationRequestError('RUNTIME_UNSUPPORTED', VSCODE_GIT_UNSUPPORTED_MESSAGE, 501);
@@ -70,7 +69,7 @@ const SYSTEM_TRANSPORT: GitNetworkTransport = {
 const RUNTIME_IDENTITY = { id: 'vscode-webview', platform: 'vscode', label: 'VS Code Extension' } as const;
 const OPERATION_HISTORY_LIMIT = 100;
 
-type CompatibilityNetworkRequest = Exclude<GitNetworkOperationRequest, { operation: 'clone' | 'checkout-hydration' }>;
+type CompatibilityNetworkRequest = Extract<GitNetworkOperationRequest, { operation: 'delete-remote-branch' }>;
 
 type CompatibilityOperation = {
   request: CompatibilityNetworkRequest;
@@ -82,7 +81,6 @@ type CompatibilityBridgePayload = {
   directory: string;
   remote: string;
   branch?: string;
-  options?: string[];
 };
 
 type StepOutcome = { ok: true } | { ok: false; message: string };
@@ -114,64 +112,16 @@ const headBranch = (ref: string): string => {
 };
 
 const buildTarget = (request: CompatibilityNetworkRequest): GitNetworkOperationTarget => {
-  const authority = {
+  requireSystemTransport(request.transportMode);
+  headBranch(request.destinationRef);
+  return {
+    operation: 'delete-remote-branch',
     repositoryId: request.repositoryId,
     bindingRevision: request.bindingRevision,
     configRevision: request.configRevision,
+    remote: request.remote,
+    destinationRef: request.destinationRef,
   };
-  switch (request.operation) {
-    case 'push': {
-      requireSystemTransport(request.transportMode);
-      headBranch(request.sourceRef);
-      headBranch(request.destinationRef);
-      const target: Extract<GitNetworkOperationTarget, { operation: 'push' }> = {
-        operation: 'push', ...authority, remote: request.remote,
-        sourceRef: request.sourceRef, destinationRef: request.destinationRef,
-      };
-      if (request.forceWithLease) target.forceWithLease = request.forceWithLease;
-      if (request.configureUpstream !== undefined) target.configureUpstream = request.configureUpstream;
-      return target;
-    }
-    case 'fetch': {
-      requireSystemTransport(request.transportMode);
-      if (request.fetchScope === 'remote') {
-        return { operation: 'fetch', fetchScope: 'remote', ...authority, remote: request.remote, force: false };
-      }
-      headBranch(request.sourceRef);
-      const target: Extract<GitNetworkOperationTarget, { operation: 'fetch'; fetchScope?: 'ref' }> = {
-        operation: 'fetch', ...authority, remote: request.remote,
-        sourceRef: request.sourceRef, destinationRef: request.destinationRef,
-      };
-      if (request.fetchScope) target.fetchScope = request.fetchScope;
-      return target;
-    }
-    case 'pull':
-      requireSystemTransport(request.transportMode);
-      headBranch(request.sourceRef);
-      return {
-        operation: 'pull', ...authority, remote: request.remote,
-        sourceRef: request.sourceRef, destinationRef: request.destinationRef,
-      };
-    case 'delete-remote-branch':
-      requireSystemTransport(request.transportMode);
-      headBranch(request.destinationRef);
-      return { operation: 'delete-remote-branch', ...authority, remote: request.remote, destinationRef: request.destinationRef };
-    case 'sync': {
-      requireSystemTransport(request.fetch.transportMode);
-      requireSystemTransport(request.push.transportMode);
-      headBranch(request.fetch.sourceRef);
-      headBranch(request.push.sourceRef);
-      headBranch(request.push.destinationRef);
-      const target: Extract<GitNetworkOperationTarget, { operation: 'sync' }> = {
-        operation: 'sync', ...authority,
-        fetch: { ...request.fetch.remote, sourceRef: request.fetch.sourceRef, destinationRef: request.fetch.destinationRef },
-        pull: { destinationRef: request.pull.destinationRef },
-        push: { ...request.push.remote, sourceRef: request.push.sourceRef, destinationRef: request.push.destinationRef },
-      };
-      if (request.push.forceWithLease) target.push.forceWithLease = request.push.forceWithLease;
-      return target;
-    }
-  }
 };
 
 const snapshotBase = (snapshot: GitNetworkOperation) => ({
@@ -196,42 +146,6 @@ const runBridgeStep = async (type: string, payload: CompatibilityBridgePayload):
 
 const transportFailure = (message: string): GitNetworkOperationError<'TRANSPORT_FAILED'> => ({ code: 'TRANSPORT_FAILED', message });
 
-const pushPayload = (
-  directory: string,
-  remote: string,
-  sourceRef: string,
-  destinationRef: string,
-  options: { forceWithLease?: { expectedRemoteSha: string }; configureUpstream?: boolean },
-): CompatibilityBridgePayload => {
-  const source = headBranch(sourceRef);
-  const destination = headBranch(destinationRef);
-  const gitOptions: string[] = [];
-  if (options.configureUpstream) gitOptions.push('--set-upstream');
-  if (options.forceWithLease) gitOptions.push(`--force-with-lease=${destination}:${options.forceWithLease.expectedRemoteSha}`);
-  return {
-    directory,
-    remote,
-    branch: source === destination ? source : `${source}:${destination}`,
-    options: gitOptions,
-  };
-};
-
-const plannedEndpoints = (request: CompatibilityNetworkRequest): Array<{ name: string; side: 'fetch' | 'push'; fingerprint: string }> => {
-  switch (request.operation) {
-    case 'sync':
-      return [
-        { name: request.fetch.remote.name, side: 'fetch', fingerprint: request.fetch.remote.endpoint.fingerprint },
-        { name: request.push.remote.name, side: 'push', fingerprint: request.push.remote.endpoint.fingerprint },
-      ];
-    case 'fetch':
-    case 'pull':
-      return [{ name: request.remote.name, side: 'fetch', fingerprint: request.remote.endpoint.fingerprint }];
-    case 'push':
-    case 'delete-remote-branch':
-      return [{ name: request.remote.name, side: 'push', fingerprint: request.remote.endpoint.fingerprint }];
-  }
-};
-
 // The bridge messages address remotes by name, so Git uses whatever URL the
 // remote has at execution time. Before anything runs, the remotes are read
 // again and must still match the plan; a changed remote ends the operation as
@@ -241,11 +155,9 @@ const revalidatePlannedRemotes = async (request: CompatibilityNetworkRequest): P
   if (current.repositoryId !== request.repositoryId) {
     return { code: 'STALE_REPOSITORY', message: 'The repository changed since this operation was planned' };
   }
-  for (const planned of plannedEndpoints(request)) {
-    const remote = current.remotes.find((candidate) => candidate.name === planned.name);
-    if (!remote || remote[planned.side].fingerprint !== planned.fingerprint) {
-      return { code: 'REMOTE_CHANGED', message: `Remote ${planned.name} changed since this operation was planned` };
-    }
+  const remote = current.remotes.find((candidate) => candidate.name === request.remote.name);
+  if (!remote || remote.push.fingerprint !== request.remote.endpoint.fingerprint) {
+    return { code: 'REMOTE_CHANGED', message: `Remote ${request.remote.name} changed since this operation was planned` };
   }
   if (current.configRevision !== request.configRevision) {
     return { code: 'STALE_CONFIG', message: 'Remote configuration changed since this operation was planned' };
@@ -269,66 +181,9 @@ const runCompatibilityOperation = async (entry: CompatibilityOperation): Promise
   }
   if (stale) return { ...base, state: 'conflicted', completedSteps: [], error: stale };
 
-  if (request.operation === 'sync') {
-    const stepResults: GitNetworkSyncStepResult[] = [];
-    const steps: Array<{ step: GitNetworkSyncStepResult['step']; run: () => Promise<StepOutcome> }> = [
-      { step: 'fetch', run: () => runBridgeStep('api:git/fetch', {
-        directory, remote: request.fetch.remote.name, branch: headBranch(request.fetch.sourceRef),
-      }) },
-      { step: 'pull', run: () => runBridgeStep('api:git/pull', {
-        directory, remote: request.fetch.remote.name, branch: headBranch(request.fetch.sourceRef),
-      }) },
-      { step: 'push', run: () => runBridgeStep('api:git/push', pushPayload(
-        directory, request.push.remote.name, request.push.sourceRef, request.push.destinationRef,
-        { forceWithLease: request.push.forceWithLease },
-      )) },
-    ];
-    let failure: GitNetworkOperationError<'TRANSPORT_FAILED'> | null = null;
-    for (const { step, run } of steps) {
-      if (failure) {
-        stepResults.push({ step, status: 'skipped' });
-        continue;
-      }
-      const outcome = await run();
-      if (outcome.ok) {
-        stepResults.push({ step, status: 'succeeded' });
-      } else {
-        failure = transportFailure(outcome.message);
-        stepResults.push({ step, status: 'failed', error: failure });
-      }
-    }
-    if (!failure) {
-      return { ...base, state: 'succeeded', completedSteps: ['validated', 'transferred', 'updated-local-repository'], stepResults };
-    }
-    const anySucceeded = stepResults.some((result) => result.status === 'succeeded');
-    return {
-      ...base,
-      state: anySucceeded ? 'partial' : 'failed',
-      completedSteps: anySucceeded ? ['validated', 'transferred'] : ['validated'],
-      stepResults,
-      error: failure,
-    };
-  }
-
-  let outcome: StepOutcome;
-  if (request.operation === 'push') {
-    outcome = await runBridgeStep('api:git/push', pushPayload(
-      directory, request.remote.name, request.sourceRef, request.destinationRef,
-      { forceWithLease: request.forceWithLease, configureUpstream: request.configureUpstream },
-    ));
-  } else if (request.operation === 'fetch') {
-    outcome = await runBridgeStep('api:git/fetch', request.fetchScope === 'remote'
-      ? { directory, remote: request.remote.name }
-      : { directory, remote: request.remote.name, branch: headBranch(request.sourceRef) });
-  } else if (request.operation === 'pull') {
-    outcome = await runBridgeStep('api:git/pull', {
-      directory, remote: request.remote.name, branch: headBranch(request.sourceRef),
-    });
-  } else {
-    outcome = await runBridgeStep('api:git/remote-branches', {
-      directory, remote: request.remote.name, branch: headBranch(request.destinationRef),
-    });
-  }
+  const outcome = await runBridgeStep('api:git/remote-branches', {
+    directory, remote: request.remote.name, branch: headBranch(request.destinationRef),
+  });
 
   if (!outcome.ok) {
     return { ...base, state: 'failed', completedSteps: ['validated'], error: transportFailure(outcome.message) };
@@ -336,9 +191,7 @@ const runCompatibilityOperation = async (entry: CompatibilityOperation): Promise
   return {
     ...base,
     state: 'succeeded',
-    completedSteps: request.operation === 'fetch' || request.operation === 'pull'
-      ? ['validated', 'transferred', 'updated-local-repository']
-      : ['validated', 'transferred'],
+    completedSteps: ['validated', 'transferred'],
   };
 };
 
@@ -459,13 +312,13 @@ export const createVSCodeGitAPI = (): GitAPI => ({
   },
 
   planNetworkOperation: async (request: GitNetworkOperationRequest): Promise<GitNetworkOperationPlan> => {
-    if (request.operation === 'clone' || request.operation === 'checkout-hydration') return unsupportedNetworkOperation();
+    if (request.operation !== 'delete-remote-branch') return unsupportedNetworkOperation();
     if (!request.directory.trim()) invalidNetworkRequest('Directory is required');
     const target = buildTarget(request);
     const plan: GitNetworkOperationPlan = {
       operationId: crypto.randomUUID(),
       runtimeIdentity: RUNTIME_IDENTITY,
-      transport: request.operation === 'sync' ? { fetch: SYSTEM_TRANSPORT, push: SYSTEM_TRANSPORT } : SYSTEM_TRANSPORT,
+      transport: SYSTEM_TRANSPORT,
       target,
       completedSteps: [],
       state: 'planned',

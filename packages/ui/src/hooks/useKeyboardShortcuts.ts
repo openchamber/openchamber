@@ -285,7 +285,8 @@ export const useKeyboardShortcuts = () => {
       return toggleTerminalSurface();
     },
     toggle_context_panel_expanded: () => {
-      if (useUIStore.getState().isMobile || !currentDirectory) return false;
+      // No ContextPanel renders in VS Code, so the store change would be invisible.
+      if (useUIStore.getState().isMobile || isVSCodeRuntime() || !currentDirectory) return false;
       toggleExpandedContextZone(currentDirectory);
     },
     open_model_selector: () => {
