@@ -97,8 +97,8 @@ One repository works as one identity. `applyIdentity.ts` turns a chosen
 provider association through the exact-target mutation, writes the primary
 remote's transport grant from the identity's transport (`account`, `ssh`,
 `system`, or `anonymous`), and applies the author with
-`setGitIdentity(directory, profileId)`. A repository with no remote, and a
-runtime that holds no bindings (VS Code), receive the signature alone. The `global` profile is the System
+`setGitIdentity(directory, profileId)`. A repository with no remote receives the signature alone.
+VS Code mounts no identity surface, so it never applies an identity. The `global` profile is the System
 identity — it removes the provider association and clears the repository-local
 author so the person's own Git configuration answers, and OpenChamber never
 writes the machine's own (global or system) configuration. No choice asks for

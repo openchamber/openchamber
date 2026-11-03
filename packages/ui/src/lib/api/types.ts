@@ -695,9 +695,9 @@ export type GitNetworkOperationStep =
   | 'checked-out'
   | 'cleaned-up';
 
-export type GitNetworkSyncStepStatus = 'succeeded' | 'skipped' | 'conflicted' | 'failed' | 'cancelled';
+type GitNetworkSyncStepStatus = 'succeeded' | 'skipped' | 'conflicted' | 'failed' | 'cancelled';
 
-export interface GitNetworkSyncStepResult {
+interface GitNetworkSyncStepResult {
   step: 'fetch' | 'pull' | 'push';
   status: GitNetworkSyncStepStatus;
   error?: GitNetworkOperationError;

@@ -302,7 +302,7 @@ every surface reached only through those is unreachable.
 | MCP settings | MOUNTED | `SettingsView` → `McpSidebar` / `McpPage` |
 | Agents / commands / skills / plugins / providers / projects settings | MOUNTED | `SettingsView` page registry |
 | Worktrees | PARTIAL | Create/remove reachable via `SessionSidebar` → `NewWorktreeDialog` and `sessionWorktreeMenu`. `WorktreesView` is `MainLayout`-only |
-| Git | PARTIAL | Read-only status/branches/log via `useGitStore` in `SessionSidebar`, `ChatInput`, `WorkStatusPrimaryGroup`. Stage/commit/push/history/merge/rebase live in `GitView` + `views/git/*`, cut off with `ContextPanel` |
+| Git | PARTIAL | Read-only status and branches via `useGitStore` in `SessionSidebar`, `ChatInput`, `WorkStatusPrimaryGroup`. Stage, commit, push, history, merge and rebase live in `GitView` + `views/git/*`, cut off with `ContextPanel`; the bridge has no handlers for them and the shared Git API rejects them as unsupported |
 | Voice / dictation | PARTIAL | `ComposerDictation` renders in `ChatInput`; the `voice` settings page is VS Code-gated |
 | Command palette | NOT MOUNTED | `CommandPalette` renders only in `MainLayout`; `useKeyboardShortcuts` gates `open_command_palette` off in the VS Code runtime, so the keystroke stays with VS Code's own command palette |
 | ContextPanel / project context (notes, todos, plans tabs) | NOT MOUNTED | `ContextPanel`, `ContextPanelRail`, `RightSidebarTabs` imported only by `MainLayout` and `MobileWorkspaceDrawer` |
