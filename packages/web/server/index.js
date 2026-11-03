@@ -160,6 +160,7 @@ import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.j
 import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
+import { createClientPushAccess } from './lib/notifications/client-push-access.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { createRelayService, relayBlockedByEnterprise } from './lib/relay/service.js';
@@ -532,6 +533,8 @@ const pushRuntime = createPushRuntime({
   PUSH_SUBSCRIPTIONS_FILE_PATH,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
+  // clientPushAccess needs this runtime, so it is created later: read it per send.
+  getInvalidSessionKeys: () => clientPushAccess.invalidSessionKeys(),
 });
 
 const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
@@ -570,6 +573,7 @@ const apnsRuntime = createApnsRuntime({
   APNS_TOKENS_FILE_PATH,
   readSettingsFromDiskMigrated,
   relayKeyStore,
+  getInvalidSessionKeys: () => clientPushAccess.invalidSessionKeys(),
 });
 
 const addOrUpdateApnsToken = (...args) => apnsRuntime.addOrUpdateApnsToken(...args);
@@ -1625,6 +1629,10 @@ const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
   crypto,
   storePath: REMOTE_CLIENTS_FILE_PATH,
 });
+const clientPushAccess = createClientPushAccess({
+  listClients: remoteClientAuthRuntime.listClients,
+  removeDevicesOfSessions: [apnsRuntime.removeApnsDevicesOfSessions, pushRuntime.removePushDevicesOfSessions],
+});
 const clientPairingRuntime = createClientPairingRuntime({
   fsPromises,
   path,
@@ -2678,6 +2686,7 @@ async function main(options = {}) {
     // Re-evaluate the relay lifecycle after pairing/device changes (a revoked or
     // redeemed device can flip relay demand on or off).
     reconcileRelay: () => (relayServiceInstance ? relayServiceInstance.reconcile() : Promise.resolve()),
+    removeClientPushDevices: clientPushAccess.removeDevicesOfClients,
     getPairingTransports: resolvePairingTransports,
     getDirectCandidateUrls: resolveDirectLanUrls,
     // Stable server identity for client-side verification of learned addresses.
