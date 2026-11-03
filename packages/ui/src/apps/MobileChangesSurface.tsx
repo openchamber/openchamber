@@ -661,8 +661,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   }, [currentDirectory, git]);
 
   // After a commit or a transfer the control waits for the status only; the
-  // branch list (which asks every remote over the network) and the remotes
-  // follow in the background instead of holding the button for seconds.
+  // branch list and the remotes follow in the background instead of holding
+  // the button.
   const refreshAfterGitAction = React.useCallback(async () => {
     if (!currentDirectory) return;
     void Promise.allSettled([fetchBranches(currentDirectory, git), refreshRemotes()]);

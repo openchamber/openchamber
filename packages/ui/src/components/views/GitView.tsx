@@ -1068,8 +1068,8 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
 
   // After a commit or a transfer the control waits for the status only: it is
   // what says what is staged and how far ahead the branch is. The branch list
-  // asks every remote over the network and the log reads history, so both
-  // follow in the background instead of holding the button for seconds.
+  // and the log read history, so both follow in the background instead of
+  // holding the button.
   const refreshAfterGitAction = React.useCallback(async (onBackgroundSettled?: () => void) => {
     if (!gitDirectory) return;
     const background = Promise.allSettled([fetchBranches(gitDirectory, git), refreshLog()]);
