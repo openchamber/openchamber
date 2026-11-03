@@ -2,7 +2,7 @@ import React from 'react';
 import type { ToolPopupContent } from '../message/types';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { runtimeAssetsNeedHeaders } from '@/lib/runtime-asset';
+import { runtimeAssetsNeedFetch } from '@/lib/runtime-asset';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
@@ -127,7 +127,7 @@ export class MarkdownMediaOwner {
     const prepared = (await this.batch).get(source);
     this.check(signal);
     if (prepared?.status !== 'ready') throw new Error('Image is unavailable');
-    if (!video && runtimeAssetsNeedHeaders()) {
+    if (!video && runtimeAssetsNeedFetch()) {
       const url = await loadPreparedImageAsDataUrl(prepared, directory, signal);
       this.check(signal);
       return url;

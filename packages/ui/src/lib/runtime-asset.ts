@@ -1,8 +1,13 @@
 import { isCapacitorApp } from './platform';
 import { getRuntimeExtraHeadersSync } from './runtime-auth';
+import { isRelayModeActive } from './relay/runtime-tunnel';
 
-export const runtimeAssetsNeedHeaders = (): boolean =>
-  isCapacitorApp() && Object.keys(getRuntimeExtraHeadersSync()).length > 0;
+/**
+ * A URL the browser loads itself cannot reach these runtimes' assets: it cannot
+ * attach custom headers on Capacitor and it never enters the relay tunnel.
+ */
+export const runtimeAssetsNeedFetch = (): boolean =>
+  isRelayModeActive() || (isCapacitorApp() && Object.keys(getRuntimeExtraHeadersSync()).length > 0);
 
 /** Bounds retained bytes even when Content-Length is absent or inaccurate. */
 export const readAssetBlob = async (response: Response, maxBytes: number, signal: AbortSignal): Promise<Blob> => {
