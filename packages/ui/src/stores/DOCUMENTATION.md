@@ -74,7 +74,11 @@ owner cannot replace the catalog or finish the current owner's loading state.
 `useFileSearchStore` keeps OpenCode's indexed file results first. Non-default
 hidden/gitignore options also request `RuntimeAPIs.files.search` and append
 unique paths up to the caller's limit. Directory searches remain indexed.
-Both sources share the existing runtime/directory/query/options cache key.
+The merged answer is cached under its runtime/directory/query/options key.
+The indexed part goes through the plain search's own cache and in-flight entry,
+so a caller may ask for the plain search first to show its hits before the
+supplement answers, with one OpenCode request between them; the supplement walks
+the project and runs Git in every checkout it meets, which can take seconds.
 An indexed-search failure rejects. A supplemental failure logs a warning and
 returns the indexed hits without caching the partial answer, so the next search
 can retry the supplement.

@@ -920,7 +920,16 @@ spinner row shows only when there are no rows yet, and "no matches" only
 once the current query's search has answered; the two rows share one height.
 Server hits carry the key of the search they answer (`mentionSearchKey`), so
 an older query's hits never show as the current one's. Enter picks the row on
-screen, held or not; a new answer selects its first row.
+screen, held or not; a new query's answer selects its first row.
+
+A query has up to two answers. OpenCode's index answers at once and its hits
+show as soon as there are any; the search behind the hidden and gitignored
+toggles may walk the project for seconds, and the list does not wait for it, or
+a large project shows only agents until it ends. Its extra rows join when it
+answers, and new rows for the same query leave the selection on the row it was
+on. Only a row pushed out of the list sends the selection back to the first
+row. An index answer of nothing keeps the query searching until the second
+answer, so "no matches" still means both finished.
 `../FileMentionAutocomplete.test.tsx` covers these states.
 
 ## Other sessions as context
