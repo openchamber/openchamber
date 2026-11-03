@@ -1,3 +1,4 @@
+import http from 'node:http';
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
@@ -720,6 +721,84 @@ describe('GitLab routes', () => {
     expect(parent.status).toBeGreaterThanOrEqual(400);
     await request(app).get(`${uploads}/${secret}/x.png`).query({ ...query, owner: '' }).expect(400);
     expect(readUpload).toHaveBeenCalledTimes(4);
+  });
+
+  it('serves the bound project avatar by the name GitLab gives it, and only as a picture', async () => {
+    const account = { id: `${origin}#9`, token: 'stored', user: { id: 9, login: 'user' }, source: 'pat', scope: '' };
+    const readProjectAvatar = vi.fn()
+      .mockResolvedValueOnce(new Response('png', { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="logo.png"' } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+      .mockResolvedValueOnce(new Response('<svg/>', { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="logo.svg"' } }));
+    const app = appWith({ store: makeStore(account), createResourceService: vi.fn(() => ({ readProjectAvatar })) });
+    const query = { instance: origin, directory: '/repo', repositoryId: 'repo_one', bindingRevision: 3, accountId: account.id, primaryRemote: 'origin' };
+
+    const avatar = await request(app).get('/api/source-control/gitlab/repo/avatar').query(query).expect(200);
+    expect(avatar.headers['content-type']).toBe('image/png');
+    expect(avatar.headers['x-content-type-options']).toBe('nosniff');
+    expect(readProjectAvatar).toHaveBeenCalledWith('/repo', 'origin', expect.objectContaining({ signal: expect.anything() }));
+
+    await request(app).get('/api/source-control/gitlab/repo/avatar').query(query).expect(404);
+    await request(app).get('/api/source-control/gitlab/repo/avatar').query(query).expect(415);
+  });
+
+  it('does not request a project avatar after the client disconnects during context validation', async () => {
+    const account = { id: `${origin}#9`, token: 'stored', user: { id: 9, login: 'user' }, source: 'pat', scope: '' };
+    let markValidationStarted;
+    const validationStarted = new Promise((resolve) => { markValidationStarted = resolve; });
+    let markResponseClosed;
+    const responseClosed = new Promise((resolve) => { markResponseClosed = resolve; });
+    let resolveValidation;
+    const validation = new Promise((resolve) => { resolveValidation = resolve; });
+    const readProjectAvatar = vi.fn();
+    const app = express();
+    app.use((_req, res, next) => {
+      res.once('close', markResponseClosed);
+      next();
+    });
+    app.use(express.json());
+    registerGitLabRoutes(app, {
+      authFile: '/unused/source-control-auth.json',
+      execFile: async () => ({ stdout: '' }),
+      store: makeStore(account),
+      createResourceService: vi.fn(() => ({ readProjectAvatar })),
+      validateReadContext: async (context) => {
+        markValidationStarted();
+        await validation;
+        return { ...context, accountId: account.id, primaryRemote: 'origin' };
+      },
+    });
+    const query = {
+      instance: origin, directory: '/repo', repositoryId: 'repo_one', bindingRevision: 3,
+      accountId: account.id, primaryRemote: 'origin',
+    };
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const port = server.address()?.port;
+    if (!port) throw new Error('Expected a TCP test server');
+    let client;
+
+    try {
+      const clientClosed = new Promise((resolve) => {
+        client = http.get({
+          hostname: '127.0.0.1',
+          port,
+          path: `/api/source-control/gitlab/repo/avatar?${new URLSearchParams(query)}`,
+        }, resolve);
+        client.once('error', resolve);
+      });
+      await validationStarted;
+      client.destroy();
+      await responseClosed;
+      resolveValidation();
+      await clientClosed;
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(readProjectAvatar).not.toHaveBeenCalled();
+    } finally {
+      client?.destroy();
+      resolveValidation();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it('uses matching bound context and rejects it before provider creation when stale', async () => {

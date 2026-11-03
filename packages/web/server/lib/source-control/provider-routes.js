@@ -419,11 +419,21 @@ export function registerProviderRoutes(app, {
      * A bound read: validates the context before any credential lookup, then
      * resolves the exact bound account and hands both to `read`.
      */
-    const boundRead = (capability, suffix, read, { validate, validateAfterInstance } = {}) => {
+    const boundRead = (capability, suffix, read, { validate, validateAfterInstance, abortOnClose = false } = {}) => {
       route('get', suffix, capability, async (req, res) => {
         let impl;
+        const abort = abortOnClose ? new AbortController() : null;
+        const onResponseClose = () => {
+          if (!res.writableEnded) abort?.abort();
+        };
+        if (abort) {
+          res.on('close', onResponseClose);
+          if (req.aborted || res.destroyed) abort.abort();
+        }
         try {
+          if (abort?.signal.aborted) return undefined;
           impl = await loadImplementation(id);
+          if (abort?.signal.aborted) return undefined;
           const early = validate?.(req);
           if (early) return res.status(400).json(isString(early) ? { error: early } : early);
           const instance = requestInstance(req);
@@ -431,12 +441,16 @@ export function registerProviderRoutes(app, {
           if (late) return res.status(400).json({ error: late });
           const directory = requestText(req.query?.directory);
           const trustedContext = await readContextOf(req, instance, directory);
+          if (abort?.signal.aborted) return undefined;
           if (!trustedContext) return res.status(501).json({ error: 'Bound source control status is unavailable' });
-          return await read({ req, res, impl, instance, directory, trustedContext });
+          return await read({ req, res, impl, instance, directory, trustedContext, signal: abort?.signal });
         } catch (error) {
+          if (abort?.signal.aborted) return undefined;
           if (isReadContextError(error)) return res.status(error.status ?? 400).json(sourceControlErrorBody(error));
           if (!impl) return res.status(error.status ?? 500).json(sourceControlErrorBody(error));
           return sendProviderResponse(res, error) ?? sendResourceError(res, impl, error);
+        } finally {
+          if (abort) res.off('close', onResponseClose);
         }
       });
     };
@@ -952,6 +966,39 @@ export function registerProviderRoutes(app, {
       }
       return undefined;
     });
+
+    if (id === 'gitlab') {
+      boundRead(null, '/repo/avatar', async ({ res, impl, instance, directory, trustedContext, signal }) => {
+        try {
+          if (signal.aborted) return undefined;
+          const readProjectAvatar = requireResource(impl, 'readProjectAvatar');
+          const session = await sessionFor(impl, instance, trustedContext.accountId);
+          if (signal.aborted) return undefined;
+          const upstream = await readProjectAvatar({
+            session,
+            directory,
+            context: trustedContext,
+            remote: trustedContext.primaryRemote,
+            signal,
+          });
+          const filename = /filename="([^"]+)"/.exec(upstream.headers.get('content-disposition') || '')?.[1] ?? '';
+          const type = uploadMediaType(upstream.headers.get('content-type') || '', filename);
+          if (!upstream.ok || !upstream.body || !type) {
+            await upstream.body?.cancel().catch(() => {});
+            return res.status(upstream.ok ? 415 : 404).end();
+          }
+          res.setHeader('Content-Type', type);
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          await pipeline(Readable.fromWeb(upstream.body), res);
+          return undefined;
+        } catch (error) {
+          if (signal.aborted) return undefined;
+          if (res.headersSent) return res.destroy();
+          throw error;
+        }
+      }, { abortOnClose: true });
+    }
 
     boundRead('changeRequests', '/pulls/list', async ({ req, res, impl, instance, directory, trustedContext }) => {
       const session = await sessionFor(impl, instance, trustedContext.accountId);

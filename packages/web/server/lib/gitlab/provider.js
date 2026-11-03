@@ -713,6 +713,8 @@ export function createProvider({
        */
       readUpload: ({ session, directory, project, remote, secret, filename, range, signal }) => serviceFor(session)
         .readUpload(directory, project, remote, { secret, filename, range, signal }),
+      readProjectAvatar: ({ session, directory, remote, signal }) => serviceFor(session)
+        .readProjectAvatar(directory, remote, { signal }),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote }) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote }),
       readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status }) => serviceFor(session)
