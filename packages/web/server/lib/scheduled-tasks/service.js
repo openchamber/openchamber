@@ -81,10 +81,19 @@ export const createScheduledTaskService = (dependencies) => {
     throw new OpenChamberControlError(`Project not found for directory: ${resolvedDirectory}`, 404);
   };
 
-  const resolveExecutionDirectory = async (projectID, targetSessionId) => {
+  const resolveExecutionDirectory = async (projectID, targetSessionId, { tolerateMissingTarget = false } = {}) => {
     const project = await findProjectByID(projectID);
     if (targetSessionId) {
-      return (await scheduledTasksRuntime.validateTarget(project.id, targetSessionId)).directory;
+      try {
+        return (await scheduledTasksRuntime.validateTarget(project.id, targetSessionId)).directory;
+      } catch (error) {
+        // A paused task may keep a target that no longer resolves — `upsert`
+        // tolerates exactly that so the task stays editable. Without a session
+        // there is no worktree to read a catalog from, so the caller stands down
+        // rather than failing a save the guard just allowed.
+        if (!tolerateMissingTarget) throw error;
+        return null;
+      }
     }
     return project.path;
   };
@@ -96,14 +105,19 @@ export const createScheduledTaskService = (dependencies) => {
   // Only a model this call actually changes is checked: a task whose stored id
   // has since disappeared must stay retimeable, disableable and deletable, and
   // that is the task a user needs to reach to remove the dead id.
-  const assertNamedModelKnown = async (projectID, task, previous) => {
+  const assertNamedModelKnown = async (projectID, task, previous, resolvedDirectory) => {
     const providerID = asNonEmptyString(task?.execution?.providerID);
     const modelID = asNonEmptyString(task?.execution?.modelID);
     if (!providerID || !modelID) return;
     const stored = previous?.execution;
     if (stored?.providerID === providerID && stored?.modelID === modelID) return;
     if (!readModelCatalog) return;
-    const directory = await resolveExecutionDirectory(projectID, task.targetSessionId);
+    // `upsert` resolves the target once for its own guard and hands the result
+    // here, so an enabled targeted save reads the session a single time.
+    const directory = resolvedDirectory !== undefined
+      ? resolvedDirectory
+      : await resolveExecutionDirectory(projectID, task.targetSessionId, { tolerateMissingTarget: true });
+    if (directory === null) return;
     const entries = await readModelCatalog(directory);
     // A location OpenCode has not started in answers empty before its catalog
     // fills in; that is not evidence a model is gone, the same stand-down the
@@ -180,10 +194,11 @@ export const createScheduledTaskService = (dependencies) => {
     }
     let upserted;
     const previous = taskInput.id ? (await projectConfigRuntime.listScheduledTasks(id)).find((task) => task.id === taskInput.id) : null;
+    let targetDirectory;
     if (taskInput.targetSessionId && (taskInput.enabled !== false || previous?.targetSessionId !== taskInput.targetSessionId)) {
-      await scheduledTasksRuntime.validateTarget(id, taskInput.targetSessionId);
+      targetDirectory = (await scheduledTasksRuntime.validateTarget(id, taskInput.targetSessionId)).directory;
     }
-    await assertNamedModelKnown(id, taskInput, previous);
+    await assertNamedModelKnown(id, taskInput, previous, targetDirectory);
     try {
       upserted = await projectConfigRuntime.upsertScheduledTask(id, taskInput);
     } catch (error) {

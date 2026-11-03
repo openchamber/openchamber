@@ -145,6 +145,39 @@ Run the digest.
       await rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it('leaves the loop file off when its model is rejected', async () => {
+    // Enabling a loop is the one moment a person is present to be told the
+    // hand-written model does not exist, so the file must not be rewritten
+    // into an enabled state that would then fail at fire time.
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loop-model-'));
+    try {
+      const loopFilePath = path.join(tempRoot, 'daily.md');
+      const original = `---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: false
+model: gone/dead
+---
+
+Run the digest.
+`;
+      await writeFile(loopFilePath, original, 'utf8');
+      const currentTask = { ...loopTask, loopFile: loopFilePath, enabled: false };
+      const syncProject = vi.fn(async () => [currentTask]);
+      const { service, projectConfigRuntime } = createService({
+        scheduledTasksRuntime: { syncProject },
+        readModelCatalog: async () => [{ providerID: 'openai', id: 'gpt-5' }],
+      });
+
+      await expect(service.setLoopEnabled('project-test', currentTask.id, true))
+        .rejects.toThrow('unknown model: gone/dead');
+      await expect(readFile(loopFilePath, 'utf8')).resolves.toBe(original);
+      expect(projectConfigRuntime.setLoopApproval).not.toHaveBeenCalled();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('scheduled-task loop-file routes', () => {
@@ -610,6 +643,59 @@ describe('scheduled-task model check', () => {
       ...task({ prompt: 'Run', providerID: 'p', modelID: 'm' }),
       targetSessionId: 'ses_target',
     })).resolves.toHaveProperty('task');
+    expect(readModelCatalog).toHaveBeenCalledWith('/worktree');
+  });
+
+  it('keeps a paused task with a stale target editable', async () => {
+    // `upsert` lets a paused task keep a target that no longer resolves so the
+    // user can still fix it. Reading a catalog for that target must not turn
+    // the tolerated save into a 404.
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const validateTarget = vi.fn(async () => {
+      throw Object.assign(new Error('Scheduled target not found'), { statusCode: 404 });
+    });
+    const { service, projectConfigRuntime } = createService({
+      readModelCatalog,
+      scheduledTasksRuntime: { syncProject: vi.fn(async () => []), validateTarget },
+      projectConfigRuntime: {
+        listScheduledTasks: vi.fn(async () => [{
+          id: 'task-1',
+          name: 'Nightly',
+          enabled: false,
+          targetSessionId: 'ses_gone',
+          schedule: { kind: 'cron', cron: '0 9 * * *' },
+          execution: { prompt: 'Old', providerID: 'p', modelID: 'old' },
+        }]),
+      },
+    });
+
+    await expect(service.upsert('project-test', {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: false,
+      targetSessionId: 'ses_gone',
+      schedule: { kind: 'cron', cron: '0 9 * * *' },
+      execution: { prompt: 'Old', providerID: 'p', modelID: 'new' },
+    })).resolves.toHaveProperty('task');
+    // No session, no worktree: there is no catalog to consult, so the check
+    // stands down rather than guessing from the project root.
+    expect(readModelCatalog).not.toHaveBeenCalled();
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
+  });
+
+  it('validates a targeted task against its worktree without fetching the session twice', async () => {
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const validateTarget = vi.fn(async () => ({ directory: '/worktree' }));
+    const { service } = createService({
+      readModelCatalog,
+      scheduledTasksRuntime: { syncProject: vi.fn(async () => []), validateTarget },
+    });
+
+    await service.upsert('project-test', {
+      ...task({ prompt: 'Run', providerID: 'p', modelID: 'm' }),
+      targetSessionId: 'ses_target',
+    });
+    expect(validateTarget).toHaveBeenCalledOnce();
     expect(readModelCatalog).toHaveBeenCalledWith('/worktree');
   });
 });
