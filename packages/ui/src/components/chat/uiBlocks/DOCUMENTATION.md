@@ -8,7 +8,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 
 - Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and copies and image exports keep the source. User messages, reasoning, tool output and documents show the fence as code.
 - The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
-- A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. A block never shows with parts silently dropped.
+- A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws a short note, the reasons it could not be drawn one per row, and its source. A block never shows with parts silently dropped.
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.
 - A page takes one answer: a press answers the waiting call at once, and the block freezes.
@@ -85,3 +85,7 @@ The guidance reaches the agent inside XML context tags, and weaker models (GLM F
 ### Why OpenUI's state, bindings and actions are left out
 
 The language can declare `$state`, bind fields and run action plans. Each needs a reactive store and its own security review, while a question needs only fields whose values a Button sends. A finished block that declares state, a query or a mutation is invalid.
+
+### Why an invalid block shows the validator's sentences as they are
+
+A block `parseUiBlock` rejects says why, under the note: the collected errors, one per row, before the source. Only the `result.meta.errors` entries are lang-core's; `Undefined names`, `Defined but never used`, `The block needs root = Stack([...])`, the incomplete-statement and state sentences, and `checkFinishedNode`'s are OpenChamber's own. They are written as they are instead of behind a translated label, because the same array is the wire text a page sends the agent on a draw failure (`onNotDrawn`, then `notDrawn`): what the reader sees has to match what the agent receives, and the sentences embed literal code identifiers (`Stack`, `root`, `/label`) that a translation could only leave alone. A block that fails to *draw* is not this path: `BlockErrorBoundary` still shows the note and the source only.

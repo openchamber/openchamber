@@ -1582,6 +1582,12 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   const fallback = (
     <div className="flex flex-col gap-1">
       <div className="typography-meta text-[var(--status-error)]">{t('chat.uiBlock.invalid')}</div>
+      {/* Why it could not be drawn, so the reader can fix the block instead of guessing. */}
+      {notDrawnErrors ? (
+        <ul className="flex flex-col gap-0.5 typography-meta text-muted-foreground" dir="ltr">
+          {notDrawnErrors.map((error, index) => <li key={index}>{error}</li>)}
+        </ul>
+      ) : null}
       <pre dir="ltr"><code>{source}</code></pre>
     </div>
   );

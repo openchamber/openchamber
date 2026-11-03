@@ -26,14 +26,16 @@ afterAll(async () => { await act(() => root.unmount()); browser.happyDOM.abort()
 
 // SAFETY: UiBlock reads only `currentTheme` from the theme system.
 const themeSystem = { currentTheme: getDefaultTheme(false) } as React.ContextType<typeof ThemeSystemContext>;
-const draw = (source: string, submit: (answer: Answer) => Promise<void>) => act(() => root.render(
+const draw = (source: string, submit: (answer: Answer) => Promise<void>, onNotDrawn?: (errors: string[]) => void) => act(() => root.render(
   <I18nProvider>
     <ThemeSystemContext.Provider value={themeSystem}>
-      <UiBlock source={source} complete host={{ kind: 'page', submit, answered: null }} />
+      <UiBlock source={source} complete host={{ kind: 'page', submit, answered: null }} onNotDrawn={onNotDrawn} />
     </ThemeSystemContext.Provider>
   </I18nProvider>,
 ));
 const buttons = () => [...host.querySelectorAll('button')].map((button) => button.textContent);
+const text = () => host.textContent ?? '';
+const reasons = () => [...host.querySelectorAll('li')].map((item) => item.textContent);
 
 test('a waiting form without buttons gets one that sends its fields', async () => {
   const answers: Answer[] = [];
@@ -49,4 +51,33 @@ test('a form with its own button gets no second one', async () => {
   await draw('root = Stack([scope, go])\nscope = Choice("scope", ["API"])\ngo = Button("Go")', async () => {});
   expect(buttons()).toContain('Go');
   expect(buttons()).not.toContain('Send');
+});
+
+test('an invalid block says why under the generic line, then its source', async () => {
+  const source = 'root = Steps([{ title: "M0", status: "todo" }], "column")';
+  await draw(source, async () => {});
+  expect(text()).toContain('This block could not be drawn.');
+  expect(reasons()).toEqual(['The block needs root = Stack([...])']);
+  expect(host.querySelector('pre code')?.textContent).toBe(source);
+});
+
+test('an invalid block shows every reason on its own row', async () => {
+  await draw('root = Steps([{ title: "M0" }], "column")\nextra = Text("hi")', async () => {});
+  expect(reasons()).toEqual([
+    'Defined but never used: extra',
+    'The block needs root = Stack([...])',
+  ]);
+});
+
+test('a valid block shows no reasons', async () => {
+  await draw('root = Stack([badge])\nbadge = Badge("Hi")', async () => {});
+  expect(text()).toContain('Hi');
+  expect(text()).not.toContain('This block could not be drawn.');
+  expect(reasons()).toEqual([]);
+});
+
+test('a settled invalid block reports its reasons once', async () => {
+  const reported: string[][] = [];
+  await draw('root = Steps([{ title: "M0", status: "todo" }], "column")', async () => {}, (errors) => reported.push(errors));
+  expect(reported).toEqual([['The block needs root = Stack([...])']]);
 });
