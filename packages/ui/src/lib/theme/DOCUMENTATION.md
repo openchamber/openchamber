@@ -86,6 +86,17 @@ Body and secondary text retain the official contrasts rather than the softened
 text targets used by adapted palettes. These exceptions are authored in the
 built-in definition; the shared theme resolver and VS Code adaptation are unchanged.
 
+Aurora is the candidate for the next default pair, drawn from the night and day
+watercolours on openchamber.dev: an emerald accent (`#063e2a` in light), poppy strings
+and parameters, and per-role code colours named after the pictures. Its dark
+variant departs from two built-in rules on purpose. Body text sits at about
+12:1 on the canvas, under the 13.3 band, and bold is a little dimmer than body
+text: brighter, heavier strokes on the near-black canvas left after-images of
+the lines during long reading, and bold keeps its emphasis through weight. Its
+surfaces carry faint tints (slate frame, emerald glass on elevated surfaces in
+light, a sky tint on light code blocks) at the lightness of the OpenChamber pair.
+Do not move these values back toward the shared targets.
+
 Built-in border strength uses OpenChamber's matching light/dark palette as the
 reference. Compare alpha-composited contrast on canvas, sidebar and elevated
 surfaces separately for ordinary borders, hover borders, tool outlines and
