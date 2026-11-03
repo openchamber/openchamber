@@ -8,7 +8,7 @@ const installDom = () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
-    window: dom, document: dom.document, navigator: dom.navigator,
+    window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node,
     Event: dom.Event, MouseEvent: dom.MouseEvent, KeyboardEvent: dom.KeyboardEvent,
     ResizeObserver: dom.ResizeObserver, getComputedStyle: dom.getComputedStyle.bind(dom),
