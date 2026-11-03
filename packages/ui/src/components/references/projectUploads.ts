@@ -70,7 +70,9 @@ export const uploadUrls = (context: SourceControlReadContext, project: Repositor
             // the file on the host and falls back to a link when it cannot play.
             if (isRelayModeActive()) {
                 if (isVideoSource(path)) return link(path);
-                return `${route(path)}?${new URLSearchParams({ ...query, bindingRevision: String(query.bindingRevision) })}`;
+                const asset = new URL(route(path), 'http://openchamber.local');
+                for (const [key, value] of Object.entries(query)) asset.searchParams.set(key, String(value));
+                return `${asset.pathname}${asset.search}`;
             }
             // Signed with the token current at the time, so every item read later
             // gets a fresh one; a clip whose token expired retries (markdownVideo.ts).

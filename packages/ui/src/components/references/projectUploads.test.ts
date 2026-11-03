@@ -77,6 +77,8 @@ describe('uploadUrls', () => {
     expect(picture.startsWith(`/api/source-control/gitlab/uploads/${secret}/shot.png?`)).toBe(true);
     expect(new URLSearchParams(picture.split('?')[1]).get('owner')).toBe('team');
     expect(picture).not.toContain('oc_url_token');
+    const written = new URLSearchParams(urls.media(`/uploads/${secret}/shot.png?inline=1`).split('?')[1]);
+    expect([written.get('inline'), written.get('owner')]).toEqual(['1', 'team']);
     expect(urls.media(`/uploads/${secret}/demo.webm`)).toBe(`https://gitlab.test/team/repo/uploads/${secret}/demo.webm`);
   });
 
