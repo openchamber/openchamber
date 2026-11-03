@@ -1669,6 +1669,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'Sorunu düzeltmek için düzenleme moduna geçin.',
   'filesView.error.readFileFailed': 'Dosya okunamadı',
   'filesView.editor.htmlPreviewTitle': 'HTML Önizleme',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'HTML önizleme relay üzerinden kullanılamıyor',
+  'filesView.editor.htmlPreviewShowCode': 'Kodu göster',
   'filesView.editor.htmlAnnotate.intro': 'Bu, bir HTML dosyası önizlemesinden alınmış açıklamalı bir seçimdir.',
   'filesView.diagram.closeDiagramView': 'Diyagram görünümünü kapat',
   'filesView.diagram.saveDiagram': 'Diyagramı kaydet',

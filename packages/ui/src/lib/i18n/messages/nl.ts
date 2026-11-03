@@ -1789,6 +1789,8 @@ export const dict = {
   'filesView.error.switchToEditMode': 'Schakel over naar bewerkmodus om het probleem op te lossen.',
   'filesView.error.readFileFailed': 'Kan bestand niet lezen',
   'filesView.editor.htmlPreviewTitle': 'HTML-preview',
+  'filesView.editor.htmlPreviewRelayUnavailable': 'HTML-preview is niet beschikbaar via de relay',
+  'filesView.editor.htmlPreviewShowCode': 'Code tonen',
   'filesView.editor.htmlAnnotate.intro': 'Dit is een geannoteerde selectie uit de preview van een HTML-bestand.',
   'filesView.diagram.closeDiagramView': 'Diagramweergave sluiten',
   'filesView.diagram.saveDiagram': 'Diagram opslaan',

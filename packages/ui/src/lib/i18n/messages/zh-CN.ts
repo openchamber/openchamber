@@ -1760,6 +1760,8 @@ export const dict: Record<I18nKey, string> = {
   'filesView.error.switchToEditMode': '请切换到编辑模式修复问题。',
   'filesView.error.readFileFailed': '读取文件失败',
   'filesView.editor.htmlPreviewTitle': 'HTML 预览',
+  'filesView.editor.htmlPreviewRelayUnavailable': '通过中继无法使用 HTML 预览',
+  'filesView.editor.htmlPreviewShowCode': '显示代码',
   'filesView.editor.htmlAnnotate.intro': '这是来自 HTML 文件预览的标注选区。',
   'filesView.diagram.closeDiagramView': '关闭图表视图',
   'filesView.diagram.saveDiagram': '保存图表',
