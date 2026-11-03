@@ -80,14 +80,20 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           return inflight;
         }
 
-        const runtimeFiles = getRegisteredRuntimeAPIs()?.files;
-        const indexedSearch = opencodeClient.searchFiles(normalizedQuery, {
-          directory: normalizedDirectory,
-          limit,
-          type,
-        });
+        const runtimeFiles = type === 'file' && (includeHidden || !respectGitignore)
+          ? getRegisteredRuntimeAPIs()?.files
+          : undefined;
+        // Through the plain search's own entry, so a caller showing those hits
+        // before the supplement answers costs no second OpenCode request.
+        const indexedSearch = runtimeFiles
+          ? get().searchFiles(normalizedDirectory, normalizedQuery, limit, { type })
+          : opencodeClient.searchFiles(normalizedQuery, {
+              directory: normalizedDirectory,
+              limit,
+              type,
+            });
         let supplementalFailed = false;
-        const supplementalSearch = type === 'file' && (includeHidden || !respectGitignore) && runtimeFiles
+        const supplementalSearch = runtimeFiles
           ? runtimeFiles.search({
               directory: normalizedDirectory,
               query: normalizedQuery,
