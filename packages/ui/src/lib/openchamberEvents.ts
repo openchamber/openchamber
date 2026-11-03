@@ -330,6 +330,10 @@ let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
 const listeners = new Set<Listener>();
+// The ready event of the open connection. A listener that subscribes after it
+// arrived gets it replayed, since the server sends it once per connection and
+// some listeners (tracked-items interest) cannot act until they have it.
+let readyEvent: Extract<OpenChamberEvent, { type: 'event-stream-ready' }> | null = null;
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 45_000;
@@ -373,6 +377,7 @@ const scheduleReconnect = () => {
 };
 
 const cleanupSource = () => {
+  readyEvent = null;
   clearHeartbeatTimer();
   streamAbortController?.abort();
   streamAbortController = null;
@@ -493,7 +498,9 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     reconnectAttempt = 0;
     const ready = eventStreamReadySchema.safeParse(envelope.properties);
     const connectionId = ready.success ? ready.data.connectionId ?? null : null;
-    for (const listener of listeners) listener({ type: 'event-stream-ready', connectionId });
+    const event = { type: 'event-stream-ready', connectionId } as const;
+    readyEvent = event;
+    for (const listener of listeners) listener(event);
     return;
   }
 
@@ -839,6 +846,12 @@ export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => 
   listeners.add(listener);
   ensureRuntimeChangeSubscription();
   connect();
+  if (readyEvent) {
+    const event = readyEvent;
+    queueMicrotask(() => {
+      if (readyEvent === event && listeners.has(listener)) listener(event);
+    });
+  }
 
   return () => {
     listeners.delete(listener);

@@ -188,6 +188,29 @@ describe('openchamber events', () => {
     }
   });
 
+  test('a listener that subscribes after the stream is ready still gets its connection, and not after a drop', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribeEarly = subscribeOpenchamberEvents(() => {});
+    const source = MockEventSource.instances[0];
+    source.onmessage?.({ data: JSON.stringify({ type: 'openchamber:event-stream-ready', properties: { connectionId: 'conn_1' } }) });
+
+    const late: unknown[] = [];
+    const unsubscribeLate = subscribeOpenchamberEvents((event) => late.push(event));
+    await Promise.resolve();
+    expect(late).toEqual([{ type: 'event-stream-ready', connectionId: 'conn_1' }]);
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    source.onerror?.();
+    const afterDrop: unknown[] = [];
+    const unsubscribeAfterDrop = subscribeOpenchamberEvents((event) => afterDrop.push(event));
+    await Promise.resolve();
+    expect(afterDrop).toEqual([]);
+
+    unsubscribeAfterDrop();
+    unsubscribeLate();
+    unsubscribeEarly();
+  });
+
   test('dispatches externally created session events', async () => {
     const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
     const events: unknown[] = [];

@@ -24,9 +24,10 @@ mock.module("@/lib/runtime-switch", () => ({
 
 const { trackedItemKey } = await import("@/lib/trackedItems/model")
 const {
+  getBoundStatusKeysForBranches,
   getBranchTrackedPull,
-  getFreshestPrStatusForBranch,
   getFreshestActiveSourceControlStatusForBranch,
+  getFreshestBranchStatusForDirectory,
   getFreshestSourceControlStatusForBranch,
   getGitHubPrStatusKey,
   getLinkedChangeRequestVisualSummary,
@@ -229,32 +230,45 @@ describe("GitHub PR status cache ownership", () => {
     expect(useGitHubPrStatusStore.getState().entries[key]?.status).toBeNull()
   })
 
-  test("passive branch readers follow the freshest remote-keyed status", () => {
-    const automatic = getGitHubPrStatusKey("/repo", "feature")
-    const origin = getGitHubPrStatusKey("/repo", "feature", "origin")
-    useGitHubPrStatusStore.getState().ensureEntry(automatic)
-    useGitHubPrStatusStore.getState().ensureEntry(origin)
-    useGitHubPrStatusStore.getState().updateStatus(automatic, () => ({
-      connected: true,
-      pr: { number: 7, title: "old", url: "u7", state: "open", draft: false, base: "main", head: "feature" },
-      checks: { state: "pending", total: 3, success: 1, failure: 0, pending: 2 },
-    }))
-    useGitHubPrStatusStore.getState().updateStatus(origin, () => ({
-      connected: true,
-      pr: { number: 7, title: "current", url: "u7", state: "open", draft: false, base: "main", head: "feature" },
-      checks: { state: "success", total: 3, success: 3, failure: 0, pending: 0 },
-    }))
-    useGitHubPrStatusStore.setState((state) => ({
-      entries: {
-        ...state.entries,
-        [automatic]: { ...state.entries[automatic], lastRefreshAt: 1 },
-        [origin]: { ...state.entries[origin], lastRefreshAt: 2 },
-      },
-    }))
+  test("background branch readers trust the registered contexts, else only a sole binding", () => {
+    const staleContext = readContext({ accountId: "github.com#1", bindingRevision: 1 })
+    const currentContext = readContext({ accountId: "github.com#2", bindingRevision: 2 })
+    const write = (context: ReturnType<typeof readContext>, state: ChangeRequest["state"], at: number) => {
+      const key = getSourceControlStatusKey(context, "feature")
+      useGitHubPrStatusStore.getState().ensureEntry(key)
+      useGitHubPrStatusStore.getState().updateStatus(key, () => ({
+        connected: true, identity: context, project: ACME_APP, branch: "feature",
+        changeRequest: changeRequest({ number: 7, title: "t", url: "u7", state }),
+      }))
+      useGitHubPrStatusStore.setState((store) => ({
+        entries: { ...store.entries, [key]: { ...store.entries[key], lastRefreshAt: at } },
+      }))
+    }
+    const state = () => useGitHubPrStatusStore.getState()
+    const feature = [{ directory: "/repo", branch: "feature" }]
+    write(currentContext, "merged", 1)
 
-    const freshest = getFreshestPrStatusForBranch(useGitHubPrStatusStore.getState().entries, "/repo", "feature")
-    expect(freshest?.pr?.title).toBe("current")
-    expect(freshest?.checks?.pending).toBe(0)
+    // Nothing registered (the project is collapsed) and one binding: it answers and is followed.
+    expect(getFreshestBranchStatusForDirectory(state(), "/repo", "feature")?.changeRequest?.state).toBe("merged")
+    expect(getBoundStatusKeysForBranches(state(), feature)).toEqual([getSourceControlStatusKey(currentContext, "feature")])
+    expect(getBoundStatusKeysForBranches(state(), [{ directory: "/repo", branch: "other" }])).toEqual([])
+
+    // Two bindings and no registration: freshness cannot pick the current one, so neither is trusted.
+    write(staleContext, "open", 2)
+    expect(getFreshestBranchStatusForDirectory(state(), "/repo", "feature")).toBeNull()
+    expect(getBoundStatusKeysForBranches(state(), feature)).toEqual([])
+
+    const store = useGitHubPrStatusStore.getState()
+    const request = store.beginActiveContextsLoad("runtime-a", "/repo", "row")
+    store.commitActiveContexts("runtime-a", "/repo", "row", request, [currentContext])
+    expect(getFreshestBranchStatusForDirectory(useGitHubPrStatusStore.getState(), "/repo", "feature")?.changeRequest?.state).toBe("merged")
+    expect(getBoundStatusKeysForBranches(state(), feature)).toEqual([getSourceControlStatusKey(currentContext, "feature")])
+    expect(getFreshestBranchStatusForDirectory(useGitHubPrStatusStore.getState(), "/repo", "other")).toBeNull()
+
+    // An empty registration means no binding is authorized now: no cached answer is trusted.
+    const empty = store.beginActiveContextsLoad("runtime-a", "/repo", "row")
+    store.commitActiveContexts("runtime-a", "/repo", "row", empty, [])
+    expect(getFreshestBranchStatusForDirectory(useGitHubPrStatusStore.getState(), "/repo", "feature")).toBeNull()
   })
 
   test("provider-neutral branch readers return GitLab status", () => {

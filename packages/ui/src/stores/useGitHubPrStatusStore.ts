@@ -456,29 +456,6 @@ const getFreshestBoundPrEntryForBranch = (
   return best;
 };
 
-const getFreshestLegacyPrEntryForBranch = (
-  entries: Record<string, PrStatusEntry>,
-  identity: SourceControlIdentity,
-  directory: string,
-  branch: string,
-): PrStatusEntry | null => {
-  const runtimeKey = getRuntimeKey();
-  let best: PrStatusEntry | null = null;
-  for (const [key, entry] of Object.entries(entries)) {
-    if (!entry.status) continue;
-    const parsed = parseStatusKey(key);
-    if (!parsed
-      || parsed.accountId
-      || parsed.runtimeKey !== runtimeKey
-      || parsed.provider !== identity.provider
-      || parsed.instance !== identity.instance
-      || parsed.directory !== directory
-      || parsed.branch !== branch) continue;
-    if (!best || entry.lastRefreshAt > best.lastRefreshAt) best = entry;
-  }
-  return best;
-};
-
 const getFreshestSourceControlEntryForBranch = (
   entries: Record<string, PrStatusEntry>,
   contexts: SourceControlReadContext[],
@@ -529,9 +506,68 @@ export const getActiveSourceControlStatusKeys = (
   return [...keys];
 };
 
-export const getFreshestPrStatusForBranch = (
-  entries: Record<string, PrStatusEntry>, directory: string, branch: string,
-): SourceControlStatus | null => getFreshestLegacyPrEntryForBranch(entries, GITHUB_IDENTITY, directory, branch)?.status ?? null;
+/**
+ * Bound entries of a branch outside any registration, when they all come from
+ * one repository binding. Live answers refresh any entry, so freshness cannot
+ * tell which of two bindings is current; with more than one nothing is
+ * trusted until a row registers the directory's contexts again.
+ */
+const getSoleBindingEntries = (
+  entries: Record<string, PrStatusEntry>,
+  runtimeKey: string,
+  directory: string,
+  branch: string,
+): Array<[string, PrStatusEntry]> => {
+  const matching: Array<[string, PrStatusEntry]> = [];
+  const bindings = new Set<string>();
+  for (const [key, entry] of Object.entries(entries)) {
+    const parsed = parseStatusKey(key);
+    if (!parsed?.accountId || parsed.runtimeKey !== runtimeKey || parsed.directory !== directory || parsed.branch !== branch) continue;
+    bindings.add(JSON.stringify([parsed.provider, parsed.instance, parsed.accountId, parsed.repositoryId, parsed.bindingRevision]));
+    matching.push([key, entry]);
+  }
+  return bindings.size === 1 ? matching : [];
+};
+
+/**
+ * The bound entry keys a background follower keeps live for these branches,
+ * without a row on screen: the registered contexts' entries, or the sole
+ * binding's when none is registered.
+ */
+export const getBoundStatusKeysForBranches = (
+  state: Pick<SourceControlStatusStore, 'entries' | 'activeContextRegistrations'>,
+  targets: ReadonlyArray<{ directory: string; branch: string }>,
+): string[] => {
+  const runtimeKey = getRuntimeKey();
+  return targets.flatMap(({ directory, branch }) => {
+    const registrations = state.activeContextRegistrations[getActiveContextsDirectoryKey(runtimeKey, directory)];
+    if (registrations) return getActiveContexts(registrations).map((context) => getSourceControlStatusKey(context, branch));
+    return getSoleBindingEntries(state.entries, runtimeKey, directory, branch).map(([key]) => key);
+  });
+};
+
+/**
+ * The branch status a background reader should trust, outside any row: the
+ * one the sidebar reads while the directory's contexts are registered, and
+ * otherwise the sole binding's freshest answer, so a project collapsed since
+ * the merge still answers.
+ */
+export const getFreshestBranchStatusForDirectory = (
+  state: Pick<SourceControlStatusStore, 'entries' | 'activeContextRegistrations'>,
+  directory: string,
+  branch: string,
+): SourceControlStatus | null => {
+  const runtimeKey = getRuntimeKey();
+  // A registration, even an empty one (no authorized binding now), is the
+  // authority; only a directory with none falls back to cached answers.
+  const registrations = state.activeContextRegistrations[getActiveContextsDirectoryKey(runtimeKey, directory)];
+  if (registrations) return getFreshestSourceControlEntryForBranch(state.entries, getActiveContexts(registrations), branch)?.status ?? null;
+  let best: PrStatusEntry | null = null;
+  for (const [, entry] of getSoleBindingEntries(state.entries, runtimeKey, directory, branch)) {
+    if (entry.status && (!best || entry.lastRefreshAt > best.lastRefreshAt)) best = entry;
+  }
+  return best?.status ?? null;
+};
 
 const getKeysBySignature = (entries: Record<string, PrStatusEntry>, signature: string): string[] => {
   return Object.entries(entries)
