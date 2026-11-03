@@ -1038,6 +1038,10 @@ const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${pa
 // see packaged-runtime-config.mjs.
 const runtimeConfigGate = createRuntimeConfigGate();
 
+// Settles when the launch's own startup has finished; a startup that fails
+// exits the app instead.
+const initialStartup = Promise.withResolvers();
+
 const injectRuntimeConfigIntoHtml = (html) => injectRuntimeConfig(html, { pending: runtimeConfigGate.isHeld() });
 
 /**
@@ -2985,6 +2989,15 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
 };
 
 const openMainWindow = async () => {
+  if (!state.startupResolved) {
+    // The tray, a second launch, a deep link or a shortcut can ask for a window
+    // while startup still runs. Resolving next to it would start the in-process
+    // server a second time, and that run replaces the first one's listener.
+    await initialStartup.promise;
+    // A foreground startup has opened the window this caller asked for.
+    if (state.mainWindow && !state.mainWindow.isDestroyed()) return state.mainWindow;
+  }
+
   if (!state.startupResolved) {
     const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
@@ -6361,6 +6374,7 @@ app.whenReady().then(async () => {
     state.startupResolved = !(await shouldSkipLocalServer());
     state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     log.info('[electron] started in background without window');
+    initialStartup.resolve();
     replayDeferredAppEvents();
     scheduleCompileCacheSettle();
     return;
@@ -6374,6 +6388,7 @@ app.whenReady().then(async () => {
     onPlainLocalBoot: startEarlyMainNavigation,
   });
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  initialStartup.resolve();
   replayDeferredAppEvents();
   scheduleCompileCacheSettle();
 
