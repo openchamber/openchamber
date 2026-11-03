@@ -13,6 +13,7 @@ const createService = (overrides = {}) => {
     listScheduledTasks: vi.fn(async () => []),
     deleteScheduledTask: vi.fn(async () => ({ deleted: true, tasks: [] })),
     setLoopApproval: vi.fn(async () => {}),
+    upsertScheduledTask: vi.fn(async (projectID, task) => ({ task: { id: 'task-1', ...task }, created: true })),
     ...(overrides.projectConfigRuntime || {}),
   };
   const scheduledTasksRuntime = {
@@ -28,6 +29,7 @@ const createService = (overrides = {}) => {
     scheduledTasksRuntime,
     chatsScope: overrides.chatsScope ?? null,
     resolvePrimaryWorktreeRoot: overrides.resolvePrimaryWorktreeRoot ?? null,
+    readModelCatalog: overrides.readModelCatalog ?? null,
   });
   return { service, projectConfigRuntime, scheduledTasksRuntime };
 };
@@ -527,5 +529,87 @@ ${prompt}
     await expect(service.setEnabled('proj', 'loop:user:my-loop', false)).resolves.toMatchObject({ enabled: false });
     expect((await stored('loop:user:my-loop')).enabled).toBe(false);
     expect(await readFile(userLoop, 'utf8')).toContain('enabled: false');
+  });
+});
+
+describe('scheduled-task model check', () => {
+  const task = (execution) => ({
+    name: 'Daily',
+    prompt: 'Run checks',
+    schedule: { kind: 'cron', cron: '0 9 * * *' },
+    execution,
+  });
+
+  it('rejects a model the catalog does not serve', async () => {
+    // A stored pair is not resolved until the fire starts, so a dead model
+    // fails hours later in a session nobody is watching (#5950).
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'openai', id: 'gpt-5' }]);
+    const { service, projectConfigRuntime } = createService({ readModelCatalog });
+
+    await expect(service.upsert('project-test', task({ prompt: 'Run', providerID: 'gone', modelID: 'dead' })))
+      .rejects.toThrow('unknown model: gone/dead');
+    expect(projectConfigRuntime.upsertScheduledTask).not.toHaveBeenCalled();
+  });
+
+  it('accepts the upstream modelID of an entry whose id is a display override', async () => {
+    // The fire path dispatches `modelID`; the session routes match either form.
+    const { service } = createService({
+      readModelCatalog: async () => [{ providerID: 'p', id: 'display-override', modelID: 'upstream-name' }],
+    });
+
+    await expect(service.upsert('project-test', task({ prompt: 'Run', providerID: 'p', modelID: 'upstream-name' })))
+      .resolves.toHaveProperty('task');
+    await expect(service.upsert('project-test', task({ prompt: 'Run', providerID: 'p', modelID: 'display-override' })))
+      .resolves.toHaveProperty('task');
+  });
+
+  it('stands down when the catalog has not loaded', async () => {
+    // A location OpenCode has not started in answers empty before its catalog
+    // fills in; an empty answer is not evidence the model is gone.
+    const { service, projectConfigRuntime } = createService({ readModelCatalog: async () => [] });
+
+    await expect(service.upsert('project-test', task({ prompt: 'Run', providerID: 'p', modelID: 'm' })))
+      .resolves.toHaveProperty('task');
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
+  });
+
+  it('checks only a model the call changes, so a stored dead model stays editable', async () => {
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service, projectConfigRuntime } = createService({
+      readModelCatalog,
+      projectConfigRuntime: {
+        listScheduledTasks: vi.fn(async () => [{
+          id: 'task-1',
+          name: 'Nightly',
+          schedule: { kind: 'cron', cron: '0 9 * * *' },
+          execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead' },
+        }]),
+      },
+    });
+
+    // Retiming or disabling a task whose model has vanished must not require
+    // fixing the model first: that is the task the user came here to reach.
+    await expect(service.upsert('project-test', {
+      id: 'task-1',
+      name: 'Nightly',
+      schedule: { kind: 'cron', cron: '0 10 * * *' },
+      execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead' },
+    })).resolves.toHaveProperty('task');
+    expect(readModelCatalog).not.toHaveBeenCalled();
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
+  });
+
+  it('reads the catalog for the directory the run will happen in', async () => {
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service } = createService({
+      readModelCatalog,
+      scheduledTasksRuntime: { syncProject: vi.fn(async () => []), validateTarget: vi.fn(async () => ({ directory: '/worktree' })) },
+    });
+
+    await expect(service.upsert('project-test', {
+      ...task({ prompt: 'Run', providerID: 'p', modelID: 'm' }),
+      targetSessionId: 'ses_target',
+    })).resolves.toHaveProperty('task');
+    expect(readModelCatalog).toHaveBeenCalledWith('/worktree');
   });
 });

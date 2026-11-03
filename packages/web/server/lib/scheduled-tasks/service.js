@@ -21,6 +21,10 @@ export const createScheduledTaskService = (dependencies) => {
     // Git helper that maps a linked worktree back to the checkout it came from;
     // see resolveProjectID.
     resolvePrimaryWorktreeRoot = null,
+    // Reads the model catalog a fire resolves against; see model-catalog.js.
+    // Absent leaves stored models unchecked, which is what the tests that do
+    // not exercise the catalog want.
+    readModelCatalog = null,
   } = dependencies;
 
   const listProjects = async () => {
@@ -85,6 +89,36 @@ export const createScheduledTaskService = (dependencies) => {
     return project.path;
   };
 
+  // A stored model that nothing serves fails at fire time, in a session nobody
+  // is watching, and reads as accepted until then. Rejecting it where it is
+  // written is the only place the user is still present.
+  //
+  // Only a model this call actually changes is checked: a task whose stored id
+  // has since disappeared must stay retimeable, disableable and deletable, and
+  // that is the task a user needs to reach to remove the dead id.
+  const assertNamedModelKnown = async (projectID, task, previous) => {
+    const providerID = asNonEmptyString(task?.execution?.providerID);
+    const modelID = asNonEmptyString(task?.execution?.modelID);
+    if (!providerID || !modelID) return;
+    const stored = previous?.execution;
+    if (stored?.providerID === providerID && stored?.modelID === modelID) return;
+    if (!readModelCatalog) return;
+    const directory = await resolveExecutionDirectory(projectID, task.targetSessionId);
+    const entries = await readModelCatalog(directory);
+    // A location OpenCode has not started in answers empty before its catalog
+    // fills in; that is not evidence a model is gone, the same stand-down the
+    // session routes apply to their own selection check.
+    if (!Array.isArray(entries) || entries.length === 0) return;
+    // Same matcher as the session routes' `findCatalogModel`: a catalog entry
+    // may carry a display override in `id`, and `modelID` is the upstream name
+    // the fire path dispatches, so either form names a model that will run.
+    const known = entries.some((model) => model?.providerID === providerID
+      && (model.id === modelID || model.modelID === modelID));
+    if (!known) {
+      throw new OpenChamberControlError(`unknown model: ${providerID}/${modelID}`, 400);
+    }
+  };
+
   const list = async (projectID) => {
     const { id } = await findProjectByID(projectID);
     return scheduledTasksRuntime.syncProject(id);
@@ -107,6 +141,11 @@ export const createScheduledTaskService = (dependencies) => {
       throw new OpenChamberControlError('enabled must be a boolean', 400);
     }
     const { id, task } = await findLoopTask(projectID, taskID);
+    // A loop file is hand-written, so enabling it is the only point where a
+    // person is present to be told its model does not exist. Checked before the
+    // file is rewritten, so a rejected enable leaves the loop off.
+    const definition = enabled ? parseLoopDefinition(task.loopFile) : null;
+    if (definition) await assertNamedModelKnown(id, { execution: definition.execution });
     try {
       if (!setLoopFileEnabled(task.loopFile, enabled)) {
         throw new OpenChamberControlError('Loop file must be valid before changing its enabled state', 400);
@@ -118,7 +157,6 @@ export const createScheduledTaskService = (dependencies) => {
     }
     // Enabling here is the user's approval of this version of the loop on
     // this machine; a repository loop does not run on its file's word alone.
-    const definition = enabled ? parseLoopDefinition(task.loopFile) : null;
     await projectConfigRuntime.setLoopApproval(id, task.loopFile, definition ? loopFingerprint(definition) : null);
     const tasks = await scheduledTasksRuntime.syncProject(id);
     return tasks.find((entry) => entry.id === taskID) || null;
@@ -145,6 +183,7 @@ export const createScheduledTaskService = (dependencies) => {
     if (taskInput.targetSessionId && (taskInput.enabled !== false || previous?.targetSessionId !== taskInput.targetSessionId)) {
       await scheduledTasksRuntime.validateTarget(id, taskInput.targetSessionId);
     }
+    await assertNamedModelKnown(id, taskInput, previous);
     try {
       upserted = await projectConfigRuntime.upsertScheduledTask(id, taskInput);
     } catch (error) {
