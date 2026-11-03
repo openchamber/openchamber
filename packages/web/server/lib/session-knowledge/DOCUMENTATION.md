@@ -111,6 +111,12 @@ tool, so it never linked anything. It goes into `openchamber.guidance`.
 
 ## Which branch the session works on
 
+`WORK_NAME_GUIDANCE` is included only while the managed tool is available and
+the session works in a linked worktree or isolated space. Main checkouts and
+plain folders keep their session titles without an agent naming instruction.
+Eligibility is read for the current directory on every send; a failed read
+withholds the naming guidance.
+
 While the agent has the managed `openchamber` tool, `openchamber.checkout`
 names the session's directory and the branch checked out there
 (`readCheckoutBranch`, read on every send). An agent once went on editing on a

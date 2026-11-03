@@ -773,8 +773,9 @@ The session creation action accepts `navigation: "preserve"` for background exte
 An explicit creation title is recorded as `metadata.openchamber.workTitle`
 with `by: "user"`, preserving the caller's other metadata. Titleless creation
 leaves metadata unchanged. The title and its ownership reach OpenCode in the
-same create request, so `work.name` cannot replace a user-given title before
-a later metadata write completes.
+same create request. `work.name` never changes a session title. When a session
+moves into a new worktree, this marker carries explicit user ownership to its
+task title; without it the current session title seeds an agent-owned name.
 
 Use the sync hooks backed by aggregated child stores when the UI needs **live truth** for sessions or statuses across all initialized directories.
 

@@ -665,6 +665,7 @@ Gitea and Forgejo accept an SSH alias only when its effective `HostName` directl
 - A `GitError` / non-repository result from status or check must not abort project/session enumeration: routes return a soft non-repo payload and log a warning.
 
 ### Worktree Naming
+- `PUT /api/git/worktrees/title` accepts optional `by`, defaulting to `user` for existing callers. A session move sends `agent` to seed the new worktree from a generated session title; explicit `workTitle.by: 'user'` carries user ownership. Both cases use `setWorktreeTaskTitle` and its ownership protection.
 - Worktree names are slugified via `slugWorktreeName`.
 - Random names use adjectives/nouns from `OPENCODE_ADJECTIVES` and `OPENCODE_NOUNS` lists.
 - Branches created for new worktrees use `openchamber/<worktree-name>` pattern.

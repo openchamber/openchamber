@@ -775,13 +775,14 @@ async function deleteGitWorktree(
 export async function setGitWorktreeTitle(
   directory: string,
   title: string,
+  by: 'user' | 'agent' = 'user',
 ): Promise<import('./api/types').GitWorktreeTitleResult> {
   const runtime = getRuntimeGit();
   if (runtime?.worktree?.setTitle) {
-    return runtime.worktree.setTitle(directory, title);
+    return runtime.worktree.setTitle(directory, title, by);
   }
   if (runtime) throw new Error('Renaming a worktree task is not available here');
-  return gitHttp.setGitWorktreeTitle(directory, title);
+  return gitHttp.setGitWorktreeTitle(directory, title, by);
 }
 
 /**

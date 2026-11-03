@@ -311,10 +311,6 @@ export const createOpenChamberControlService = (dependencies) => {
       const client = await getClient();
       return client.session.get({ sessionID }).catch(() => null);
     },
-    renameSession: async (sessionID, title, directory) => {
-      const client = await getClient(directory);
-      await client.session.update({ sessionID, title });
-    },
     createError: (message, status) => new OpenChamberControlError(message, status),
   }) : null;
 

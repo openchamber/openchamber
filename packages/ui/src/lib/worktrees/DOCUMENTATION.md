@@ -10,6 +10,7 @@ This module resolves project roots and lists worktree topology through the runti
 - A root-branch lookup checks its instance owner after resolving the root and before reading that root's status.
 - A topology invalidation within the same instance may retry the list, bounded by the existing convergence limit. Same-instance transport changes keep that behavior.
 - Failed or retired lists reject. They cannot stand in for an authoritative empty worktree list.
+- A move into a newly created worktree seeds its task title from the session's current title. Explicit `workTitle.by: 'user'` retains user ownership; every other title is agent-owned so `work.name` may replace it.
 
 ## Decisions
 

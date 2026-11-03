@@ -21,6 +21,7 @@ import { Readable } from 'node:stream';
 import { z } from 'zod';
 
 import { UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS, createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { SPACE_TASK_TITLE_EVENT, SPACE_TASK_TITLE_ROUTE, sanitizeSpaceTaskTitle } from './task-title.js';
 
 const EVENT_PATH = '/api/event';
 const CONTROL_PATH = '/api/openchamber/events';
@@ -116,8 +117,19 @@ const readBody = (response, cap) => new Promise((resolve, reject) => {
  * `broadcastGlobalUiEvent` its notification stream, and without one the connection that feeds it
  * is not made. `stallTimeoutMs`, `stateStallTimeoutMs` and `now` are for the tests.
  */
-export function createSpaceEventSources({ requestInside, index, hub, broadcastUiEvent = null, broadcastGlobalUiEvent = null, logger = console, stallTimeoutMs, stateStallTimeoutMs = SPACE_STATE_STALL_TIMEOUT_MS, now = Date.now }) {
+export function createSpaceEventSources({ requestInside, index, hub, broadcastUiEvent = null, broadcastGlobalUiEvent = null, onTaskTitle = null, logger = console, stallTimeoutMs, stateStallTimeoutMs = SPACE_STATE_STALL_TIMEOUT_MS, now = Date.now }) {
   const sources = new Map();
+  const titleProposalSchema = z.object({ properties: z.object({ spaceId: z.string(), title: z.unknown() }) });
+  const takeTaskTitle = (spaceId, title) => {
+    const clean = sanitizeSpaceTaskTitle(title);
+    if (clean) onTaskTitle?.(spaceId, clean);
+  };
+  const seedTaskTitle = async (spaceId, isCurrent) => {
+    const response = await requestInside(spaceId, { path: SPACE_TASK_TITLE_ROUTE, headers: { accept: 'application/json' }, timeoutMs: STATUS_TIMEOUT_MS });
+    if (response.statusCode !== 200) { response.resume(); return; }
+    const body = z.object({ title: z.unknown() }).safeParse(JSON.parse(await readBody(response, 1024)));
+    if (body.success && isCurrent()) takeTaskTitle(spaceId, body.data.title);
+  };
 
   const inject = (spaceId, payload, directory) => hub.injectEvent({ payload, directory, spaceId });
 
@@ -156,7 +168,7 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
   const start = (spaceId) => {
     if (sources.has(spaceId)) return;
     const controller = new AbortController();
-    const source = { failures: 0, everConnected: false, reader: null, controller };
+    const source = { failures: 0, everConnected: false, reader: null, controller, titleRevision: 0 };
     source.reader = createUpstreamSseReader({
       signal: controller.signal,
       fetchImpl: fetchInside(spaceId, EVENT_PATH),
@@ -189,10 +201,23 @@ export function createSpaceEventSources({ requestInside, index, hub, broadcastUi
     if (broadcastUiEvent) {
       source.stateReaders.push(startStateReader(spaceId, controller.signal, {
         path: CONTROL_PATH,
-        announce: () => broadcastUiEvent({ type: 'openchamber:space-queue-stream', properties: { spaceId, status: 'connected' } }),
+        announce: () => {
+          broadcastUiEvent({ type: 'openchamber:space-queue-stream', properties: { spaceId, status: 'connected' } });
+          if (onTaskTitle) {
+            const revision = ++source.titleRevision;
+            seedTaskTitle(spaceId, () => !controller.signal.aborted && revision === source.titleRevision)
+              .catch((error) => logger.warn?.(`[spaces] could not read the task title of space ${spaceId}: ${error?.code ?? error?.message ?? error}`));
+          }
+        },
         forward: (payload) => {
           if (payload?.type === QUEUE_UPDATED) forwardQueueUpdate(spaceId, payload);
           else if (payload?.type === AUTO_REVIEW_UPDATED) forwardAutoReviewUpdate(spaceId, payload);
+          else if (payload?.type === SPACE_TASK_TITLE_EVENT && onTaskTitle) {
+            const proposal = titleProposalSchema.safeParse(payload);
+            if (!proposal.success || proposal.data.properties.spaceId !== spaceId) return;
+            source.titleRevision += 1;
+            takeTaskTitle(spaceId, proposal.data.properties.title);
+          }
         },
       }));
     }

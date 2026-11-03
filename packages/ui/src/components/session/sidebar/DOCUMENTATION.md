@@ -425,10 +425,9 @@ Task titles are named by the agent through the openchamber tool's `work.name`
 (`web/server/lib/openchamber-sessions/work-naming.js`). A worktree's title is
 its branch description, with the agent's copy beside it
 (`branch.<name>.openchamberAgentTitle`, see `setWorktreeTaskTitle` in
-`web/server/lib/git`). A task in the main checkout renames its root session
-and records `metadata.openchamber.workTitle { title, by }`. A rename by the
-user (the row's Rename task, a session rename, AI rename) always wins: the
-agent's next call changes nothing and answers with the user's name.
+`web/server/lib/git`). A task in the main checkout uses its session title;
+`work.name` answers `named: false` and changes no session, including origins
+of forks and reviews. A user-given worktree task name wins over an agent name.
 
 A worktree's row is named by its task, and by its branch until the task has a
 name; never by one of its sessions (maintainer decision 2026-10-27: a row
@@ -439,11 +438,12 @@ value for every surface) swaps them: the branch is the row's name, the task's
 under it. The name the row does not show goes on a detailed row's second line;
 the tooltip leads with the task's name. A space follows the same rule with its
 own name in the branch's place. A session moved into a new worktree takes its
-task's name along (the sidebar's Quick worktree move,
+current session title along (the sidebar's Quick worktree move,
 `lib/worktrees/sessionWorktreeMove.ts`, and the agent's
 `session.moveToWorktree`, `carryToWorktree` in `work-naming.js`): the agent
-does not name a task twice, so the new worktree would otherwise show its bare
-branch. A move onto a branch that already exists keeps that branch's name.
+may replace that agent-owned seed. A session with explicit `workTitle.by: 'user'`
+keeps user ownership in the worktree. No marker is required to seed the title.
+A move onto a branch that already exists keeps that branch's name.
 
 ### Spaces
 
@@ -454,12 +454,13 @@ the draft rows of its folder. The row is the worktree's (`WorktreeWorkRow`,
 `MobileWorktreeRow`), drawn for a space by `useWorktreeWork`:
 
 - The space's instance icon where the worktree mark goes. Its title is its
-  task's name, named as a main-checkout task is: the agent's `work.name` from
-  inside the space names the root session it works in, and the user's rename
-  of that session wins (`metadata.openchamber.workTitle`); the most recent
-  named session names the row. Until then the row shows the space's own name,
+  task's name from the host's space record, with user ownership taking precedence
+  over agent proposals. Until then the row shows the space's own name,
   which otherwise stands where a worktree's branch does (the tooltip, a
-  detailed row's second line). Rename task renames that session. It has no branch, pin or archive.
+  detailed row's second line). Rename task writes the space record as user-owned,
+  including when the space has no sessions. It never changes a session title.
+  Old session `workTitle` metadata is left in place and does not name the space.
+  It has no branch, pin or archive.
 - Its state is one mark at the row's end (`spaces/SpaceStatus.tsx`): a
   spinner while it is made, a setup command runs or an action is under way;
   the word "Stopped" where a row's time goes while it is stopped (a square

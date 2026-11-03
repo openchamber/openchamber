@@ -618,6 +618,59 @@ The create dialog fills the allowlist with the package registries the project's 
 
 A failure after `creating` removes what was made: the containers, the refs in the user's repository and the record, and the answer of the failed step is kept in the list as `state: 'failed'` with `failure: { code, message, details, cleanup }` until the user dismisses it with `DELETE /<id>`, so an error is never silent; when that clean-up itself failed, `cleanup` says so and the dismissal removes what is still there, so the space cannot come back in the list as damaged after the user was told it was gone. A creation under way is listed as `preparing` with its `step`, over the place's view of it, and refuses start, stop, remove and apply with `space_preparing` until it is ready or failed; a failed one refuses them with `space_creation_failed`. One action runs per space at a time: start, stop, remove, the journal, the preview and the apply take a lock on the space's id and a second action meets `space_busy`, so a remove from another client cannot pull the service refs from under an apply that is writing them. A start of a space whose history is `pending` or `failed` sends it again, because a stop right after the creation is the usual way it fails. The project must be one the host has registered, compared as the label's hash and the path, because the sidebar resolves a space to its project the same way. The request may spell the folder any way the host's `path.resolve` turns into the registered one, forward slashes on Windows among them, and the space keeps it as the settings name it. The four choices are parsed at the boundary, each field refusing with a code of its own: `project_not_registered`, `invalid_space_name`, `invalid_snapshot_mode`, `invalid_network`, and since 5d-4 `invalid_setup_commands` for the project's setup commands, which start in the background right after `ready`.
 
+### Task-title ownership
+
+`taskTitle` is nullable `{ title, by: 'user' | 'agent' }` on the host's own
+record. Records written before task titles read with `null`; no session-title
+migration runs. A malformed task-title field is dropped without making the
+network choice or grants unreadable.
+
+### Task titles
+
+`work.name` never renames a session. Inside a space, `task-title.js` writes the
+agent's proposal to `$HOME/.openchamber-space/task-title.json` and emits
+`openchamber:space-task-title.updated { spaceId, title }` on that server's
+`/api/openchamber/events`. `GET /api/openchamber/space-task-title` reads the
+persisted proposal. Both paths use small plain setting files capped at 1 KiB;
+proposal writes replace through a fresh temporary file. The environment names
+the proposal and user-copy paths with `OPENCHAMBER_SPACE_TASK_TITLE_FILE` and
+`OPENCHAMBER_SPACE_USER_TASK_TITLE_FILE`.
+
+The host's existing control-stream connection accepts this event in addition
+to queue and auto-review changes. At every connection it reads the GET once,
+over the same authenticated dispatcher channel. A newer event supersedes an
+in-flight reconnect read. There is no naming poll or new inbound host listener.
+
+Space output is a proposal only. The host takes a string's first line, strips
+control and bidi characters, trims it, and keeps at most 120 characters.
+Non-string and empty proposals are ignored. An event naming a different space
+is dropped. The host always assigns `by: 'agent'`, ignoring any ownership in
+space output. An agent proposal replaces only an empty or agent-owned record;
+the user's title always wins. Titles are rendered as text.
+
+`PUT /api/openchamber/spaces/:id/task-title { title }` is the user's rename.
+It persists user ownership, announces the authoritative record on the global
+event hub, and copies `{ title }` into
+`$HOME/.openchamber-space/user-task-title.json` over exec through a temporary
+name. Start and both restart paths deliver the copy again. A failed delivery
+is logged and leaves the host record unchanged. Web, desktop, hosted mobile
+and Capacitor read the host record through the journey list, merged session
+marks and task-title events. VS Code has no spaces. Stopped and unreachable
+spaces retain the persisted task name; without one their rows use the space
+name, including spaces previously named through a session's `workTitle`.
+
+**Known limit.** The agent owns files and processes inside the space, so it can
+tamper with the copied user title or replace the server. That changes only its
+own `work.name` answer. The host's ownership rule still protects the displayed
+user title. Delivery is eventual: an agent can receive `named: true` just before
+the host ignores its proposal because the user's title already wins.
+
+### Why task titles belong to space records
+
+A space can hold several independent conversations and can be stopped. Its
+display name therefore belongs to the host record. Naming a root session made
+agent calls overwrite conversations named in clients without ownership markers.
+
 ### The record
 
 The labels stay the source of truth about which spaces exist. What the host adds is one file per space under `<data dir>/spaces/records/<id>.json`, mode 0600, written through a temporary name: `{ version, network: { mode, domains }, repository, spacePath, base, history, grants, setup }`. It exists so that a gatekeeper that starts with an empty memory is told the network the user chose, and so that the history and the result find the repository and the space path that code in used, which differ from the project directory when the project is a subfolder of its repository. A record the host cannot read is reported as unreadable, never as a fresh one, and is not written over: `start` then leaves the network closed and answers `networkRestored: false`, and the list carries `network: null`, which a screen shows as unknown and never as open. No secret is in a record; that is decision 5. Since 5b `grants` holds each grant without its value: `{ kind: 'model', id, provider, upstream, header, source }` with `source` `{ kind: 'typed' }` or `{ kind: 'env', name }`, or `{ kind: 'domain', id, upstream }`. The schema is strict, so a value under any name is refused rather than written, and a record from before 5b reads back with no grants.
@@ -1160,6 +1213,14 @@ docker manifest inspect node@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb37
 The answer has `mediaType: application/vnd.oci.image.index.v1+json` and lists manifests for `linux/amd64`, `linux/arm64`, and `linux/ppc64le`, plus attestation entries with platform `unknown/unknown`. Node 24 dropped 32-bit `linux/arm`. An arch-specific digest answers with `application/vnd.oci.image.manifest.v1+json` and no platform list. `docker images --digests node` showed the same digest for the `24-bookworm` tag. Repeat both commands when you bump the digest. `docker buildx imagetools inspect` gives the same facts where buildx is installed. A bump also reads the image's own variables again for `hardening.js`, and adds the digest it replaces to `RETIRED_SPACE_BASE_IMAGES`, see "Retired images" under "Places page". The bump of 2026-10-08 from `node:22-bookworm` is the first.
 
 ## Tests
+
+`task-title.test.js` covers persisted ownership, old records, failed writes,
+small plain files, inside naming, control-stream reconnect seeding, hostile
+display text and cross-space event refusal. `host.test.js` also runs that
+channel through the authenticated dispatcher and checks the host-owned title
+in the merged list. `journey.test.js` covers user delivery, start and restart
+redelivery, and the persisted host name when exec fails. These are parser,
+storage and channel proofs; they make no new container-isolation claim.
 
 ### Escape tests
 

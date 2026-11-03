@@ -1691,11 +1691,11 @@ export async function deleteGitWorktree(directory: string, payload: RemoveGitWor
 
 const worktreeTitleResultSchema = z.object({ title: z.string(), branch: z.string() });
 
-export async function setGitWorktreeTitle(directory: string, title: string): Promise<GitWorktreeTitleResult> {
+export async function setGitWorktreeTitle(directory: string, title: string, by: 'user' | 'agent' = 'user'): Promise<GitWorktreeTitleResult> {
   const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/title`, directory), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, by }),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {

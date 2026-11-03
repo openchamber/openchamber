@@ -3333,6 +3333,10 @@ export function SyncProvider(props: {
         if (known && progress.step !== "ready" && progress.step !== "failed") return
         void refreshSpacesJourney().catch(() => undefined)
       },
+      onSpaceTaskTitle: (spaceId, taskTitle) => {
+        if (runtimeKey !== getRuntimeKey()) return
+        if (!useSpacesStore.getState().noteTaskTitle(spaceId, taskTitle)) void refreshSpacesJourney().catch(() => undefined)
+      },
       onSpaceSetup: () => {
         // The setup commands of a space moved on; what they do now is in the list.
         void refreshSpacesJourney().catch(() => undefined)
