@@ -1,10 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { Project } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useCommandsStore } from '@/stores/useCommandsStore';
+import { useSkillsStore } from '@/stores/useSkillsStore';
+import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { usePluginsStore } from '@/stores/usePluginsStore';
 import { ChildStoreManager } from './child-store';
 import { useGlobalSyncStore } from './global-sync-store';
 import { createEventRoutingIndex, handleEvent } from './sync-context';
@@ -49,6 +54,27 @@ afterEach(() => {
 });
 
 describe('catalog refresh routing', () => {
+  test('one config burst refreshes each Settings resource once across derived events', async () => {
+    const config = spyOn(opencodeClient, 'getConfig').mockResolvedValue({});
+    const providers = spyOn(useConfigStore.getState(), 'loadProviders').mockResolvedValue(undefined);
+    const commands = spyOn(useCommandsStore.getState(), 'loadCommands').mockResolvedValue(true);
+    const skills = spyOn(useSkillsStore.getState(), 'loadSkills').mockResolvedValue(true);
+    const catalog = spyOn(useSkillsCatalogStore.getState(), 'loadCatalog').mockResolvedValue(true);
+    const mcp = spyOn(useMcpConfigStore.getState(), 'loadMcpConfigs').mockResolvedValue(true);
+    const plugins = spyOn(usePluginsStore.getState(), 'loadPlugins').mockResolvedValue(true);
+    const spies = [config, providers, commands, skills, catalog, mcp, plugins];
+    try {
+      for (const kind of ['config', 'agent', 'provider', 'model', 'plugin', 'skill', 'command'] as const) {
+        handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind } }, childStores, createEventRoutingIndex(), getRuntimeKey());
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(agentLoads.sort()).toEqual(['/workspace/ambient', '/workspace/project']);
+      for (const resource of spies) expect(resource).toHaveBeenCalledTimes(1);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
   test('an open-directory event refreshes its Settings list without reading unrelated locations', async () => {
     handleEvent('/workspace/project', { type: 'catalog.updated', properties: { kind: 'agent' } }, childStores, createEventRoutingIndex(), getRuntimeKey());
     await new Promise((resolve) => setTimeout(resolve, 300));

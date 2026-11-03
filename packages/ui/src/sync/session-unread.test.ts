@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import type { Session } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
-import { isSessionUnread, isSessionUnreadWithError, markSessionUnreadSeen } from "./session-unread"
+import { getUnreadSessionIds, isSessionUnread, isSessionUnreadWithError, markSessionsUnreadSeen, markSessionUnreadSeen } from "./session-unread"
 
 const session = (id: string, time: Partial<Session["time"]> = {}, extra: Partial<Session> = {}): Session => ({
   id, directory: "/repo", projectID: "project", title: id, cost: 0,
@@ -84,5 +84,21 @@ describe("markSessionUnreadSeen", () => {
     markSessionUnreadSeen("a")
     markSessionUnreadSeen("missing")
     expect(view.mock.calls).toEqual([])
+  })
+
+  test("marking all clears every unread mark in one store update and records each view", () => {
+    view.mockResolvedValue(undefined)
+    useGlobalSessionsStore.getState().upsertSessions([
+      session("b", { idle: 30 }),
+      session("c", { idle: 40, viewed: 40 }),
+    ])
+    let updates = 0
+    const unsubscribe = useGlobalSessionsStore.subscribe(() => { updates += 1 })
+    const marked = markSessionsUnreadSeen(getUnreadSessionIds())
+    unsubscribe()
+    expect(marked.sort()).toEqual(["a", "b"])
+    expect(updates).toBe(1)
+    expect(getUnreadSessionIds()).toEqual([])
+    expect(view.mock.calls.sort()).toEqual([["a", 10, "/repo"], ["b", 30, "/repo"]])
   })
 })

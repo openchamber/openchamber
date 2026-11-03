@@ -56,13 +56,13 @@ const usePierreThemeConfig = () => {
     // Registration is synchronous module state inside @pierre/diffs; rendering
     // a PatchDiff with these theme ids requires it to have happened first, so
     // register during render rather than in an effect.
-    ensurePierreThemeRegistered(lightTheme);
-    ensurePierreThemeRegistered(darkTheme);
+    const lightThemeName = ensurePierreThemeRegistered(lightTheme);
+    const darkThemeName = ensurePierreThemeRegistered(darkTheme);
 
     const currentVariant = themeSystem?.currentTheme.metadata.variant ?? 'light';
 
     return {
-        pierreTheme: { light: lightTheme.metadata.id, dark: darkTheme.metadata.id },
+        pierreTheme: { light: lightThemeName, dark: darkThemeName },
         pierreThemeType: currentVariant === 'dark' ? ('dark' as const) : ('light' as const),
     };
 };

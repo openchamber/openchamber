@@ -95,6 +95,9 @@ A failed read retries with backoff (2 s doubling to 60 s).
   "Session finished: <title>" row that opens to the answer.
 - `delivery: 'steer'`: a parent that is busy reads it at its next step, the
   way OpenCode delivers a subagent report; an idle one is woken by `resume`.
+  A parent waiting on a page or a secret card reads it right after the user's
+  answer, and the chat shows the row only then (`../openchamber-control/`,
+  *Why a background message waits behind a page*).
 - `resume: false` for an archived parent: the answer is recorded, nothing
   runs behind the user's back. A failed archive lookup counts as not archived
   and wakes the parent: the agent asked for this result.

@@ -16,7 +16,7 @@ interface ChangeScopeSelectorProps {
     scope: PendingDiffScope;
     workingCount: number;
     stagedCount: number;
-    turnCount: number;
+    turnCount: number | null;
     branchCount: number | null;
     commitCount: number | null;
     prCount: number | null;
@@ -93,7 +93,7 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                     <DropdownMenuRadioItem value="turn">
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                             <span>{t('diffView.scope.lastTurn')}</span>
-                            <span className="typography-meta text-muted-foreground">{turnCount}</span>
+                            <span className="typography-meta text-muted-foreground">{turnCount ?? '…'}</span>
                         </span>
                     </DropdownMenuRadioItem>
                     {showBranchOption ? (

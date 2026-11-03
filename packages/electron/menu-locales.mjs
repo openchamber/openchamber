@@ -1,5 +1,8 @@
 export const MENU_LOCALE_DICTIONARIES = {
   en: {
+    'dock.markAllRead': 'Mark all as read',
+    'dock.unread': 'Unread',
+    'dock.untitledSession': 'Untitled session',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'Connecting to {host}…',
     'about': 'About OpenChamber',
@@ -64,6 +67,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Quit',
   },
   ar: {
+    'dock.markAllRead': 'وضع علامة مقروء على الكل',
+    'dock.unread': 'غير مقروء',
+    'dock.untitledSession': 'جلسة بلا عنوان',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'جارٍ الاتصال بـ {host}…',
     'about': 'حول OpenChamber',
@@ -128,6 +134,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'إنهاء',
   },
   de: {
+    'dock.markAllRead': 'Alle als gelesen markieren',
+    'dock.unread': 'Ungelesen',
+    'dock.untitledSession': 'Unbenannte Sitzung',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'Verbindung zu {host} wird hergestellt…',
     'about': 'Über OpenChamber',
@@ -192,6 +201,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Beenden',
   },
   es: {
+    'dock.markAllRead': 'Marcar todo como leído',
+    'dock.unread': 'Sin leer',
+    'dock.untitledSession': 'Sesión sin título',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'Conectando a {host}…',
     'about': 'Acerca de OpenChamber',
@@ -256,6 +268,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Salir',
   },
   fr: {
+    'dock.markAllRead': 'Tout marquer comme lu',
+    'dock.unread': 'Non lus',
+    'dock.untitledSession': 'Session sans titre',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'Connexion à {host}…',
     'about': 'À propos d\'OpenChamber',
@@ -320,6 +335,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Quitter',
   },
   he: {
+    'dock.markAllRead': 'סימון הכול כנקרא',
+    'dock.unread': 'לא נקרא',
+    'dock.untitledSession': 'שיחה ללא כותרת',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'מתחבר אל {host}…',
     'about': 'אודות OpenChamber',
@@ -384,6 +402,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'יציאה',
   },
   ja: {
+    'dock.markAllRead': 'すべて既読にする',
+    'dock.unread': '未読',
+    'dock.untitledSession': '無題のセッション',
     'app.name': 'OpenChamber',
     'splash.connectingTo': '{host} に接続中…',
     'about': 'OpenChamber について',
@@ -448,6 +469,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': '終了',
   },
   ko: {
+    'dock.markAllRead': '모두 읽음으로 표시',
+    'dock.unread': '읽지 않음',
+    'dock.untitledSession': '제목 없는 세션',
     'app.name': 'OpenChamber',
     'splash.connectingTo': '{host}에 연결 중…',
     'about': 'OpenChamber에 관하여',
@@ -512,6 +536,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': '종료',
   },
   nl: {
+    'dock.markAllRead': 'Alles als gelezen markeren',
+    'dock.unread': 'Ongelezen',
+    'dock.untitledSession': 'Naamloze sessie',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'Verbinden met {host}…',
     'about': 'Over OpenChamber',
@@ -576,6 +603,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Stoppen',
   },
   pl: {
+    'dock.markAllRead': 'Oznacz wszystko jako przeczytane',
+    'dock.unread': 'Nieprzeczytane',
+    'dock.untitledSession': 'Sesja bez tytułu',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'Łączenie z {host}…',
     'about': 'O programie OpenChamber',
@@ -640,6 +670,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Zakończ',
   },
   'pt-BR': {
+    'dock.markAllRead': 'Marcar tudo como lido',
+    'dock.unread': 'Não lidas',
+    'dock.untitledSession': 'Sessão sem título',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'Conectando a {host}…',
     'about': 'Sobre o OpenChamber',
@@ -704,6 +737,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Sair',
   },
   tr: {
+    'dock.markAllRead': 'Tümünü okundu olarak işaretle',
+    'dock.unread': 'Okunmamış',
+    'dock.untitledSession': 'Başlıksız oturum',
     'app.name': 'OpenChamber',
     'splash.connectingTo': '{host} adresine bağlanılıyor…',
     'about': 'OpenChamber Hakkında',
@@ -768,6 +804,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Çık',
   },
   uk: {
+    'dock.markAllRead': 'Позначити все прочитаним',
+    'dock.unread': 'Непрочитані',
+    'dock.untitledSession': 'Сесія без назви',
     'app.name': 'OpenChamber',
     'splash.connectingTo': 'Підключення до {host}…',
     'about': 'Про OpenChamber',
@@ -832,6 +871,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': 'Вийти',
   },
   'zh-CN': {
+    'dock.markAllRead': '全部标为已读',
+    'dock.unread': '未读',
+    'dock.untitledSession': '无标题会话',
     'app.name': 'OpenChamber',
     'splash.connectingTo': '正在连接到 {host}…',
     'about': '关于 OpenChamber',
@@ -896,6 +938,9 @@ export const MENU_LOCALE_DICTIONARIES = {
     'quit': '退出',
   },
   'zh-TW': {
+    'dock.markAllRead': '全部標為已讀',
+    'dock.unread': '未讀',
+    'dock.untitledSession': '無標題工作階段',
     'app.name': 'OpenChamber',
     'splash.connectingTo': '正在連線到 {host}…',
     'about': '關於 OpenChamber',

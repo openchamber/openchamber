@@ -45,8 +45,6 @@ export const UsagePage: React.FC = () => {
   const results = useQuotaStore((state) => state.results);
   const selectedProviderId = useQuotaStore((state) => state.selectedProviderId);
   const setSelectedProvider = useQuotaStore((state) => state.setSelectedProvider);
-  const loadSettings = useQuotaStore((state) => state.loadSettings);
-  const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const fetchProviderQuota = useQuotaStore((state) => state.fetchProviderQuota);
   const isLoading = useQuotaStore((state) => state.isLoading);
   const blink = useWaitingBlink(isLoading);
@@ -59,12 +57,7 @@ export const UsagePage: React.FC = () => {
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
   const providers = useQuotaProviders();
 
-  useQuotaAutoRefresh();
-
-  React.useEffect(() => {
-    void loadSettings();
-    void fetchAllQuotas();
-  }, [loadSettings, fetchAllQuotas]);
+  useQuotaAutoRefresh(true, true);
 
   React.useEffect(() => {
     if (selectedProviderId) {

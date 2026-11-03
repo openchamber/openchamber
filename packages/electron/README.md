@@ -384,6 +384,31 @@ An exit requested during entry remains queued in Electron even after an explicit
 
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart. While disabled, Desktop skips the native tray controller, tray-specific subscriptions, polling, and quota refresh. Dock badges remain independent: unread activity, session membership, and badge preferences still update the Dock through the shared IPC command. Turning off the Dock badge clears its count without enabling the menu bar item.
 
+The Dock's context menu lists up to 10 unread sessions, newest completed turn
+first, from the same sidebar-visible set as its badge. A session opens through
+the tray's session action route. Mark all as read reaches the renderer even
+with the menu bar disabled. Turning off the Dock badge also clears this menu;
+an empty unread list offers no actions. Native labels follow the preferred UI locale.
+
+Packaged Windows exposes the same unread set in a custom taskbar jump-list
+category and a Mark all as read task. Session items launch the executable with
+the existing session deep link, strictly validating its ID and checking global
+session membership before selection. Mark-all launches with `--mark-all-read`;
+main queues it until the renderer has registered its action listener, and the
+renderer waits for the global list. Unchanged lists are not rewritten. Empty
+lists clear the custom jump list. Windows-removed items are excluded by their
+launch arguments before deduplication, so re-adding one cannot drop the category.
+Development skips jump lists because Electron's
+executable needs a separate app-path argument to relaunch this checkout.
+
+An enabled tray loads the dropdown providers' quota once after renderer runtime
+initialization when no sample has loaded. The native Menu `menu-will-show` event
+requests a quota refresh through `openchamber:tray-action` before or as the menu
+opens on macOS, Windows and Linux. It shares the readouts' 15-second freshness
+window and works while the main window is hidden or minimized without revealing
+it. The menu can open with cached usage; the renderer pushes a new tray snapshot
+when the fetch lands. No quota timer runs for the tray.
+
 ## Bundled OpenCode CLI
 
 Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. A Windows build for another architecture does not run the binary, because the arm64 release job runs on an x64 runner that cannot start it; there the step checks the version in the package's `package.json` instead; on Windows `verify:opencode-cli` and `verify:opencode-cli:packaged` also read the binary's PE header (`scripts/windows-executable.mjs`) and fail when it was built for another architecture.
@@ -507,6 +532,13 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   when closing the last one hides the app on macOS.
 
 ## IPC Pattern
+
+`desktop_get_current_window_state` includes the native `visible` boolean, true
+only for a shown, non-minimized window. The read-only
+`openchamber:window-visibility` event carries that same boolean on show, hide,
+minimize and restore. Shared quota readouts use it to stop provider refresh in
+hidden windows. Focus changes do not change visibility. Chromium's document
+visibility is insufficient here because desktop disables background throttling.
 
 Renderer code should call the desktop bridge exposed by `preload.mjs`. Do not import Electron from shared UI code.
 

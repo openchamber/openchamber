@@ -65,6 +65,9 @@ const pullSummarySchema = z.object({
   base: z.string().optional(),
   mergeable: z.boolean().nullable(),
   mergeableState: z.string().nullable(),
+  isInMergeQueue: z.boolean().optional(),
+  mergeQueueEntry: z.object({ state: z.string(), position: z.number().int().nonnegative() }).nullish(),
+  autoMergeRequest: z.object({ enabledAt: z.string(), mergeMethod: z.string() }).nullish(),
   checks: checksSchema.nullable(),
 }) satisfies z.ZodType<ChangeRequestLiveSummary>;
 

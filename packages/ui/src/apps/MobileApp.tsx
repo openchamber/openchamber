@@ -799,14 +799,12 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // The mobile shell has no layout-level session list sync, so a lost
   // `session.deleted` is reconciled here from the same complete global
   // active+archived snapshots, refreshed whenever the sessions sheet opens.
-  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
-  const globalArchivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
-  const hasAuthoritativeGlobalSessions = useGlobalSessionsStore((state) => state.status === 'ready');
-  const cleanupSessions = React.useMemo(
-    () => [...globalActiveSessions, ...globalArchivedSessions],
-    [globalActiveSessions, globalArchivedSessions],
-  );
-  useAuthoritativeSessionCleanup({ hasAuthoritativeGlobalSessions, sessions: cleanupSessions });
+  const authoritativeSessions = useGlobalSessionsStore((state) => state.authoritativeSessions);
+  const cleanupSessions = React.useMemo(() => authoritativeSessions ?? [], [authoritativeSessions]);
+  useAuthoritativeSessionCleanup({
+    hasAuthoritativeGlobalSessions: authoritativeSessions != null,
+    sessions: cleanupSessions,
+  });
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [showConnectionRecovery, setShowConnectionRecovery] = React.useState(false);

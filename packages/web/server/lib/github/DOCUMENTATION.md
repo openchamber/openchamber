@@ -267,6 +267,18 @@ The client's branch PR state is `useGitHubPrStatusStore`, a provider-neutral sto
 
 ## Decisions
 
+### Why a refused merge can enable auto-merge
+
+The asynchronous merge runs first with the existing `bypass_rules: true`, so an actor permitted to bypass keeps that behavior. After a refusal or a failed asynchronous result, `merge-when-ready.js` reads GitHub's authoritative state. An open, unchanged, non-conflicting PR in `BLOCKED` or `UNSTABLE`, whose target branch has no merge queue, enables auto-merge with the selected method and `expectedHeadOid`. A queue branch keeps the asynchronous queue path. Authentication failures, moved heads, conflicts and unreadable state never become auto-merge requests. GitHub refusing auto-merge, including a repository where it is disabled, remains a visible refusal.
+
+### Why user merge follows share tracked-items
+
+`merge-follow.js` owns user notifications for merges initiated here, independently of the agent's `pr.watch`. A successful `queued`, `auto-merge` or still-`merging` receipt registers server interest, including the acting account. Follows persist atomically in `github-merge-follow.json` with mode `0600`, at most 200 active entries. They survive a server restart and need no client window. Replay receipts do not restart follows. Invalid individual entries are dropped; an unreadable or malformed file prevents replacement writes. Failed writes restore the prior in-memory snapshot.
+
+Live summaries carry `isInMergeQueue`, `mergeQueueEntry { state, position }` and `autoMergeRequest { enabledAt, mergeMethod }`. The shared PR actions show that waiting state with Cancel, which dequeues and disables any retained auto-merge request through the same durable merge route using `cancel: true`. The cancel digest differs from merging; existing merge digests remain unchanged. Reconciliation reads the waiting state before claiming a lost enable/cancel succeeded.
+
+Follows notify on merged, closed, leaving both queue and auto-merge, and checks becoming failing, including another failure on a new head. A terminal state wins over its simultaneous queue disappearance and ends the follow. Removal and failing checks leave it active until merged or closed. A cancel made from OpenChamber ends the follow without a removal notification: the source-control routes call `onMutationStarting` before the provider write, and removal seen while that cancel runs is not announced. A merged read is accepted even when it began before the follow, since tracked items stop reading a merged PR and no later read would come. Unknown reads and reads begun before the merge request never imply removal. Baselines are saved before best-effort notification delivery, matching session notifications' live delivery contract. Notification settings and enterprise content stripping are owned by `../notifications`.
+
 ### Why merge-permission refusals are remembered for five minutes
 
 Non-collaborator permission checks repeatedly return the same 403, producing log noise and an unnecessary request on each status read. A bounded process-local memo suppresses those requests while allowing permission changes to appear after five minutes; rate limits remain transient and are never stored as permission refusals.

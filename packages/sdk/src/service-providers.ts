@@ -726,7 +726,7 @@ export const notificationsProviderTimeoutMs = (method: NotificationsProviderMeth
  * `review`: an auto-review ended; the `goal_*` kinds: a session goal settled.
  * Which kinds reach a channel follows the user's own notification toggles.
  */
-export const GUEST_NOTIFICATION_KINDS = ['ready', 'error', 'question', 'permission', 'review', 'goal_complete', 'goal_blocked', 'goal_budget'] as const;
+export const GUEST_NOTIFICATION_KINDS = ['ready', 'error', 'question', 'permission', 'review', 'goal_complete', 'goal_blocked', 'goal_budget', 'pull-request'] as const;
 export type GuestNotificationKind = (typeof GUEST_NOTIFICATION_KINDS)[number];
 
 /**

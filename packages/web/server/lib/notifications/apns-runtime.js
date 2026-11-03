@@ -89,6 +89,8 @@ export const createApnsRuntime = (deps) => {
     readSettingsFromDiskMigrated,
     // Host relay identity keys, shared with the private relay (relay/key-store.js).
     relayKeyStore,
+    // Session keys of revoked or expired clients (client-push-access.js).
+    getInvalidSessionKeys = async () => new Set(),
   } = deps;
 
   let persistLock = Promise.resolve();
@@ -281,6 +283,24 @@ export const createApnsRuntime = (deps) => {
       const tokensBySession = { ...(current.tokensBySession || {}) };
       for (const [session, entries] of Object.entries(tokensBySession)) {
         const filtered = normalizeTokens(entries).filter((entry) => entry.deviceToken !== deviceToken);
+        if (filtered.length === 0) delete tokensBySession[session];
+        else tokensBySession[session] = filtered;
+      }
+      return { version: APNS_TOKENS_VERSION, tokensBySession };
+    });
+  };
+
+  // A device can sit under several keys (an older cookie session, an earlier pairing) and a
+  // send reaches it through any of them, so it leaves every key except those in `keep`.
+  const removeApnsDevicesOfSessions = async (sessionKeys, keep) => {
+    await persistTokenUpdate((current) => {
+      const tokensBySession = { ...(current.tokensBySession || {}) };
+      const deviceTokens = new Set(
+        sessionKeys.flatMap((key) => normalizeTokens(tokensBySession[key]).map((entry) => entry.deviceToken)),
+      );
+      for (const [session, entries] of Object.entries(tokensBySession)) {
+        if (keep.has(session)) continue;
+        const filtered = normalizeTokens(entries).filter((entry) => !deviceTokens.has(entry.deviceToken));
         if (filtered.length === 0) delete tokensBySession[session];
         else tokensBySession[session] = filtered;
       }
@@ -557,6 +577,9 @@ export const createApnsRuntime = (deps) => {
   const sendApnsToAllUiSessions = async ({ sealed, ...payload } = {}, _options = {}) => {
     const sealedContent = sealed ?? { title: payload.title, body: payload.body };
     const store = await readTokensFromDisk();
+    // Rejects when the client list cannot be read: this notification is lost with a log line
+    // in the fanout, since sending would reach a revoked device.
+    const invalidSessionKeys = await getInvalidSessionKeys();
     // Tokens are grouped by their registered APNs environment so each batch goes to the
     // endpoint that actually knows the token (Xcode builds → sandbox, TestFlight/App Store
     // → production). Mixing them gets BadDeviceToken and the token wrongly dropped as dead.
@@ -565,7 +588,8 @@ export const createApnsRuntime = (deps) => {
     // each is its own send; the rest share one batch per environment.
     const sealedDevices = [];
     const seen = new Set();
-    for (const record of Object.values(store.tokensBySession || {})) {
+    for (const [sessionKey, record] of Object.entries(store.tokensBySession || {})) {
+      if (invalidSessionKeys.has(sessionKey)) continue;
       for (const entry of normalizeTokens(record)) {
         if (seen.has(entry.deviceToken)) continue;
         seen.add(entry.deviceToken);
@@ -613,6 +637,7 @@ export const createApnsRuntime = (deps) => {
     addOrUpdateApnsToken,
     removeApnsToken,
     removeApnsTokenFromAllSessions,
+    removeApnsDevicesOfSessions,
     sendApnsToAllUiSessions,
     resolveApnsConfig,
     // exposed for tests

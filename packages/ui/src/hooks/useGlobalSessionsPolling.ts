@@ -10,6 +10,7 @@ import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed
 import { subscribeFirstServerConnect } from '@/sync/first-server-connect';
 
 export const GLOBAL_SESSIONS_REFRESH_INTERVAL_MS = 45_000;
+export const GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS = 10 * 60_000;
 const STARTUP_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 
 type ScheduleTimeout = (callback: () => void, delay: number) => number;
@@ -33,11 +34,19 @@ const documentVisibility = (): PollingVisibility => {
   return {
     isHidden: () => document.visibilityState === 'hidden',
     onVisible: (listener) => {
+      let wasHidden = document.visibilityState === 'hidden';
       const handle = () => {
-        if (document.visibilityState !== 'hidden') listener();
+        const hidden = document.visibilityState === 'hidden';
+        if (wasHidden && !hidden) listener();
+        wasHidden = hidden;
       };
+      const focus = () => { if (wasHidden && document.visibilityState !== 'hidden') handle(); };
       document.addEventListener('visibilitychange', handle);
-      return () => document.removeEventListener('visibilitychange', handle);
+      window.addEventListener('focus', focus);
+      return () => {
+        document.removeEventListener('visibilitychange', handle);
+        window.removeEventListener('focus', focus);
+      };
     },
   };
 };
@@ -49,6 +58,8 @@ export const startGlobalSessionsPolling = (
   clearScheduledTimeout: ClearTimeout = window.clearTimeout.bind(window),
   visibility: PollingVisibility = NEVER_HIDDEN,
   subscribeServerReady: SubscribeServerReady = NEVER_READY,
+  headCheck: () => Promise<boolean> = refresh,
+  now: () => number = Date.now,
 ): (() => void) => {
   let disposed = false;
   let timeoutId: number | undefined;
@@ -57,15 +68,21 @@ export const startGlobalSessionsPolling = (
   let running = false;
   // OpenCode answered while a load that started before it was in flight.
   let readyDuringRun = false;
-  // A refresh that came due while nobody could see the app waits for them.
-  let dueWhileHidden = false;
-  const run = async (load: () => Promise<boolean>) => {
+  let fullRefreshPending = false;
+  let lastFullRefreshAt = Number.NEGATIVE_INFINITY;
+  const run = async (load: () => Promise<boolean>, full = true) => {
     running = true;
     readyDuringRun = false;
     const succeeded = await load().catch(() => false);
     running = false;
     if (disposed) return;
     hasSucceeded ||= succeeded;
+    if (full && succeeded) lastFullRefreshAt = now();
+    if (fullRefreshPending) {
+      fullRefreshPending = false;
+      void run(refresh);
+      return;
+    }
     if (!hasSucceeded && readyDuringRun) {
       // That load may have failed only because OpenCode was still starting.
       void run(refresh);
@@ -73,18 +90,24 @@ export const startGlobalSessionsPolling = (
     }
     const retryDelay = !hasSucceeded ? STARTUP_RETRY_DELAYS_MS[startupRetries] : undefined;
     if (retryDelay !== undefined) startupRetries += 1;
+    const untilFullRefresh = GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS - (now() - lastFullRefreshAt);
+    const delay = untilFullRefresh > 0
+      ? Math.min(GLOBAL_SESSIONS_REFRESH_INTERVAL_MS, untilFullRefresh)
+      : full ? GLOBAL_SESSIONS_REFRESH_INTERVAL_MS : 0;
     timeoutId = scheduleTimeout(() => {
       timeoutId = undefined;
       if (visibility.isHidden()) {
-        dueWhileHidden = true;
         return;
       }
-      void run(refresh);
-    }, retryDelay ?? GLOBAL_SESSIONS_REFRESH_INTERVAL_MS);
+      const fullDue = !hasSucceeded || now() - lastFullRefreshAt >= GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS;
+      void run(fullDue ? refresh : headCheck, fullDue);
+    }, retryDelay ?? delay);
   };
   const stopListening = visibility.onVisible(() => {
-    if (!dueWhileHidden || disposed) return;
-    dueWhileHidden = false;
+    if (disposed) return;
+    if (timeoutId !== undefined) clearScheduledTimeout(timeoutId);
+    timeoutId = undefined;
+    if (running) { fullRefreshPending = true; return; }
     void run(refresh);
   });
   // Until a load succeeds, OpenCode answering ends the wait for the next
@@ -97,7 +120,6 @@ export const startGlobalSessionsPolling = (
     }
     if (timeoutId !== undefined) clearScheduledTimeout(timeoutId);
     timeoutId = undefined;
-    dueWhileHidden = false;
     void run(refresh);
   });
   void run(initialLoad);
@@ -112,9 +134,9 @@ export const startGlobalSessionsPolling = (
 /**
  * Owns the one global-session polling lifecycle for the main app runtime.
  * The timed refresh pauses while the document is hidden: live events keep
- * the list current, and a refresh that came due runs once it is visible.
+ * the list current, and becoming visible runs a complete snapshot.
  *
- * Each load is followed by the host status seed: unopened directories are
+ * Each complete load is followed by the host status seed: unopened directories are
  * never bootstrapped, so a turn already running there when this client
  * started is only known to the host's cross-project map. The seed resolves
  * directories from the list just loaded, which is why it runs after it.
@@ -143,6 +165,7 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
         (listener) => subscribeFirstServerConnect((connectedRuntimeKey) => {
           if (connectedRuntimeKey === runtimeKey) listener();
         }),
+        () => useGlobalSessionsStore.getState().refreshSessionHead(),
       );
       return () => { active = false; stop(); };
     };

@@ -10,6 +10,8 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 const SPACES_ROUTE = '/api/openchamber/spaces';
 
 const spaceIdSchema = z.string().regex(/^[0-9a-f]{12}$/);
+export const spaceTaskTitleSchema = z.object({ title: z.string().min(1).max(120), by: z.enum(['user', 'agent']) });
+export type SpaceTaskTitle = z.infer<typeof spaceTaskTitleSchema>;
 
 const failureSchema = z.object({
   code: z.string(),
@@ -140,6 +142,7 @@ const setupSchema = z.discriminatedUnion('state', [
 const spaceEntrySchema = z.object({
   id: spaceIdSchema,
   name: z.string(),
+  taskTitle: spaceTaskTitleSchema.nullish(),
   // The place the space lives on, as the host names it; the browser panel's container mark says it.
   placeId: z.string(),
   // The machine of a Docker over SSH place, as the user wrote it; null for this computer, and
@@ -414,6 +417,10 @@ export const startSpace = (spaceId: string): Promise<SpaceEntry> =>
   request(`${SPACES_ROUTE}/${spaceId}/start`, spaceEntrySchema, { method: 'POST' });
 
 /** Stops a running space and its gatekeeper; its files stay. */
+export const setSpaceTaskTitle = async (spaceId: string, title: string): Promise<void> => {
+  await request(`${SPACES_ROUTE}/${spaceId}/task-title`, z.object({ applied: z.boolean(), taskTitle: spaceTaskTitleSchema.nullable() }), { method: 'PUT', body: JSON.stringify({ title }) });
+};
+
 export const stopSpace = (spaceId: string): Promise<SpaceEntry> =>
   request(`${SPACES_ROUTE}/${spaceId}/stop`, spaceEntrySchema, { method: 'POST' });
 

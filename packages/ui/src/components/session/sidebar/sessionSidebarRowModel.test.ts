@@ -509,6 +509,11 @@ describe('buildSessionSidebarRowModel', () => {
 
     expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(7);
     expect(model.rows.some((row) => row.kind === 'show-control' && row.more)).toBe(true);
+    const control = model.rows.find((row) => row.kind === 'show-control');
+    if (control?.kind !== 'show-control') throw new Error('Missing reveal control');
+    expect(control.hiddenNodes).toHaveLength(24_993);
+    const visibleIds = new Set(model.rows.filter((row) => row.kind === 'session').map((row) => row.node.session.id));
+    expect(control.hiddenNodes.some((hidden) => visibleIds.has(hidden.session.id))).toBe(false);
   });
 
   test('single-project flat mode reveals twenty at a time and resets without changing Chats', () => {
@@ -783,6 +788,17 @@ describe('buildSessionSidebarRowModel', () => {
       // Failed or gone, it closes the list as an empty worktree does.
       input.liveSpaceIds = new Set();
       expect(listedOf(buildSessionSidebarRowModel(input).rows)).not.toContain('work:space:0123456789ab@0');
+    });
+
+    test('Show more activity covers hidden worktree subtrees and leaves shown works out', () => {
+      const roots = Array.from({ length: 7 }, (_, index) => node(`r${index}`));
+      const hiddenWork = worktree([node('wt-old', [node('wt-child')])]);
+      const input = args([project([group(roots), hiddenWork])]);
+      input.sessionOrderIndex = new Map([...roots.map((root, index) => [root.session.id, index] as const), ['wt-old', 10], ['wt-child', 11]]);
+      const control = buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'show-control');
+      if (control?.kind !== 'show-control') throw new Error('Missing reveal control');
+      expect(control.hiddenNodes.map((hidden) => hidden.session.id)).toEqual(['wt-old']);
+      expect(control.hiddenNodes[0].children[0].session.id).toBe('wt-child');
     });
 
     test('Detailed rows give the works under a project two lines, and keep what nests inside them on one', () => {

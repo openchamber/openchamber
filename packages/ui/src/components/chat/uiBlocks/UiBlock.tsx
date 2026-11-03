@@ -1391,7 +1391,34 @@ function Node({ value }: { value: BlockValue }) {
 }
 
 /**
- * A block that fails to draw shows its source. The next source text clears
+ * A block that could not be drawn: why, and its source folded away. Unfolded,
+ * a long program filled the reply, and the reasons were nowhere.
+ */
+function NotDrawn({ source, errors }: { source: string; errors: string[] }) {
+  const { t } = useI18n();
+  const [open, setOpen] = React.useState(false);
+  const panelId = React.useId();
+  return (
+    <div className="flex flex-col gap-1 typography-meta">
+      <div className="text-[var(--status-error)]">{t('chat.uiBlock.invalid')}</div>
+      {errors.map((error, index) => <div key={index} className="text-muted-foreground" dir="ltr">{error}</div>)}
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-fit items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <Icon name="arrow-right-s" className={cn('size-4 shrink-0 transition-transform duration-150', open && 'rotate-90 rtl:-rotate-90')} />
+        {t('chat.uiBlock.source')}
+      </button>
+      <pre id={panelId} hidden={!open} dir="ltr"><code>{source}</code></pre>
+    </div>
+  );
+}
+
+/**
+ * A block that fails to draw shows why and its source. The next source text clears
  * the failure without remounting a working tree, so a streamed update keeps
  * the user's chosen tab.
  */
@@ -1579,12 +1606,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   const sendButton = host.kind === 'page' && complete && decisions.length === 0 && Boolean(host.submit || sent)
     ? { label: host.answered?.button ?? t('chat.uiBlock.send'), variant: 'primary' }
     : null;
-  const fallback = (
-    <div className="flex flex-col gap-1">
-      <div className="typography-meta text-[var(--status-error)]">{t('chat.uiBlock.invalid')}</div>
-      <pre dir="ltr"><code>{source}</code></pre>
-    </div>
-  );
+  const fallback = <NotDrawn source={source} errors={notDrawnErrors ?? []} />;
   if (parsed.kind === 'invalid') return fallback;
   if (parsed.kind === 'empty') return null;
   // A block that fails to draw falls back to its source; the rest of the reply stays.

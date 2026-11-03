@@ -169,12 +169,12 @@ Review only: no comments, merges, checkouts, edits or pushes.`;
 
 const reviewGroup = async (group) => {
   const label = `Review ${group.prs.map((number) => `#${number}`).join(' ')}`;
-  const first = await agent(reviewPrompt(group.prs, group.note), { label, phase: 'Review', agent: 'review', model: models.review, schema: verdictSchema });
+  const first = await agent(reviewPrompt(group.prs, group.note), { label, phase: 'Review', agent: 'review-pr', model: models.review, schema: verdictSchema });
   const verdicts = first ? first.verdicts.filter((verdict) => group.prs.includes(verdict.number)) : [];
   const missing = group.prs.filter((number) => !verdicts.some((verdict) => verdict.number === number));
   if (missing.length === 0) return { verdicts, missing };
   log(`${label}: no verdict for ${missing.map((number) => `#${number}`).join(' ')}, asking again`);
-  const retry = await agent(reviewPrompt(missing, group.note), { label: `Review again ${missing.map((number) => `#${number}`).join(' ')}`, phase: 'Review', agent: 'review', model: models.review, schema: verdictSchema });
+  const retry = await agent(reviewPrompt(missing, group.note), { label: `Review again ${missing.map((number) => `#${number}`).join(' ')}`, phase: 'Review', agent: 'review-pr', model: models.review, schema: verdictSchema });
   const recovered = retry ? retry.verdicts.filter((verdict) => missing.includes(verdict.number)) : [];
   return {
     verdicts: [...verdicts, ...recovered],

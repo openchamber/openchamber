@@ -101,15 +101,15 @@ const usePierreThemeConfig = (): PierreThemeConfig => {
         [availableThemes, darkThemeId, fallbackDarkTheme],
     );
 
-    React.useEffect(() => {
-        ensurePierreThemeRegistered(lightTheme);
-        ensurePierreThemeRegistered(darkTheme);
-    }, [darkTheme, lightTheme]);
+    // Registered during render, as in the tool diff preview: an edited theme
+    // gets a new name, and the dialog must not render with one not yet known.
+    const lightThemeName = ensurePierreThemeRegistered(lightTheme);
+    const darkThemeName = ensurePierreThemeRegistered(darkTheme);
 
     const currentVariant = themeSystem?.currentTheme.metadata.variant ?? 'light';
 
     return {
-        theme: { light: lightTheme.metadata.id, dark: darkTheme.metadata.id },
+        theme: { light: lightThemeName, dark: darkThemeName },
         themeType: currentVariant === 'dark' ? 'dark' : 'light',
     };
 };

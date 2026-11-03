@@ -507,7 +507,7 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string; requireKnownSession?: boolean }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
@@ -517,7 +517,7 @@ function App({ apis }: AppProps) {
       if (openSessionInOwningHostWindow(sessionId, String(detail?.runtimeKey ?? '').trim(), messageId)) return;
       // A session event carries the owning directory; a link carries none and
       // lets the opener resolve it from the global session list.
-      void openSession(sessionId, { directory, messageId });
+      void openSession(sessionId, { directory, messageId, requireKnownSession: detail?.requireKnownSession === true });
     };
 
     window.addEventListener('openchamber:open-session', handler as EventListener);
@@ -527,7 +527,8 @@ function App({ apis }: AppProps) {
     void takePendingDesktopSessionLinks().then((links) => {
       for (const link of links) {
         if (openSessionInOwningHostWindow(link.sessionId, link.runtimeKey, link.messageId)) continue;
-        void openSessionLink(link.sessionId, link.messageId);
+        if (link.requireKnownSession) void openSession(link.sessionId, { messageId: link.messageId, requireKnownSession: true });
+        else void openSessionLink(link.sessionId, link.messageId);
       }
     });
     return () => window.removeEventListener('openchamber:open-session', handler as EventListener);

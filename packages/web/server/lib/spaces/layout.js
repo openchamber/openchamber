@@ -69,6 +69,8 @@ export const SPACE_IDLE_EXIT_CODE = 75;
 // way. The agent can rewrite it, and gains nothing by that: it already owns the settings and the
 // token of the server inside, so it can set any chat's mode anyway.
 export const SPACE_PERMISSION_DEFAULT_PATH = `${SPACE_TOKEN_DIRECTORY}/permission-default.json`;
+const SPACE_AGENT_TASK_TITLE_PATH = `${SPACE_TOKEN_DIRECTORY}/task-title.json`;
+export const SPACE_USER_TASK_TITLE_PATH = `${SPACE_TOKEN_DIRECTORY}/user-task-title.json`;
 
 // The gatekeeper, the space's only way out. It sits on the space's internal network under this
 // name and on the space's own outer network, and nothing else joins either of them.
@@ -169,6 +171,8 @@ export const SPACE_ENVIRONMENT = Object.freeze({
   OPENCHAMBER_SPACE_IDLE_STOP_FILE: SPACE_IDLE_STOP_PATH,
   // Where the server inside reads the permission mode a new chat starts in, in place of its own settings.
   OPENCHAMBER_SPACE_PERMISSION_DEFAULT_FILE: SPACE_PERMISSION_DEFAULT_PATH,
+  OPENCHAMBER_SPACE_TASK_TITLE_FILE: SPACE_AGENT_TASK_TITLE_PATH,
+  OPENCHAMBER_SPACE_USER_TASK_TITLE_FILE: SPACE_USER_TASK_TITLE_PATH,
 });
 
 // Waits for the token file, takes it as the server password, and becomes the server.

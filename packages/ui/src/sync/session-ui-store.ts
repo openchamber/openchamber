@@ -2915,9 +2915,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         get().setCurrentSession(sessionId, normalized)
         return
       }
+      const moved = normalized !== get().currentSessionDirectory
       set({ currentSessionDirectory: normalized })
       setActiveSession(normalized ?? "", sessionId)
       writeRuntimeSessionMemory(runtimeMemoryKey(), { sessionId, directory: normalized })
+      // A session opened in a folder that was gone never loaded the model list,
+      // so the composer stays on Loading until the directory follows it. A list
+      // that did load stays, and with it the session's model.
+      if (moved && normalized && !useConfigStore.getState().providersLoaded) {
+        useDirectoryStore.getState().setDirectory(normalized, { showOverlay: false })
+        opencodeClient.setDirectory(normalized)
+      }
     }
   },
 }))
