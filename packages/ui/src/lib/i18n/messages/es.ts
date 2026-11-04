@@ -2529,6 +2529,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.actions.addToInput": "Citar",
   "chat.textSelection.actions.read": "Leer",
   "chat.textSelection.actions.stopReading": "Detener",
+  'chat.selection.approve': "Aprobar selección",
   "chat.textSelection.actions.comment": "Comentar",
   "chat.textSelection.actions.askOpenChamber": "Por cierto…",
   "chat.textSelection.title.askOpenChamber": "Abrir un borrador BTW con la selección",

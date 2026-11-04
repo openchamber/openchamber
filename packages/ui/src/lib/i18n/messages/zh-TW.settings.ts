@@ -5,6 +5,8 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.visual.field.selectionApprovalText': '選取文字贊同文案',
+  'settings.openchamber.visual.field.selectionApprovalTextInfo': '選取助手文字後，👍 快捷操作使用的自訂回饋。留空使用預設文案。',
   'settings.openchamber.sessionRetention.field.archivedDescription': '保留期限從封存時開始計算。過期的工作階段會被刪除。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保留期限從工作階段的最後活動時間開始計算。過期的工作階段會被封存。',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '保留期限從工作階段的最後活動時間開始計算。過期的工作階段會被刪除。',

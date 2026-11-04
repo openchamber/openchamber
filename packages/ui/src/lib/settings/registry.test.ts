@@ -24,6 +24,35 @@ import { renderSettingsRegistrySnapshot, SETTINGS_REGISTRY_SNAPSHOT_PATHS } from
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
 
 describe('settings registry', () => {
+  test('round-trips custom selection approval text and clearing it without resetting omitted preferences', async () => {
+    const options = useUIStore.persist.getOptions();
+    const original = useUIStore.getState();
+    let saved: Parameters<NonNullable<typeof options.storage>['setItem']>[1] = { state: original, version: options.version };
+    try {
+      useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      for (const text of ['  认可此方案 👍  ', '']) {
+        const parsed = parseSettingsDocument(JSON.parse(JSON.stringify({ selectionApprovalText: text })));
+        expect(parsed).toEqual({ selectionApprovalText: text });
+        if (!parsed) throw new Error('Expected valid settings');
+        applySettingsToStores(parsed);
+        expect(readAutoSaveSnapshot().selectionApprovalText).toBe(text);
+        const persisted = saved;
+        useUIStore.persist.setOptions({ storage: { getItem: () => persisted, setItem: () => undefined, removeItem: () => undefined } });
+        useUIStore.getState().setSelectionApprovalText('other');
+        await useUIStore.persist.rehydrate();
+        expect(useUIStore.getState().selectionApprovalText).toBe(text);
+        useUIStore.persist.setOptions({ storage: { getItem: () => saved, setItem: (_name, value) => { saved = value; }, removeItem: () => undefined } });
+      }
+      useUIStore.getState().setSelectionApprovalText('Keep this');
+      applySettingsToStores({});
+      expect(useUIStore.getState().selectionApprovalText).toBe('Keep this');
+      expect(parseSettingsDocument({ selectionApprovalText: null })).toEqual({});
+      expect(parseSettingsDocument({ selectionApprovalText: 42 })).toEqual({});
+    } finally {
+      useUIStore.persist.setOptions(options);
+      useUIStore.setState(original, true);
+    }
+  });
   test('dictation auto-send is opt-in and adopts only explicit boolean preferences', () => {
     const dom = installHookTestDom();
     window.__zustand_config_store__ = useConfigStore;

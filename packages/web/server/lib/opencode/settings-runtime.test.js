@@ -281,13 +281,14 @@ describe('settings runtime', () => {
     }
   });
 
-  it('round-trips shared sidebar preferences through preferences.json', async () => {
+  it('round-trips shared profile preferences through preferences.json', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     const preferences = {
       sidebarProjectDisplayMode: 'single',
       sidebarViewMode: 'timeline',
       sidebarProjectSortOrder: 'date-added',
       sidebarShowChatsSection: false,
+      selectionApprovalText: '认可此方案 👍',
     };
     try {
       await runtime.persistSettings(preferences);
@@ -297,6 +298,8 @@ describe('settings runtime', () => {
       expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toEqual(preferences);
       const stored = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
       expect(Object.fromEntries(Object.entries(stored.fields).map(([key, entry]) => [key, entry.value]))).toEqual(preferences);
+      await runtime.persistSettings({ ...preferences, selectionApprovalText: '' });
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({ ...preferences, selectionApprovalText: '' });
     } finally {
       await cleanup();
     }

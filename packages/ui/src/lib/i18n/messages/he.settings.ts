@@ -5,6 +5,8 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.visual.field.selectionApprovalText': 'טקסט אישור לבחירה',
+  'settings.openchamber.visual.field.selectionApprovalTextInfo': 'משוב מותאם אישית לקיצור 👍 בטקסט נבחר של העוזר. יש להשאיר ריק כדי להשתמש בטקסט ברירת המחדל.',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'תקופת השמירה נספרת מרגע ההעברה לארכיון. הפעלות שפג תוקפן נמחקות.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'תקופת השמירה נספרת מהפעילות האחרונה בהפעלה. הפעלות שפג תוקפן מועברות לארכיון.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'תקופת השמירה נספרת מהפעילות האחרונה בהפעלה. הפעלות שפג תוקפן נמחקות.',

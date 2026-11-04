@@ -2556,6 +2556,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToInput': '引用',
   'chat.textSelection.actions.read': '読み上げ',
   'chat.textSelection.actions.stopReading': '停止',
+  'chat.selection.approve': "選択した内容を承認",
   'chat.textSelection.actions.comment': 'コメント',
   'chat.textSelection.actions.askOpenChamber': 'ところで…',
   'chat.textSelection.title.askOpenChamber': '選択したテキストでBTWの下書きを開く',

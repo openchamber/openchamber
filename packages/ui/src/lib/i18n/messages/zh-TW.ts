@@ -2536,6 +2536,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToInput': '引用',
   'chat.textSelection.actions.read': '朗讀',
   'chat.textSelection.actions.stopReading': '停止',
+  'chat.selection.approve': "認可選取內容",
   'chat.textSelection.actions.comment': '留言',
   'chat.textSelection.actions.askOpenChamber': '順便問一下…',
   'chat.textSelection.title.askOpenChamber': '用所選文字開啟 BTW 草稿',

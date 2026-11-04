@@ -2560,6 +2560,7 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'Citeren',
   'chat.textSelection.actions.read': 'Voorlezen',
   'chat.textSelection.actions.stopReading': 'Stoppen',
+  'chat.selection.approve': "Selectie goedkeuren",
   'chat.textSelection.actions.comment': 'Reactie',
   'chat.textSelection.actions.askOpenChamber': 'Trouwens…',
   'chat.textSelection.title.askOpenChamber': 'Open een BTW-concept met de selectie',

@@ -2485,6 +2485,7 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'اقتباس',
   'chat.textSelection.actions.read': 'قراءة',
   'chat.textSelection.actions.stopReading': 'إيقاف',
+  'chat.selection.approve': "الموافقة على النص المحدد",
   'chat.textSelection.actions.comment': 'تعليق',
   'chat.textSelection.actions.askOpenChamber': 'بالمناسبة…',
   'chat.textSelection.title.askOpenChamber': 'فتح مسودة BTW بالنص المحدد',

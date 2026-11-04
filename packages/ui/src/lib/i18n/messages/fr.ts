@@ -2274,6 +2274,7 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'Citer',
   'chat.textSelection.actions.read': 'Lire',
   'chat.textSelection.actions.stopReading': 'Arrêter',
+  'chat.selection.approve': "Approuver la sélection",
   'chat.textSelection.actions.comment': 'Commenter',
   'chat.textSelection.actions.askOpenChamber': 'Au fait…',
   'chat.textSelection.title.askOpenChamber': 'Ouvrir un brouillon BTW avec la sélection',

@@ -2560,6 +2560,7 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'Quote',
   'chat.textSelection.actions.read': 'Read',
   'chat.textSelection.actions.stopReading': 'Stop',
+  'chat.selection.approve': "Approve selection",
   'chat.textSelection.actions.comment': 'Comment',
   'chat.textSelection.actions.askOpenChamber': 'By the way…',
   'chat.textSelection.title.askOpenChamber': 'Open a BTW draft with the selection',

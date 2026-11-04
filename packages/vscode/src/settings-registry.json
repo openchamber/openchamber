@@ -446,6 +446,9 @@
     "copyMessagesAsPlainText": {
       "scope": "profile"
     },
+    "selectionApprovalText": {
+      "scope": "profile"
+    },
     "showTurnChangedFiles": {
       "scope": "profile"
     },

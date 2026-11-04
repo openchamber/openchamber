@@ -3557,6 +3557,7 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'Alıntıla',
   'chat.textSelection.actions.read': 'Oku',
   'chat.textSelection.actions.stopReading': 'Durdur',
+  'chat.selection.approve': "Seçimi onayla",
   'chat.textSelection.actions.comment': 'Yorum yap',
   'chat.textSelection.actions.askOpenChamber': 'Bu arada…',
   'chat.textSelection.title.askOpenChamber': 'Seçili metinle BTW taslağı aç',

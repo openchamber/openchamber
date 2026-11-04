@@ -2560,6 +2560,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToInput': '인용',
   'chat.textSelection.actions.read': '읽기',
   'chat.textSelection.actions.stopReading': '중지',
+  'chat.selection.approve': "선택한 내용 승인",
   'chat.textSelection.actions.comment': '댓글',
   'chat.textSelection.actions.askOpenChamber': '그런데…',
   'chat.textSelection.title.askOpenChamber': '선택한 텍스트로 BTW 초안 열기',

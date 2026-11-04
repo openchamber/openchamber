@@ -5,6 +5,8 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
+  'settings.openchamber.visual.field.selectionApprovalText': 'Texte d\'approbation de la sélection',
+  'settings.openchamber.visual.field.selectionApprovalTextInfo': 'Commentaire personnalisé pour le raccourci 👍 sur le texte sélectionné de l\'assistant. Laisser vide pour utiliser le texte par défaut.',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'La durée de conservation commence à l\'archivage. Les sessions expirées sont supprimées.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont archivées.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont supprimées.',

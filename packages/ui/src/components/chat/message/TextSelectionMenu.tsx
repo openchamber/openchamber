@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { createPortal, flushSync } from 'react-dom';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -10,6 +11,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { PROJECT_NOTE_BODY_MAX_LENGTH } from '@/lib/projectContextApi';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -734,6 +736,35 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     });
   }, [addContextDraft, attachCitedImages, commentText, focusColumnInput, hideMenu, mobileCommentController, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
 
+  const handleApproveSelection = React.useCallback(() => {
+    if (!pendingSelectionRef.current || !selectedTextMarkdown) return;
+    const composerTarget = mobileCommentController?.getScope();
+    if (!composerTarget || composerTarget.runtimeKey !== getRuntimeKey()) {
+      toast.error(t('chat.textSelection.comment.attachFailed'));
+      return;
+    }
+    const draftId = addContextDraft(
+      { directory: composerTarget.directory, sessionKey: composerTarget.sessionKey },
+      {
+        source: 'chat-quote',
+        fileLabel: selectedMessageId ?? '',
+        startLine: 1,
+        endLine: 1,
+        code: selectedTextMarkdown,
+        language: '',
+        text: useUIStore.getState().selectionApprovalText.trim() || 'LGTM',
+        anchor: captureCommentAnchor() ?? undefined,
+      },
+    );
+    if (!draftId) {
+      toast.error(t('chat.textSelection.comment.attachFailed'));
+      return;
+    }
+    hideMenu();
+    window.getSelection()?.removeAllRanges();
+    if (!isMobile) queueMicrotask(() => focusColumnInput());
+  }, [addContextDraft, captureCommentAnchor, focusColumnInput, hideMenu, isMobile, mobileCommentController, selectedMessageId, selectedTextMarkdown, t]);
+
   const selectionDirectory = effectiveDirectory ?? currentSessionDirectory ?? '';
   const spaceProjectDirectory = useSpaceProjectDirectory(selectionDirectory);
   const currentProjectRef = React.useMemo(() => {
@@ -805,6 +836,20 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       document.body,
     )
     : null;
+
+  const approvalButton = currentSessionId && selectedMessageId ? (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      onClick={handleApproveSelection}
+      aria-label={t('chat.selection.approve')}
+      title={t('chat.selection.approve')}
+      className={isMobile ? 'h-11 w-11 shrink-0 rounded-xl bg-foreground/[0.04] active:opacity-80 transition-opacity duration-150' : 'rounded-full'}
+    >
+      <Icon name="thumb-up" className={isMobile ? 'size-5' : 'size-4'} />
+    </Button>
+  ) : null;
 
   const commentInput = (
     <div
@@ -969,10 +1014,13 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               </button>
             ) : null}
 
+          </div>
+
+          <div className="flex gap-2">
             <button
               onClick={handleSaveAsSnippet}
               className={cn(
-                'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                'flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
                 'text-sm font-medium leading-tight',
                 'bg-foreground/[0.04] text-foreground',
                 'active:opacity-80',
@@ -982,8 +1030,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               type="button"
             >
               <Icon name="hashtag" className="h-5 w-5 flex-shrink-0" />
-              <span className="min-w-0 whitespace-normal">{t('snippets.quickCreate.action')}</span>
+              <span className="min-w-0 truncate">{t('snippets.quickCreate.action')}</span>
             </button>
+            {approvalButton}
           </div>
         </div>
       </div>,
@@ -1092,6 +1141,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
           >
             <Icon name="hashtag" className="h-4 w-4" />
           </button>
+          {approvalButton ? (
+            <>
+              <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
+              {approvalButton}
+            </>
+          ) : null}
 
           {canReadAloud ? (
             <>

@@ -2485,6 +2485,7 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'צטט',
   'chat.textSelection.actions.read': 'הקרא',
   'chat.textSelection.actions.stopReading': 'עצור',
+  'chat.selection.approve': "אישור הטקסט שנבחר",
   'chat.textSelection.actions.comment': 'הגב',
   'chat.textSelection.actions.askOpenChamber': 'אגב…',
   'chat.textSelection.title.askOpenChamber': 'פתח טיוטת BTW עם הטקסט שנבחר',

@@ -1145,6 +1145,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToInput': 'Cytuj',
   'chat.textSelection.actions.read': 'Czytaj',
   'chat.textSelection.actions.stopReading': 'Zatrzymaj',
+  'chat.selection.approve': "Zatwierdź zaznaczenie",
   'chat.textSelection.actions.comment': 'Skomentuj',
   'chat.textSelection.actions.askOpenChamber': 'A tak przy okazji…',
   'chat.textSelection.title.askOpenChamber': 'Otwórz szkic BTW z zaznaczonym tekstem',

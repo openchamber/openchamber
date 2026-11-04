@@ -2277,6 +2277,7 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'Zitieren',
   'chat.textSelection.actions.read': 'Vorlesen',
   'chat.textSelection.actions.stopReading': 'Stopp',
+  'chat.selection.approve': "Auswahl bestätigen",
   'chat.textSelection.actions.comment': 'Kommentieren',
   'chat.textSelection.actions.askOpenChamber': 'Übrigens…',
   'chat.textSelection.title.askOpenChamber': 'BTW-Entwurf mit der Auswahl öffnen',

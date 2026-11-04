@@ -2531,6 +2531,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.actions.addToInput": "Citar",
   "chat.textSelection.actions.read": "Ler",
   "chat.textSelection.actions.stopReading": "Parar",
+  'chat.selection.approve': "Aprovar seleção",
   "chat.textSelection.actions.comment": "Comentar",
   "chat.textSelection.title.commentOnSelection": "Comentar a seleção",
   "chat.textSelection.comment.placeholder": "Adicione um comentário opcional...",

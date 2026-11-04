@@ -1344,6 +1344,13 @@ found only when their text appears once in the message.
 
 A quote taken inside a page the agent showed (`openchamber_render`) has `page: { partId }` in its anchor: its text stream is the page's body, measured and re-found inside the page's frame. The layer does not paint those marks; it publishes them, asks for reveals and hears clicks through `message/pageQuoteBridge.ts` (see `message/parts/DOCUMENTATION.md`).
 
+The selection menu's thumbs-up attaches a normal `chat-quote` draft to the
+column's published comment scope, including an expanded BTW composer. Its
+comment uses the trimmed `selectionApprovalText` setting, falling back to
+`LGTM`. Existing drafts, attachments and linked references stay in place;
+the user sends them together through the normal Send action. The shortcut
+focuses the composer on desktop and does not request keyboard focus on mobile.
+
 ## Mobile comment mode
 
 On mobile, "Comment" on a text selection does not open a floating input. The

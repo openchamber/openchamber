@@ -2529,6 +2529,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.actions.addToInput": "Цитувати",
   "chat.textSelection.actions.read": "Читати",
   "chat.textSelection.actions.stopReading": "Зупинити",
+  'chat.selection.approve': "Схвалити виділене",
   "chat.textSelection.actions.comment": "Коментувати",
   "chat.textSelection.actions.askOpenChamber": "До речі…",
   "chat.textSelection.title.askOpenChamber": "Відкрити BTW-чернетку з виділеним текстом",
