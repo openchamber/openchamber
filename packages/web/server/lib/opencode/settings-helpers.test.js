@@ -855,6 +855,17 @@ describe('settings helpers', () => {
 });
 
 describe('settings registry gate', () => {
+  it('round-trips selection approval overrides and explicit clearing through save and response boundaries', () => {
+    const helpers = createTestHelpers();
+    for (const text of ['  认可此方案 👍  ', '']) {
+      const changes = helpers.sanitizeSettingsUpdate({ selectionApprovalText: text });
+      const stored = helpers.mergePersistedSettings({ selectionApprovalText: 'previous' }, changes);
+      const response = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(stored)));
+      expect(response.selectionApprovalText).toBe(text);
+    }
+    const invalid = helpers.sanitizeSettingsUpdate({ selectionApprovalText: null });
+    expect(helpers.mergePersistedSettings({ selectionApprovalText: 'previous' }, invalid).selectionApprovalText).toBe('previous');
+  });
   const registryPath = join(dirname(testFilePath), 'settings-registry.json');
   const registry = JSON.parse(readFileSync(registryPath, 'utf8'));
   const persistableKeys = Object.entries(registry.fields)
@@ -887,6 +898,7 @@ describe('settings registry gate', () => {
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
     stickyUserHeader: true, promptNavigatorEnabled: true, wideChatLayoutEnabled: true, showSplitAssistantMessageActions: true, showToolFileIcons: true,
+    selectionApprovalText: 'Agreed.',
     codeBlockLineWrap: true, tableCellWrap: true, copyMessagesAsPlainText: true, showTurnChangedFiles: true, toolJsonViewMode: 'raw',
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,

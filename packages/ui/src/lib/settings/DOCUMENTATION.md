@@ -39,6 +39,8 @@
 
 `DesktopSettings`, `SettingsPayload`, the client sanitizer, the mirror, the apply step and the auto-save all follow from step 1; no second list has to stay in step for persistence.
 
+`selectionApprovalText` is a shared profile preference for the selection approval shortcut. An empty string means no custom text; older documents can omit the field. The setting stores only the override and does not define fallback message text or dispatch behavior.
+
 ## Decisions
 
 ### Why the Settings view passes its voice availability snapshot

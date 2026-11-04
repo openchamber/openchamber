@@ -1,16 +1,20 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 import type { Session } from '@/lib/opencode/model';
 import { I18nProvider } from '@/lib/i18n';
+import { toast } from '@/components/ui';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { invokeActiveSelectionAddToChat } from '@/lib/addSelectionToChat';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useUIStore } from '@/stores/useUIStore';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
+import { readLinkedReferences, useLinkedReferenceDrafts } from '../composer/linkedReferenceDrafts';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { ChatColumnActionsContext, ChatColumnSessionContext, useChatColumnActions } from '../chatColumnSession';
 import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
@@ -415,4 +419,154 @@ describe('TextSelectionMenu render subscriptions', () => {
     expect(dialog.textContent).toContain('Comment');
     containerRef.current = null;
   });
+
+  test('desktop approval adds one anchored quote to its pinned composer and preserves pending input', async () => {
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.append(frame);
+    document.body.append(host);
+    containerRef.current = host;
+    const input = document.createElement('div');
+    input.dataset.chatInput = 'true';
+    const editor = document.createElement('div');
+    editor.className = 'cm-content';
+    input.append(editor);
+    document.body.append(input);
+    const focus = spyOn(editor, 'focus');
+    const settings = useUIStore.getState();
+    const linkedDrafts = useLinkedReferenceDrafts.getState().drafts;
+    const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockImplementation(async () => {});
+    const queue = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockImplementation(async () => {});
+    const target = { directory, sessionKey: 'pinned-fork' };
+    const identity = createChatDraftIdentity(getRuntimeKey(), directory, target.sessionKey);
+    if (!identity) throw new Error('Missing draft identity');
+    const controller = createMobileCommentDraftController();
+    try {
+      useUIStore.setState({ isMobile: false, selectionApprovalText: '   ' });
+      await render(true, controller, true);
+      controller.setScope({ runtimeKey: getRuntimeKey(), ...target });
+      useInputStore.getState().setPendingInputText('Keep my draft', 'append', target.sessionKey);
+      useInputStore.getState().addRestoredAttachment({ url: 'data:text/plain;base64,aGk=', mimeType: 'text/plain', filename: 'keep.txt' }, identity);
+      const files = useInputStore.getState().getAttachedFiles(identity);
+      const linked = [{ kind: 'repository-issue' as const, number: 7, title: 'Keep this issue', url: 'https://example.com/7', contextText: 'Existing reference' }];
+      useLinkedReferenceDrafts.getState().set(linked, identity);
+      useInlineCommentDraftStore.getState().addDraft(target, { source: 'chat-quote', fileLabel: 'earlier-message', code: 'Earlier quote', text: 'Existing comment', startLine: 1, endLine: 1, language: '' });
+      const existing = useInlineCommentDraftStore.getState().getDrafts(target)[0];
+      const anchor = { text: 'picked', prefix: 'before ', suffix: ' after', start: 7 };
+      await act(async () => dispatchFrameSelection(frame, { text: 'picked', anchor, rect: { top: 40, left: 80, width: 100, height: 20 } }));
+      const button = document.querySelector<HTMLButtonElement>('[aria-label="Approve selection"]');
+      if (!button) throw new Error('Missing approval action');
+      await act(async () => { button.click(); button.click(); });
+      const quotes = useInlineCommentDraftStore.getState().getDrafts(target);
+      expect(quotes).toHaveLength(2);
+      expect(quotes[0]).toBe(existing);
+      expect(quotes[1]).toMatchObject({ source: 'chat-quote', sessionKey: target.sessionKey, fileLabel: 'message-1', code: 'picked', text: 'LGTM', anchor });
+      expect(useInlineCommentDraftStore.getState().getDrafts({ directory, sessionKey: column.sessionId })).toEqual([]);
+      expect(useInputStore.getState().pendingInputText).toBe('Keep my draft');
+      expect(useInputStore.getState().getAttachedFiles(identity)).toBe(files);
+      expect(readLinkedReferences(identity)).toEqual(linked);
+      expect(focus.mock.calls).toHaveLength(1);
+      expect(send.mock.calls).toEqual([]);
+      expect(queue.mock.calls).toEqual([]);
+      expect(document.querySelector('[aria-label="Approve selection"]')).toBeNull();
+    } finally {
+      focus.mockRestore();
+      send.mockRestore();
+      queue.mockRestore();
+      useLinkedReferenceDrafts.setState({ drafts: linkedDrafts });
+      await act(async () => useUIStore.setState({ isMobile: settings.isMobile, selectionApprovalText: settings.selectionApprovalText }));
+    }
+  });
+
+  test('approval preserves the selection when the composer target or attachment is unavailable', async () => {
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.append(frame);
+    document.body.append(host);
+    containerRef.current = host;
+    const settings = useUIStore.getState();
+    const controller = createMobileCommentDraftController();
+    const target = { directory, sessionKey: 'approval-target' };
+    const addDraft = useInlineCommentDraftStore.getState().addDraft;
+    const error = spyOn(toast, 'error').mockImplementation(() => 'toast');
+    let cleared = 0;
+    try {
+      useUIStore.setState({ isMobile: false });
+      await render(true, controller);
+      await act(async () => dispatchFrameSelection(frame, {
+        text: 'picked', rect: { top: 40, left: 80, width: 100, height: 20 }, clear: () => { cleared += 1; },
+      }));
+      const button = document.querySelector<HTMLButtonElement>('[aria-label="Approve selection"]');
+      if (!button) throw new Error('Missing approval action');
+
+      await act(async () => button.click());
+      controller.setScope({ runtimeKey: 'another-runtime', ...target });
+      await act(async () => button.click());
+      controller.setScope({ runtimeKey: getRuntimeKey(), ...target });
+      useInlineCommentDraftStore.setState({ addDraft: () => null });
+      await act(async () => button.click());
+
+      expect(error.mock.calls).toHaveLength(3);
+      expect(cleared).toBe(0);
+      expect(document.querySelector('[aria-label="Approve selection"]')).not.toBeNull();
+      expect(useInlineCommentDraftStore.getState().getDrafts(target)).toEqual([]);
+
+      useInlineCommentDraftStore.setState({ addDraft });
+      await act(async () => button.click());
+      expect(useInlineCommentDraftStore.getState().getDrafts(target)).toHaveLength(1);
+      expect(cleared).toBe(1);
+      expect(document.querySelector('[aria-label="Approve selection"]')).toBeNull();
+    } finally {
+      useInlineCommentDraftStore.setState({ addDraft });
+      error.mockRestore();
+      await act(async () => useUIStore.setState({ isMobile: settings.isMobile }));
+      containerRef.current = null;
+    }
+  });
+
+  test('mobile approval attaches custom text to its BTW composer without sending or focusing the editor', async () => {
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.append(frame);
+    document.body.append(host);
+    containerRef.current = host;
+    const input = document.createElement('div');
+    input.dataset.chatInput = 'true';
+    const editor = document.createElement('div');
+    editor.className = 'cm-content';
+    input.append(editor);
+    document.body.append(input);
+    const focus = spyOn(editor, 'focus');
+    const settings = useUIStore.getState();
+    const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockImplementation(async () => {});
+    const queue = spyOn(useMessageQueueStore.getState(), 'addToQueue').mockImplementation(async () => {});
+    const controller = createMobileCommentDraftController();
+    const target = { directory, sessionKey: 'mobile-btw' };
+    try {
+      useUIStore.setState({ isMobile: true, selectionApprovalText: '  Ship this  ' });
+      await render(true, controller);
+      controller.setScope({ runtimeKey: getRuntimeKey(), ...target });
+      await act(async () => store().setState({ session_status: { [sessionId]: { type: 'busy' } } }));
+      const anchor = { text: 'picked', prefix: '', suffix: '', start: 0, page: { partId: 'page-1' } };
+      await act(async () => dispatchFrameSelection(frame, { text: 'picked', anchor, rect: { top: 40, left: 80, width: 100, height: 20 } }));
+      const button = document.querySelector<HTMLButtonElement>('[aria-label="Approve selection"]');
+      if (!button) throw new Error('Missing approval action');
+      await act(async () => button.click());
+      const quotes = useInlineCommentDraftStore.getState().getDrafts(target);
+      expect(quotes).toHaveLength(1);
+      expect(quotes[0]).toMatchObject({ source: 'chat-quote', fileLabel: 'message-1', code: 'picked', text: 'Ship this', anchor });
+      expect(useInlineCommentDraftStore.getState().getDrafts({ directory, sessionKey: column.sessionId })).toEqual([]);
+      expect(controller.getState()).toEqual({ status: 'closed' });
+      expect(focus.mock.calls).toEqual([]);
+      expect(send.mock.calls).toEqual([]);
+      expect(queue.mock.calls).toEqual([]);
+      expect(document.querySelector('[aria-label="Approve selection"]')).toBeNull();
+    } finally {
+      focus.mockRestore();
+      send.mockRestore();
+      queue.mockRestore();
+      await act(async () => useUIStore.setState({ isMobile: settings.isMobile, selectionApprovalText: settings.selectionApprovalText }));
+    }
+  });
+
 });

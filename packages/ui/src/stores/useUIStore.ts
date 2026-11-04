@@ -1203,6 +1203,7 @@ interface UIStore {
   codeBlockLineWrap: boolean;
   tableCellWrap: boolean;
   copyMessagesAsPlainText: boolean;
+  selectionApprovalText: string;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
   timeFormatPreference: TimeFormatPreference;
@@ -1483,6 +1484,7 @@ interface UIStore {
   setCodeBlockLineWrap: (value: boolean) => void;
   setTableCellWrap: (value: boolean) => void;
   setCopyMessagesAsPlainText: (value: boolean) => void;
+  setSelectionApprovalText: (value: string) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
@@ -1731,6 +1733,7 @@ export const useUIStore = create<UIStore>()(
         codeBlockLineWrap: true,
         tableCellWrap: true,
         copyMessagesAsPlainText: true,
+        selectionApprovalText: '',
         showToolFileIcons: true,
         showTurnChangedFiles: false,
         timeFormatPreference: 'auto',
@@ -3449,6 +3452,9 @@ export const useUIStore = create<UIStore>()(
         setTableCellWrap: (value) => {
           set({ tableCellWrap: value });
         },
+        setSelectionApprovalText: (value) => {
+          set({ selectionApprovalText: value });
+        },
         setCopyMessagesAsPlainText: (value) => {
           set({ copyMessagesAsPlainText: value });
         },
@@ -3956,6 +3962,7 @@ export const useUIStore = create<UIStore>()(
           codeBlockLineWrap: state.codeBlockLineWrap,
           tableCellWrap: state.tableCellWrap,
           copyMessagesAsPlainText: state.copyMessagesAsPlainText,
+          selectionApprovalText: state.selectionApprovalText,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
           timeFormatPreference: state.timeFormatPreference,

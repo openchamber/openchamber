@@ -28,6 +28,7 @@ const SEARCH_TARGET_TABS = new Map<string, ChatSettingsTab>([
   ['chat.collapsible-user-messages', 'messages'],
   ['chat.sticky-user-header', 'messages'],
   ['chat.inline-assistant-actions', 'messages'],
+  ['chat.selection-approval-text', 'messages'],
   ['chat.user-message-rendering', 'messages'],
   ['chat.mermaid-rendering', 'messages'],
   ['chat.diff-layout', 'messages'],

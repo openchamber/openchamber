@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/de';
 import { settingsDict } from './de.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -102,6 +103,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} Unteragenten eingesetzt',
   'sessions.sidebar.projectAction.active': 'Projektaktion aktiv',
   ...settingsDict,
+  ...selectionApprovalMessages,
   'gitView.operation.title': 'Git-Vorgang',
   'gitView.operation.recovery.storage': 'OpenChamber kann den Stand von Git-Übertragungen hier nicht speichern. Erlaube den Websitespeicher und lade neu; bis dahin sind Push und Pull pausiert.',
   'gitView.operation.recovery.capacity': 'Zu viele unfertige Git-Übertragungen sind gespeichert. Prüfe die unten, bevor du eine neue startest.',

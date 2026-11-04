@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import type { Root } from 'react-dom/client';
 
 import { I18nProvider } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
@@ -30,14 +30,16 @@ describe('ChatSettings', () => {
   let host: HTMLDivElement;
   let root: Root;
   let initialLargeTextPasteBehavior: ReturnType<typeof useUIStore.getState>['largeTextPasteBehavior'];
+  let initialSelectionApprovalText: string;
   let globalDescriptors: Map<string, PropertyDescriptor | undefined>;
 
   // The tab strip measures itself, so it needs ResizeObserver too.
-  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT'];
+  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node', 'Event', 'ResizeObserver', 'localStorage', 'sessionStorage', 'IS_REACT_ACT_ENVIRONMENT'];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     windowInstance = new Window();
     initialLargeTextPasteBehavior = useUIStore.getState().largeTextPasteBehavior;
+    initialSelectionApprovalText = useUIStore.getState().selectionApprovalText;
     globalDescriptors = new Map(globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
     Object.assign(globalThis, {
       window: windowInstance,
@@ -45,6 +47,7 @@ describe('ChatSettings', () => {
       HTMLElement: windowInstance.HTMLElement,
       Element: windowInstance.Element,
       Node: windowInstance.Node,
+      Event: windowInstance.Event,
       ResizeObserver: windowInstance.ResizeObserver,
       localStorage: windowInstance.localStorage,
       sessionStorage: windowInstance.sessionStorage,
@@ -52,6 +55,7 @@ describe('ChatSettings', () => {
     });
     host = document.createElement('div');
     document.body.append(host);
+    const { createRoot } = await import('react-dom/client');
     root = createRoot(host);
   });
 
@@ -59,7 +63,7 @@ describe('ChatSettings', () => {
     try {
       await act(async () => root.unmount());
     } finally {
-      useUIStore.setState({ largeTextPasteBehavior: initialLargeTextPasteBehavior });
+      useUIStore.setState({ largeTextPasteBehavior: initialLargeTextPasteBehavior, selectionApprovalText: initialSelectionApprovalText });
       useChatSettingsTabStore.setState({ tab: 'messages' });
       windowInstance.close();
       for (const [name, descriptor] of globalDescriptors) {
@@ -86,6 +90,32 @@ describe('ChatSettings', () => {
     await act(async () => fourth.click());
     expect(useUIStore.getState().largeTextPasteBehavior).toBe('inline-double-paste');
     expect(fourth.getAttribute('aria-checked')).toBe('true');
+  });
+
+  test('search reaches the approval text field and edits or clears its value', async () => {
+    const t = (key: I18nKey): string => key;
+    const result = buildSettingsSearchResults({ query: 'lgtm', runtimeCtx, t, getPageTitle: (page) => `${page}-page` })
+      .find((item) => item.id === 'chat.selection-approval-text');
+    expect(result?.page).toBe('chat');
+    expect(chatSettingsTabForSearchTarget('chat.selection-approval-text')).toBe('messages');
+    useChatSettingsTabStore.setState({ tab: 'messages' });
+    useUIStore.setState({ selectionApprovalText: 'Existing feedback' });
+    await act(async () => root.render(<I18nProvider><ChatSettings /></I18nProvider>));
+
+    const field = host.querySelector<HTMLInputElement>('[data-settings-item="chat.selection-approval-text"] input');
+    if (!field) throw new Error('Missing selection approval field');
+    expect(field.value).toBe('Existing feedback');
+    expect(field.placeholder).toBe('LGTM');
+    const setValue = Object.getOwnPropertyDescriptor(windowInstance.HTMLInputElement.prototype, 'value')?.set;
+    if (!setValue) throw new Error('Missing input value setter');
+    for (const value of ['Ship this', '']) {
+      await act(async () => {
+        setValue.call(field, value);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(useUIStore.getState().selectionApprovalText).toBe(value);
+      expect(field.value).toBe(value);
+    }
   });
 
   test('every Chat search result opens the tab that holds it', () => {

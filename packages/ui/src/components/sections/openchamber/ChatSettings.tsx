@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { SelectionApprovalModule } from '@/components/chat/selection-approval';
 import { NumberInput } from '@/components/ui/number-input';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import {
@@ -261,6 +262,7 @@ const MessagesTab: React.FC = () => {
           info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
           settingsItem="chat.inline-assistant-actions"
         />
+        <SelectionApprovalModule.Settings />
       </SettingsSection>
 
       <SettingsSection title={t('settings.layout.chat.section.formatting')} contentClassName="space-y-3">

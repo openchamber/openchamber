@@ -28,6 +28,7 @@ import {
     useMobileCommentComposerController,
     useMobileCommentDraft,
 } from '../composer/comment/MobileCommentComposerContext';
+import { SelectionApprovalModule } from '../selection-approval';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { resolveShadowSelectionRange } from './shadowSelection';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
@@ -734,6 +735,16 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     });
   }, [addContextDraft, attachCitedImages, commentText, focusColumnInput, hideMenu, mobileCommentController, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
 
+  const getApprovalSelection = React.useCallback(() => {
+    if (!pendingSelectionRef.current || !selectedTextMarkdown) return null;
+    return { markdownText: selectedTextMarkdown, messageId: selectedMessageId, anchor: captureCommentAnchor() };
+  }, [captureCommentAnchor, selectedMessageId, selectedTextMarkdown]);
+
+  const finishApproval = React.useCallback(() => {
+    hideMenu();
+    window.getSelection()?.removeAllRanges();
+  }, [hideMenu]);
+
   const selectionDirectory = effectiveDirectory ?? currentSessionDirectory ?? '';
   const spaceProjectDirectory = useSpaceProjectDirectory(selectionDirectory);
   const currentProjectRef = React.useMemo(() => {
@@ -804,6 +815,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       </div>,
       document.body,
     )
+    : null;
+
+  const approvalButton = currentSessionId && selectedMessageId
+    ? isMobile
+      ? <SelectionApprovalModule.Mobile getSelection={getApprovalSelection} onSuccess={finishApproval} />
+      : <SelectionApprovalModule.Desktop getSelection={getApprovalSelection} onSuccess={finishApproval} />
     : null;
 
   const commentInput = (
@@ -969,10 +986,13 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               </button>
             ) : null}
 
+          </div>
+
+          <div className="flex gap-2">
             <button
               onClick={handleSaveAsSnippet}
               className={cn(
-                'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                'flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
                 'text-sm font-medium leading-tight',
                 'bg-foreground/[0.04] text-foreground',
                 'active:opacity-80',
@@ -982,8 +1002,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               type="button"
             >
               <Icon name="hashtag" className="h-5 w-5 flex-shrink-0" />
-              <span className="min-w-0 whitespace-normal">{t('snippets.quickCreate.action')}</span>
+              <span className="min-w-0 truncate">{t('snippets.quickCreate.action')}</span>
             </button>
+            {approvalButton}
           </div>
         </div>
       </div>,
@@ -1092,6 +1113,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
           >
             <Icon name="hashtag" className="h-4 w-4" />
           </button>
+          {approvalButton ? (
+            <>
+              <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
+              {approvalButton}
+            </>
+          ) : null}
 
           {canReadAloud ? (
             <>
