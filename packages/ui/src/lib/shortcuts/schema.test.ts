@@ -2,8 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   getCustomizableShortcutActions,
   getEffectiveShortcutCombo,
+  getNativeMenuShortcutCombos,
   getShortcutBindingConflicts,
   getShortcutAction,
+  isMenuAcceleratorCombo,
+  isShortcutAvailable,
   parseShortcut,
   SHORTCUT_SCHEMA,
   type ShortcutCategory,
@@ -78,6 +81,35 @@ describe('shortcut schema', () => {
     expect(getShortcutAction('switch_context_surface')?.defaultBinding).toBe('mod+alt');
   });
 
+  test('lists every keyboard action in Settings except the double Escape stop', () => {
+    expect(SHORTCUT_SCHEMA.filter((action) => !action.customizable).map((action) => action.id)).toEqual(['abort_run']);
+  });
+
+  test('keeps native menu keys out of the way where the menu does not exist', () => {
+    const conflict = getShortcutBindingConflicts('new_chat', 'mod+shift+g')
+      .find((candidate) => candidate.action.id === 'open_git_panel');
+    expect(conflict).toBeUndefined();
+    expect(isShortcutAvailable(getShortcutAction('open_git_panel')!)).toBe(false);
+    expect(isShortcutAvailable(getShortcutAction('new_chat')!)).toBe(true);
+  });
+
+  test('accepts only combos the native menu can show', () => {
+    for (const combo of ['alt+insert', 'mod+minus', 'mod+=', 'ctrl+alt+arrowup', 'mod+shift+alt+n']) {
+      expect(isMenuAcceleratorCombo(combo)).toBe(true);
+    }
+    for (const combo of ['g', 'shift+g', 'mod+k g', 'alt+capslock', 'alt+contextmenu']) {
+      expect(isMenuAcceleratorCombo(combo)).toBe(false);
+    }
+  });
+
+  test('reports the menu keys, with an unassigned one as empty', () => {
+    const combos = getNativeMenuShortcutCombos({ zoom_in: 'mod+shift+=', zoom_out: '__unassigned__' });
+    expect(combos.zoom_in).toBe('mod+shift+=');
+    expect(combos.zoom_out).toBe('');
+    expect(combos.new_window).toBe('mod+shift+alt+n');
+    expect(Object.keys(combos)).toHaveLength(10);
+  });
+
   test('every action ships with a default binding', () => {
     // Palette-only commands live outside this schema entirely; an action in
     // the schema without a binding would be dead weight in Settings.
@@ -95,8 +127,8 @@ describe('shortcut schema', () => {
   });
 
   test('keeps internal bindings authoritative over persisted overrides', () => {
-    expect(getEffectiveShortcutCombo('save_file', { save_file: 'mod+k' })).toBe('mod+s');
-    expect(getEffectiveShortcutCombo('save_file', { save_file: '__unassigned__' })).toBe('mod+s');
+    expect(getEffectiveShortcutCombo('abort_run', { abort_run: 'mod+k' })).toBe('escape');
+    expect(getEffectiveShortcutCombo('abort_run', { abort_run: '__unassigned__' })).toBe('escape');
   });
 
   test('surfaces a desktop global combo override as a replaceable conflict', () => {
@@ -109,10 +141,10 @@ describe('shortcut schema', () => {
   test('detects conflicts against customizable and internal bindings', () => {
     const customizableConflict = getShortcutBindingConflicts('new_chat', 'mod+p')
       .find((conflict) => conflict.action.id === 'open_command_palette');
-    const internalConflict = getShortcutBindingConflicts('new_chat', 'mod+f')
-      .find((conflict) => conflict.action.id === 'find_in_file');
-    const internalPrefixConflict = getShortcutBindingConflicts('new_chat', 'mod+s x')
-      .find((conflict) => conflict.action.id === 'save_file');
+    const internalConflict = getShortcutBindingConflicts('new_chat', 'escape')
+      .find((conflict) => conflict.action.id === 'abort_run');
+    const internalPrefixConflict = getShortcutBindingConflicts('new_chat', 'escape x')
+      .find((conflict) => conflict.action.id === 'abort_run');
     const leaderPrefixConflict = getShortcutBindingConflicts('new_chat', 'mod+k')
       .find((conflict) => conflict.action.id === 'open_session_list');
     const blockingPrefixConflict = getShortcutBindingConflicts('new_chat', 'mod+p x')

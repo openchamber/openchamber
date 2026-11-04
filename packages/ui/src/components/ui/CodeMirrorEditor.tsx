@@ -2,16 +2,17 @@ import React from 'react';
 
 import type { Extension } from '@codemirror/state';
 import { Compartment, EditorState, RangeSetBuilder, StateField, type StateEffect } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, type KeyBinding, ViewPlugin, WidgetType, gutters, keymap, lineNumbers } from '@codemirror/view';
+import { Decoration, type DecorationSet, EditorView, ViewPlugin, WidgetType, gutters, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { forceParsing, indentUnit } from '@codemirror/language';
-import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
+import { search, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
 import { createPortal } from 'react-dom';
 
 import { AttachedOverlayScrollbar } from '@/components/ui/AttachedOverlayScrollbar';
 import { searchPanelSpace } from '@/lib/codemirror/searchPanelSpace';
 import { createVimModeExtensions } from '@/lib/codemirror/vimModeExtension';
 import { cn } from '@/lib/utils';
+import { searchKeymapWithFindShortcut } from '@/lib/codemirror/findShortcut';
 
 /** Patches `title` attributes onto CodeMirror search-panel controls for icon-only tooltips. */
 const buttonTooltips: Record<string, string> = {
@@ -164,9 +165,7 @@ const blockWidgetsCompartment = new Compartment();
 const searchCompartment = new Compartment();
 const vimCompartment = new Compartment();
 
-const toViewKeyBindings = (bindings: readonly unknown[]): readonly KeyBinding[] => {
-  return bindings as readonly KeyBinding[];
-};
+const createSearchExtensions = () => [search({ top: true }), searchPanelSpace(), searchKeymapWithFindShortcut()];
 
 const forceParsingCompat = forceParsing as unknown as (view: EditorView, upto?: number, timeout?: number) => boolean;
 const openSearchPanelCompat = openSearchPanel as unknown as (view: EditorView) => void;
@@ -457,7 +456,7 @@ export function CodeMirrorEditor({
         externalExtensionsCompartment.of(extensions ?? []),
         highlightLinesCompartment.of(createHighlightLinesExtension(highlightLines)),
         blockWidgetsCompartment.of(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)),
-        searchCompartment.of(enableSearch ? [search({ top: true }), searchPanelSpace(), keymap.of(toViewKeyBindings(searchKeymap))] : []),
+        searchCompartment.of(enableSearch ? createSearchExtensions() : []),
       ],
     });
 
@@ -525,7 +524,7 @@ export function CodeMirrorEditor({
       effects.push(blockWidgetsCompartment.reconfigure(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)));
     }
     if (applied.enableSearch !== enableSearch) {
-      effects.push(searchCompartment.reconfigure(enableSearch ? [search({ top: true }), searchPanelSpace(), keymap.of(toViewKeyBindings(searchKeymap))] : []));
+      effects.push(searchCompartment.reconfigure(enableSearch ? createSearchExtensions() : []));
     }
     if (effects.length === 0) {
       return;

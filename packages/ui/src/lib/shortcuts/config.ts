@@ -8,6 +8,12 @@ type ShortcutConfig = {
   /** The binding is a bare-modifier chord prefix (completed by another key);
       conflict resolution compares its prefix rather than a full combo. */
   prefixStyle?: true;
+  /** The handler matches single key presses, so Settings records one chord. */
+  singleChord?: true;
+  /** The desktop app menu owns the key as a native accelerator: it works from
+      every focused surface and window, and needs no renderer handler. The key
+      exists only where that menu item does; the recorder takes one chord. */
+  nativeMenu?: 'all' | 'non-mac';
 } & (
   | { customizable: false }
   | {
@@ -160,6 +166,39 @@ const SHORTCUT_GROUPS = {
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_dictation.label',
     },
+    {
+      id: 'sessions_bulk_delete',
+      defaultBinding: 'mod+backspace',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.sessions_bulk_delete.label',
+    },
+    {
+      id: 'sessions_select_all',
+      defaultBinding: 'mod+a',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.sessions_select_all.label',
+    },
+    {
+      id: 'permission_allow_once',
+      defaultBinding: 'alt+enter',
+      singleChord: true,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.permission_allow_once.label',
+    },
+    {
+      id: 'permission_allow_always',
+      defaultBinding: 'alt+shift+enter',
+      singleChord: true,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.permission_allow_always.label',
+    },
+    {
+      id: 'permission_deny',
+      defaultBinding: 'alt+backspace',
+      singleChord: true,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.permission_deny.label',
+    },
     { id: 'abort_run', defaultBinding: 'escape', customizable: false },
     {
       // Not ctrl+b (the OpenCode TUI's key): the composer editor's macOS
@@ -180,7 +219,12 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.open_model_selector.label',
     },
-    { id: 'cycle_thinking_variant', defaultBinding: 'mod+shift+t', customizable: false },
+    {
+      id: 'cycle_thinking_variant',
+      defaultBinding: 'mod+shift+t',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_thinking_variant.label',
+    },
     {
       id: 'cycle_agent',
       defaultBinding: 'tab',
@@ -254,6 +298,13 @@ const SHORTCUT_GROUPS = {
         'settings.openchamber.keyboardShortcuts.action.switch_context_surface.label',
     },
     {
+      id: 'open_git_panel',
+      defaultBinding: 'mod+shift+g',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_git_panel.label',
+    },
+    {
       id: 'toggle_services_menu',
       defaultBinding: 'mod+k i',
       customizable: true,
@@ -262,8 +313,45 @@ const SHORTCUT_GROUPS = {
     },
   ],
   navigation: [
-    { id: 'save_file', defaultBinding: 'mod+s', customizable: false },
-    { id: 'find_in_file', defaultBinding: 'mod+f', customizable: false },
+    {
+      id: 'save_file',
+      defaultBinding: 'mod+s',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.save_file.label',
+    },
+    {
+      id: 'find_in_file',
+      defaultBinding: 'mod+f',
+      singleChord: true,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.find_in_file.label',
+    },
+    {
+      id: 'diff_next_file',
+      defaultBinding: 'alt+arrowdown',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.diff_next_file.label',
+    },
+    {
+      id: 'diff_previous_file',
+      defaultBinding: 'alt+arrowup',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.diff_previous_file.label',
+    },
+    {
+      id: 'previous_project',
+      defaultBinding: 'ctrl+alt+arrowup',
+      nativeMenu: 'non-mac',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.previous_project.label',
+    },
+    {
+      id: 'next_project',
+      defaultBinding: 'ctrl+alt+arrowdown',
+      nativeMenu: 'non-mac',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.next_project.label',
+    },
     {
       id: 'open_go_to_line',
       defaultBinding: 'alt+g',
@@ -309,6 +397,55 @@ const SHORTCUT_GROUPS = {
       defaultBinding: 'mod+k c',
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_theme.label',
+    },
+    {
+      id: 'new_window',
+      defaultBinding: 'mod+shift+alt+n',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.new_window.label',
+    },
+    {
+      id: 'show_diagnostics',
+      defaultBinding: 'mod+shift+l',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.show_diagnostics.label',
+    },
+    {
+      id: 'toggle_developer_tools',
+      defaultBinding: 'mod+alt+i',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_developer_tools.label',
+    },
+    {
+      id: 'toggle_memory_debug',
+      defaultBinding: 'mod+shift+d',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_memory_debug.label',
+    },
+    {
+      id: 'zoom_in',
+      defaultBinding: 'mod+=',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.zoom_in.label',
+    },
+    {
+      id: 'zoom_out',
+      defaultBinding: 'mod+minus',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.zoom_out.label',
+    },
+    {
+      id: 'zoom_reset',
+      defaultBinding: 'mod+0',
+      nativeMenu: 'all',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.zoom_reset.label',
     },
   ],
   // Desktop-shell capabilities: registered as OS-level global shortcuts rather

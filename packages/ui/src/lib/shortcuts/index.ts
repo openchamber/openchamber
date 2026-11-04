@@ -3,6 +3,7 @@ export {
   eventMatchesShortcutPrefix,
   formatShortcutForDisplay,
   getShortcutConflict,
+  isMenuAcceleratorCombo,
   isRiskyBrowserShortcut,
   isShortcutPrefixHeld,
   keyToShortcutToken,
@@ -21,7 +22,10 @@ export {
   getShortcutBindingConflicts,
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
+  getNativeMenuShortcutCombos,
   getShortcutAction,
+  isShortcutAvailable,
+  isSingleChordShortcut,
   SHORTCUT_SCHEMA,
 } from './schema';
 export type {

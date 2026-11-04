@@ -8,6 +8,8 @@ import {
   getCustomizableShortcutActions,
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
+  isShortcutAvailable,
+  isSingleChordShortcut,
   UNASSIGNED_SHORTCUT,
   type ShortcutActionId,
   type ShortcutCombo,
@@ -50,7 +52,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     refreshGlobalQuakeCombo();
   }, [refreshGlobalQuakeCombo]);
 
-  const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
+  const actions = React.useMemo(() => getCustomizableShortcutActions().filter(isShortcutAvailable), []);
   const persist = (nextOverrides: Record<string, ShortcutCombo>) => {
     void updateDesktopSettings({ shortcutOverrides: nextOverrides });
   };
@@ -168,6 +170,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
       <ShortcutRecordingDialog
         action={editingAction}
         overrides={recorderOverrides}
+        maxChords={editingAction && isSingleChordShortcut(editingAction) ? 1 : undefined}
         onSave={save}
         onOpenChange={(open) => {
           if (!open) setEditingAction(null);

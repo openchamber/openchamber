@@ -100,6 +100,7 @@ import {
   selectQuakeToggleAction,
 } from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
+import { menuAccelerator, normalizeMenuShortcuts } from './menu-shortcuts.mjs';
 import { createCopyLinkMenuHook } from './context-menu-clipboard.mjs';
 import { createCopyMenuAction } from './menu-copy-action.mjs';
 import {
@@ -2236,6 +2237,16 @@ const closeTabOrWindow = () => {
     return;
   }
   target.close();
+};
+
+// The combos the renderer sends for menu items Settings can rebind. Until the
+// first update the menus use their built-in keys.
+let menuShortcuts = {};
+let appMenuLocale = 'en';
+const menuKey = (id, fallback) => menuAccelerator(menuShortcuts, id, fallback);
+
+const applyApplicationMenu = () => {
+  Menu.setApplicationMenu(process.platform === 'darwin' ? buildMacMenu(appMenuLocale) : buildAutoHiddenMenu());
 };
 
 const getMenuTargetWindow = () => {
@@ -5427,8 +5438,18 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (typeof args.locale === 'string') {
         setContextMenuLocale(args.locale);
         if (process.platform === 'darwin') {
-          Menu.setApplicationMenu(buildMacMenu(normalizeMenuLocale(args.locale)));
+          appMenuLocale = normalizeMenuLocale(args.locale);
+          applyApplicationMenu();
         }
+      }
+      return null;
+    }
+
+    case 'desktop_set_menu_shortcuts': {
+      const next = normalizeMenuShortcuts(args.shortcuts);
+      if (JSON.stringify(next) !== JSON.stringify(menuShortcuts)) {
+        menuShortcuts = next;
+        applyApplicationMenu();
       }
       return null;
     }
@@ -5516,7 +5537,7 @@ const buildMacMenu = (locale = 'en') => {
     {
       label: t('file'),
       submenu: [
-        { label: t('newWindow'), accelerator: 'Cmd+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { label: t('newWindow'), accelerator: menuKey('new_window', 'Cmd+Shift+Alt+N'), click: () => void handleInvoke(null, 'desktop_new_window') },
         { type: 'separator' },
         { label: t('newSession'), accelerator: 'Cmd+N', click: () => dispatchAction('new-session') },
         { label: t('newWorktree'), accelerator: 'Cmd+Shift+N', click: () => dispatchAction('new-worktree-session') },
@@ -5546,7 +5567,7 @@ const buildMacMenu = (locale = 'en') => {
       label: t('view'),
       submenu: [
         { label: t('toggleRightSidebar'), accelerator: 'Cmd+B', click: () => dispatchAction('toggle-right-sidebar') },
-        { label: t('openGitSidebar'), accelerator: 'Cmd+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: t('openGitSidebar'), accelerator: menuKey('open_git_panel', 'Cmd+Shift+G'), click: () => dispatchAction('open-right-sidebar-git') },
         { label: t('openFilesSidebar'), click: () => dispatchAction('open-right-sidebar-files') },
         { type: 'separator' },
         { label: t('toggleTerminalDock'), accelerator: 'Cmd+J', click: () => dispatchAction('toggle-terminal') },
@@ -5557,7 +5578,7 @@ const buildMacMenu = (locale = 'en') => {
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
         { label: t('toggleSessionSidebar'), accelerator: 'Cmd+Alt+L', click: () => dispatchAction('toggle-sidebar') },
-        { label: t('toggleMemoryDebug'), accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: t('toggleMemoryDebug'), accelerator: menuKey('toggle_memory_debug', 'Cmd+Shift+D'), click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
@@ -5568,9 +5589,9 @@ const buildMacMenu = (locale = 'en') => {
         roleItem('minimize', 'minimize'),
         roleItem('zoom', 'zoom'),
         { type: 'separator' },
-        { label: t('zoomIn'), accelerator: 'CmdOrCtrl+=', click: () => dispatchAction('zoom-in') },
-        { label: t('zoomOut'), accelerator: 'CmdOrCtrl+-', click: () => dispatchAction('zoom-out') },
-        { label: t('resetZoom'), accelerator: 'CmdOrCtrl+0', click: () => dispatchAction('zoom-reset') },
+        { label: t('zoomIn'), accelerator: menuKey('zoom_in', 'CmdOrCtrl+='), click: () => dispatchAction('zoom-in') },
+        { label: t('zoomOut'), accelerator: menuKey('zoom_out', 'CmdOrCtrl+-'), click: () => dispatchAction('zoom-out') },
+        { label: t('resetZoom'), accelerator: menuKey('zoom_reset', 'CmdOrCtrl+0'), click: () => dispatchAction('zoom-reset') },
         { type: 'separator' },
         { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
       ],
@@ -5579,8 +5600,8 @@ const buildMacMenu = (locale = 'en') => {
       label: t('help'),
       submenu: [
         { label: t('keyboardShortcuts'), accelerator: 'Cmd+.', click: () => dispatchAction('help-dialog') },
-        { label: t('showDiagnostics'), accelerator: 'Cmd+Shift+L', click: () => dispatchAction('download-logs') },
-        { label: t('toggleDeveloperTools'), accelerator: 'Cmd+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { label: t('showDiagnostics'), accelerator: menuKey('show_diagnostics', 'Cmd+Shift+L'), click: () => dispatchAction('download-logs') },
+        { label: t('toggleDeveloperTools'), accelerator: menuKey('toggle_developer_tools', 'Cmd+Alt+I'), click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
@@ -5619,7 +5640,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
     {
       label: t('file'),
       submenu: [
-        { label: t('newWindow'), accelerator: 'Ctrl+Shift+Alt+N', click: () => void handleInvoke(null, 'desktop_new_window') },
+        { label: t('newWindow'), accelerator: menuKey('new_window', 'Ctrl+Shift+Alt+N'), click: () => void handleInvoke(null, 'desktop_new_window') },
         { type: 'separator' },
         { label: t('newSession'), accelerator: 'Ctrl+N', click: () => dispatchAction('new-session') },
         { label: t('newWorktree'), accelerator: 'Ctrl+Shift+N', click: () => dispatchAction('new-worktree-session') },
@@ -5647,10 +5668,10 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       submenu: [
         roleItem('reload', 'reload'),
         roleItem('forceReload', 'forceReload'),
-        { label: t('toggleDeveloperTools'), accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
+        { label: t('toggleDeveloperTools'), accelerator: menuKey('toggle_developer_tools', 'Ctrl+Alt+I'), click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('toggleRightSidebar'), accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
-        { label: t('openGitSidebar'), accelerator: 'Ctrl+Shift+G', click: () => dispatchAction('open-right-sidebar-git') },
+        { label: t('openGitSidebar'), accelerator: menuKey('open_git_panel', 'Ctrl+Shift+G'), click: () => dispatchAction('open-right-sidebar-git') },
         { label: t('openFilesSidebar'), click: () => dispatchAction('open-right-sidebar-files') },
         { type: 'separator' },
         { label: t('toggleTerminalDock'), accelerator: 'Ctrl+J', click: () => dispatchAction('toggle-terminal') },
@@ -5661,7 +5682,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('systemTheme'), click: () => dispatchAction('theme-system') },
         { type: 'separator' },
         { label: t('toggleSessionSidebar'), accelerator: 'Ctrl+Alt+L', click: () => dispatchAction('toggle-sidebar') },
-        { label: t('toggleMemoryDebug'), accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
+        { label: t('toggleMemoryDebug'), accelerator: menuKey('toggle_memory_debug', 'Ctrl+Shift+D'), click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
         roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
@@ -5677,17 +5698,17 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('previousSession'), click: () => dispatchAction('previous-session') },
         { label: t('nextSession'), click: () => dispatchAction('next-session') },
         { type: 'separator' },
-        { label: t('previousProject'), accelerator: 'Ctrl+Alt+Up', click: () => dispatchAction('previous-project') },
-        { label: t('nextProject'), accelerator: 'Ctrl+Alt+Down', click: () => dispatchAction('next-project') },
+        { label: t('previousProject'), accelerator: menuKey('previous_project', 'Ctrl+Alt+Up'), click: () => dispatchAction('previous-project') },
+        { label: t('nextProject'), accelerator: menuKey('next_project', 'Ctrl+Alt+Down'), click: () => dispatchAction('next-project') },
       ],
     },
     {
       label: t('window'),
       submenu: [
         roleItem('minimize', 'minimize'),
-        { label: t('zoomIn'), accelerator: 'Ctrl+=', click: () => dispatchAction('zoom-in') },
-        { label: t('zoomOut'), accelerator: 'Ctrl+-', click: () => dispatchAction('zoom-out') },
-        { label: t('resetZoom'), accelerator: 'Ctrl+0', click: () => dispatchAction('zoom-reset') },
+        { label: t('zoomIn'), accelerator: menuKey('zoom_in', 'Ctrl+='), click: () => dispatchAction('zoom-in') },
+        { label: t('zoomOut'), accelerator: menuKey('zoom_out', 'Ctrl+-'), click: () => dispatchAction('zoom-out') },
+        { label: t('resetZoom'), accelerator: menuKey('zoom_reset', 'Ctrl+0'), click: () => dispatchAction('zoom-reset') },
         roleItem('togglefullscreen', 'toggleFullScreen'),
         { type: 'separator' },
         { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
@@ -5697,7 +5718,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       label: t('help'),
       submenu: [
         { label: t('keyboardShortcuts'), accelerator: 'Ctrl+.', click: () => dispatchAction('help-dialog') },
-        { label: t('showDiagnostics'), accelerator: 'Ctrl+Shift+L', click: () => dispatchAction('download-logs') },
+        { label: t('showDiagnostics'), accelerator: menuKey('show_diagnostics', 'Ctrl+Shift+L'), click: () => dispatchAction('download-logs') },
         { type: 'separator' },
         { label: t('clearCache'), click: () => void handleInvoke(null, 'desktop_clear_cache') },
         { type: 'separator' },
@@ -5871,6 +5892,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_host_probe',
   'desktop_switch_to_local',
   'desktop_new_window',
+  'desktop_set_menu_shortcuts',
   'desktop_new_window_at_url',
   'desktop_new_window_for_host',
   'desktop_set_window_title',
@@ -6335,11 +6357,9 @@ app.whenReady().then(async () => {
   hardenBrowserPanelSession();
   setupAutoUpdater();
 
+  applyApplicationMenu();
   if (process.platform === 'darwin') {
-    Menu.setApplicationMenu(buildMacMenu());
     void applyDevDockIdentity({ app, electronDir: __dirname, log });
-  } else {
-    Menu.setApplicationMenu(buildAutoHiddenMenu());
   }
   setupTray();
   applyDesktopMiniChatGlobalShortcut();

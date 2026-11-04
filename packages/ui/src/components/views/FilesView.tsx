@@ -4188,7 +4188,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
 
     const docked = layout === 'docked';
-    const saveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('save_file'));
+    const saveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('save_file', shortcutOverrides));
 
     // `announce` is for the "More actions" menu: the menu closes on select, so
     // the button's check-mark feedback would never be seen there.
