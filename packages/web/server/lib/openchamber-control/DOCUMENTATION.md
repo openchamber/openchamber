@@ -148,9 +148,23 @@ other.
   session, a failed prompt keeps its directory. Chats cannot request a worktree.
 - Session status and messages come from official directory-scoped OpenCode
   APIs. Message output includes only ordered `text` parts.
+- `session.status` and `session.messages` ask OpenCode's `session.get` first,
+  because the active-session map names only running sessions: a session it
+  does not name is idle or does not exist. An unknown id is a 404. A lookup
+  that fails is a 503 with its own message, never a 404 or an idle status.
+- A session status is `busy`, `idle`, or `waiting`: a running session with an
+  open permission, form, secret card or page (`readPendingRequests`). A
+  permission the server answers by itself does not count
+  (`isPermissionAutoAnswered`, the rule notifications use; in `safety` mode the
+  read waits for the verdict). Each session answers for itself: a parent whose
+  child waits stays `busy`. The pending list comes from this server's event
+  stream, so a request opened before this server connected to OpenCode reads as
+  `busy`. `session.list` with `withStatus` uses the same rule.
 - Wait (CLI only; the agent tool refuses it) never treats an initial idle
   response as completion after dispatch. It requires observed activity or a
-  newly completed assistant message.
+  newly completed assistant message. A `waiting` session ends the wait at once
+  with that status, because the user may never answer; the CLI then exits
+  non-zero, so a script does not read it as finished.
 - Timeout and cancellation are failures, never authoritative idle results.
 - `returnResult` on create/send/fork hands the dispatched session's final
   answer back to the calling session (`options.contextSessionId`) through

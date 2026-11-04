@@ -28,6 +28,7 @@ Command modules implement user-facing commands and preserve output contracts acr
 - `commands-session.js`
   - Implements `openchamber session create`, `send`, `fork`, `list`, `status`, and `messages`.
   - Maps CLI options to shared control-service inputs and owns only human, quiet, and JSON presentation.
+  - A `--wait` that ends because the session waits for the user exits non-zero, with a line on stderr outside `--json`.
   - Message projection matches Export Markdown semantics: only ordered `text` parts are exposed; tool, reasoning, file, and other parts are omitted.
   - The server control service owns create/worktree/prompt orchestration, official OpenCode reads, Goal Mode, wait semantics, and partial failures.
 
