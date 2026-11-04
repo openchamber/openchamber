@@ -13,7 +13,6 @@ import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { PROJECT_NOTE_BODY_MAX_LENGTH } from '@/lib/projectContextApi';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
-import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { summarizeSelectionForNotes } from '@/lib/smallModel';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useSpaceProjectDirectory } from '@/lib/spaces/spaces-store';
@@ -792,14 +791,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     }
   }, [currentProjectRef, currentSessionId, hideMenu, selectedText, selectedTextMarkdown, t]);
 
-  const handleSaveAsSnippet = React.useCallback(() => {
-    const content = selectedTextMarkdown || selectedText;
-    if (!content) return;
-    useSnippetsStore.getState().openQuickCreate({ content });
-    hideMenu();
-    window.getSelection()?.removeAllRanges();
-  }, [hideMenu, selectedText, selectedTextMarkdown]);
-
   if (!position.show) return null;
 
   const commentHighlightOverlay = commentMode && commentRects && commentRects.length > 0
@@ -984,24 +975,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               </button>
             ) : null}
 
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleSaveAsSnippet}
-              className={cn(
-                'flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
-                'text-sm font-medium leading-tight',
-                'bg-foreground/[0.04] text-foreground',
-                'active:opacity-80',
-                'transition-opacity duration-150'
-              )}
-              title={t('snippets.quickCreate.action')}
-              type="button"
-            >
-              <Icon name="hashtag" className="h-5 w-5 flex-shrink-0" />
-              <span className="min-w-0 truncate">{t('snippets.quickCreate.action')}</span>
-            </button>
             {approvalButton}
           </div>
         </div>
@@ -1096,21 +1069,6 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
             </>
           ) : null}
 
-          <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />
-          <button
-            onClick={handleSaveAsSnippet}
-            className={cn(
-              'flex h-8 w-8 items-center justify-center rounded-full',
-              'text-foreground',
-              'hover:bg-[var(--interactive-hover)]',
-              'transition-colors duration-150'
-            )}
-            aria-label={t('snippets.quickCreate.action')}
-            title={t('snippets.quickCreate.action')}
-            type="button"
-          >
-            <Icon name="hashtag" className="h-4 w-4" />
-          </button>
           {approvalButton ? (
             <>
               <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" />

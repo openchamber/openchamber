@@ -537,8 +537,7 @@ main composer, "Save draft as #name" with the draft minus the token being
 typed; once saved, that token leaves the draft. Every create row opens the
 quick dialog (`components/snippets/SnippetQuickCreateDialog.tsx`, mounted once
 per app shell) and never writes on its own, so Enter on `fix #42` cannot make
-a snippet. The same dialog backs "Save as snippet" on a user message and on a
-text selection.
+a snippet. The same dialog backs "Save as snippet" on a user message.
 
 Desktop comment fields in ordinary page DOM (chat quote comments, editing a
 pending comment above the composer) are `components/comments/CommentTextEditor`:

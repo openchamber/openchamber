@@ -52,17 +52,23 @@ export function SelectionApprovalButton({ mobile, getSelection, onSuccess }: Sel
     if (!mobile) queueMicrotask(() => focusInput());
   };
 
+  if (mobile) {
+    return (
+      <button
+        type="button"
+        onClick={approve}
+        aria-label={label}
+        className="flex min-w-0 items-center gap-2 rounded-xl bg-foreground/[0.04] px-3 py-2.5 text-start text-sm font-medium leading-tight text-foreground transition-opacity duration-150 active:opacity-80"
+      >
+        <Icon name="thumb-up" className="h-5 w-5 flex-shrink-0" />
+        <span className="min-w-0 whitespace-normal">{label}</span>
+      </button>
+    );
+  }
+
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      onClick={approve}
-      aria-label={label}
-      title={label}
-      className={mobile ? 'h-11 w-11 shrink-0 rounded-xl bg-foreground/[0.04] active:opacity-80 transition-opacity duration-150' : 'rounded-full'}
-    >
-      <Icon name="thumb-up" className={mobile ? 'size-5' : 'size-4'} />
+    <Button type="button" variant="ghost" size="icon" onClick={approve} aria-label={label} title={label} className="rounded-full">
+      <Icon name="thumb-up" className="size-4" />
     </Button>
   );
 }
