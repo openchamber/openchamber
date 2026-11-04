@@ -1025,6 +1025,8 @@ interface UIStore {
   collapsibleThinkingBlocks: boolean;
   /** A collapsible reasoning block opens while its model thinks. Off: it stays folded to its header. */
   expandReasoningWhileStreaming: boolean;
+  /** Write and edit tool rows open on their own while the agent works. Off: every tool row opens with a click. */
+  expandToolRowsWhileWorking: boolean;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
@@ -1354,6 +1356,7 @@ interface UIStore {
   setSessionGoalDefaultBudget: (value: number) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setExpandReasoningWhileStreaming: (value: boolean) => void;
+  setExpandToolRowsWhileWorking: (value: boolean) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
@@ -1614,6 +1617,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
         expandReasoningWhileStreaming: false,
+        expandToolRowsWhileWorking: false,
         activityRenderMode: 'summary',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
@@ -2730,6 +2734,10 @@ export const useUIStore = create<UIStore>()(
 
         setExpandReasoningWhileStreaming: (value) => {
           set({ expandReasoningWhileStreaming: value });
+        },
+
+        setExpandToolRowsWhileWorking: (value) => {
+          set({ expandToolRowsWhileWorking: value });
         },
 
         setActivityRenderMode: (value) => {
@@ -3861,6 +3869,7 @@ export const useUIStore = create<UIStore>()(
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           expandReasoningWhileStreaming: state.expandReasoningWhileStreaming,
+          expandToolRowsWhileWorking: state.expandToolRowsWhileWorking,
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,

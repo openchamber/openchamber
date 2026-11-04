@@ -30,6 +30,7 @@ import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
 import { streamPerfCount, streamPerfMark, streamPerfMeasure } from '@/stores/utils/streamDebug';
 import type { StreamPhase } from './message/types';
+import { collectFileChangeToolIds } from './message/parts/toolRenderUtils';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPartsForMessages } from '@/sync/sync-context';
 import type { ReviewTransferDirection } from '@/lib/reviewFlow';
@@ -201,9 +202,15 @@ interface MessageRowProps {
     scrollToBottom?: () => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
     isFirstRow?: boolean;
+    /**
+     * Opening snapshot for auto-expand; see `ChatMessageProps`. Handled by the
+     * ChatMessage memo comparator not at all on purpose: a changed seed must
+     * not re-render mounted messages, only feed freshly mounted ones.
+     */
+    autoExpandSeedToolIds?: ReadonlySet<string>;
 }
 
-const MessageRow = React.memo<MessageRowProps>(({ 
+const MessageRow = React.memo<MessageRowProps>(({
     message,
     nextMessage,
     turnGroupingContext,
@@ -215,6 +222,7 @@ const MessageRow = React.memo<MessageRowProps>(({
     scrollToBottom,
     reviewTransferDirection,
     isFirstRow,
+    autoExpandSeedToolIds,
 }) => {
     // Roles that are not a conversation turn render as their own timeline row
     // (or as nothing); only user and assistant go through ChatMessage.
@@ -237,6 +245,7 @@ const MessageRow = React.memo<MessageRowProps>(({
             isInActiveTurn={isInActiveTurn}
             activeStreamingPhase={activeStreamingPhase}
             reviewTransferDirection={reviewTransferDirection}
+            autoExpandSeedToolIds={autoExpandSeedToolIds}
         />
     );
 }, (prev, next) => {
@@ -269,6 +278,8 @@ interface TurnRendererInput {
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    /** Opening snapshot for auto-expand; see `ChatMessageProps`. */
+    autoExpandSeedToolIds?: ReadonlySet<string>;
 }
 
 /** Draws any message of a turn with the turn-wide context it needs; every row of the turn uses it. */
@@ -283,6 +294,7 @@ const useTurnMessageRenderer = ({
     activeStreamingMessageId,
     activeStreamingPhase,
     reviewTransferDirection,
+    autoExpandSeedToolIds,
 }: TurnRendererInput) => {
     const streamingAssistantMessageId = React.useMemo(() => {
         if (activeStreamingMessageId && turn.assistantMessages.some((assistant) => assistant.info.id === activeStreamingMessageId)) {
@@ -395,6 +407,7 @@ const useTurnMessageRenderer = ({
                     isInActiveTurn={Boolean(streamingAssistantMessageId) && message.info.id === streamingAssistantMessageId}
                     activeStreamingPhase={message.info.id === streamingAssistantMessageId ? activeStreamingPhase : null}
                     reviewTransferDirection={reviewTransferDirection}
+                    autoExpandSeedToolIds={autoExpandSeedToolIds}
                     animateUserOnMount={shouldAnimateUserMessage(message)}
                     onUserAnimationConsumed={onUserAnimationConsumed}
                     scrollToBottom={scrollToBottom}
@@ -415,6 +428,7 @@ const useTurnMessageRenderer = ({
             streamingAssistantMessageId,
             activeStreamingPhase,
             reviewTransferDirection,
+            autoExpandSeedToolIds,
             assistantIndexById,
             turnEarlierAssistantText,
             activityOwnerMessageId,
@@ -503,6 +517,8 @@ interface UngroupedMessageRowProps {
     activeStreamingMessageId?: string | null;
     activeStreamingPhase?: StreamPhase | null;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    /** Opening snapshot for auto-expand; see `ChatMessageProps`. */
+    autoExpandSeedToolIds?: ReadonlySet<string>;
 }
 
 const UngroupedMessageRow = React.memo(({
@@ -515,6 +531,7 @@ const UngroupedMessageRow = React.memo(({
     activeStreamingMessageId,
     activeStreamingPhase,
     reviewTransferDirection,
+    autoExpandSeedToolIds,
 }: UngroupedMessageRowProps) => {
     return (
         <MessageRow
@@ -526,6 +543,7 @@ const UngroupedMessageRow = React.memo(({
             isInActiveTurn={Boolean(activeStreamingMessageId) && message.info.id === activeStreamingMessageId}
             activeStreamingPhase={message.info.id === activeStreamingMessageId ? activeStreamingPhase : null}
             reviewTransferDirection={reviewTransferDirection}
+            autoExpandSeedToolIds={autoExpandSeedToolIds}
             isFirstRow={isFirstRow}
         />
     );
@@ -614,6 +632,12 @@ type TimelineRowContextValue = {
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    /**
+     * Opening snapshot for auto-expand; see `ChatMessageProps`. Content-stable:
+     * the value only changes identity when the session's latest file-change
+     * rows actually change, so a streamed part costs nothing here.
+     */
+    autoExpandSeedToolIds: ReadonlySet<string>;
     // The rows of the live tail read its live entry; every other row renders
     // its entry as it is.
     streamingTailKey: string | null;
@@ -624,6 +648,8 @@ type TimelineRowContextValue = {
 };
 
 const TimelineRowContext = React.createContext<TimelineRowContextValue | null>(null);
+
+const EMPTY_AUTO_EXPAND_SEED: ReadonlySet<string> = new Set();
 
 const subscribeNowhere = () => () => {};
 const readNothing = () => null;
@@ -664,6 +690,7 @@ const TimelineRow = React.memo(({ row }: { row: RenderRow }) => {
                 activeStreamingMessageId={activeStreamingMessageId}
                 activeStreamingPhase={activeStreamingPhase}
                 reviewTransferDirection={context.reviewTransferDirection}
+                autoExpandSeedToolIds={context.autoExpandSeedToolIds}
             />
         );
     }
@@ -681,6 +708,7 @@ const TimelineRow = React.memo(({ row }: { row: RenderRow }) => {
             activeStreamingMessageId={activeStreamingMessageId}
             activeStreamingPhase={activeStreamingPhase}
             reviewTransferDirection={context.reviewTransferDirection}
+            autoExpandSeedToolIds={context.autoExpandSeedToolIds}
         />
     );
 });
@@ -1003,6 +1031,26 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             fallbackTimestamp: retryOverlay?.fallbackTimestamp ?? 0,
         });
     }), [baseDisplayMessages, retryOverlay]);
+
+    // Earlier list versions let "open tool rows by default" settings mount every
+    // diff of a session at load and froze long ones. The seed replaces that: it
+    // names only the ten most recent file-change rows, and only the messages
+    // that own one of them open. The string key keeps the Set identity (and so
+    // the timeline context) stable while a live turn streams parts that do not
+    // add a new file change; the Set rebuilds only when the ten actually move.
+    const autoExpandSeedKey = React.useMemo(() => {
+        const ids: string[] = [];
+        for (let index = displayMessages.length - 1; index >= 0 && ids.length < 10; index -= 1) {
+            const parts = displayMessages[index].parts;
+            if (!Array.isArray(parts)) continue;
+            ids.unshift(...collectFileChangeToolIds(parts, 10 - ids.length));
+        }
+        return ids.length === 0 ? '' : ids.join('\u0000');
+    }, [displayMessages]);
+    const autoExpandSeedToolIds = React.useMemo(() => {
+        if (autoExpandSeedKey === '') return EMPTY_AUTO_EXPAND_SEED;
+        return new Set<string>(autoExpandSeedKey.split('\u0000'));
+    }, [autoExpandSeedKey]);
 
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
         sessionKey,
@@ -1518,6 +1566,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         shouldAnimateUserMessage,
         onUserAnimationConsumed,
         reviewTransferDirection,
+        autoExpandSeedToolIds,
         streamingTailKey: trailingStreamingEntry?.key ?? null,
         liveTail,
         sessionIsWorking,
@@ -1526,6 +1575,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }), [
         activeStreamingMessageId,
         activeStreamingPhase,
+        autoExpandSeedToolIds,
         liveTail,
         onUserAnimationConsumed,
         reviewTransferDirection,

@@ -25,6 +25,7 @@ import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
 import { filterVisibleParts, normalizeParts } from './message/partUtils';
+import { collectFileChangeToolIds } from './message/parts/toolRenderUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { useSourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { isHiddenUserMessage } from './message/hiddenUserMessage';
@@ -115,6 +116,17 @@ interface ChatMessageProps {
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
     reviewTransferDirection?: ReviewTransferDirection | null;
+    /**
+     * Content-stable snapshot of the session's most recent file-change tool
+     * rows: it changes identity only when the latest ten actually move, and
+     * only freshly mounted messages read it. When auto-expand is on and the
+     * message is not streaming, it opens its own share of that snapshot, so
+     * reopening a session shows the latest code without mounting the whole
+     * transcript. Deliberately absent from the memo comparators: the seed is
+     * an opening state, not a live signal, so later snapshots do not
+     * re-render closed messages.
+     */
+    autoExpandSeedToolIds?: ReadonlySet<string>;
 }
 
 const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -127,6 +139,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     animateUserOnMount = false,
     onUserAnimationConsumed,
     reviewTransferDirection = null,
+    autoExpandSeedToolIds,
 }) => {
     const { t } = useI18n();
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
@@ -150,11 +163,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const providers = useConfigStore((state) => state.providers);
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
+    const expandToolRowsWhileWorking = useUIStore((state) => state.expandToolRowsWhileWorking);
 
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [copiedMessage, setCopiedMessage] = React.useState(false);
     const handleCopyLink = useCopyMessageLink(message.info.sessionID, message.info.id);
     const [expandedTools, setExpandedTools] = React.useState<Set<string>>(() => readExpandedToolsCache(message.info.id));
+    // File-change rows this instance already opened by auto-expand. A row the
+    // person closed by hand keeps its id here, so it does not open again on the
+    // next part update of the same live turn.
+    const autoExpandedToolIdsRef = React.useRef<Set<string>>(new Set());
     const [popupContent, setPopupContent] = React.useState<ToolPopupContent>({
         open: false,
         title: '',
@@ -421,6 +439,35 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             setHasStartedStreamingHeader(true);
         }
     }, [assistantHeaderMessageId, isUser, message.info.id, streamPhase, turnGroupingContext?.headerMessageId]);
+
+    // Auto-expansion writes into the same state a click uses, so a row's
+    // toggle keeps one meaning: closing an auto-opened row just works. While
+    // the message streams it opens every file-change row as the call lands;
+    // once it loads from history it opens only its share of the session-wide
+    // seed, so an old transcript stays light and only the latest code shows.
+    React.useEffect(() => {
+        if (isUser || !expandToolRowsWhileWorking) return;
+        const streaming = streamPhase === 'streaming' || streamPhase === 'cooldown';
+        const toOpen: string[] = [];
+        if (streaming) {
+            for (const id of collectFileChangeToolIds(visibleParts, Infinity)) {
+                if (!autoExpandedToolIdsRef.current.has(id)) toOpen.push(id);
+            }
+        } else if (autoExpandSeedToolIds && autoExpandSeedToolIds.size > 0) {
+            for (const part of visibleParts) {
+                if (part.type !== 'tool' || !autoExpandSeedToolIds.has(part.id)) continue;
+                if (!autoExpandedToolIdsRef.current.has(part.id)) toOpen.push(part.id);
+            }
+        }
+        if (toOpen.length === 0) return;
+        for (const id of toOpen) autoExpandedToolIdsRef.current.add(id);
+        setExpandedTools((prev) => {
+            if (toOpen.every((id) => prev.has(id))) return prev;
+            const next = new Set(prev);
+            for (const id of toOpen) next.add(id);
+            return next;
+        });
+    }, [isUser, expandToolRowsWhileWorking, streamPhase, visibleParts, autoExpandSeedToolIds]);
 
     const shouldShowHeader = React.useMemo(() => {
         if (isUser) return true;

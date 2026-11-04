@@ -463,6 +463,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['tools', 'files', 'icons'],
   },
   {
+    id: 'chat.expand-tool-rows',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.expandToolRowsWhileWorking',
+    descriptionKey: 'settings.openchamber.visual.field.expandToolRowsWhileWorkingInfo',
+    keywords: ['tools', 'expand', 'collapse', 'open', 'diff', 'write', 'edit'],
+  },
+  {
     id: 'chat.changed-files',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showTurnChangedFiles',

@@ -95,6 +95,8 @@ const MessagesTab: React.FC = () => {
   const setCollapsibleThinkingBlocks = useUIStore((state) => state.setCollapsibleThinkingBlocks);
   const expandReasoningWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
   const setExpandReasoningWhileStreaming = useUIStore((state) => state.setExpandReasoningWhileStreaming);
+  const expandToolRowsWhileWorking = useUIStore((state) => state.expandToolRowsWhileWorking);
+  const setExpandToolRowsWhileWorking = useUIStore((state) => state.setExpandToolRowsWhileWorking);
   const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
   const setShowToolFileIcons = useUIStore((state) => state.setShowToolFileIcons);
   const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
@@ -174,6 +176,14 @@ const MessagesTab: React.FC = () => {
               className={NESTED_OPTION_CLASS}
             />
           ) : null}
+          <SettingsCheckboxRow
+            checked={expandToolRowsWhileWorking}
+            onChange={setExpandToolRowsWhileWorking}
+            label={t('settings.openchamber.visual.field.expandToolRowsWhileWorking')}
+            ariaLabel={t('settings.openchamber.visual.field.expandToolRowsWhileWorkingAria')}
+            info={t('settings.openchamber.visual.field.expandToolRowsWhileWorkingInfo')}
+            settingsItem="chat.expand-tool-rows"
+          />
           <SettingsCheckboxRow
             checked={showToolFileIcons}
             onChange={(enabled) => {

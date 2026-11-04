@@ -575,6 +575,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.expandReasoningWhileStreaming === 'boolean') {
       result.expandReasoningWhileStreaming = candidate.expandReasoningWhileStreaming;
     }
+    if (typeof candidate.expandToolRowsWhileWorking === 'boolean') {
+      result.expandToolRowsWhileWorking = candidate.expandToolRowsWhileWorking;
+    }
     if (typeof candidate.codeBlockLineWrap === 'boolean') {
       result.codeBlockLineWrap = candidate.codeBlockLineWrap;
     }
