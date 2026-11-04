@@ -21,6 +21,7 @@ const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => 
   const path = new URL(input instanceof Request ? input.url : String(input), 'http://localhost').pathname;
   if (path === '/api/config/settings') return Response.json({ projects: [PROJECT] });
   if (path.endsWith('/fs/home')) return Response.json({ home: '/home/test' });
+  if (path.endsWith('/fs/directory-stats')) return Response.json({ results: [{ path: '/gone/worktree', reason: 'not-found' }, { path: '/untrusted/clone', isDirectory: true }] });
   if (path === '/api/openchamber/spaces/archives') return Response.json({ archives: spaceArchives });
   if (path.endsWith('/archives')) return Response.json({ archives: [] });
   if (path === '/api/config' || path === '/api/project') return Response.json([]);
@@ -34,6 +35,7 @@ const { I18nProvider } = await import('@/lib/i18n');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useGlobalSessionsStore } = await import('@/stores/useGlobalSessionsStore');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
+const { useGlobalSyncStore } = await import('@/sync/global-sync-store');
 const { ArchiveSessionsView, ArchiveView } = await import('./ArchiveView');
 const { refreshSpaceArchives, useSpaceArchivesStore } = await import('@/lib/spaces/space-archives');
 const { updateDesktopSettings } = await import('@/lib/persistence');
@@ -113,6 +115,21 @@ test('archive rows hide unregistered destinations while preserving raw archived 
   expect(document.body.textContent).toContain('Kept archive');
   expect(document.body.textContent).not.toContain('Blocked archive');
   expect(useGlobalSessionsStore.getState().archivedSessions).toHaveLength(2);
+});
+
+test('a session of a worktree that is gone is listed, one in an existing folder of the same OpenCode project is not', async () => {
+  const syncProjects = useGlobalSyncStore.getState().projects;
+  useGlobalSyncStore.setState({ projects: [{ id: 'project', worktree: '/workspace', time: { created: 1, updated: 1 }, sandboxes: [] }] });
+  useGlobalSessionsStore.setState({ archivedSessions: [
+    { ...session('gone-worktree', 'Gone worktree'), directory: '/gone/worktree' },
+    { ...session('untrusted-clone', 'Untrusted clone'), directory: '/untrusted/clone' },
+  ] });
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  // Directory probes share one request after a short window.
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+  expect(document.body.textContent).toContain('Gone worktree');
+  expect(document.body.textContent).not.toContain('Untrusted clone');
+  useGlobalSyncStore.setState({ projects: syncProjects });
 });
 
 test('the chats of a deleted space are grouped under its name and cannot be restored', async () => {
