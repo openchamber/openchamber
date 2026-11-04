@@ -330,13 +330,15 @@ until an authoritative snapshot confirms them.
 
 ## Forking after an answer
 
-`/fork`, the fork action on an answer, and `/btw` keep the answer in the fork. OpenCode's fork `before` leaves out the record it names, so `transcriptCutAfterMessage` in `transcript-cut.ts` names the next turn boundary, the first record after the answer that starts something new, such as a prompt, a compaction, a background command's result or a workflow report. Without one, ordinary forks copy the whole transcript; `/btw` fails before creating a fork. A locally visible cut may not be persisted yet. All three paths retry a 404 once with the same cut and captured runtime, then propagate the error so the user can try again.
+`/fork`, the fork action on an answer, and `/btw` keep the answer in the fork. OpenCode's fork `before` leaves out the record it names, so `transcriptCutAfterMessage` in `transcript-cut.ts` names the next turn boundary, the first record after the answer that starts something new, such as a prompt, a compaction, a background command's result or a workflow report. Without one, ordinary forks copy the whole transcript; `/btw` looks for the boundary on the server first. A locally visible cut may not be persisted yet. All three paths retry a 404 once with the same cut and captured runtime, then propagate the error so the user can try again.
 
-### Why `/btw` requires an explicit cut and retries never widen one
+### Why `/btw` asks the server before copying a whole transcript, and retries never widen a cut
 
-The next prompt can reach the server before the first fork request or between attempts, while this window still shows an idle or empty transcript. An omitted `before` would copy that prompt and its unfinished response into the fork. `/btw` requires an explicit cut from the first attempt; keeping that cut on retry preserves the selected history even when the main chat advances.
+The next prompt can reach the server before the first fork request or between attempts, while this window still shows an idle transcript. An omitted `before` would copy that prompt and its unfinished response into the fork. So when the local transcript has no boundary after the answer, `/btw` reads the server's tail back to the answer and takes the boundary from there. Comparing only the newest record would not do: the server's newest record after a finished turn is the `idle` record, which this window never has. Only when the server also has no boundary does `/btw` omit `before`. Keeping a cut on retry preserves the selected history even when the main chat advances.
 
-If `/btw` has no completed answer or no following turn boundary, it fails before creating a fork and clears its creating flag so the user can retry. This includes idle and locally empty parents: the current API cannot enforce an inclusive upper bound at an answer or an empty server snapshot. Retry once a later turn boundary is loaded. No parent messages are changed.
+The current API has no inclusive upper bound at an answer, so a prompt landing between that read and the fork is still copied. Refusing `/btw` on every idle session to close that gap would break its most common use.
+
+A failed read, an answer the server does not list, and a parent with no completed answer each fail before creating a fork and clear the creating flag so the user can retry. No parent messages are changed.
 
 ### Why the next turn boundary and not the next record
 

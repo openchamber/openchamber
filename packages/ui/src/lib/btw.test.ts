@@ -261,29 +261,82 @@ describe('startBtwSession', () => {
     expect(childStoreSessions.map((s) => s.id)).toEqual(['fork-1']);
   });
 
-  test('rejects an unbounded fork when the server has a prompt missing from the idle local history, then allows retry', async () => {
-    parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
-    const serverMessages = [...parentSyncMessages, userMessage('msg-3'), assistantMessage('msg-4')];
-    const boundaries: Array<string | undefined> = [];
-    let inherited: Message[] = [];
-    forkSessionImpl = (_sessionId, options) => {
-      boundaries.push(options?.before);
-      const cut = serverMessages.findIndex((message) => message.id === options?.before);
-      inherited = cut < 0 ? serverMessages : serverMessages.slice(0, cut);
-      return Promise.resolve(makeSession('fork-1', '/project'));
+  describe('a parent that looks idle here', () => {
+    // The server pages newest first and holds the `idle` record no live event delivers.
+    const serverTail = (...messages: Message[]) => {
+      getSessionMessagesImpl = (id) => Promise.resolve(id === 'parent-1'
+        ? page([...messages].reverse().map((info) => ({ info, parts: [] })))
+        : page([record('msg-boundary')]));
+    };
+    const idleRecord = (id: string): Message => ({ id, sessionID: 'parent-1', role: 'idle', time: { created: 2 }, outcome: 'succeeded' });
+    const recordFork = () => {
+      const boundaries: Array<string | undefined> = [];
+      forkSessionImpl = (_sessionId, options) => {
+        boundaries.push(options?.before);
+        return Promise.resolve(makeSession('fork-1', '/project'));
+      };
+      return boundaries;
     };
 
-    await expect(startBtwSession(startInput)).rejects.toThrow('No safe transcript boundary to fork from');
-    expect(boundaries).toEqual([]);
-    expect(inherited).toEqual([]);
-    expect(metadataPatches).toEqual([]);
-    expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+    beforeEach(() => {
+      parentSyncMessages.splice(0, parentSyncMessages.length, userMessage('msg-1'), assistantMessage('msg-2', 10));
+    });
 
-    parentSyncMessages.push(serverMessages[2], serverMessages[3]);
-    await startBtwSession(startInput);
+    test('copies the whole transcript when the server has nothing newer than the answer', async () => {
+      serverTail(userMessage('msg-1'), assistantMessage('msg-2', 10), idleRecord('msg-idle'));
+      const boundaries = recordFork();
 
-    expect(boundaries).toEqual(['msg-3']);
-    expect(inherited.map((message) => message.id)).toEqual(['msg-1', 'msg-2']);
+      expect((await startBtwSession(startInput)).id).toBe('fork-1');
+      expect(boundaries).toEqual([undefined]);
+    });
+
+    test('cuts before a prompt the server has and this window has not received', async () => {
+      serverTail(
+        userMessage('msg-1'),
+        assistantMessage('msg-2', 10),
+        idleRecord('msg-idle'),
+        userMessage('msg-3'),
+        assistantMessage('msg-4'),
+      );
+      const boundaries = recordFork();
+
+      await startBtwSession(startInput);
+
+      expect(boundaries).toEqual(['msg-3']);
+    });
+
+    test('finds the answer on an older page', async () => {
+      const newer = Array.from({ length: 3 }, (_, index) => assistantMessage(`msg-new-${index}`));
+      getSessionMessagesImpl = (id, options) => {
+        if (id !== 'parent-1') return Promise.resolve(page([record('msg-boundary')]));
+        return Promise.resolve(options && 'cursor' in options
+          ? { items: [{ info: userMessage('msg-3'), parts: [] }, { info: parentSyncMessages[1], parts: [] }], cursor: {} }
+          : { items: newer.map((info) => ({ info, parts: [] })), cursor: { next: 'older' } });
+      };
+      const boundaries = recordFork();
+
+      await startBtwSession(startInput);
+
+      expect(boundaries).toEqual(['msg-3']);
+    });
+
+    test('fails without forking when the server does not list the answer', async () => {
+      serverTail(userMessage('msg-3'));
+      const boundaries = recordFork();
+
+      await expect(startBtwSession(startInput)).rejects.toThrow('No safe transcript boundary to fork from');
+      expect(boundaries).toEqual([]);
+      expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+    });
+
+    test('a failed read never widens the fork', async () => {
+      getSessionMessagesImpl = () => Promise.reject(new Error('messages failed'));
+      const boundaries = recordFork();
+
+      await expect(startBtwSession(startInput)).rejects.toThrow('messages failed');
+      expect(boundaries).toEqual([]);
+      expect(useBtwStore.getState().byParent['parent-1']?.creating).toBe(false);
+    });
   });
 
   test('does not copy an unfinished first turn', async () => {
