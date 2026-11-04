@@ -7,6 +7,7 @@ import { useInputStore } from '@/sync/input-store';
 import { attachmentWireName } from '@/lib/attachmentIdentity';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { CreateMultiRunParams } from '@/types/multirun';
 
@@ -191,6 +192,7 @@ export function useParallelComposer(input: {
     const title = runTitleFrom(variants[0].text) || t('chat.parallel.defaultTitle');
     const attachments = useInputStore.getState().attachedFiles;
     const config = useConfigStore.getState();
+    const ui = useUIStore.getState();
     const params: CreateMultiRunParams = {
       name: title,
       title,
@@ -213,6 +215,9 @@ export function useParallelComposer(input: {
       autoFusion: current.fuse
         ? { providerID: current.fuse.providerID, modelID: current.fuse.modelID, variant: current.fuse.variant, agent: config.currentAgentName || undefined }
         : undefined,
+      goal: useSessionGoalArmStore.getState().armed
+        ? { tokenBudget: ui.sessionGoalDefaultBudgetEnabled ? ui.sessionGoalDefaultBudget : null }
+        : undefined,
     };
 
     setIsLaunching(true);
@@ -226,6 +231,8 @@ export function useParallelComposer(input: {
       setMessage('');
       useInputStore.getState().clearAttachedFiles();
       setState(null);
+      // A launch that made no sessions keeps the arm, with the prompt, for the retry.
+      if (params.goal) useSessionGoalArmStore.getState().setArmed(false);
       useUIStore.getState().setRunOverviewKey(result.groupKey);
     } finally {
       setIsLaunching(false);

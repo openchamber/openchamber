@@ -4,6 +4,7 @@ import { distillGoalObjective } from '@/lib/smallModel';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { deleteGoalObjectiveFile, writeGoalObjectiveFile } from '@/lib/goalObjectiveFiles';
+import { wrapSystemReminder } from '@/lib/systemReminder';
 import {
   SESSION_GOAL_OBJECTIVE_CHAR_LIMIT,
   type SessionGoalPayload,
@@ -39,6 +40,29 @@ export interface SetSessionGoalInput {
   objective: string;
   tokenBudget: number | null;
 }
+
+/**
+ * First-turn reminder that teaches the agent the goal protocol; without it the
+ * agent only learns about goal mode from the first server continuation.
+ */
+export const sessionGoalIntro = (tokenBudget: number | null): string => {
+  const budgetLine = tokenBudget
+    ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
+    : '';
+  return wrapSystemReminder(
+    'Goal mode is active for this session. The user message above defines the goal objective. '
+    + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue.'
+    + budgetLine
+    // Same text as GOAL_REPORT_INSTRUCTIONS in the server's session-goal/audit.js.
+    + '\n\nBefore you end a turn, stop every background command you started that does not finish on its own, such as a dev server or a watcher. Start it again in a later turn if you need it.\n'
+    + '\nProgress is checked independently after each turn, from your final message only. End every turn with a short status block, in the language of your reply, with exactly these four lines:\n'
+    + '- Done: what is finished.\n'
+    + '- Verified: how you checked it (the command, test or file), or "not verified".\n'
+    + '- Remaining: the parts of the objective you still have to do yourself, or "nothing".\n'
+    + '- Needs from the user: what only the user can provide before you can go on (a decision, credentials, access), or "nothing".\n'
+    + 'Testing in the app, review and committing are the user\'s steps after the work, not remaining work and not blockers.',
+  );
+};
 
 /**
  * Create a new goal (fresh id resets accounting) or edit the existing one
