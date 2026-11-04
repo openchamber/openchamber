@@ -237,6 +237,16 @@ test('links keep the old renderer behaviour: inert when unsafe, bare URLs LTR, f
   expect(openedLinks).toEqual([]);
 });
 
+test('a bare link takes the same way as a named one', async () => {
+  openedLinks.length = 0;
+  const url = 'https://github.com/openchamber/openchamber/pull/6206';
+  await render(`${url} and [#6206](${url})`);
+  for (const anchor of host.querySelectorAll('a')) {
+    anchor.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+  expect(openedLinks).toEqual([url, url]);
+});
+
 test('a code block without a language is labelled text', async () => {
   await render('```\nplain\n```');
   expect(host.querySelector('[data-streamdown="code-block-header"]')?.textContent).toContain('text');
