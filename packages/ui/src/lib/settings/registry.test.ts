@@ -192,6 +192,38 @@ describe('settings registry', () => {
     }
   });
 
+  test('section order: a saved default moves on apply, a dragged order stays', () => {
+    const original = useUIStore.getState();
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    try {
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrder.slice(0, 4)).toEqual(['session', 'repository', 'usage', 'contextSources']);
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(false);
+
+      useUIStore.getState().setWorkStatusSectionOrder(savedDefault);
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedDefault);
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
+
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrder).toEqual(savedDefault);
+
+      useUIStore.setState({ workStatusSectionOrderExplicit: false });
+      applySettingsToStores(parseSettingsDocument({ workStatusSectionOrder: savedDefault, workStatusSectionOrderExplicit: true }) ?? {});
+      expect(useUIStore.getState().workStatusSectionOrderExplicit).toBe(true);
+    } finally {
+      useUIStore.setState(original, true);
+    }
+  });
+
+  test('section order: the local store migration moves a saved default', async () => {
+    const migrate = useUIStore.persist.getOptions().migrate;
+    if (!migrate) throw new Error('Expected a migration');
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    expect(await migrate({ workStatusSectionOrder: savedDefault }, 26)).toMatchObject({
+      workStatusSectionOrder: ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned'],
+    });
+  });
+
   test('restores section order from the actual local persisted projection', async () => {
     const options = useUIStore.persist.getOptions();
     const original = useUIStore.getState();

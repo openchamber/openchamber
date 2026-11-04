@@ -940,6 +940,8 @@ interface UIStore {
    */
   workStatusHiddenSections: string[];
   workStatusSectionOrder: WorkStatusPanelSectionId[];
+  /** True once the user arranged the sections, false for a saved default. */
+  workStatusSectionOrderExplicit: boolean;
   /** Explicitly chosen hidden-section state. False keeps the default opt-in seed. */
   workStatusHiddenSectionsExplicit: boolean;
   isSessionSwitcherOpen: boolean;
@@ -1567,6 +1569,7 @@ export const useUIStore = create<UIStore>()(
         workStatusOverlayOpen: false,
         workStatusHiddenSections: [],
         workStatusSectionOrder: sanitizeWorkStatusSectionOrder([]),
+        workStatusSectionOrderExplicit: false,
         workStatusHiddenSectionsExplicit: false,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
@@ -2430,7 +2433,7 @@ export const useUIStore = create<UIStore>()(
           set({ mobileWorkStatusHiddenSections: [...new Set(sectionIds)] });
         },
         setWorkStatusSectionOrder: (sectionIds) => {
-          set({ workStatusSectionOrder: sanitizeWorkStatusSectionOrder(sectionIds) });
+          set({ workStatusSectionOrder: sanitizeWorkStatusSectionOrder(sectionIds), workStatusSectionOrderExplicit: true });
         },
 
         setContextRailSurfaceVisible: (surfaceId, visible) => {
@@ -3563,7 +3566,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 26,
+        version: 27,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3575,6 +3578,12 @@ export const useUIStore = create<UIStore>()(
           // the synced settings after hydration.
           if (version < 23) {
             state.tableCellWrap = true;
+          }
+
+          // v26 -> v27: Context sources moved up the default order; an order
+          // the user arranged stays.
+          if (version < 27 && Array.isArray(state.workStatusSectionOrder)) {
+            state.workStatusSectionOrder = sanitizeWorkStatusSectionOrder(state.workStatusSectionOrder, false);
           }
 
           // v20 -> v21: enable telemetry by default; preserve explicit choices.
@@ -3856,6 +3865,7 @@ export const useUIStore = create<UIStore>()(
           workStatusPanelEnabled: state.workStatusPanelEnabled,
           workStatusHiddenSections: state.workStatusHiddenSections,
           workStatusSectionOrder: state.workStatusSectionOrder,
+          workStatusSectionOrderExplicit: state.workStatusSectionOrderExplicit,
           workStatusHiddenSectionsExplicit: state.workStatusHiddenSectionsExplicit,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           sidebarSection: state.sidebarSection,

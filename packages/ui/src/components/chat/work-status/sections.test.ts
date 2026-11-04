@@ -19,8 +19,25 @@ describe('section registry', () => {
 
   test('preserves chosen positions and appends missing sections once', () => {
     const order = sanitizeWorkStatusSectionOrder(['pinned', 'repository', 'pinned', 'obsolete', 'session']);
-    expect(order).toEqual(['pinned', 'repository', 'session', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'contextSources']);
+    expect(order).toEqual(['pinned', 'repository', 'session', 'usage', 'contextSources', 'telemetry', 'subagents', 'workflows', 'mcp']);
     expect(sanitizeWorkStatusSectionOrder(JSON.parse(JSON.stringify(order)))).toEqual(order);
+  });
+
+  test('a saved old default follows Context sources up, however the later sections were appended', () => {
+    const moved = ['session', 'repository', 'usage', 'contextSources', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned'];
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    expect(sanitizeWorkStatusSectionOrder(savedDefault, false)).toEqual(moved);
+    expect(sanitizeWorkStatusSectionOrder(moved, false)).toEqual(moved);
+    expect(sanitizeWorkStatusSectionOrder(['session', 'repository', 'usage', 'subagents', 'mcp', 'pinned', 'contextSources', 'telemetry', 'workflows'], false))
+      .toEqual(['session', 'repository', 'usage', 'contextSources', 'subagents', 'mcp', 'pinned', 'telemetry', 'workflows']);
+  });
+
+  test('an arranged order keeps Context sources where it is', () => {
+    const savedDefault = ['session', 'repository', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    const custom = ['repository', 'session', 'usage', 'telemetry', 'subagents', 'workflows', 'mcp', 'pinned', 'contextSources'];
+    expect(sanitizeWorkStatusSectionOrder(savedDefault)).toEqual(savedDefault);
+    expect(sanitizeWorkStatusSectionOrder(custom, false)).toEqual(custom);
+    expect(sanitizeWorkStatusSectionOrder([...savedDefault, 'ext:git-graph'], false)).toEqual([...savedDefault, 'ext:git-graph']);
   });
 
   test('every section has a label, and every label a section', () => {

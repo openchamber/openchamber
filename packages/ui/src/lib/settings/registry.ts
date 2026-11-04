@@ -97,6 +97,7 @@ type SettingsSiblingView = {
   readonly draftStartersCraftGoalAdded?: boolean;
   readonly draftStartersScheduleTaskAdded?: boolean;
   readonly workStatusHiddenSectionsExplicit?: boolean;
+  readonly workStatusSectionOrderExplicit?: boolean;
 };
 
 /**
@@ -413,7 +414,20 @@ export const SETTINGS_REGISTRY = {
   workStatusSectionOrder: field({
     scope: 'profile',
     parse: mapParser(parseStringList, sanitizeWorkStatusSectionOrder),
-    ui: uiStore('workStatusSectionOrder', (value) => useUIStore.getState().setWorkStatusSectionOrder(value)),
+    // The explicit marker tells an order the user arranged from a saved default.
+    ui: uiStore('workStatusSectionOrder', (value, snapshot) => {
+      const explicit = snapshot.workStatusSectionOrderExplicit === true;
+      useUIStore.setState({
+        workStatusSectionOrder: sanitizeWorkStatusSectionOrder(value, explicit),
+        workStatusSectionOrderExplicit: explicit,
+      });
+    }),
+  }),
+  workStatusSectionOrderExplicit: field({
+    scope: 'profile',
+    parse: parseBoolean,
+    // Applied here too: the order above is skipped when it equals the local one.
+    ui: uiStore('workStatusSectionOrderExplicit', (value) => useUIStore.setState({ workStatusSectionOrderExplicit: value })),
   }),
   workStatusPanelEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('workStatusPanelEnabled', (v) => useUIStore.getState().setWorkStatusPanelEnabled(v)) }),
   workStatusHiddenSections: field({

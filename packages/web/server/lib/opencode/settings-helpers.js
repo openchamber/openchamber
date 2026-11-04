@@ -367,8 +367,8 @@ export const createSettingsHelpers = (dependencies) => {
         ...new Set(candidate.workStatusHiddenSections.filter((entry) => typeof entry === 'string' && entry.length > 0)),
       ];
     }
-    if (typeof candidate.workStatusHiddenSectionsExplicit === 'boolean') {
-      result.workStatusHiddenSectionsExplicit = candidate.workStatusHiddenSectionsExplicit;
+    for (const key of ['workStatusHiddenSectionsExplicit', 'workStatusSectionOrderExplicit']) {
+      if (typeof candidate[key] === 'boolean') result[key] = candidate[key];
     }
     if (Array.isArray(candidate.workStatusSectionOrder)) {
       result.workStatusSectionOrder = [

@@ -376,6 +376,9 @@
     "workStatusSectionOrder": {
       "scope": "profile"
     },
+    "workStatusSectionOrderExplicit": {
+      "scope": "profile"
+    },
     "workStatusPanelEnabled": {
       "scope": "profile"
     },
