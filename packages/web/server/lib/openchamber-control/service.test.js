@@ -1098,6 +1098,34 @@ describe('render.page', () => {
       expect(result.note).toContain('answered on the page');
     });
 
+    it('stops listing a page once its session turn ended, without ending the call', async () => {
+      const onPageWaitChange = vi.fn();
+      const { service } = createService({ onPageWaitChange });
+      const controller = new AbortController();
+      const settled = vi.fn();
+      const pending = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
+      pending.then(settled, settled);
+      const other = service.execute('render.page', ask, '/repo', { ...call, contextSessionId: 'ses_2' });
+      await settle();
+
+      service.releaseAnswerWaits('ses_1');
+      await settle();
+
+      expect(onPageWaitChange).toHaveBeenCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
+      expect(onPageWaitChange).not.toHaveBeenCalledWith({ type: 'settled', sessionId: 'ses_2', callId: 'call_1' });
+      expect(settled).not.toHaveBeenCalled();
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow('no longer waiting');
+
+      // The request's end still ends the call, and says nothing twice.
+      const announced = onPageWaitChange.mock.calls.length;
+      controller.abort();
+      await expect(pending).rejects.toThrow('stopped waiting');
+      expect(onPageWaitChange).toHaveBeenCalledTimes(announced);
+
+      service.answerPage({ sessionId: 'ses_2', callId: 'call_1', summary: 'B' });
+      await other;
+    });
+
     it('announces when the page starts and stops waiting', async () => {
       const onPageWaitChange = vi.fn();
       const { service } = createService({ onPageWaitChange });

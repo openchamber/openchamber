@@ -1458,6 +1458,10 @@ globalMessageStreamHub.subscribeEvent((event) => {
     if (payload.type === 'session.idle' && payload.properties?.aborted === true) {
       agentToolRuntime?.abortSession?.(payload.properties.sessionID);
     }
+    // The turn ended, so nobody here waits on a page of this session any more.
+    if (payload.type === 'session.idle' || payload.type === 'session.error') {
+      openChamberControlService.releaseAnswerWaits(payload.properties?.sessionID);
+    }
     sessionLineage.observe(payload);
     turnDurationRecorder.processPayload(payload, directory || payload.properties?.directory || '');
     sessionAssistRuntime.processPayload(payload, directory || payload.properties?.directory || '');

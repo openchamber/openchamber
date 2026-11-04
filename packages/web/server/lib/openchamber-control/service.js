@@ -1190,5 +1190,9 @@ export const createOpenChamberControlService = (dependencies) => {
   // id and the directory is resolved here, where it is authoritative.
   // `answerPage` is the chat's side of a page that waits (render.page with
   // awaitAnswer), `answerSecret` the chat's side of a secret.request card.
-  return { execute, resolveSessionDirectory, answerPage: pageAnswers.answer, answerSecret: secretRequests.answer };
+  const releaseAnswerWaits = (sessionId) => {
+    pageAnswers.release(sessionId);
+    secretRequests.release(sessionId);
+  };
+  return { execute, resolveSessionDirectory, answerPage: pageAnswers.answer, answerSecret: secretRequests.answer, releaseAnswerWaits };
 };
