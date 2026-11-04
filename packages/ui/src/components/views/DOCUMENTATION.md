@@ -328,8 +328,9 @@ current state the view shows loading; a failed read keeps its error and retry.
 A file that is not there opens Changed instead, in the repository holding the
 file, read afresh, expanded. A repository the picker drops again ends the
 attempt on the repository left on screen. Picking Last turn by hand asks
-nothing and stays there, empty or not. The phone is different: there the chip
-opens nothing at all, so no empty view exists to fall back from.
+nothing and stays there, empty or not. The phone's Changes surface
+(`apps/MobileChangesSurface.tsx`) answers the same way and opens the file's own
+diff screen, since it has no expanded list to scroll.
 
 ### Why the click is a one-shot request and not derived from the tab
 

@@ -46,7 +46,7 @@ export const MobileWorkspaceDrawer: React.FC<{
   tab: MobileWorkspaceTab;
   onTabChange: (tab: MobileWorkspaceTab) => void;
   /** When set, the Changes tab opens directly into the per-file diff. */
-  pendingChangesDiff: { path: string; staged: boolean } | null;
+  pendingChangesDiff: { path: string; staged: boolean; scope?: 'turn' } | null;
   /** Notes tab: opens a plan fullscreen (layered above the drawer). */
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   variant?: 'drawer' | 'panel';

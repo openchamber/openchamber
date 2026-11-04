@@ -435,7 +435,7 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   const originalFetch = globalThis.fetch;
-  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [], isClean: true, diffStats: { staged: {}, working: {} } };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [{ path: 'src/working.png', index: ' ', working_dir: 'M' }], isClean: false, diffStats: { staged: {}, working: {} } };
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
     const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
     if (url.pathname === '/api/fs/home' || url.pathname === '/api/session-folders') return new Promise<Response>(() => {});
@@ -476,7 +476,12 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
   const servedGitHub = githubLikeDescriptor();
   useSourceControlProviderRegistry.setState({ ordered: [servedGitHub], byId: new Map([[servedGitHub.id, servedGitHub]]), status: 'ready', holdsList: true });
   const { MobileChangesPane } = await import('./MobileChangesSurface');
-  const apis = createWebAPIs();
+  const webApis = createWebAPIs();
+  // The chip's way to Changes reads status and the file through these, not through this test's fetch.
+  const apis = { ...webApis, git: { ...webApis.git,
+    getGitStatus: async () => status,
+    getGitFileDiff: async (_directory: string, { path }: { path: string }) => ({ path, original: '', modified: '', isBinary: true, submodule: null }),
+  } };
   useGitStore.getState().setActiveDirectory('/repo');
   const previous = useGitStore.getState().getDirectoryState('/repo');
   if (!previous) throw new Error('Missing repository state');
@@ -508,14 +513,15 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     if (!button) throw new Error(`Missing file ${path}`);
     await act(async () => { button.click(); });
   };
+  const renderPane = (initialDiff: { path: string; staged: boolean; scope?: 'turn' } | null) => act(async () => {
+    root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
+      <MobileChangesPane rootDirectory="/repo"
+        repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
+        visible initialDiff={initialDiff} />
+    </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
+  });
   try {
-    await act(async () => {
-      root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
-        <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
-          visible />
-      </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
-    });
+    await renderPane(null);
     await act(async () => { useSessionUIStore.setState({ currentSessionId: 'ses_turn' }); });
     // The selector offers Last turn and choosing it asks the client for the turn.
     await chooseMode('Last turn');
@@ -547,12 +553,26 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     expect(container.textContent).toContain('snapshot unavailable');
     expect(container.textContent).not.toContain('No last turn changes to display');
     turnDiffs.mockResolvedValue([
-      { file: 'src/retried.ts', status: 'modified', additions: 2, deletions: 0, patch: '' },
+      { file: 'src/retried.ts', status: 'modified', additions: 2, deletions: 0,
+        patch: 'diff --git a/src/retried.ts b/src/retried.ts\nindex 5555555..6666666 100644\nBinary files a/src/retried.ts and b/src/retried.ts differ\n' },
     ]);
     const retry = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry');
     if (!retry) throw new Error('Missing Retry');
     await act(async () => { retry.click(); });
     expect(container.querySelector('[title="src/retried.ts"]')).not.toBeNull();
+    // A chip's file opens from Last turn when the turn has it.
+    await renderPane({ path: '/repo/src/retried.ts', staged: false, scope: 'turn' });
+    expect(container.querySelector('h2')?.textContent).toBe('src/retried.ts');
+    expect(container.textContent).toContain('Last turn');
+    // Without it the same request lands on Changes, on that file.
+    await renderPane({ path: '/repo/src/working.png', staged: false, scope: 'turn' });
+    for (let tick = 0; tick < 20 && container.querySelector('h2')?.textContent !== 'src/working.png'; tick += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    }
+    expect(container.querySelector('h2')?.textContent).toBe('src/working.png');
+    expect(container.textContent).not.toContain('Last turn');
+    await click('[aria-label="Back"]');
+    expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');
   } finally {
     await act(async () => root.unmount());
     turnDiffs.mockRestore();

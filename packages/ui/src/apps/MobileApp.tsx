@@ -175,7 +175,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
   const [settingsInitialMobileStage, setSettingsInitialMobileStage] = React.useState<'nav' | 'page-content'>('nav');
   // When set, the Changes surface opens directly into the per-file diff for this path.
-  const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean } | null>(null);
+  const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean; scope?: 'turn' } | null>(null);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const updateAvailable = useUpdateStore((state) => state.available);
@@ -255,7 +255,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setOpenPlan({ id: event.planId, title: event.title, projectRef });
   }), []);
 
-  const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean } | null = null) => {
+  const openChangesSurface = React.useCallback((diff: { path: string; staged: boolean; scope?: 'turn' } | null = null) => {
     setPendingChangesDiff(diff);
     setWorkspaceTab('changes');
     setWorkspaceOpen(true);
@@ -319,8 +319,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   const mobileActions = React.useMemo<MobileAppActions>(
     () => ({
-      openChanges: ({ diffPath, staged } = {}) => {
-        openChangesSurface(diffPath ? { path: diffPath, staged: staged === true } : null);
+      openChanges: ({ diffPath, staged, scope } = {}) => {
+        openChangesSurface(diffPath ? { path: diffPath, staged: staged === true, scope } : null);
       },
       openFiles: () => openFilesSurface(),
       openSourceBoard: () => openSurface('board'),
