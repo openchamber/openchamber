@@ -349,8 +349,10 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         setSearch({ key: debouncedSearchKey, files, directories });
       }
     });
+    // A new query or a closed list stops that walk; nobody is left to read it.
+    const walk = new AbortController();
     void Promise.all([
-      searchFiles(currentDirectory, serverQuery, 80, { ...options, type: 'file' }).catch((): FileInfo[] => []),
+      searchFiles(currentDirectory, serverQuery, 80, { ...options, type: 'file', signal: walk.signal }).catch((): FileInfo[] => []),
       directorySearch,
     ]).then(([files, directories]) => {
       answered = true;
@@ -361,6 +363,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
 
     return () => {
       cancelled = true;
+      walk.abort();
     };
   }, [currentDirectory, debouncedQuery, debouncedSearchKey, searchFiles, showHidden, showGitignored]);
 

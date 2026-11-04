@@ -21,7 +21,7 @@ interface FileSearchStoreState {
     directory: string,
     query: string,
     limit?: number,
-    options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory' }
+    options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory'; signal?: AbortSignal }
   ) => Promise<ProjectFileSearchHit[]>;
   invalidateDirectory: (directory?: string | null) => void;
   resetForRuntimeSwitch: () => void;
@@ -48,6 +48,28 @@ const cacheKeyMatchesDirectory = (cacheKey: string, directory: string) => {
   } catch {
     return false;
   }
+};
+
+// A running search behind the toggles stops once nobody waits for it. A caller
+// without a signal never stops waiting.
+interface SupplementalWalk {
+  controller: AbortController;
+  waiters: number;
+  abandon: () => void;
+}
+
+const supplementalWalks = new WeakMap<Promise<ProjectFileSearchHit[]>, SupplementalWalk>();
+
+const waitForWalk = (walk: SupplementalWalk, signal: AbortSignal | undefined) => {
+  if (!signal) {
+    walk.waiters = Infinity;
+    return;
+  }
+  walk.waiters += 1;
+  signal.addEventListener('abort', () => {
+    walk.waiters -= 1;
+    if (walk.waiters === 0) walk.abandon();
+  }, { once: true });
 };
 
 export const useFileSearchStore = create<FileSearchStoreState>()(
@@ -77,6 +99,8 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
 
         const inflight = get().inFlight[key];
         if (inflight) {
+          const walk = supplementalWalks.get(inflight);
+          if (walk) waitForWalk(walk, options?.signal);
           return inflight;
         }
 
@@ -93,6 +117,7 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
               type,
             });
         let supplementalFailed = false;
+        const walkController = new AbortController();
         const supplementalSearch = runtimeFiles
           ? runtimeFiles.search({
               directory: normalizedDirectory,
@@ -100,6 +125,7 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
               maxResults: limit,
               includeHidden,
               respectGitignore,
+              signal: walkController.signal,
             }).then((results) =>
               results.map((result) => {
                 const normalizedPath = result.path.replace(/\\/g, '/');
@@ -116,7 +142,9 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
               })
             ).catch((error: unknown) => {
               supplementalFailed = true;
-              console.warn('Supplemental file search failed; keeping indexed results:', error);
+              if (!walkController.signal.aborted) {
+                console.warn('Supplemental file search failed; keeping indexed results:', error);
+              }
               return [];
             })
           : Promise.resolve([]);
@@ -156,17 +184,19 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
             });
             return files;
           })
-          .finally(() => {
-            set((state) => {
-              if (state.inFlight[key] !== searchPromise) {
-                return state;
-              }
+          .finally(dropInFlight);
 
-              const nextInFlight = { ...state.inFlight };
-              delete nextInFlight[key];
-              return { inFlight: nextInFlight };
-            });
+        function dropInFlight() {
+          set((state) => {
+            if (state.inFlight[key] !== searchPromise) {
+              return state;
+            }
+
+            const nextInFlight = { ...state.inFlight };
+            delete nextInFlight[key];
+            return { inFlight: nextInFlight };
           });
+        }
 
         set((state) => ({
           inFlight: {
@@ -174,6 +204,21 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
             [key]: searchPromise,
           },
         }));
+
+        if (runtimeFiles) {
+          const walk: SupplementalWalk = {
+            controller: walkController,
+            waiters: 0,
+            // Out of the in-flight list at once: the same query asked again
+            // starts its own walk instead of joining the stopped one.
+            abandon: () => {
+              walkController.abort();
+              dropInFlight();
+            },
+          };
+          supplementalWalks.set(searchPromise, walk);
+          waitForWalk(walk, options?.signal);
+        }
 
         return searchPromise;
       },

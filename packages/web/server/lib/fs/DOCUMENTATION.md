@@ -85,6 +85,19 @@ names.
 10,000-file ceiling. A 30-second deadline fails the search rather than returning
 an unmarked partial answer. Default icon discovery keeps its existing bounds.
 
+When the client closes the response (a new letter aborted the request) the walk
+stops at its next batch, starts no more Git reads, kills the running one and
+sends nothing. Typing a name otherwise leaves one whole-tree walk per letter
+running at once. VS Code stops its own walk through `api:fs:search:abort`.
+
+### Why a stopped walk kills Git without `taskkill /T`
+
+On Windows the spawned `git.exe` is Git for Windows' launcher, so the kill leaves
+the real `git` to finish that one read, about 250 ms in a 20,000-file checkout.
+`taskkill` would start one more process per stopped read, on a path that exists
+to start fewer. The Git service's untracked listing uses it because that listing
+can walk for a minute.
+
 ### Why workspace search reads ignored paths per repository
 
 Workspace search runs `git ls-files --others --ignored --exclude-standard

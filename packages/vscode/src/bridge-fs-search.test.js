@@ -43,6 +43,15 @@ describe('workspace file search supplements', () => {
     expect((await searchDirectory(root, 'ts', 60, true, true)).map((file) => file.name)).toEqual(['.visible.ts']);
   });
 
+  test('a stopped walk rejects and reads no more of the tree', async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-vscode-file-search-'));
+    await fs.mkdir(path.join(root, 'deep'));
+    await fs.writeFile(path.join(root, 'deep/needle.ts'), '');
+    const abort = new AbortController();
+    abort.abort();
+    await expect(searchDirectory(root, 'needle', 60, true, false, abort.signal)).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   test('includes ignored build files and honors the hidden flag with real filesystem entries', async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-vscode-file-search-'));
     execFileSync('git', ['init', '-q'], { cwd: root });

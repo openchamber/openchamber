@@ -44,6 +44,9 @@ const createGitCheckIgnoreTimeoutMs = () => {
 
 const GIT_CHECK_IGNORE_TIMEOUT_MS = createGitCheckIgnoreTimeoutMs();
 
+// Running walks by bridge request id: a webview that moved on stops its own.
+const searchAbortControllers = new Map<string, AbortController>();
+
 type FsDeps = {
   resolveUserPath: (value: string, baseDirectory: string) => string;
   listDirectoryEntries: (directoryPath: string) => Promise<DirectoryEntry[]>;
@@ -55,6 +58,7 @@ type FsDeps = {
     limit: number | undefined,
     includeHidden: boolean,
     respectGitignore: boolean,
+    signal?: AbortSignal,
   ) => Promise<Array<{ name: string; path: string; relativePath: string; extension: string | undefined }>>;
   resolveFileReadPath: (inputPath: string) => Promise<
     | { ok: true; resolvedPath: string }
@@ -176,8 +180,21 @@ export async function handleFsBridgeMessage(
         includeHidden?: boolean;
         respectGitignore?: boolean;
       };
-      const files = await deps.searchDirectory(directory, query, limit, Boolean(includeHidden), respectGitignore !== false);
-      return { id, type, success: true, data: { files } };
+      const abort = new AbortController();
+      searchAbortControllers.set(id, abort);
+      try {
+        const files = await deps.searchDirectory(directory, query, limit, Boolean(includeHidden), respectGitignore !== false, abort.signal);
+        return { id, type, success: true, data: { files } };
+      } finally {
+        searchAbortControllers.delete(id);
+      }
+    }
+
+    case 'api:fs:search:abort': {
+      // SAFETY: the payload comes from the webview's own searchFilesRequest; an unknown id stops nothing.
+      const { requestID = '' } = (payload || {}) as { requestID?: string };
+      searchAbortControllers.get(requestID)?.abort();
+      return { id, type, success: true };
     }
 
     case 'api:fs:mkdir': {

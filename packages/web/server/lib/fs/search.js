@@ -108,8 +108,8 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
     ? fsPromises.readdir(directory, { withFileTypes: true })
     : listDirectoryEntries(directory, fsPromises);
 
-  const readIgnoredPaths = async (directory, names) => {
-    if (!workspaceSearch && names.length === 0) return new Set();
+  const readIgnoredPaths = async (directory, names, signal) => {
+    if ((!workspaceSearch && names.length === 0) || signal?.aborted) return new Set();
     try {
       const result = await new Promise((resolve) => {
         const args = workspaceSearch
@@ -129,18 +129,21 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
           if (settled) return;
           settled = true;
           if (timeout) clearTimeout(timeout);
+          signal?.removeEventListener('abort', stop);
           resolve(value);
+        };
+        const stop = () => {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+          }
+          finish('');
         };
 
         if (gitCheckIgnoreTimeoutMs > 0) {
-          timeout = setTimeout(() => {
-            try {
-              child.kill('SIGKILL');
-            } catch {
-            }
-            finish('');
-          }, gitCheckIgnoreTimeoutMs);
+          timeout = setTimeout(stop, gitCheckIgnoreTimeoutMs);
         }
+        signal?.addEventListener('abort', stop, { once: true });
 
         child.stdout.setEncoding?.('utf8');
         child.stdout.on('data', (data) => { stdout += data.toString(); });
@@ -158,7 +161,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
   };
 
   const searchFilesystemFiles = async (rootPath, options) => {
-    const { limit, query, includeHidden, respectGitignore } = options;
+    const { limit, query, includeHidden, respectGitignore, signal } = options;
     const includeHiddenEntries = Boolean(includeHidden);
     const normalizedQuery = query.trim().toLowerCase();
     const matchAll = normalizedQuery.length === 0;
@@ -179,6 +182,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
       : !workspaceSearch && inspectedFiles >= FILE_SEARCH_MAX_VISITED_FILES);
 
     while (queue.length > 0 && !reachedSearchStop()) {
+      signal?.throwIfAborted();
       if (deadline && Date.now() > deadline) {
         throw new Error('File search exceeded its time limit');
       }
@@ -189,11 +193,11 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
         // A nested checkout has its own index and ignore rules.
         if (!workspaceSearch || dirents.some((entry) => entry.name === '.git')) gitRoot = dir;
         if (workspaceSearch && shouldRespectGitignore && !ignoredByRoot.has(gitRoot)) {
-          ignoredByRoot.set(gitRoot, readIgnoredPaths(gitRoot, dirents.map((entry) => entry.name).filter(Boolean)));
+          ignoredByRoot.set(gitRoot, readIgnoredPaths(gitRoot, dirents.map((entry) => entry.name).filter(Boolean), signal));
         }
         const ignoredPaths = !shouldRespectGitignore ? new Set() : workspaceSearch
           ? await ignoredByRoot.get(gitRoot)
-          : await readIgnoredPaths(dir, dirents.map((entry) => entry.name).filter(Boolean));
+          : await readIgnoredPaths(dir, dirents.map((entry) => entry.name).filter(Boolean), signal);
         return { dir, gitRoot, dirents, ignoredPaths };
       }));
 
@@ -265,6 +269,8 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
       }
     }
 
+    // A stopped Git read filtered nothing, so this answer must not reach anyone.
+    signal?.throwIfAborted();
     if (deadline && Date.now() > deadline) {
       throw new Error('File search exceeded its time limit');
     }

@@ -157,6 +157,10 @@ the project and runs Git in every checkout it meets, which can take seconds.
 An indexed-search failure rejects. A supplemental failure logs a warning and
 returns the indexed hits without caching the partial answer, so the next search
 can retry the supplement.
+A caller may pass a `signal`. The walk stops once every caller waiting for it has
+aborted and none came without a signal; the composer's `@` list aborts on each new
+query. A stopped walk leaves the in-flight list at once, so the same query asked
+again starts over. Its partial answer is not cached and logs no warning.
 
 The Stats page keeps its reports in a feature-local store, `components/views/usage/usageStatsStore.ts`: keyed by runtime, range and project, in memory only, never refetched on its own once a key has a report, cleared on runtime switch. A failed refresh keeps the cached report. The report is requested with `tools: "none"`; tool calls, which make OpenCode scan every tool call in the range, load on request under the same key, over the loaded report's own window. Once the user asks for them, every report shown later in the app session fetches its tool calls after it lands. A failed tool read shows an error with retry and never reads as zero calls.
 
