@@ -39,6 +39,8 @@ import type { GitIdentityProfile } from '@/lib/api/types';
 import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
 import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
+import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
+import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { hasConfigChangedGrant } from '@/lib/source-control/types';
@@ -399,6 +401,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
     [comparisonSource, prComparison.provider, selectedPrHead],
   );
+  const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, currentDirectory, visible && mode === 'pr');
   const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision, prComparison.readContext, prComparison.provider);
   const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
   const comparisonFiles = React.useMemo(() => comparison.files ? [...comparison.files].sort((a, b) => a.path.localeCompare(b.path)) : null, [comparison.files]);
@@ -579,6 +582,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     if (!currentDirectory) return;
     const normalized = branch.replace(/^remotes\//, '');
     try {
+      if (!git.checkoutBranch) throw new Error('Branch checkout is unavailable on this runtime');
       const result = await git.checkoutBranch(currentDirectory, normalized);
       toast.success(t('gitView.toast.checkedOut', { name: result.branch || normalized }));
       await refreshStatusAndBranches();
@@ -602,6 +606,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     if (!currentDirectory) return;
     try {
       await git.createBranch(currentDirectory, branch, currentBranch ?? 'HEAD');
+      if (!git.checkoutBranch) throw new Error('Branch checkout is unavailable on this runtime');
       await git.checkoutBranch(currentDirectory, branch);
       await refreshStatusAndBranches();
     } catch (error) {
@@ -624,8 +629,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   }, [currentDirectory, git]);
 
   // After a commit or a transfer the control waits for the status only; the
-  // branch list (which asks every remote over the network) and the remotes
-  // follow in the background instead of holding the button for seconds.
+  // branch list and the remotes follow in the background instead of holding
+  // the button.
   const refreshAfterGitAction = React.useCallback(async () => {
     if (!currentDirectory) return;
     void Promise.allSettled([fetchBranches(currentDirectory, git), refreshRemotes()]);
@@ -674,6 +679,10 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     let cancelled = false;
     const runtimeKey = getRuntimeKey();
     setDiffLoadError(null);
+    if (!git.getGitFileDiff) {
+      setDiffLoadError('Diff is unavailable on this runtime');
+      return;
+    }
     void git.getGitFileDiff(currentDirectory, { path: route.path, staged: route.staged || undefined })
       .then((response) => {
         if (cancelled) return;
@@ -888,6 +897,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     let recovery: ReturnType<typeof operationRecovery.start> = null;
     let commitOutcome: 'pending' | 'local' | 'published' = 'pending';
     try {
+      if (!git.createGitCommit) throw new Error('Git commit is unavailable on this runtime');
       const commit = await git.createGitCommit(currentDirectory, commitMessage.trim(), { files: filesToCommit });
       commitOutcome = 'local';
       const deletion = commitCelebration.committed(commit.summary, options);
@@ -944,6 +954,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     if (!currentDirectory) return;
     try {
       if (mergeInProgress) {
+        if (!git.continueMerge) throw new Error('Git continue merge is unavailable on this runtime');
         const result = await git.continueMerge(currentDirectory);
         if (result.conflict) {
           openConflictDialog(result.conflictFiles ?? [], 'merge');
@@ -952,6 +963,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           toast.success(t('gitView.toast.mergeCompleted'));
         }
       } else {
+        if (!git.continueRebase) throw new Error('Git continue rebase is unavailable on this runtime');
         const result = await git.continueRebase(currentDirectory);
         if (result.conflict) {
           openConflictDialog(result.conflictFiles ?? [], 'rebase');
@@ -970,9 +982,11 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     if (!currentDirectory) return;
     try {
       if (operation === 'merge') {
+        if (!git.abortMerge) throw new Error('Git abort merge is unavailable on this runtime');
         await git.abortMerge(currentDirectory);
         toast.success(t('gitView.toast.mergeAborted'));
       } else {
+        if (!git.abortRebase) throw new Error('Git abort rebase is unavailable on this runtime');
         await git.abortRebase(currentDirectory);
         toast.success(t('gitView.toast.rebaseAborted'));
       }
@@ -1137,6 +1151,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     : mode === 'commit' ? selectedCommitHash?.slice(0, 8) : mode === 'pr' && selectedPr ? `#${selectedPr.number}` : null;
   if (route.type === 'walkthrough' && walkthroughTarget && currentDirectory) {
     return (
+      <ChangeRequestReviewContext.Provider value={changeRequestReview}>
       <MobileWalkthroughScreen
         directory={currentDirectory}
         target={walkthroughTarget}
@@ -1145,10 +1160,12 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         visible={visible}
         onBack={() => setRoute(LIST_ROUTE)}
       />
+      </ChangeRequestReviewContext.Provider>
     );
   }
   if (activeComparisonPath && activeComparisonDiff) {
     return (
+      <ChangeRequestReviewContext.Provider value={changeRequestReview}>
       <MobileDiffDetail
         path={activeComparisonPath}
         subtitle={[modeLabel, sourceLabel].filter(Boolean).join(' · ')}
@@ -1167,6 +1184,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         pendingContextExpansion={pendingContextExpansion}
         contextLoading={pendingContextExpansion !== null && !activeFullComparisonDiff}
       />
+      </ChangeRequestReviewContext.Provider>
     );
   }
 
@@ -1278,6 +1296,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           <PullRequestComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])} comparison={prComparison} />
           {selectedPr && <Button variant="ghost" size="sm" disabled={comparison.loading} aria-label={t('session.githubIssuePicker.actions.refresh')}
             onClick={() => void comparison.refresh()}><Icon name="refresh" className="size-4" /></Button>}
+          {changeRequestReview && reviewProvider ? <ReviewSubmitButton review={changeRequestReview} provider={reviewProvider} className="h-8" /> : null}
         </>}
         {walkthroughTarget && (
           <Button

@@ -16,7 +16,7 @@ let dom: Window;
 let root: Root;
 let host: HTMLDivElement;
 let restore: Array<() => void>;
-let searches: Array<{ query: string; type: string; resolve: (hits: ProjectFileSearchHit[]) => void }>;
+let searches: Array<{ query: string; type: string; toggled: boolean; resolve: (hits: ProjectFileSearchHit[]) => void }>;
 let picked: string[];
 const globals = new Map<string, PropertyDescriptor | undefined>();
 const directory = '/mention-test';
@@ -74,7 +74,7 @@ beforeEach(async () => {
   useFileSearchStore.setState({
     invalidateDirectory: () => undefined,
     searchFiles: (_directory, query, _limit, options) => new Promise<ProjectFileSearchHit[]>((resolve) => {
-      searches.push({ query, type: options?.type ?? 'file', resolve });
+      searches.push({ query, type: options?.type ?? 'file', toggled: options?.includeHidden !== undefined, resolve });
     }),
   });
   host = document.createElement('div');
@@ -125,8 +125,22 @@ const hit = (relativePath: string): ProjectFileSearchHit => ({
 /** Answers the file and folder searches sent for `query`. */
 const answer = (query: string, files: string[]) => act(async () => {
   const sent = searches.filter((search) => search.query === query);
-  expect(sent.map((search) => search.type).sort()).toEqual(['directory', 'file']);
+  expect(sent.map((search) => search.type).sort()).toEqual(['directory', 'file', 'file']);
   for (const search of sent) search.resolve(search.type === 'file' ? files.map(hit) : []);
+});
+
+/** Answers only OpenCode's index for `query`; the toggles' file search stays open. */
+const answerIndexed = (query: string, files: string[]) => act(async () => {
+  for (const search of searches) {
+    if (search.query !== query) continue;
+    if (search.type === 'directory') search.resolve([]);
+    else if (!search.toggled) search.resolve(files.map(hit));
+  }
+});
+
+/** Answers the toggles' file search for `query`. */
+const answerToggled = (query: string, files: string[]) => act(async () => {
+  searches.find((search) => search.query === query && search.type === 'file' && search.toggled)?.resolve(files.map(hit));
 });
 
 const press = (key: string) => act(async () => handle.current?.handleKeyDown(key));
@@ -181,6 +195,70 @@ test('rows of the last answer stay while the next query searches, then give way 
   await answer('appz', []);
   expect(rows()).toEqual([]);
   expect(empty()).toBe(true);
+});
+
+test('files from the index show while the search behind the toggles still runs, and its rows join later', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answerIndexed('ap', ['src/app.ts']);
+  expect(rows()).toEqual(['src/app.ts']);
+  expect(busy()).toBe(false);
+
+  await answerToggled('ap', ['src/app.ts', '.config/app.json']);
+  expect(rows()).toEqual(['src/app.ts', '.config/app.json']);
+});
+
+test('an empty index answer keeps searching until the search behind the toggles answers', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answerIndexed('ap', []);
+  expect(spinner()).not.toBeNull();
+  expect(empty()).toBe(false);
+
+  await answerToggled('ap', ['.config/app.json']);
+  expect(rows()).toEqual(['.config/app.json']);
+});
+
+test('rows that join later keep the selection on the row the keyboard moved to', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answerIndexed('ap', ['src/app.ts', 'src/map.ts']);
+  await press('ArrowDown');
+  expect(selectedRow()).toBe('src/map.ts');
+
+  // The joining row ranks above the selected one, which moves down with it.
+  await answerToggled('ap', ['src/app.ts', 'src/map.ts', 'ap.json']);
+  expect(rows()).toEqual(['ap.json', 'src/app.ts', 'src/map.ts']);
+  expect(selectedRow()).toBe('src/map.ts');
+  await press('Enter');
+  expect(picked).toEqual(['src/map.ts']);
+});
+
+test('rows that join later keep the selection on the row the mouse is on', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answerIndexed('ap', ['src/app.ts', 'src/map.ts']);
+  await act(async () => {
+    host.querySelectorAll('.cursor-pointer')[1]?.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+  });
+  expect(selectedRow()).toBe('src/map.ts');
+
+  await answerToggled('ap', ['src/app.ts', 'src/map.ts', 'ap.json']);
+  expect(selectedRow()).toBe('src/map.ts');
+});
+
+test('an arrow press before the first answer does not keep later rows out', async () => {
+  await type('ap');
+  await settleDebounce();
+  await answer('ap', ['src/ap.ts']);
+  await type('app');
+  await press('ArrowDown');
+  await settleDebounce();
+
+  await answerIndexed('app', ['src/app.ts']);
+  await answerToggled('app', ['src/app.ts', '.config/app.json']);
+  expect(rows()).toEqual(['src/app.ts', '.config/app.json']);
+  expect(selectedRow()).toBe('src/app.ts');
 });
 
 test('an answer to an older query never shows as the newer one\'s', async () => {

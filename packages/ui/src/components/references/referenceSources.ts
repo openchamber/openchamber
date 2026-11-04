@@ -300,7 +300,16 @@ const readContextCacheKey = (context: SourceControlReadContext): unknown[] => [
     context.repositoryId,
     context.primaryRemote,
     context.bindingRevision,
+    context.linked === true,
 ];
+
+/** The context a read of `reference` goes through: a linked item's reads say so. */
+const useReferenceReadContext = (context: SourceControlReadContext | 'missing' | null, linked: boolean): SourceControlReadContext | null => (
+    React.useMemo(() => {
+        if (!context || context === 'missing') return null;
+        return linked ? { ...context, linked: true } : context;
+    }, [context, linked])
+);
 
 export function useRepositoryReferenceList(options: {
     enabled: boolean;
@@ -308,12 +317,14 @@ export function useRepositoryReferenceList(options: {
     kind: RepositoryReferenceKind;
     filter: RepositoryReferenceFilter;
     query: string;
+    /** The query is a link outside the repository network: finds that one item wherever it is, and only reads it. */
+    linked?: boolean;
 }) {
     const { sourceControl } = useRuntimeAPIs();
-    const { enabled, directory, kind, filter, query } = options;
+    const { enabled, directory, kind, filter, query, linked = false } = options;
     const { state, people } = filter;
     const context = useRepositoryReadContext(enabled ? directory : null);
-    const readable = context && context !== 'missing' ? context : null;
+    const readable = useReferenceReadContext(context, linked);
     const descriptor = useSourceControlProvider(readable?.provider);
     const urls = useRepositoryUrlMatcher();
     const text = query.trim();
@@ -323,14 +334,17 @@ export function useRepositoryReferenceList(options: {
         : null;
     const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<RepositoryReference>> => {
         if (!readable) return { kind: 'unavailable', reason: 'no-repo' };
+        const named = (page: ListPage<RepositoryReference>): ListPage<RepositoryReference> => (
+            linked && page.kind === 'page' ? { ...page, items: page.items.map((item) => ({ ...item, linked: true })) } : page
+        );
         if (!descriptor.features.referenceSearch) {
-            return fetchListBackedReferencePage(sourceControl, readable, { descriptor, urls }, kind, { state, people }, text, cursor);
+            return named(await fetchListBackedReferencePage(sourceControl, readable, { descriptor, urls }, kind, { state, people }, text, cursor));
         }
         const result = await sourceControl.references(readable, { kind, state, people, query: text, cursor });
         if (!result.connected) return { kind: 'unavailable', reason: 'disconnected' };
         if (!result.repo) return { kind: 'unavailable', reason: 'no-repo' };
-        return { kind: 'page', items: result.items, cursor: result.cursor, hasMore: result.hasMore };
-    }, [descriptor, kind, people, readable, sourceControl, state, text, urls]);
+        return named({ kind: 'page', items: result.items, cursor: result.cursor, hasMore: result.hasMore });
+    }, [descriptor, kind, linked, people, readable, sourceControl, state, text, urls]);
     const list = useCachedList(repositoryLists, key, fetchPage);
     const contextOf = React.useCallback(() => readable, [readable]);
     const live = useLiveReferences(list.items, contextOf, list.pageReads);
@@ -435,7 +449,7 @@ export function useTrackerReferenceList(options: {
 export function useRepositoryReferenceDetail(directory: string | null, reference: RepositoryReference | null, settled: boolean, revision: string | null = null) {
     const { sourceControl } = useRuntimeAPIs();
     const context = useRepositoryReadContext(reference ? directory : null);
-    const readable = context && context !== 'missing' ? context : null;
+    const readable = useReferenceReadContext(context, reference?.linked === true);
     const features = useSourceControlProvider(readable?.provider).features;
     const detailed = features.referenceDetail;
     const owner = reference?.sourceRepo.owner ?? '';
@@ -566,7 +580,7 @@ const newerStatus = (asked: AskedPullStatus, live: LivePullStatus | null): Cache
  */
 export function useRepositoryPullStatuses(directory: string | null, references: readonly RepositoryReference[]) {
     const context = useRepositoryReadContext(directory);
-    const readable = context && context !== 'missing' ? context : null;
+    const readable = useReferenceReadContext(context, references.some((reference) => reference.linked));
     const listed = useSourceControlProvider(readable?.provider).features.listStatuses;
     const asked = listed ? readable : null;
     const groups = React.useMemo(

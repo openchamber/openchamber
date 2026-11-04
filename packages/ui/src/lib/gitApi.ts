@@ -9,6 +9,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { GitNetworkOperationRequestError } from './api/types';
 import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
 import type { SourceControlProviderDescriptor } from '@/lib/source-control/providers/descriptor';
 
@@ -21,6 +22,11 @@ export type {
 const getRuntimeGit = () => {
   return getRegisteredRuntimeAPIs()?.git ?? null;
 };
+
+// A registered runtime that omits an operation does not have it. Falling back
+// to the HTTP adapter would call a server that runtime does not run.
+const unsupportedByRuntime = (operation: string): Promise<never> =>
+  Promise.reject(new GitNetworkOperationRequestError('RUNTIME_UNSUPPORTED', `${operation} is not supported in this runtime`, 501));
 
 // Runtime git adapters (the VS Code bridge today) do not go through the HTTP
 // adapter's cache, so the invalidation signal `useGitStore` relies on has to be
@@ -105,7 +111,7 @@ export async function getGitRangeDiff(
   options: import('./api/types').GetGitRangeDiffOptions
 ): Promise<import('./api/types').GitDiffResponse> {
   const runtime = getRuntimeGit();
-  if (runtime?.getGitRangeDiff) return runtime.getGitRangeDiff(directory, options);
+  if (runtime) return runtime.getGitRangeDiff ? runtime.getGitRangeDiff(directory, options) : unsupportedByRuntime('getGitRangeDiff');
   return gitHttp.getGitRangeDiff(directory, options);
 }
 
@@ -114,7 +120,7 @@ export async function getGitRangeFiles(
   options: import('./api/types').GetGitRangeFilesOptions
 ): Promise<import('./api/types').GitRangeFileEntry[]> {
   const runtime = getRuntimeGit();
-  if (runtime?.getGitRangeFiles) return runtime.getGitRangeFiles(directory, options);
+  if (runtime) return runtime.getGitRangeFiles ? runtime.getGitRangeFiles(directory, options) : unsupportedByRuntime('getGitRangeFiles');
   return gitHttp.getGitRangeFiles(directory, options);
 }
 
@@ -123,7 +129,7 @@ export async function getBranchBase(
   branch: string
 ): Promise<import('./api/types').GitBranchBaseResponse> {
   const runtime = getRuntimeGit();
-  if (runtime?.getBranchBase) return runtime.getBranchBase(directory, branch);
+  if (runtime) return runtime.getBranchBase ? runtime.getBranchBase(directory, branch) : unsupportedByRuntime('getBranchBase');
   return gitHttp.getBranchBase(directory, branch);
 }
 
@@ -902,7 +908,7 @@ export async function getGitLog(
   options: import('./api/types').GitLogOptions = {}
 ): Promise<import('./api/types').GitLogResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getGitLog(directory, options);
+  if (runtime) return runtime.getGitLog ? runtime.getGitLog(directory, options) : unsupportedByRuntime('getGitLog');
   return gitHttp.getGitLog(directory, options);
 }
 
@@ -911,7 +917,7 @@ export async function getCommitFiles(
   hash: string
 ): Promise<import('./api/types').GitCommitFilesResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getCommitFiles(directory, hash);
+  if (runtime) return runtime.getCommitFiles ? runtime.getCommitFiles(directory, hash) : unsupportedByRuntime('getCommitFiles');
   return gitHttp.getCommitFiles(directory, hash);
 }
 
@@ -931,7 +937,7 @@ export async function getCommitFileDiff(
   isBinary: boolean
 ): Promise<import('./api/types').CommitFileDiffResponse> {
   const runtime = getRuntimeGit();
-  if (runtime?.getCommitFileDiff) return runtime.getCommitFileDiff(directory, hash, filePath, isBinary);
+  if (runtime) return runtime.getCommitFileDiff ? runtime.getCommitFileDiff(directory, hash, filePath, isBinary) : unsupportedByRuntime('getCommitFileDiff');
   return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary);
 }
 
@@ -961,7 +967,7 @@ export async function deleteGitIdentity(id: string): Promise<void> {
 
 export async function getGlobalGitIdentity(): Promise<import('./api/types').GitIdentitySummary | null> {
   const runtime = getRuntimeGit();
-  if (runtime?.getGlobalGitIdentity) return runtime.getGlobalGitIdentity();
+  if (runtime) return runtime.getGlobalGitIdentity ? runtime.getGlobalGitIdentity() : unsupportedByRuntime('getGlobalGitIdentity');
   return gitHttp.getGlobalGitIdentity();
 }
 
@@ -970,7 +976,7 @@ export async function rebase(
   options: { onto: string }
 ): Promise<import('./api/types').GitRebaseResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.rebase(directory, options));
+  if (runtime) return runtime.rebase ? runtimeStatusMutation(directory, runtime.rebase(directory, options)) : unsupportedByRuntime('rebase');
   return gitHttp.rebase(directory, options);
 }
 
@@ -979,7 +985,7 @@ export async function merge(
   options: { branch: string }
 ): Promise<import('./api/types').GitMergeResult> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.merge(directory, options));
+  if (runtime) return runtime.merge ? runtimeStatusMutation(directory, runtime.merge(directory, options)) : unsupportedByRuntime('merge');
   return gitHttp.merge(directory, options);
 }
 
@@ -988,7 +994,7 @@ export async function checkoutCommit(
   hash: string
 ): Promise<import('./api/types').CheckoutCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.checkoutCommit(directory, hash));
+  if (runtime) return runtime.checkoutCommit ? runtimeStatusMutation(directory, runtime.checkoutCommit(directory, hash)) : unsupportedByRuntime('checkoutCommit');
   return gitHttp.checkoutCommit(directory, hash);
 }
 
@@ -997,7 +1003,7 @@ export async function cherryPick(
   hash: string
 ): Promise<import('./api/types').CherryPickResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.cherryPick(directory, hash));
+  if (runtime) return runtime.cherryPick ? runtimeStatusMutation(directory, runtime.cherryPick(directory, hash)) : unsupportedByRuntime('cherryPick');
   return gitHttp.cherryPick(directory, hash);
 }
 
@@ -1006,7 +1012,7 @@ export async function revertCommit(
   hash: string
 ): Promise<import('./api/types').RevertCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.revertCommit(directory, hash));
+  if (runtime) return runtime.revertCommit ? runtimeStatusMutation(directory, runtime.revertCommit(directory, hash)) : unsupportedByRuntime('revertCommit');
   return gitHttp.revertCommit(directory, hash);
 }
 
@@ -1017,7 +1023,7 @@ export async function resetToCommit(
   force?: boolean
 ): Promise<import('./api/types').ResetToCommitResponse> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtimeStatusMutation(directory, runtime.resetToCommit(directory, hash, mode, force));
+  if (runtime) return runtime.resetToCommit ? runtimeStatusMutation(directory, runtime.resetToCommit(directory, hash, mode, force)) : unsupportedByRuntime('resetToCommit');
   return gitHttp.resetToCommit(directory, hash, mode, force);
 }
 
@@ -1038,6 +1044,6 @@ export async function validateWorktreeDirectory(directory: string, worktreeRoot:
 
 export async function getConflictDetails(directory: string): Promise<import('./api/types').MergeConflictDetails> {
   const runtime = getRuntimeGit();
-  if (runtime?.getConflictDetails) return runtime.getConflictDetails(directory);
+  if (runtime) return runtime.getConflictDetails ? runtime.getConflictDetails(directory) : unsupportedByRuntime('getConflictDetails');
   return gitHttp.getConflictDetails(directory);
 }

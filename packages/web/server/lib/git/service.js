@@ -2497,7 +2497,7 @@ const resolveExistingWorktreeSource = async (primaryWorktree, input = {}, intent
   };
 };
 
-// The branch list offers remote branches that were never fetched (it asks
+// A live branch list offers remote branches that were never fetched (it asks
 // each remote with `ls-remote`), so a worktree from one of them fetches that
 // single branch first. A failed fetch reports the branch as missing.
 const ensureLocalRemoteBranchRef = async (primaryWorktree, remoteName, branchName) => {
@@ -4581,21 +4581,21 @@ const withoutDetachedHeadEntry = (summary) => {
 };
 
 /**
- * `remote: 'local'` answers from local refs alone, as `git branch -a` does: the
- * callers that only need local facts (publishing and worktree creation read the
- * checked-out branch and its upstream, the worktree delete dialog reads
- * `defaultBranches`) must not wait on every remote's network round trip.
+ * Answers from local refs alone, as `git branch -a` does. `remote: 'live'` also
+ * asks every remote: over SSH that is a connection the person's key or agent
+ * may have to approve, so it runs only when the person asked for the list.
  */
-export async function getBranches(directory, { remote = 'live' } = {}) {
+export async function getBranches(directory, { remote = 'local' } = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
     const result = await git.branch();
     const { all: allBranches, branches } = withoutDetachedHeadEntry(result);
     const remoteBranches = allBranches.filter(branch => branch.startsWith('remotes/'));
-    // Read-only ref discovery, not a transfer: it never writes refs and never
-    // takes the planned-operation path, so a branch pushed from elsewhere is
-    // listed and a ref deleted on the remote is pruned without a fetch first.
+    // A live listing is read-only ref discovery, not a transfer: it never writes
+    // refs and never takes the planned-operation path, so a branch pushed from
+    // elsewhere is listed and a ref deleted on the remote is pruned without a
+    // fetch first.
     const activeRemoteBranches = remote === 'local'
       ? remoteBranches
       : await filterActiveRemoteBranches(git, directory, remoteBranches);
@@ -4671,12 +4671,11 @@ async function getRemoteDefaultBranches(git) {
   return defaults;
 }
 
-// What each remote reported for its heads, per repository and remote. A
-// repository with many remotes paid one network round trip per remote on every
-// branch listing, and the Git panel lists branches several times per action.
-// An answer is reused while it is fresh and the local remote-tracking refs of
-// that remote are unchanged: a push or fetch from here changes them, so it
-// reads again. Concurrent listings share one round trip.
+// What each remote reported for its heads, per repository and remote. A live
+// listing pays one network round trip per remote. An answer is reused while it
+// is fresh and the local remote-tracking refs of that remote are unchanged: a
+// push or fetch from here changes them, so it reads again. Concurrent listings
+// share one round trip.
 const REMOTE_HEADS_TTL_MS = 30_000;
 const remoteHeadsCache = new Map();
 

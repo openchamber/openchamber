@@ -4516,6 +4516,41 @@ export function buildSessionMessageRecordsSnapshot(
   }
 }
 
+export function readSessionMessageRecordsSnapshot(
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+  current: SessionMessageRecordsSnapshot,
+  suspendPartUpdates: boolean,
+  suspendedPartUpdatesMessageID?: string,
+): SessionMessageRecordsSnapshot {
+  const state = store.getState()
+  const sameSession = current.sessionID === sessionID
+  // A suspension that changes within a session continues from what the chat
+  // shows now. A snapshot cached under the other suspension can hold older
+  // parts of the message it suspended, and its parts check skips that message.
+  const suspensionChanged = sameSession && (
+    current.suspendPartUpdates !== suspendPartUpdates
+    || current.suspendedPartUpdatesMessageID !== suspendedPartUpdatesMessageID
+  )
+  const reusableSnapshot = suspensionChanged
+    ? undefined
+    : getReusableSessionMessageRecordsSnapshot(store, state, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
+  if (reusableSnapshot) return reusableSnapshot
+
+  const previousSnapshot = sameSession
+    ? current
+    : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
+  const nextSnapshot = buildSessionMessageRecordsSnapshot(
+    state,
+    sessionID,
+    previousSnapshot,
+    suspendPartUpdates,
+    suspendedPartUpdatesMessageID,
+  )
+  rememberSessionMessageRecordsSnapshot(store, nextSnapshot)
+  return nextSnapshot
+}
+
 export function useSessionRenderable(sessionID: string, directory?: string): boolean {
   const store = useDirectoryStore(directory)
   const renderableRef = useRef(false)
@@ -4637,35 +4672,14 @@ export function useSessionMessageRecords(
       return snapshotRef.current.sessionID === sessionID ? snapshotRef.current.list : EMPTY_SESSION_MESSAGE_RECORDS
     }
 
-    const state = store.getState()
-    const suspendPartUpdates = Boolean(options?.suspendPartUpdates)
-    const suspendedPartUpdatesMessageID = options?.suspendPartUpdatesForMessageId ?? undefined
-    const reusableSnapshot = getReusableSessionMessageRecordsSnapshot(
+    snapshotRef.current = readSessionMessageRecordsSnapshot(
       store,
-      state,
       sessionID,
-      suspendPartUpdates,
-      suspendedPartUpdatesMessageID,
+      snapshotRef.current,
+      Boolean(options?.suspendPartUpdates),
+      options?.suspendPartUpdatesForMessageId ?? undefined,
     )
-    if (reusableSnapshot) {
-      snapshotRef.current = reusableSnapshot
-      return reusableSnapshot.list
-    }
-
-    const previousSnapshot = snapshotRef.current.sessionID === sessionID
-      ? snapshotRef.current
-      : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
-
-    const nextSnapshot = buildSessionMessageRecordsSnapshot(
-      state,
-      sessionID,
-      previousSnapshot,
-      suspendPartUpdates,
-      suspendedPartUpdatesMessageID,
-    )
-    snapshotRef.current = nextSnapshot
-    rememberSessionMessageRecordsSnapshot(store, nextSnapshot)
-    return nextSnapshot.list
+    return snapshotRef.current.list
   }, [options?.enabled, options?.suspendPartUpdates, options?.suspendPartUpdatesForMessageId, sessionID, store])
 
   const subscribe = useCallback((notify: () => void) => {

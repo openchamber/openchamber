@@ -347,6 +347,12 @@ const ANNOTATION_BRIDGE = `(function(C){window.addEventListener("message",functi
 // page's width without resizing the root, so the tooltip check below also
 // sizes the page again when the bar's height changed.
 //
+// A height less than 1 px off the frame's is the frame's own. At a fractional
+// display scale (175%) the browser snaps the frame to device pixels, so
+// content sized to the frame (`min-height:100vh`) measures a fraction above
+// it (387.43 in a 387 frame), and rounding that up grew the frame by 1 px on
+// every frame, with the chat under the page moving along.
+//
 // A page built as an app screen scrolls itself: the body, or a box spanning
 // the whole frame from its top to its bottom (`height:100vh` or `100%` with
 // `overflow:auto`), holds the content and the document never outgrows the
@@ -354,7 +360,10 @@ const ANNOTATION_BRIDGE = `(function(C){window.addEventListener("message",functi
 // inside a 48 px strip. Such a box adds what it hides below its own edge.
 // Each box is grown that way once per height: a box of a fixed height that
 // only happened to span the frame does not follow, and growing it again would
-// swing the frame between two heights.
+// swing the frame between two heights. Until the page reports anything past
+// the grown height, though, the box adds what it added: the page is measured
+// again before the host resizes the frame (on load, say), and skipping the
+// box there shrank the frame back to its minimum for good.
 //
 // A page that fits its frame cannot scroll at all. A document that can scroll
 // keeps a touch that starts on it: on a phone, a swipe over a page that fit
@@ -415,12 +424,12 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(POINTER_MESSAGE)})return;if(d.over===true)document.documentElement.setAttribute("data-oc-pointer","");else document.documentElement.removeAttribute("data-oc-pointer");});`
     + `document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null,u;if(!a)return;try{u=new URL(a.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol))return;e.preventDefault();window.parent.postMessage({type:${JSON.stringify(OPEN_LINK_MESSAGE)},url:u.href},"*");},true);`
     + ANNOTATION_BRIDGE
-    + `var h,G=0,HF=new WeakMap(),z=function(){var r=document.documentElement,d=document.body,v=r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height,i,b,k;`
+    + `var h,G=0,HN=0,HF=new WeakMap(),z=function(){var r=document.documentElement,d=document.body,v=r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height,i,b,k,g;`
     + `if(d&&!/^(?:hidden|clip|scroll|auto)$/.test(getComputedStyle(d).overflowY)){b=d.getBoundingClientRect();b=b.top+window.scrollY+(d.clientTop+d.scrollHeight)*(d.offsetHeight?b.height/d.offsetHeight:1);if(b>v)v=b;}if(N){N=0;W();}`
     + `for(i=0;i<P.length;i++){b=P[i].getBoundingClientRect();if(getComputedStyle(P[i]).position==="absolute"&&(b.width||b.height)&&b.bottom+window.scrollY>v)v=b.bottom+window.scrollY;}`
     + `for(i=-1;i<SC.length;i++){b=i<0?d:SC[i];if(!b||b.scrollHeight<=b.clientHeight+1||i<0&&!/^(?:scroll|auto)$/.test(getComputedStyle(b).overflowY))continue;k=b.getBoundingClientRect();`
-    + `if(k.top>1||Math.abs(k.bottom-window.innerHeight)>1||Math.abs((HF.get(b)||-9)-k.height)<.5)continue;HF.set(b,k.height);k=window.innerHeight+b.scrollHeight-b.clientHeight;if(k>v)v=k;}`
-    + `i=window.innerHeight-r.clientHeight;v=Math.ceil(v);if(i&&!(i===G&&v===window.innerHeight))v+=i;G=i;r.style.overflowY=v>window.innerHeight+1?"auto":"hidden";if(v===h)return;h=v;window.parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:v},"*");};window.addEventListener("resize",z);`
+    + `if(k.top>1||Math.abs(k.bottom-window.innerHeight)>1)continue;g=HF.get(b);if(g&&Math.abs(g[0]-k.height)<.5){if(HN>g[2]+1)continue;k=g[1];}else{g=k.height;k=window.innerHeight+b.scrollHeight-b.clientHeight;HF.set(b,[g,k,HN]);}if(k>v)v=k;}`
+    + `i=window.innerHeight-r.clientHeight;v=Math.abs(v-window.innerHeight)<1?window.innerHeight:Math.ceil(v);if(i&&!(i===G&&v===window.innerHeight))v+=i;G=i;r.style.overflowY=v>window.innerHeight+1?"auto":"hidden";if(v===h)return;h=v;HN++;window.parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:v},"*");};window.addEventListener("resize",z);`
     + `if(window.ResizeObserver){var o=new ResizeObserver(z);o.observe(document.documentElement);document.addEventListener("DOMContentLoaded",function(){if(document.body)o.observe(document.body);});}`
     + `document.addEventListener("DOMContentLoaded",z);window.addEventListener("load",z);`
     + `window.addEventListener("keydown",function(e){var t=e.composedPath()[0],f;if(!e.isTrusted||e.isComposing||!(e.metaKey||e.ctrlKey)||/^[acvxyz]$/i.test(e.key)&&!e.altKey||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;`

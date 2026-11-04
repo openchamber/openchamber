@@ -60,17 +60,27 @@ before the local server is imported, and the renderer parses, fetches and
 compiles the application while the server starts. The runtime values the
 application needs before any request (local origin, API base, client token)
 do not exist yet, so that document ends with a parser-blocking
-`<script src="/__runtime-config.js">` instead of the inline values; main
-answers it once `activateMainWindow` has the resolved runtime
-(`packaged-runtime-config.mjs`). The script carries the client token, and a
-classic `<script src>` ignores CORS, so each pending document gets its own
-single-use nonce in the script URL; a request without an issued, unclaimed
-nonce, or whose fetch metadata is not a same-origin script load, gets 404. A
-sandboxed preview or plugin frame cannot read the document, so it cannot
-learn the nonce. Module scripts run only after parsing ends,
-so no application code runs before the values are set. Remote, SSH,
-environment-target, HMR and background launches keep the previous order:
-resolve, then navigate, with the splash reporting the connection attempt.
+`<script src="/__runtime-config.js">`; main answers it once `activateMainWindow`
+has the resolved runtime (`packaged-runtime-config.mjs`). Module scripts run only
+after parsing ends, so no application code runs before the values are set.
+Remote, SSH, environment-target, HMR and background launches keep the previous
+order: resolve, then navigate, with the splash reporting the connection attempt.
+
+Packaged documents and that script hold no runtime values. They ask for them
+through the preload bridge, and main answers only the top frame of a window on
+the packaged origin. The scheme answers every frame in the session, including
+sandboxed ones, and a request to it carries nothing that says who is asking, so
+main decides by the IPC sender's frame.
+
+A launch runs one startup. The tray, a second launch, a deep link, a shortcut or
+macOS `activate` can ask for a window while that startup still runs, and
+`openMainWindow` then waits for it. Resolving next to it would call `main()` of
+the server module a second time in the same process: depending on the timing,
+that run fails to listen on the port, replaces the first run's listener handle
+so the managed OpenCode cannot start, or binds a second port, and the failure
+can reject the startup itself and exit the app. A background launch without a
+local server still probes its remote again when the window opens, because
+reachability from login time says little about later.
 
 `bun run profile:startup` measures a packaged build's launch in an isolated
 profile; see `scripts/perf/DOCUMENTATION.md`.
@@ -179,13 +189,14 @@ IPC results if its endpoint changes while the read is pending.
 |------|---------|
 | `entry.mjs` | What Electron loads: pre-`ready` configuration, single-instance lock, the first window, then a dynamic import of `main.mjs` |
 | `compile-cache.mjs` | Node's V8 code cache for the packaged main process: enabling it under userData, keeping it out of child environments, flushing and pruning after startup |
-| `packaged-runtime-config.mjs` | Runtime values for packaged application documents: inline injection, and the blocking script and gate used while the first navigation runs ahead of the local server |
+| `packaged-runtime-config.mjs` | Runtime values for packaged application documents: the script that asks main for them, the check on the asking frame, and the blocking script and gate used while the first navigation runs ahead of the local server |
 | `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles. Its window icon in an unpackaged Windows run is `dev-icon.ico`, the Windows icon behind construction tape (source `resources/icons/dev-icon-win.svg`), so the taskbar tells a dev copy apart; Linux keeps the usual icon, because GNOME takes the dock icon from the installed app's `.desktop` entry |
 | `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
 | `host-probe-policy.mjs` | Selector fast attempt and unreachable-only retry policy |
 | `startup-url-selection.mjs` | Pure bundled/HMR startup probe and loopback connection-limit policy |
 | `app-cache.mjs` | Help > Clear Cache: drops the HTTP cache only, keeps site storage (device settings, pinned sessions, login cookies), reloads windows |
+| `session-link-gate.mjs` | Whether the main window's current document listens for session links: it does once it asks for its pending links, or after a fallback delay for a remote page that never asks. Until then links wait in the queue |
 | `pairing-deep-link.mjs` | Validates an `openchamber://connect` pairing link for the confirmation prompt. After the user confirms, the main window's renderer redeems it (`desktop_take_pending_host_actions`) with the same code as Import Link, so relay-only links pair over the E2EE tunnel. `openchamber://host/<id>` for a host with a relay leg goes through the same queue |
 | `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: splash colour parsing, host list without credentials |
 | `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |

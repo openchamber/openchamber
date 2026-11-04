@@ -940,8 +940,8 @@ describe('GitLab routes', () => {
     expect(createClient).toHaveBeenCalledWith({ origin, token: 'bound-token', tokenType: 'oauth' });
     expect(createResourceService).toHaveBeenCalledWith(expect.objectContaining({ canonicalReads: true }));
     expect(listIssues).toHaveBeenCalledWith('/repo', { page: 2, query: 'bug', state: 'open', people: 'any', remote: 'upstream' });
-    expect(getIssue).toHaveBeenCalledWith('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream');
-    expect(issueComments).toHaveBeenCalledWith('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream');
+    expect(getIssue).toHaveBeenCalledWith('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream', { linked: undefined });
+    expect(issueComments).toHaveBeenCalledWith('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream', { linked: undefined });
     expect(projectUpstream).toHaveBeenCalledWith('/repo', 'upstream');
     expect(projectBranches).toHaveBeenCalledWith('/repo', { owner: 'team', name: 'repo' }, 'upstream');
     expect(validateReadContext).toHaveBeenCalledWith(expect.objectContaining({

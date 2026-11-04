@@ -15,6 +15,7 @@ import {
 import { resetSessionOrdering, useSessionOrderingStore } from "./session-ordering"
 import { resetSessionActivityTiming, useSessionActivityTimingStore } from "./session-activity-timing"
 import { applyBackgroundShellEvents, resetBackgroundShells } from "./background-shells"
+import { applyPrWatch, resetPrWatchesForRuntimeSwitch } from "./pr-watch"
 
 beforeEach(() => {
   replaceGlobalSessionStatusById(new Map())
@@ -386,6 +387,64 @@ describe("a background command keeps its session's turn open", () => {
   test("a status snapshot does not settle a session waiting on its command", () => {
     applyGlobalSessionStatusEvents("/repo", [busy("session")])
     applyBackgroundShellEvents("/repo", [started])
+    applyGlobalSessionStatusSnapshot("/repo", {}, ["session"])
+    expect(timing().startedAt.has("session")).toBe(true)
+  })
+})
+
+describe("a pull request watch keeps its session's turn open", () => {
+  const busy = (sessionID: string): SyncEvent => ({
+    type: "session.status",
+    properties: { sessionID, status: { type: "busy" }, turnStart: { at: Date.now(), source: "live" } },
+  })
+  const idle = (sessionID: string): SyncEvent => ({ type: "session.idle", properties: { sessionID } } as SyncEvent)
+  const watch = {
+    sessionID: "session", directory: "/repo", url: "https://example.test/pr/1", number: 1, title: "PR", status: "pending" as const, startedAt: 1,
+  }
+  const timing = () => useSessionActivityTimingStore.getState()
+
+  beforeEach(() => {
+    resetBackgroundShells()
+    resetPrWatchesForRuntimeSwitch()
+  })
+
+  test("the timer runs through the wait and settles when the user stops the watch", () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("session")])
+    applyPrWatch(1, "session", watch)
+    applyGlobalSessionStatusEvents("/repo", [idle("session")])
+    expect(timing().startedAt.has("session")).toBe(true)
+
+    applyPrWatch(2, "session", null)
+    expect(timing().startedAt.has("session")).toBe(false)
+    expect(timing().settledMs.has("session")).toBe(true)
+  })
+
+  test("a wake runs on inside the same turn", () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("session")])
+    applyPrWatch(1, "session", watch)
+    applyGlobalSessionStatusEvents("/repo", [idle("session")])
+    const start = timing().startedAt.get("session")
+
+    applyGlobalSessionStatusEvents("/repo", [busy("session")])
+    applyPrWatch(2, "session", null)
+    expect(timing().startedAt.get("session")).toBe(start)
+  })
+
+  test("a watch ending leaves a session its command still holds", () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("session")])
+    applyPrWatch(1, "session", watch)
+    applyBackgroundShellEvents("/repo", [{
+      type: "shell.started",
+      properties: { shell: { id: "sh_1", sessionID: "session", command: "sleep 300", file: "/tmp/sh_1.out", startedAt: 1 } },
+    }])
+    applyGlobalSessionStatusEvents("/repo", [idle("session")])
+    applyPrWatch(2, "session", null)
+    expect(timing().startedAt.has("session")).toBe(true)
+  })
+
+  test("a status snapshot does not settle a session waiting on its pull request", () => {
+    applyGlobalSessionStatusEvents("/repo", [busy("session")])
+    applyPrWatch(1, "session", watch)
     applyGlobalSessionStatusSnapshot("/repo", {}, ["session"])
     expect(timing().startedAt.has("session")).toBe(true)
   })

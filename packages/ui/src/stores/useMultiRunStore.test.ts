@@ -11,6 +11,12 @@ const worktreeBootstrapWaitCalls: string[] = [];
 const operationOrder: string[] = [];
 const dispatchedSessionIds: string[] = [];
 const deletedSessionIds: string[] = [];
+type DispatchedPart = { text: string; synthetic?: boolean };
+const dispatchedParts = new Map<string, DispatchedPart[] | undefined>();
+const goalWrites: Array<{ sessionId: string; directory: string; objective: string; tokenBudget: number | null }> = [];
+const clearedGoals: string[] = [];
+let rejectGoalFor: string | null = null;
+let rejectPromptFor: string | null = null;
 let createdCount = 0;
 let rejectNextMembership = false;
 let onCreate = () => {};
@@ -78,8 +84,24 @@ const fakeOpencodeClient = {
   },
 };
 
+mock.module('@/lib/sessionGoalActions', () => ({
+  sessionGoalIntro: (tokenBudget: number | null) => `goal intro, budget ${tokenBudget}`,
+  clearSessionGoal: async (sessionId: string) => { clearedGoals.push(sessionId); },
+  setSessionGoal: async (sessionId: string, directory: string, input: { objective: string; tokenBudget: number | null }) => {
+    if (rejectGoalFor === sessionId) throw new Error('goal write failed');
+    operationOrder.push(`goal:${sessionId}`);
+    goalWrites.push({ sessionId, directory, ...input });
+  },
+}));
+
 mock.module('@/sync/session-ui-store', () => ({
-  routeMessage: async ({ sessionId }: { sessionId: string }) => { dispatchedSessionIds.push(sessionId); },
+  resolveGoalObjective: (content: string) => content,
+  routeMessage: async ({ sessionId, additionalParts }: { sessionId: string; additionalParts?: DispatchedPart[] }) => {
+    if (rejectPromptFor === sessionId) throw new Error('prompt rejected');
+    operationOrder.push(`prompt:${sessionId}`);
+    dispatchedSessionIds.push(sessionId);
+    dispatchedParts.set(sessionId, additionalParts);
+  },
   useSessionUIStore: {
     getState: () => ({
       markSessionAsOpenChamberCreated: mock(() => undefined),
@@ -205,6 +227,11 @@ describe('useMultiRunStore', () => {
     operationOrder.length = 0;
     dispatchedSessionIds.length = 0;
     deletedSessionIds.length = 0;
+    dispatchedParts.clear();
+    goalWrites.length = 0;
+    clearedGoals.length = 0;
+    rejectGoalFor = null;
+    rejectPromptFor = null;
     createdCount = 0;
     rejectNextMembership = false;
     activeClient = sdkClient;
@@ -346,5 +373,55 @@ describe('useMultiRunStore', () => {
     expect(useMultiRunStore.getState().error).toBeNull();
     expect(result?.sessionIds).toHaveLength(6);
     expect(worktreeCreateCalls.length).toBe(6);
+  });
+
+  const settleDispatch = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const goalRun = {
+    name: 'Goal run',
+    isolateRuns: false,
+    goal: { tokenBudget: 1000 },
+    groups: [
+      { prompt: 'Variant A', models: [{ providerID: 'p', modelID: 'one' }] },
+      { prompt: 'Variant B', models: [{ providerID: 'p', modelID: 'two' }] },
+    ],
+  };
+
+  test('each lane gets its own goal, from its own prompt, before that prompt leaves', async () => {
+    await useMultiRunStore.getState().createMultiRun(goalRun);
+    await settleDispatch();
+
+    expect(goalWrites).toEqual([
+      { sessionId: 'ses_multirun', directory: '/repo', objective: 'Variant A', tokenBudget: 1000 },
+      { sessionId: 'ses_multirun_2', directory: '/repo', objective: 'Variant B', tokenBudget: 1000 },
+    ]);
+    for (const sessionId of ['ses_multirun', 'ses_multirun_2']) {
+      expect(operationOrder.indexOf(`goal:${sessionId}`)).toBeLessThan(operationOrder.indexOf(`prompt:${sessionId}`));
+      expect(dispatchedParts.get(sessionId)).toEqual([{ text: 'goal intro, budget 1000', synthetic: true }]);
+    }
+  });
+
+  test('a lane whose goal cannot be written is not sent, its sibling still runs', async () => {
+    rejectGoalFor = 'ses_multirun';
+    await useMultiRunStore.getState().createMultiRun(goalRun);
+    await settleDispatch();
+
+    expect(dispatchedSessionIds).toEqual(['ses_multirun_2']);
+  });
+
+  test('a rejected prompt takes its goal back, so the lane does not stay working', async () => {
+    rejectPromptFor = 'ses_multirun';
+    await useMultiRunStore.getState().createMultiRun(goalRun);
+    await settleDispatch();
+
+    expect(clearedGoals).toEqual(['ses_multirun']);
+    expect(dispatchedSessionIds).toEqual(['ses_multirun_2']);
+  });
+
+  test('a run without a goal writes none', async () => {
+    await useMultiRunStore.getState().createMultiRun({ ...goalRun, goal: undefined });
+    await settleDispatch();
+
+    expect(goalWrites).toEqual([]);
+    expect(dispatchedParts.get('ses_multirun')).toBeUndefined();
   });
 });

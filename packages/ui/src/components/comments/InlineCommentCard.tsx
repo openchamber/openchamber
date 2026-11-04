@@ -13,15 +13,16 @@ interface InlineCommentCardProps {
   onDelete: () => void;
   className?: string;
   maxWidth?: number;
+  /** Beside review comments, the card says it goes to the agent and leaves the file to its place under the lines. */
+  forAgent?: boolean;
 }
 
 const HEADER_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
 
 /**
- * A saved inline comment shown under its lines in the diff/editor. Styled to
- * match the composer's context preview entries: a muted header band naming
- * the file and range with direct edit/remove actions, and the comment text
- * below.
+ * A saved inline comment shown under its lines in the diff/editor: a header
+ * naming the file and range with direct edit/remove actions, and the comment
+ * text below, on one tone so the card stands apart from the lines around it.
  */
 export function InlineCommentCard({
   draft,
@@ -29,6 +30,7 @@ export function InlineCommentCard({
   onDelete,
   className,
   maxWidth,
+  forAgent = false,
 }: InlineCommentCardProps) {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
@@ -48,12 +50,10 @@ export function InlineCommentCard({
       }}
       data-comment-card="true"
     >
-      <div
-        className="flex items-center gap-1.5 px-3 py-1.5"
-        style={{ backgroundColor: 'color-mix(in srgb, var(--surface-muted-foreground) 8%, transparent)' }}
-      >
+      <div className="flex items-center gap-1.5 px-3 pt-2">
+        {forAgent ? <Icon name="attachment-2" className="size-3.5 shrink-0 text-muted-foreground" /> : null}
         <span className="min-w-0 max-w-[200px] truncate text-xs font-medium text-foreground" title={draft.fileLabel}>
-          {draft.fileLabel}
+          {forAgent ? t('review.card.forAgent') : draft.fileLabel}
         </span>
         <span className="shrink-0 text-xs text-muted-foreground">•</span>
         {/* "Whole file" is short and never shrinks, so a narrow panel truncates the path instead. */}
@@ -84,7 +84,7 @@ export function InlineCommentCard({
         </button>
       </div>
 
-      <div className="px-3 py-2">
+      <div className="px-3 pb-2 pt-1">
         <Collapsible open={isOpen || !isLongContent} onOpenChange={setIsOpen}>
           <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground', !isOpen && isLongContent && 'line-clamp-3')}>
             {draftText}

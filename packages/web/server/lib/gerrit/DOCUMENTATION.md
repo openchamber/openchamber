@@ -83,3 +83,7 @@ One Change-Id can be open on several branches. The local branch's upstream is wh
 ### Why candidates come from recent changes
 
 Gerrit exposes no project-member list a normal user can read, and suggesting arbitrary accounts would need the account search, which may list the whole instance. Owners and reviewers of recent changes are the people who review there.
+
+## Review drafts
+
+A review is the viewer's draft comments on the change. `/pr/review` always sends `drafts: PUBLISH_ALL_REVISIONS`, so votes and comments go out together, and `publishDrafts: true` lets it go out with no votes, for the drafts alone. The old side is the patchset's `PARENT`. Threads are the published comments followed through `in_reply_to`; one rooted on an older patchset has no line in this diff and stays on the board. A draft on an older patchset stays in the review and shows with the file's comments, without a line. Replies are not offered here (`reviewThreads.reply` is off). Discarding removes drafts one by one, because Gerrit has no call for the whole draft.

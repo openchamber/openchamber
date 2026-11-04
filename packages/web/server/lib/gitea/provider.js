@@ -84,6 +84,22 @@ function mutationOperations() {
       perform: (service, normalized, resolved) => service.reviewChangeRequest(call(resolved, { verdict: normalized.verdict, body: normalized.body })),
       reconcile: unknownOutcome,
     },
+    '/pr/review/comment': {
+      perform: (service, normalized, resolved) => service.addReviewComment(call(resolved, { position: normalized.position, body: normalized.body })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/comment/update': {
+      perform: (service, normalized, resolved) => service.updateReviewComment(call(resolved, { commentId: normalized.commentId, body: normalized.body })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/comment/delete': {
+      perform: (service, normalized, resolved) => service.deleteReviewComment(call(resolved, { commentId: normalized.commentId })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/discard': {
+      perform: (service, _normalized, resolved) => service.discardReview(call(resolved)),
+      reconcile: unknownOutcome,
+    },
   };
   for (const route of ['/pr/comment', '/issues/comment']) {
     operations[route] = {
@@ -200,20 +216,21 @@ export function createGiteaFamilyProvider({
       changeRequestStatus: ({ session, directory, branch, remote }) => serviceFor(session).changeRequestStatus(directory, branch, remote),
       listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
         .listChangeRequests(directory, { page, query, state, people, remote }),
-      changeRequestContext: ({ session, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
-        .changeRequestContext(directory, number, { includeDiff, includeCIDetails, includeTimeline, project, remote }),
+      changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
+        .changeRequestContext(directory, number, { includeDiff, includeCIDetails, includeTimeline, project, remote, linked: context?.linked }),
+      reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
       listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
         .listIssues(directory, { page, query, state, people, remote }),
-      getIssue: ({ session, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote),
-      issueComments: ({ session, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote),
+      getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
+      issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),
       projectBranches: ({ session, directory, project, remote }) => serviceFor(session).projectBranches(directory, project, remote),
       listLabels: ({ session, directory, project, remote }) => serviceFor(session).listLabels(directory, project, remote),
       listReviewerCandidates: ({ session, directory, project, remote }) => serviceFor(session).listReviewerCandidates(directory, project, remote),
-      readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote }) => serviceFor(session)
-        .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote }),
-      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status }) => serviceFor(session)
-        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status }),
+      readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }) => serviceFor(session)
+        .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
+      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, linked }) => serviceFor(session)
+        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, linked }),
       liveSummaries: ({ session, refs, issueRefs }) => serviceFor(session).liveSummaries({ refs, issueRefs }),
       /** A pull request's head on the context's primary repository network, for a worktree made from it. */
       readChangeRequestHead: async ({ session, directory, remote, number }) => {

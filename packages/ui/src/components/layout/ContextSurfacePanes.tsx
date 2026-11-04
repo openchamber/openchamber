@@ -40,6 +40,7 @@ import { ZoneSurfaceDragContext } from './zoneSurfaceDragContext';
 import { useZoneHostsStore } from './zoneHosts';
 import { useRightSlotStore } from './rightSlot';
 import { useOpenUntilSettled, useOpenWhenSettled } from './useOpenUntilSettled';
+import { useClosingZoneTab } from './useClosingZoneTab';
 import { isZoneExposed, ZoneInteractiveContext } from './zoneInteractiveContext';
 import { PauseClock } from '@/components/ui/pause-clock';
 import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
@@ -297,7 +298,7 @@ export const ContextSurfacePanes: React.FC = () => {
   const chatCovered = useRightSlotStore((state) => state.chatCovered);
 
   // What each zone shows. A zone is open only with a tab of its own.
-  const zones = React.useMemo(() => {
+  const storedZones = React.useMemo(() => {
     const viewOf = (zone: ContextZone) => {
       const activeTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
       const covered = zone === 'bottom' && chatCovered;
@@ -305,6 +306,12 @@ export const ContextSurfacePanes: React.FC = () => {
     };
     return { left: viewOf('left'), right: viewOf('right'), bottom: viewOf('bottom') };
   }, [chatCovered, panelState, placement]);
+  // A closing zone keeps drawing what it showed, as its frame does (ContextPanel).
+  const zones = {
+    left: { ...storedZones.left, activeTab: useClosingZoneTab(storedZones.left.activeTab, storedZones.left.isOpen) },
+    right: { ...storedZones.right, activeTab: useClosingZoneTab(storedZones.right.activeTab, storedZones.right.isOpen) },
+    bottom: { ...storedZones.bottom, activeTab: useClosingZoneTab(storedZones.bottom.activeTab, storedZones.bottom.isOpen) },
+  };
 
   // A closing zone's content leaves the document (the editor's `detached`)
   // only once its animation has settled. The zone frame runs the same hook
@@ -401,12 +408,14 @@ export const ContextSurfacePanes: React.FC = () => {
   // Tells agent browser control which project is on screen and which browser
   // tab the user last had in front of them there; a session without a tab of
   // its own may use that tab only when it is the user's and in its project.
-  const shownBrowserTabId = browserZone.activeTab?.mode === 'browser' ? browserZone.activeTab.id : null;
+  // From the store, not the drawn tab: a closed zone still remembers it.
+  const storedBrowserTab = storedZones[browserZone.zone].activeTab;
+  const shownBrowserTabId = storedBrowserTab?.mode === 'browser' ? storedBrowserTab.id : null;
   React.useEffect(() => {
     setShownBrowserTab(directoryKey, shownBrowserTabId);
   }, [directoryKey, shownBrowserTabId]);
 
-  const fileActiveTab = fileZone.activeTab;
+  const fileActiveTab = storedZones[fileZone.zone].activeTab;
   React.useEffect(() => {
     if (!contentDirectory || fileActiveTab?.mode !== 'file' || !fileActiveTab.targetPath) {
       return;

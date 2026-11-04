@@ -2222,6 +2222,11 @@ const ensureGlobalWatcherStarted = async () => {
 };
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
+  // These steps need a running OpenCode; a retry runs them once it starts.
+  if (openCodeLifecycleRuntime.scheduleBootstrapRetry(bootstrapOpenCodeAtStartup, finishOpenCodeBootstrap)) return;
+  finishOpenCodeBootstrap();
+};
+const finishOpenCodeBootstrap = () => {
   scheduleOpenCodeApiDetection();
   if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
     startHealthMonitoring();

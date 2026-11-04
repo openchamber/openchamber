@@ -4,6 +4,7 @@ import { devtools } from 'zustand/middleware';
 import type {
   GitStatus,
   GitBranch,
+  GitBranchListOptions,
   GitLogResponse,
   GitIdentitySummary,
   GitFileDiffResponse,
@@ -67,6 +68,9 @@ interface DirectoryGitState {
   lastBranchesFetch: number;
   lastIdentityFetch: number;
   logMaxCount: number;
+  // Never-fetched branches the remotes reported when the person last asked them.
+  // No local ref backs these, so a local refresh would otherwise drop them.
+  askedRemoteOnlyBranches: string[];
   isLoadingStatus: boolean;
   isLoadingLog: boolean;
   isLoadingBranches: boolean;
@@ -83,7 +87,12 @@ interface GitStore {
   getDirectoryState: (directory: string) => DirectoryGitState | null;
 
   fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light'; force?: boolean; throwOnError?: boolean }) => Promise<boolean>;
-  fetchBranches: (directory: string, git: GitAPI) => Promise<void>;
+  /**
+   * Reads local refs. `remote: 'live'` also asks every remote, which can start
+   * an SSH sign-in: only an explicit request from the person may pass it.
+   */
+  fetchBranches: (directory: string, git: GitAPI, options?: { remote?: 'live' }) => Promise<void>;
+  isAskingRemotes: (directory: string) => boolean;
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
   fetchAll: (directory: string, git: GitAPI, options?: { force?: boolean; silentIfCached?: boolean }) => Promise<void>;
@@ -148,16 +157,17 @@ interface GitStore {
 interface GitAPI {
   checkIsGitRepository: (directory: string) => Promise<boolean>;
   getGitStatus: (directory: string, options?: GitStatusRequestOptions) => Promise<GitStatus>;
-  getGitBranches: (directory: string) => Promise<GitBranch>;
-  getGitLog: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
-  getCurrentGitIdentity: (directory: string) => Promise<GitIdentitySummary | null>;
-  getGitFileDiff: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
+  getGitBranches: (directory: string, options?: GitBranchListOptions) => Promise<GitBranch>;
+  getGitLog?: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
+  getCurrentGitIdentity?: (directory: string) => Promise<GitIdentitySummary | null>;
+  getGitFileDiff?: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
 }
 
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
 const inFlightStatusFetches = new Map<string, { promise: Promise<boolean>; statusMutationRevision: number }>();
 const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
+const directoriesAskingRemotes = new Set<string>();
 const inFlightNestedRepoDiscovery = new Map<string, Promise<void>>();
 const requestGenerationByChannel = new Map<string, number>();
 const statusMutationRevisionByDirectory = new Map<string, number>();
@@ -258,6 +268,7 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   lastBranchesFetch: 0,
   lastIdentityFetch: 0,
   logMaxCount: 25,
+  askedRemoteOnlyBranches: [],
   isLoadingStatus: false,
   isLoadingLog: false,
   isLoadingBranches: false,
@@ -732,6 +743,7 @@ export const useGitStore = create<GitStore>()(
         statusMutationRevisionByDirectory.clear();
         inFlightStatusFetches.clear();
         inFlightEnsureAllByDirectory.clear();
+        directoriesAskingRemotes.clear();
         inFlightNestedRepoDiscovery.clear();
         // Outstanding transports still consume capacity on their captured
         // runtime, even after its visible cache has been reset.
@@ -1051,7 +1063,9 @@ export const useGitStore = create<GitStore>()(
         set({ directories: nextDirectories });
       },
 
-      fetchBranches: async (directory, git) => {
+      fetchBranches: async (directory, git, options) => {
+        const live = options?.remote === 'live';
+        const liveKey = runtimeDirectoryKey(getRuntimeKey(), directory);
         const token = startRequest(directory, 'branches');
         {
           const newDirectories = new Map(get().directories);
@@ -1060,12 +1074,29 @@ export const useGitStore = create<GitStore>()(
           set({ directories: newDirectories });
         }
 
+        if (live) directoriesAskingRemotes.add(liveKey);
         try {
-          const branches = await git.getGitBranches(directory);
-          if (!isRequestCurrent(token, directory)) return;
+          const answer = await git.getGitBranches(directory, { remote: live ? 'live' : 'local' });
+          const askedRemoteOnly = answer.all.filter((name) => name.startsWith('remotes/') && !answer.branches[name]);
+          if (!isRequestCurrent(token, directory)) {
+            // A local refresh that started during the sign-in owns the list, but
+            // what the person signed in for still joins it.
+            const current = get().directories.get(directory);
+            if (live && current && token.runtimeKey === getRuntimeKey()) {
+              const newDirectories = new Map(get().directories);
+              const branches = current.branches && { ...current.branches, all: [...new Set([...current.branches.all, ...askedRemoteOnly])] };
+              newDirectories.set(directory, { ...current, branches, askedRemoteOnlyBranches: askedRemoteOnly });
+              set({ directories: newDirectories });
+            }
+            return;
+          }
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
-          newDirectories.set(directory, { ...dirState, branches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
+          const askedRemoteOnlyBranches = live ? askedRemoteOnly : dirState.askedRemoteOnlyBranches;
+          const branches = live
+            ? answer
+            : { ...answer, all: [...new Set([...answer.all, ...askedRemoteOnlyBranches])] };
+          newDirectories.set(directory, { ...dirState, branches, askedRemoteOnlyBranches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
           set({ directories: newDirectories });
           writeCachedBranches(token.runtimeKey, directory, branches);
         } catch (error) {
@@ -1075,8 +1106,12 @@ export const useGitStore = create<GitStore>()(
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
           newDirectories.set(directory, { ...d, isLoadingBranches: false });
           set({ directories: newDirectories });
+        } finally {
+          if (live) directoriesAskingRemotes.delete(liveKey);
         }
       },
+
+      isAskingRemotes: (directory) => directoriesAskingRemotes.has(runtimeDirectoryKey(getRuntimeKey(), directory)),
 
       fetchLog: async (directory, git, maxCount) => {
         const token = startRequest(directory, 'log');
@@ -1092,7 +1127,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const log = await git.getGitLog(directory, { maxCount: effectiveMaxCount });
+          const log = git.getGitLog ? await git.getGitLog(directory, { maxCount: effectiveMaxCount }) : null;
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1124,7 +1159,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const identity = await git.getCurrentGitIdentity(directory);
+          const identity = git.getCurrentGitIdentity ? await git.getCurrentGitIdentity(directory) : null;
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1230,6 +1265,9 @@ export const useGitStore = create<GitStore>()(
       prefetchDiffs: async (directory, git, filePaths, options = {}) => {
         const dirState = get().directories.get(directory);
         if (!dirState?.status?.files || dirState.status.files.length === 0 || filePaths.length === 0) return;
+        // A runtime without the per-file diff read (VS Code) has no diff
+        // prefetch to run; the git view that triggers it is not mounted there.
+        if (!git.getGitFileDiff) return;
 
         const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
         const availablePaths = new Set(dirState.status.files.map((file) => file.path));
@@ -1288,7 +1326,7 @@ export const useGitStore = create<GitStore>()(
           inFlight.add(filePath);
           const fetchPromise = (async () => {
             try {
-              return await git.getGitFileDiff(directory, { path: filePath });
+              return await git.getGitFileDiff!(directory, { path: filePath });
             } finally {
               // A UI deadline only stops waiting. Keep the path and capacity
               // reserved until the transport actually settles.

@@ -480,6 +480,8 @@ export const buildStartupSplashUrl = () => (
     : `data:text/html;charset=utf-8,${encodeURIComponent(buildStartupSplashHtml())}`
 );
 
+export const isStartupSplashUrl = (url) => url.startsWith('data:') || url.endsWith(SPLASH_PATHNAME);
+
 const EARLY_WINDOW_SHOW_WAIT_MS = 500;
 let pendingEarlyWindow = null;
 let earlyWindowClosed = false;

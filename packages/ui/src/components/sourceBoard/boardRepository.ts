@@ -268,7 +268,13 @@ export function folderOfRepository(
 }
 
 /** The folder a link to an issue or PR is read through: `pending` while that is not known yet, `failed` when the search for repositories failed. */
-export type LinkRepository = { status: 'pending' | 'failed' | 'ready'; directory: string; retry: () => void };
+export type LinkRepository = {
+    status: 'pending' | 'failed' | 'ready';
+    directory: string;
+    /** A remote of the folder names the link's repository; false for one the project may only reach through its fork network, or not at all. */
+    owned: boolean;
+    retry: () => void;
+};
 
 /**
  * The folder the Tracker reads a link through, or a surface that only needs it
@@ -310,11 +316,11 @@ export function useLinkRepository(root: string, url: string, options: { enabled?
         return folderOfRepository(repositoryUrl, folders, [...knownIdentities, ...defaultSourceControlIdentities(descriptors)], descriptors);
     }, [bindings, candidates, descriptors, enabled, knownIdentities, repositoryUrl]);
 
-    if (!enabled) return { status: 'ready', directory: root, retry };
-    if (rootIsGitRepo === null) return { status: 'pending', directory: root, retry };
-    if (match !== null && match !== 'none') return { status: 'ready', directory: match, retry };
-    if (nestedRepos === undefined) return { status: 'pending', directory: root, retry };
-    if (nestedRepos === null) return { status: 'failed', directory: root, retry };
-    if (match === null) return { status: 'pending', directory: root, retry };
-    return { status: 'ready', directory: root, retry };
+    if (!enabled) return { status: 'ready', directory: root, owned: false, retry };
+    if (rootIsGitRepo === null) return { status: 'pending', directory: root, owned: false, retry };
+    if (match !== null && match !== 'none') return { status: 'ready', directory: match, owned: true, retry };
+    if (nestedRepos === undefined) return { status: 'pending', directory: root, owned: false, retry };
+    if (nestedRepos === null) return { status: 'failed', directory: root, owned: false, retry };
+    if (match === null) return { status: 'pending', directory: root, owned: false, retry };
+    return { status: 'ready', directory: root, owned: false, retry };
 }

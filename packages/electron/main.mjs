@@ -20,6 +20,7 @@ import { persistMainWindowState } from './window-state.mjs';
 import { attachWindowVisibility, isNativeWindowVisible } from './window-visibility.mjs';
 import { createTrayController } from './tray.mjs';
 import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
+import { createSessionLinkGate } from './session-link-gate.mjs';
 import { applyDevDockIdentity, applyDockBadge } from './dev-dock-identity.mjs';
 import { attachDevWindowTape } from './dev-window-tape.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
@@ -37,6 +38,7 @@ import {
   buildMainWindowOptions,
   buildRendererAdditionalArguments,
   buildStartupSplashUrl,
+  isStartupSplashUrl,
   getLoginItemOptions,
   getWindowIconPath,
   installPackagedUiRequestHandler,
@@ -76,7 +78,7 @@ import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
 import { findReusableHostWindowIndex, normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, resolveSenderHostId, runtimeKeyForDeepLinkHost, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
-import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
+import { RUNTIME_CONFIG_SCRIPT, RUNTIME_CONFIG_SCRIPT_PATHNAME, createRuntimeConfigGate, injectRuntimeConfig, isRuntimeConfigFrame } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
@@ -1038,18 +1040,11 @@ const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${pa
 // see packaged-runtime-config.mjs.
 const runtimeConfigGate = createRuntimeConfigGate();
 
-const buildRuntimeConfigScript = () => {
-  const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
-  const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  return `if(window.__OPENCHAMBER_LOCAL_ORIGIN__===undefined){window.__OPENCHAMBER_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__OPENCHAMBER_API_BASE_URL__===undefined){window.__OPENCHAMBER_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__OPENCHAMBER_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__OPENCHAMBER_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}`;
-};
+// Settles when the launch's own startup has finished; a startup that fails
+// exits the app instead.
+const initialStartup = Promise.withResolvers();
 
-const injectRuntimeConfigIntoHtml = (html) => {
-  if (runtimeConfigGate.isHeld()) {
-    return injectRuntimeConfig(html, { pending: true, scriptBody: '', nonce: runtimeConfigGate.issueScriptNonce() });
-  }
-  return injectRuntimeConfig(html, { pending: false, scriptBody: buildRuntimeConfigScript() });
-};
+const injectRuntimeConfigIntoHtml = (html) => injectRuntimeConfig(html, { pending: runtimeConfigGate.isHeld() });
 
 /**
  * The browser panel's own session, kept separate from OpenChamber's.
@@ -1285,12 +1280,8 @@ const registerPackagedUiProtocol = () => {
     }
 
     if (new URL(request.url).pathname === RUNTIME_CONFIG_SCRIPT_PATHNAME) {
-      // Carries the client token: only the document it was issued to gets it.
-      if (!claimRuntimeConfigScriptRequest(runtimeConfigGate, request)) {
-        return new Response('', { status: 404, headers: { 'Cache-Control': 'no-store' } });
-      }
       await runtimeConfigGate.whenReleased();
-      return new Response(buildRuntimeConfigScript(), {
+      return new Response(RUNTIME_CONFIG_SCRIPT, {
         headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
       });
     }
@@ -2180,8 +2171,8 @@ const dispatchDeepLink = (link) => {
 
 // Session links wait for the renderer to take them (desktop_take_pending_session_links)
 // once its listener is mounted: an event sent when the page has merely loaded
-// reached no listener on a cold start and the link was lost. The late flush
-// still delivers them to a renderer that never asks (an older remote UI).
+// reached no listener on a cold start and the link was lost. The gate's fallback
+// still delivers them to a renderer that never asks (a remote page).
 const flushPendingDeepLinks = ({ includeSessions }) => {
   const kept = [];
   while (pendingDeepLinks.length > 0) {
@@ -2195,6 +2186,11 @@ const flushPendingDeepLinks = ({ includeSessions }) => {
   pendingDeepLinks.push(...kept);
 };
 
+const mainWindowSessionLinkGate = createSessionLinkGate({
+  fallbackMs: PENDING_SESSION_LINK_FALLBACK_MS,
+  onFallback: () => flushPendingDeepLinks({ includeSessions: true }),
+});
+
 const isMainWindowReadyForDeepLink = () =>
   Boolean(state.mainWindow)
   && !state.mainWindow.isDestroyed()
@@ -2204,7 +2200,7 @@ const handleDeepLinks = (urls) => {
   for (const raw of urls) {
     const parsed = parseDeepLink(raw);
     if (!parsed) continue;
-    if (isMainWindowReadyForDeepLink()) {
+    if (isMainWindowReadyForDeepLink() && (parsed.type !== 'session' || mainWindowSessionLinkGate.isListening())) {
       dispatchDeepLink(parsed);
     } else {
       pendingDeepLinks.push(parsed);
@@ -2727,6 +2723,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       mainWindowTrayActionsReady = false;
+      mainWindowSessionLinkGate.documentReplaced();
       state.mainWindow = null;
     }
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2818,6 +2815,8 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   // same fallback a window that has not reported yet uses.
   browserWindow.webContents.on('did-navigate', (_event, url) => {
     if (!isAppUiNavigationTarget(url)) browserWindow.__ocRuntimeKey = null;
+    // On commit: a navigation that only started can still leave this document in place.
+    if (browserWindow === state.mainWindow) mainWindowSessionLinkGate.documentReplaced();
   });
   browserWindow.webContents.on('did-start-navigation', (details) => {
     if (browserWindow === state.mainWindow && details.isMainFrame && !details.isSameDocument) {
@@ -2878,11 +2877,12 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
     }
-    if (state.mainWindow && browserWindow.id === state.mainWindow.id && pendingDeepLinks.length > 0) {
-      const timer = setTimeout(() => flushPendingDeepLinks({ includeSessions: false }), 400);
-      if (typeof timer?.unref === 'function') timer.unref();
-      const lateTimer = setTimeout(() => flushPendingDeepLinks({ includeSessions: true }), PENDING_SESSION_LINK_FALLBACK_MS);
-      if (typeof lateTimer?.unref === 'function') lateTimer.unref();
+    if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
+      if (pendingDeepLinks.length > 0) {
+        const timer = setTimeout(() => flushPendingDeepLinks({ includeSessions: mainWindowSessionLinkGate.isListening() }), 400);
+        if (typeof timer?.unref === 'function') timer.unref();
+      }
+      if (!isStartupSplashUrl(browserWindow.webContents.getURL())) mainWindowSessionLinkGate.applicationDocumentLoaded();
     }
   });
 
@@ -3000,6 +3000,15 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
 };
 
 const openMainWindow = async () => {
+  if (!state.startupResolved) {
+    // The tray, a second launch, a deep link or a shortcut can ask for a window
+    // while startup still runs. Resolving next to it would start the in-process
+    // server a second time, and that run replaces the first one's listener.
+    await initialStartup.promise;
+    // A foreground startup has opened the window this caller asked for.
+    if (state.mainWindow && !state.mainWindow.isDestroyed()) return state.mainWindow;
+  }
+
   if (!state.startupResolved) {
     const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
@@ -3416,9 +3425,7 @@ const resolveMiniChatRuntimeConfig = (browserWindow, args = {}) => {
 const showSplashStatus = (text) => {
   const mainWindow = state.mainWindow;
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  // Development shows the splash as a data: URL, packaged builds as /__splash.
-  const url = mainWindow.webContents.getURL();
-  if (!url.startsWith('data:') && !url.endsWith('/__splash')) return;
+  if (!isStartupSplashUrl(mainWindow.webContents.getURL())) return;
   const script = `(() => {
     const show = () => {
     const stack = document.querySelector('.stack');
@@ -5332,6 +5339,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_take_pending_session_links':
       // Session links open in the main window only.
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
+      mainWindowSessionLinkGate.documentAsked();
       return takePendingSessionDeepLinks();
 
     case 'desktop_open_host_session': {
@@ -5364,7 +5372,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // No live main window (e.g. "Open in main window" from a mini-chat after
       // the main window was closed): create one and open the session in it. A
       // fresh window can't take an immediate emit, so queue the session as a
-      // pending deep-link and let did-finish-load flush it once ready.
+      // pending deep-link for its renderer to take once it listens.
       if (!hasMainWindow) {
         if (sessionId) pendingDeepLinks.push({ type: 'session', value: sessionId });
         await openMainWindow();
@@ -5900,6 +5908,17 @@ ipcMain.on('openchamber:take-safe-start', (event) => {
   event.returnValue = takeSafeStart(event.sender);
 });
 
+// Sync, because the document's own scripts read these values as they run.
+ipcMain.on('openchamber:read-runtime-config', (event) => {
+  event.returnValue = isRuntimeConfigFrame(event.senderFrame)
+    ? {
+      localOrigin: state.localOrigin || state.sidecarUrl || '',
+      apiBaseUrl: state.apiBaseUrl || state.sidecarUrl || '',
+      clientToken: state.clientToken || '',
+    }
+    : null;
+});
+
 ipcMain.handle('openchamber:dialog:open', async (event, options) => {
   // Native file dialogs expose absolute local paths; never grant to remote.
   if (!isLocalSender(event.sender)) {
@@ -6078,8 +6097,8 @@ const revealMainWindow = async () => {
 
 // Open a session in the main window, creating one first if none is alive. A
 // freshly created window can't receive an immediate emit (its renderer hasn't
-// mounted its listeners yet), so we queue the session as a pending deep-link —
-// the did-finish-load handler flushes it once the window is ready.
+// mounted its listeners yet), so we queue the session as a pending deep-link
+// for its renderer to take once it listens.
 const focusMainWindowWithSession = async (sessionId, directory) => {
   if (state.mainWindow && !state.mainWindow.isDestroyed()) {
     if (state.mainWindow.isMinimized()) state.mainWindow.restore();
@@ -6365,6 +6384,7 @@ app.whenReady().then(async () => {
     state.startupResolved = !(await shouldSkipLocalServer());
     state.initScript = buildInitScript(localOrigin, state.bootOutcome, apiBaseUrl, clientToken, state.requestHeaders);
     log.info('[electron] started in background without window');
+    initialStartup.resolve();
     replayDeferredAppEvents();
     scheduleCompileCacheSettle();
     return;
@@ -6378,6 +6398,7 @@ app.whenReady().then(async () => {
     onPlainLocalBoot: startEarlyMainNavigation,
   });
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  initialStartup.resolve();
   replayDeferredAppEvents();
   scheduleCompileCacheSettle();
 

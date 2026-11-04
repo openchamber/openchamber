@@ -78,7 +78,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
         code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT',
       });
     }
-    return readContext;
+    return source.linked === true ? { ...readContext, linked: true } : readContext;
   };
 
   app.get('/api/walkthrough', async (req, res) => {

@@ -120,6 +120,9 @@ describe('source control provider descriptors', () => {
       const features = { ...descriptor.features };
       const urls = { ...descriptor.urls };
       delete features.discussions;
+      // A server old enough for the fallback has no review draft routes.
+      delete features.reviewDrafts;
+      delete features.reviewDraftFileComments;
       delete urls.discussion;
       return { ...descriptor, features, urls };
     };

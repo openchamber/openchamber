@@ -28,9 +28,10 @@ const sameRepository = (left, right) => left.owner.toLowerCase() === right.owner
  * upstream it was forked from, which is exactly what the bound pull request
  * list reads with the same account. So every listed pull request can be
  * opened, and a name outside that network fails instead of reaching a
- * repository the binding never covered.
+ * repository the binding never covered, unless the read says `linked`: a link
+ * named that pull request, and only reads carry it.
  */
-async function resolvePullRequestRepo({ session, directory, remote, number, sourceRepo = null }, dependencies) {
+async function resolvePullRequestRepo({ session, directory, remote, number, sourceRepo = null, linked = false }, dependencies) {
   const resolveRepository = dependencies.resolveGitHubRepoFromDirectory ?? resolveGitHubRepoFromDirectory;
   const { repo } = await resolveRepository(directory, remote);
   if (!repo?.owner || !repo?.repo) {
@@ -60,6 +61,8 @@ async function resolvePullRequestRepo({ session, directory, remote, number, sour
       code: 'github-not-connected',
     });
   }
+
+  if (linked && sourceRepo) return { octokit: account.octokit, repo: { owner: sourceRepo.owner, repo: sourceRepo.repo } };
 
   let target = repo;
   if (sourceRepo && !sameRepository(sourceRepo, repo)) {

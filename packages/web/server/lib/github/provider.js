@@ -277,6 +277,7 @@ export function createProvider({
         resolveSession: (context) => resolveAccount({ instance: context.instance, accountId: context.accountId }),
       }),
       referenceDetail: resources.referenceDetail,
+      reviewState: resources.reviewState,
       referenceStatuses: resources.referenceStatuses,
       readChangeRequestHead: resources.readChangeRequestHead,
       resolveChangeRequestSource: resources.resolveChangeRequestSource,

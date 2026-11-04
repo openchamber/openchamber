@@ -65,6 +65,7 @@ export const githubDescriptor = Object.freeze({
     reviewers: true,
     // GitHub opens a review thread only on a diff line, which the board does not offer.
     reviewThreads: Object.freeze({ start: false, reply: true, resolve: true }),
+    reviewDrafts: Object.freeze({ fileComments: true }),
     uploads: false,
     stacks: true,
     changeRequestPatch: true,
@@ -139,6 +140,7 @@ export const githubDescriptor = Object.freeze({
     features: Object.freeze({
       referenceSearch: true, referenceDetail: true, listStatuses: true, referencesAcross: true,
       startThread: false, authorCanReview: false, projectUploads: false, issueCloseReason: true,
+      reviewDrafts: true, reviewDraftFileComments: true,
       changeRequestTemplates: Object.freeze([]),
     }),
   }),

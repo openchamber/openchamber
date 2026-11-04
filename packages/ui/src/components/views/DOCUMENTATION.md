@@ -50,6 +50,23 @@ edge, or past it, the editor scrolls and the range follows. The click that
 ends a drag lands on whatever the pointer ended over, so each view's
 click-outside handler skips it (`isDragReleaseClick`) and the range stays.
 
+### Why a comment's annotation keeps one DOM node
+
+Pierre keys its annotation wrappers by index in the list, so an annotation that comes or goes rebuilds every one after it. A card is portalled into its annotation's node, so a new node would unmount the card and drop its height for a frame, which moves the diff and the scroll. `renderAnnotation` hands back the same node per annotation id, and the open comment field goes last in the list, so opening or closing it shifts nothing.
+
+### Why Pierre owns diff line-number selection
+
+`PierreDiffViewer` receives number-column selections through Pierre's
+`onLineSelected`, including clearing a single line, Shift+click ranges and
+touch taps. A separate click listener would run after Pierre's pointerup,
+reopen a cleared comment editor and replace a range with the clicked line.
+Pierre toggles a single selection by number without checking its side. A
+capture-phase pointerdown clears that selection before a same-number press
+on the other side, so Pierre starts a normal selection there. Shift+press
+and unfinished comments keep their existing paths.
+The gutter "+" keeps its own `onGutterUtilityClick` path. An unfinished
+comment still prevents an accidental deselection from closing its editor.
+
 ### Why the window follows the drag and not the gutter
 
 The gutter only sees the pointer while it is over the line-number column,

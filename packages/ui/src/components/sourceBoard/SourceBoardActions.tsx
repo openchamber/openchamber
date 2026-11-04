@@ -9,6 +9,7 @@ import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { reviewDraftCount, useChangeRequestReview } from '@/components/review/useChangeRequestReview';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { usePendingComposerReferences, type ComposerReferenceHandoff } from '@/components/chat/composer/pendingComposerReferences';
 import type { ReferencePickerItem, ReferencePickerSelection } from '@/components/references/referencePickerItems';
@@ -131,7 +132,9 @@ export const SourceBoardActions: React.FC<{
     submitRequirementsUnreadable?: boolean;
     /** Whether the host would merge or submit the previewed change, from its status; null when it does not say. */
     mergeable?: boolean | null;
-}> = ({ item, project, context, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null }) => {
+}> = ({ item, project, context: readContext, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null }) => {
+    // A linked item is only read: it can be attached, and nothing here acts on it.
+    const context = readContext?.linked ? null : readContext;
     const { t } = useI18n();
     const { sourceControl, trackers } = useRuntimeAPIs();
     const confirmation = useConfirmDialog();
@@ -165,7 +168,7 @@ export const SourceBoardActions: React.FC<{
     const attachToComposer = (target: ComposerReferenceHandoff) => {
         void resolveComposerReferences([selectionOf(item)], {
             sourceControl,
-            context,
+            context: readContext,
             readTrackerDetail: (provider, itemId) => (trackers
                 ? readTrackerItemDetail(trackers, provider, itemId)
                 : Promise.reject(new Error('Trackers are not available here'))),
@@ -458,7 +461,7 @@ const LINK_CLASS = cn(
  * With an earlier revision picked (`revision`), both read that revision, the
  * one whose counts sit beside them.
  */
-export const SourceBoardPullLinks: React.FC<{
+type PullLinkProps = {
     pull: RepositoryChangeRequestReference;
     project: SourceBoardProject;
     /** The folder the board reads; a repository under the project's root when the root is not one. */
@@ -469,14 +472,15 @@ export const SourceBoardPullLinks: React.FC<{
     onLeave?: () => void;
     /** The earlier revision (a patchset's full SHA) the preview shows; null for the current one. */
     revision?: string | null;
-}> = ({ pull, project, repository, context, projectOwnsDirectory, currentDirectory, onLeave, revision = null }) => {
-    const { t } = useI18n();
+};
+
+const useOpenPull = ({ pull, project, repository, context, projectOwnsDirectory, currentDirectory, onLeave, revision = null }: PullLinkProps) => {
     const mobile = useMobileAppActions();
-    const diffServing = useChangeRequestDiffServing(context.provider);
-    const open = (surface: 'diff' | 'walkthrough') => {
+    return (surface: 'diff' | 'walkthrough') => {
         const source: PullRequestSource = {
             kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo },
             ...(revision ? { revision } : {}),
+            linked: context.linked,
         };
         const ui = useUIStore.getState();
         const target = resolvePullLinkTarget({
@@ -508,6 +512,13 @@ export const SourceBoardPullLinks: React.FC<{
         useWalkthroughStore.getState().requestTarget(requestDirectory, { source, context });
         ui.openContextPanelTab(panelDirectory, { mode: 'walkthrough', targetDirectory });
     };
+};
+
+export const SourceBoardPullLinks: React.FC<PullLinkProps> = (props) => {
+    const { t } = useI18n();
+    const mobile = useMobileAppActions();
+    const diffServing = useChangeRequestDiffServing(props.context.provider);
+    const open = useOpenPull(props);
     if (diffServing === 'not-served') return null;
     return (
         <span className="inline-flex items-center gap-1">
@@ -527,6 +538,34 @@ export const SourceBoardPullLinks: React.FC<{
     );
 };
 
+
+/**
+ * The viewer's unsent review of the previewed PR, beside its reviewers: who it
+ * is and how many comments wait. Opens the diff it was written on.
+ */
+export const SourceBoardReviewDraft: React.FC<PullLinkProps> = (props) => {
+    const { pull, context, project } = props;
+    const { t } = useI18n();
+    const open = useOpenPull(props);
+    const target = React.useMemo(() => (pull.state === 'open' ? {
+        context,
+        provider: context.provider,
+        project: { owner: pull.sourceRepo.owner, name: pull.sourceRepo.repo },
+        number: pull.number,
+        headSha: pull.headSha,
+        directory: context.directory ?? project.path,
+    } : null), [context, project.path, pull.headSha, pull.number, pull.sourceRepo.owner, pull.sourceRepo.repo, pull.state]);
+    const review = useChangeRequestReview(target);
+    const count = reviewDraftCount(review);
+    if (count === 0) return null;
+    const login = review?.state?.draft?.comments[0]?.author?.login;
+    const label = t(count === 1 ? 'review.board.draft.one' : 'review.board.draft.other', { count });
+    return (
+        <button type="button" className={LINK_CLASS} onClick={() => open('diff')}>
+            {login ? `${login} · ${label}` : label}
+        </button>
+    );
+};
 
 const DISCUSSION_CLOSE_REASONS = ['resolved', 'outdated', 'duplicate'] as const satisfies readonly DiscussionCloseReason[];
 const DISCUSSION_CLOSE_KEYS = {

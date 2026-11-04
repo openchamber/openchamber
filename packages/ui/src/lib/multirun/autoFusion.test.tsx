@@ -124,3 +124,68 @@ async function checkAutoFusion(batched: boolean): Promise<void> {
 for (const batched of [false, true]) {
   test(`automatic fusion waits for a newer parent completion, batched events: ${batched}`, () => checkAutoFusion(batched));
 }
+
+test('automatic fusion waits for an active goal to settle between its turns', async () => {
+  const lanes = ['goal-lane-a', 'goal-lane-b'];
+  fusionCalls.length = 0;
+  const dom = new Window({ url: 'http://fusion.test' });
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  for (const [name, value] of Object.entries({
+    window: dom, document: dom.document, navigator: dom.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  })) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+  }
+  const { createRoot } = await import('react-dom/client');
+  const root = createRoot(document.createElement('div'));
+  const setLane = (id: string, goalStatus: string) => {
+    sessionById.set(id, {
+      id, projectID: 'project', directory: '/repo', title: id, cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2, idle: 2 }, outcome: 'succeeded',
+      metadata: {
+        ...withMultiRunMembership({}, {
+          version: 1, sessionID: id,
+          group: { kind: 'id', id: '9f512893-6e63-4e49-a534-5de733ca1040' },
+          groupSlug: 'goal-fusion-test', role: 'run', providerID: 'test', modelID: id,
+          autoFusion: { providerID: 'test', modelID: 'judge', launcherId: RUN_LAUNCHER_ID },
+        }),
+      },
+    });
+    const lane = sessionById.get(id);
+    const openchamber = lane?.metadata?.openchamber;
+    if (lane && openchamber && typeof openchamber === 'object' && !Array.isArray(openchamber)) {
+      lane.metadata = { ...lane.metadata, openchamber: { ...openchamber, goal: { id: 'g', objective: 'ship it', status: goalStatus } } };
+    }
+  };
+  const update = async (...activeIds: string[]) => {
+    await act(async () => {
+      replaceGlobalSessionStatusById(new Map(activeIds.map((id) => [id, { directory: '/repo', status: { type: 'busy' as const } }])));
+      root.render(<RunAutoFusion />);
+    });
+  };
+  try {
+    setSessionParentResolver(() => undefined);
+    for (const id of lanes) setLane(id, 'active');
+    await update(...lanes);
+    // Both turns ended and recorded an outcome; the goals go on.
+    await update();
+    expect(fusionCalls.length).toBe(0);
+    setLane(lanes[0], 'complete');
+    await update();
+    expect(fusionCalls.length).toBe(0);
+    setLane(lanes[1], 'blocked');
+    await update();
+    expect(fusionCalls.length).toBe(1);
+  } finally {
+    await act(async () => root.unmount());
+    replaceGlobalSessionStatusById(new Map());
+    sessionById.clear();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  }
+});

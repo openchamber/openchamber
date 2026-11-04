@@ -23,6 +23,8 @@ const LIST_DETAIL_CONCURRENCY = 4;
 const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
 const COMMIT_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const LIST_STATES = { open: 'open', closed: 'closed', merged: 'closed', all: 'all' };
+const REVIEW_EVENTS = Object.freeze({ approve: 'APPROVED', 'request-changes': 'REQUEST_CHANGES', comment: 'COMMENT' });
+
 /** Review states that keep a user among a pull request's reviewers; `REQUEST_REVIEW` and `PENDING` do not. */
 const SUBMITTED_REVIEW_STATES = new Set(['APPROVED', 'REQUEST_CHANGES', 'COMMENT']);
 
@@ -84,8 +86,15 @@ export function createGiteaResourceService({
     return targets;
   };
 
-  /** The primary repository's network, and the one repository a selector names in it. */
-  const network = async (directory, selector, remote, { requireComplete = false } = {}) => {
+  /**
+   * The primary repository's network, and the one repository a selector names
+   * in it. A `linked` read takes the repository a link named, wherever it is.
+   */
+  const network = async (directory, selector, remote, { requireComplete = false, linked = false } = {}) => {
+    if (linked && selector) {
+      const target = await showRepo({ owner: selector.owner, name: selector.name });
+      return { primary: target, target, targets: [target] };
+    }
     const [primary] = await resolveDirectoryRepos(directory, remote);
     const targets = await withParents([primary], { requireComplete: requireComplete || Boolean(selector) });
     if (!selector) return { primary, target: targets[0], targets };
@@ -93,6 +102,31 @@ export function createGiteaResourceService({
     if (!target) throw notFound(`${providerLabel} repository is outside the bound repository network`);
     return { primary, target, targets };
   };
+
+  const reviewsPath = (providerTarget) => `${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}/reviews`;
+  /** The viewer's pending review, kept by the host; only its author can read it. */
+  const readPendingReview = async (providerTarget) => {
+    const [reviews, viewer] = await Promise.all([client.get(reviewsPath(providerTarget)), readCurrentLogin()]);
+    if (!Array.isArray(reviews)) throw malformed(`${providerLabel} returned an invalid review list`);
+    return reviews.find((review) => review?.state === 'PENDING' && review?.user?.login === viewer) ?? null;
+  };
+  const readPendingComments = async (providerTarget) => {
+    const pending = await readPendingReview(providerTarget);
+    const comments = pending ? await client.get(`${reviewsPath(providerTarget)}/${pending.id}/comments`) : [];
+    if (!Array.isArray(comments)) throw malformed(`${providerLabel} returned invalid review comments`);
+    return comments;
+  };
+  /** Only the viewer's own unpublished comment can be changed here. */
+  const requirePendingComment = async (providerTarget, commentId) => {
+    if (!(await readPendingComments(providerTarget)).some((comment) => String(comment?.id) === commentId)) {
+      throw Object.assign(new Error('Review comment is not a draft of yours on this pull request'), { code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', status: 409 });
+    }
+  };
+  const reviewPerson = (user) => (isString(user?.login) ? { login: user.login, avatarUrl: isString(user.avatar_url) ? user.avatar_url : undefined } : null);
+  /** A comment on the new side reads `position`; one on the old side only `original_position`. */
+  const reviewCommentAt = (comment) => (Number(comment?.position) > 0
+    ? { path: comment.path, side: 'new', line: comment.position, startLine: null }
+    : { path: comment?.path, side: 'old', line: comment?.original_position ?? null, startLine: null });
 
   let currentLogin = null;
   const readCurrentLogin = () => {
@@ -124,8 +158,8 @@ export function createGiteaResourceService({
    * Its head may come from any fork: the pull request is the authority for
    * it (`changeRequestNetworkTarget`).
    */
-  const findPull = async (directory, number, selector, { remote } = {}) => {
-    const net = await network(directory, selector, remote, { requireComplete: true });
+  const findPull = async (directory, number, selector, { remote, linked } = {}) => {
+    const net = await network(directory, selector, remote, { requireComplete: true, linked });
     const candidates = selector ? [net.target] : net.targets;
     for (const target of candidates) {
       let raw;
@@ -339,7 +373,7 @@ export function createGiteaResourceService({
     },
 
     async changeRequestContext(directory, number, options = {}) {
-      const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote });
+      const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote, linked: options.linked });
       const repo = repoPath(target.project);
       const [comments, reviews, diffText, changedFiles, ci, headProject, commits] = await Promise.all([
         readIssueComments(target.project, number),
@@ -415,13 +449,13 @@ export function createGiteaResourceService({
       return { items, page, hasMore: result.hasMore };
     },
 
-    async getIssue(directory, number, selector, remote) {
-      const { target } = await network(directory, selector, remote);
+    async getIssue(directory, number, selector, remote, { linked } = {}) {
+      const { target } = await network(directory, selector, remote, { linked });
       return requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
     },
 
-    async issueComments(directory, number, selector, remote) {
-      const { target } = await network(directory, selector, remote);
+    async issueComments(directory, number, selector, remote, { linked } = {}) {
+      const { target } = await network(directory, selector, remote, { linked });
       const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
       const comments = await readIssueComments(target.project, number);
       return comments.map((comment) => requireMapped(mapGiteaComment(comment, identity, issue.url), `${providerLabel} returned an invalid issue comment`));
@@ -466,8 +500,8 @@ export function createGiteaResourceService({
     },
 
     /** The pull request's changes as one unified diff; its target must be in the bound network. */
-    async changeRequestPatch(directory, number, { project, remote } = {}) {
-      const { target } = await findPull(directory, number, project, { remote });
+    async changeRequestPatch(directory, number, { project, remote, linked } = {}) {
+      const { target } = await findPull(directory, number, project, { remote, linked });
       const patch = await client.text(`${repoPath(target.project)}/pulls/${number}.diff`);
       if (!isString(patch)) throw malformed(`${providerLabel} returned an invalid pull request diff`);
       return { patch, meta: { owner: target.project.owner, repo: target.project.name, number } };
@@ -478,8 +512,8 @@ export function createGiteaResourceService({
      * the head commit. Gitea keeps a fork pull request's head under the
      * target repository's `refs/pull/<n>/head`, so both reads go there.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status }) {
-      const { target, raw } = await findPull(directory, number, project, { remote });
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, linked }) {
+      const { target, raw } = await findPull(directory, number, project, { remote, linked });
       const baseSha = raw?.merge_base;
       const headSha = raw?.head?.sha;
       if (!COMMIT_SHA.test(String(baseSha)) || !COMMIT_SHA.test(String(headSha))) throw malformed(`${providerLabel} returned invalid pull request refs`);
@@ -751,10 +785,100 @@ export function createGiteaResourceService({
     async reviewChangeRequest({ providerTarget, verdict, body, expectedTarget }) {
       const current = await readTargetPull(providerTarget);
       if (current.head?.sha !== expectedTarget.headSha) throw mismatch('headSha');
-      const payload = { event: verdict === 'approve' ? 'APPROVED' : 'REQUEST_CHANGES', commit_id: expectedTarget.headSha, body: body ?? '' };
-      const raw = await client.post(`${repoPath(targetRepo(providerTarget))}/pulls/${providerTarget.number}/reviews`, payload);
+      const event = REVIEW_EVENTS[verdict];
+      const reviews = reviewsPath(providerTarget);
+      const pending = await readPendingReview(providerTarget);
+      if (!pending && verdict === 'comment' && body === undefined) {
+        throw Object.assign(new Error('A review with no comments needs text'), { status: 422 });
+      }
+      // A verdict is for the commit the user read; a draft begun on an older one still goes out as comments.
+      if (pending && verdict !== 'comment' && pending.commit_id !== expectedTarget.headSha) {
+        throw Object.assign(new Error('This review draft was started on an older commit. Send it as a comment, then give your verdict.'), { status: 409 });
+      }
+      // A pending review goes out with the verdict, comments and all.
+      const raw = pending
+        ? await client.post(`${reviews}/${pending.id}`, { event, body: body ?? '' })
+        : await client.post(reviews, { event, commit_id: expectedTarget.headSha, body: body ?? '' });
       if (!isPlainObject(raw) || !Number.isInteger(raw.id)) throw malformed(`${providerLabel} returned an invalid review`);
       return { commented: body !== undefined };
+    },
+
+    /** The viewer's pending review and every published comment on the head, for the diff. Replies and resolving are not in the API. */
+    async reviewState(directory, number, project, remote) {
+      const { target, raw } = await findPull(directory, number, project, { remote });
+      const repo = repoPath(target.project);
+      const [reviews, viewer] = await Promise.all([client.get(`${repo}/pulls/${number}/reviews`), readCurrentLogin()]);
+      if (!Array.isArray(reviews)) throw malformed(`${providerLabel} returned an invalid review list`);
+      const headSha = raw?.head?.sha;
+      const commentsOf = (review) => client.get(`${repo}/pulls/${number}/reviews/${review.id}/comments`).then((value) => {
+        if (!Array.isArray(value)) throw malformed(`${providerLabel} returned invalid review comments`);
+        return value;
+      });
+      const pending = reviews.find((review) => review?.state === 'PENDING' && review?.user?.login === viewer) ?? null;
+      const published = reviews.filter((review) => review?.state !== 'PENDING' && Number(review?.comments_count) > 0 && review?.stale !== true);
+      const [draftComments, ...publishedComments] = await Promise.all([
+        pending ? commentsOf(pending) : Promise.resolve([]),
+        ...published.map(commentsOf),
+      ]);
+      return {
+        connected: true,
+        viewerIsAuthor: raw?.user?.login === viewer,
+        headSha,
+        draft: pending ? {
+          id: String(pending.id),
+          body: isString(pending.body) ? pending.body : '',
+          comments: draftComments.map((comment) => ({ ...reviewCommentAt(comment), id: String(comment.id), body: comment.body, author: reviewPerson(comment.user) })),
+        } : null,
+        threads: publishedComments.flat().filter((comment) => comment?.commit_id === headSha).map((comment) => ({
+          ...reviewCommentAt(comment),
+          id: String(comment.id),
+          resolved: Boolean(comment.resolver),
+          canReply: false,
+          canResolve: false,
+          comments: [{ id: String(comment.id), body: comment.body, createdAt: comment.created_at, url: comment.html_url, author: reviewPerson(comment.user) }],
+        })),
+        truncated: false,
+      };
+    },
+
+    async addReviewComment({ providerTarget, position, body, expectedTarget }) {
+      const comment = {
+        path: position.path,
+        body,
+        new_position: position.side === 'new' ? position.line : 0,
+        old_position: position.side === 'old' ? position.line : 0,
+      };
+      // The same call starts a pending review and adds to the one that exists.
+      const raw = await client.post(reviewsPath(providerTarget), { event: 'PENDING', commit_id: expectedTarget.headSha, body: '', comments: [comment] });
+      if (!isPlainObject(raw) || !Number.isInteger(raw.id)) throw malformed(`${providerLabel} returned an invalid review comment`);
+      return {};
+    },
+
+    /** A review comment is an issue comment to the edit route. */
+    async updateReviewComment({ providerTarget, commentId, body }) {
+      await requirePendingComment(providerTarget, commentId);
+      const updated = await client.patch(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`, { body });
+      // Older releases answer an edit of a review comment with an empty 204 and change nothing.
+      if (!isPlainObject(updated)) throw Object.assign(new Error(`This ${providerLabel} version cannot edit a review comment`), { status: 422 });
+      return {};
+    },
+
+    async deleteReviewComment({ providerTarget, commentId }) {
+      await requirePendingComment(providerTarget, commentId);
+      await client.delete(`${repoPath(targetRepo(providerTarget))}/issues/comments/${seg(commentId)}`);
+      // Older releases answer 204 for a review comment and keep it.
+      const left = await readPendingComments(providerTarget);
+      if (left.some((comment) => String(comment?.id) === commentId)) {
+        throw Object.assign(new Error(`This ${providerLabel} version cannot remove one review comment; discard the review instead`), { status: 422 });
+      }
+      return {};
+    },
+
+    async discardReview({ providerTarget }) {
+      const pending = await readPendingReview(providerTarget);
+      if (!pending) throw Object.assign(new Error('There is no review draft on this pull request'), { status: 409 });
+      await client.delete(`${reviewsPath(providerTarget)}/${pending.id}`);
+      return {};
     },
   };
 }

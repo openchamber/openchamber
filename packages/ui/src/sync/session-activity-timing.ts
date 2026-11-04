@@ -64,7 +64,7 @@ type SessionActivityPhase = 'active' | 'settled';
 
 export type SessionActivityTimingMutation =
   | { type: 'observe'; sessionId: string; phase: SessionActivityPhase; turnStart?: SessionTurnStart }
-  // The session went idle while its subagent or background command keeps the turn open.
+  // The session went idle while its subagent, background command or pull request keeps the turn open.
   | { type: 'hold'; sessionId: string }
   | { type: 'remove'; sessionId: string };
 
@@ -593,7 +593,7 @@ export const removeSessionActivityTiming = (sessionId: string): void => {
  * device only joined from a status snapshot is not such a turn, because the
  * map still describes the turn that was already running. `heldHere` names
  * sessions the host reports idle while this device sees their turn kept open
- * by a subagent or a background command: their turn begins here with the
+ * by background work: their turn begins here with the
  * host's last start, since nothing else on this device would ever start
  * counting it.
  */

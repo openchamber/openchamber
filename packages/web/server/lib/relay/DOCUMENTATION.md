@@ -238,6 +238,8 @@ answer.
 
 Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 
+A URL the browser loads itself (`<img src>`, `<video src>`, an iframe) never enters the tunnel: in relay mode the runtime base is the page's own origin, so such a URL gets the desktop protocol's 503 or the phone's app shell. `runtimeAssetsNeedFetch` is true in relay mode, so chat images and Files previews read their bytes through `runtimeFetch`. Other browser-owned URLs stay unreachable over the relay, among them chat and document video and HTML previews.
+
 ## Design invariants (do not regress)
 
 - The relay never sees plaintext application traffic; it sees only routing metadata (routing id, connection identifiers, timestamps, coarse counts).

@@ -177,6 +177,8 @@ export function createGerritClient({
       return Buffer.from(text.replace(/\s+/g, ''), 'base64');
     },
     post: (path, body) => send('POST', path, { body: body ?? {} }),
+    put: (path, body) => send('PUT', path, { body: body ?? {} }),
+    delete: (path) => send('DELETE', path, {}),
     page,
   });
 }
