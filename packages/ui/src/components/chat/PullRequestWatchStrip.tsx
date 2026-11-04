@@ -4,6 +4,8 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { changeRequestTermOfUrl, useRepositoryUrlMatcher } from '@/lib/source-control/repositoryUrlMatcher';
 import { usePrWatchStore, type PrWatch } from '@/sync/pr-watch';
 import { stopPrWatch } from '@/sync/pr-watch-sync';
 
@@ -23,6 +25,7 @@ const hasStatusLabel = (status: PrWatch['status']): status is keyof typeof STATU
  */
 export const PullRequestWatchStrip = memo(({ sessionId }: { sessionId: string | null }) => {
   const { t } = useI18n();
+  const urls = useRepositoryUrlMatcher();
   const watch = usePrWatchStore(React.useCallback((state) => (sessionId ? state.bySession.get(sessionId) ?? null : null), [sessionId]));
 
   if (!watch) return null;
@@ -38,7 +41,7 @@ export const PullRequestWatchStrip = memo(({ sessionId }: { sessionId: string | 
     <div role="status" className="flex oc-composer-row min-w-0 items-center gap-2 border-b border-edge ps-3 pe-1.5" title={watch.title || undefined}>
       <Icon name="git-pull-request" className="size-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-        {t('chat.prWatch.title', { number: watch.number })}
+        {t(changeRequestCopy('chat.prWatch.title', changeRequestTermOfUrl(watch.url, urls)), { number: watch.number })}
         {hasStatusLabel(watch.status) ? <span className="text-muted-foreground"> · {t(STATUS_LABEL[watch.status])}</span> : null}
       </span>
       <Button

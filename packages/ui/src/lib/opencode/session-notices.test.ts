@@ -47,6 +47,40 @@ describe("readSessionNotice: shown", () => {
     expect(readSessionNotice(synthetic("Continuing after restart", { notice: "restart" }))?.kind).toBe("restart")
   })
 
+  describe("a pull request wake", () => {
+    const url = "https://github.com/acme/app/pull/7"
+    const text = `<openchamber-pull-request url="${url}" number="7">\nPull request #7: a check failed (lint).\nYou are no longer watching it.\n</openchamber-pull-request>`
+
+    test("reads what changed from the metadata and the number from the envelope", () => {
+      const metadata = { source: "openchamber-pr-watch", url, events: ["checks-failed", "activity"], failedChecks: ["lint"], authors: ["bob"] }
+      expect(readSessionNotice(synthetic("Pull request #7: a check failed (lint)", metadata, text))).toEqual({
+        kind: "pull-request",
+        url,
+        number: 7,
+        events: ["checks-failed", "activity"],
+        failedChecks: ["lint"],
+        authors: ["bob"],
+        text,
+      })
+    })
+
+    test("a message written before the names were in the metadata reads without them", () => {
+      const notice = readSessionNotice(synthetic("Pull request #7: merged", { source: "openchamber-pr-watch", url, events: ["merged"] }, text))
+      expect(notice).toMatchObject({ kind: "pull-request", number: 7, failedChecks: [], authors: [] })
+    })
+
+    test("survives as an Activity row", () => {
+      const message = synthetic("Pull request #7: merged", { source: "openchamber-pr-watch", url, events: ["merged"] }, text)
+      const notice = readSessionNotice(message)!
+      expect(readSessionNoticePart(sessionNoticePart(message, notice, "assistant_1", "after"))).toEqual(notice)
+    })
+
+    test("an event this build does not know stays a plain notice", () => {
+      const metadata = { source: "openchamber-pr-watch", url, events: ["reopened"] }
+      expect(readSessionNotice(synthetic("Pull request #7: reopened", metadata, text))?.kind).toBe("plugin")
+    })
+  })
+
   test("a !command that could not start", () => {
     expect(readSessionNotice(synthetic("npm run dev", { source: "shell", state: "error" }))).toEqual({
       kind: "command-failed",
