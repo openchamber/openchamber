@@ -92,6 +92,10 @@ A block with an error shows the parser's reasons and a folded "Source". The sour
 
 One bad part used to cost the whole block: GLM wrote two charts and a table, then a `Details("Method notes")` with no children, and the user got an error in their place. A `Details` with no children is not an error at all now and draws nothing, since it holds nothing to lose. A reply has no second try, since the agent has finished and never hears of it, so a block that only shows things draws what is sound, with the reasons and the folded source under it. A form stays whole, because a form that lost an option or a button takes an answer to a different question. A page stays whole too: its reasons go back to the agent, which draws it again. Repairing each mistake in the program was the alternative; dropping the broken part handles all of them.
 
+### Why a named argument gets its own error and stays unsupported
+
+Signatures print as `label: string`, so agents write `Choice("a", [...], label: "Pick")`. The parser reads `label` as a variable and the value as one more argument, and its errors ("takes 4 arg(s), got 5", "Undefined names: label") never name the cause: agents repeated the same call. A finished block with errors is scanned with the library's tokenizer for a key where a call takes an argument, and that one error replaces the rest, since a key shifts every argument after it and the others mislead. The scan also reads what the parser skips, such as comments, so it counts only when the parser reports an excess argument or the key as an undefined name. A reply's block that keeps its sound parts lists this line under them. Supporting the keys was the alternative; the language's spec binds by position and the guidance says so.
+
 ### Why OpenUI's state, bindings and actions are left out
 
 The language can declare `$state`, bind fields and run action plans. Each needs a reactive store and its own security review, while a question needs only fields whose values a Button sends. A finished block that declares state, a query or a mutation is invalid.
