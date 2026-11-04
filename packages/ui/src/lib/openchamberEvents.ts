@@ -144,6 +144,13 @@ type SourceControlProvidersChangedEvent = { type: 'source-control-providers-chan
 type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
 
 /**
+ * The set of usage providers the server serves changed: an extension that
+ * reports usage was approved, enabled, updated, paused or removed. Carries
+ * nothing; listeners re-read the provider list.
+ */
+type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
+
+/**
  * The extension catalog changed: an extension was installed, updated, approved,
  * paused, enabled or removed, or a folder install's files changed. Carries
  * nothing; listeners re-read the catalog.
@@ -308,6 +315,7 @@ type OpenChamberEvent =
   | BrowserProviderResetEvent
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
+  | QuotaProvidersChangedEvent
   | GuestsChangedEvent
   | ThemesChangedEvent
   | LimitFailoverEvent
@@ -631,6 +639,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:tracker-providers-changed') {
     for (const listener of listeners) listener({ type: 'tracker-providers-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:quota-providers-changed') {
+    for (const listener of listeners) listener({ type: 'quota-providers-changed' });
     return;
   }
 

@@ -6,6 +6,8 @@
  */
 
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { extensionQuotaProvider, extensionQuotaProviderEntries } from '../extension-registry.js';
+import { QuotaRouteError } from '../route-error.js';
 import { buildResult } from '../utils/index.js';
 
 import * as claude from './claude/index.js';
@@ -201,6 +203,12 @@ const registry = {
   }
 };
 
+export { attachExtensionQuotaProvider, detachExtensionQuotaProvider } from '../extension-registry.js';
+
+// `hasOwn`, so an id such as `constructor` never resolves to the object's own prototype members.
+const providerOf = (providerId) => (Object.hasOwn(registry, providerId) ? registry[providerId] : extensionQuotaProvider(providerId));
+const providerEntries = () => [...Object.entries(registry), ...extensionQuotaProviderEntries()];
+
 const pendingFetches = new Map();
 
 
@@ -213,7 +221,7 @@ export const listConfiguredQuotaProviders = async () => {
   const auth = await readOpenCodeCredentials();
   const configured = [];
 
-  for (const [id, provider] of Object.entries(registry)) {
+  for (const [id, provider] of providerEntries()) {
     try {
       if (provider.isConfigured(auth)) {
         configured.push(id);
@@ -227,7 +235,7 @@ export const listConfiguredQuotaProviders = async () => {
 };
 
 const fetchQuotaForProviderUncoalesced = async (providerId) => {
-  const provider = registry[providerId];
+  const provider = providerOf(providerId);
 
   if (!provider) {
     return buildResult({
@@ -242,6 +250,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   try {
     return await provider.fetchQuota();
   } catch (error) {
+    // The extension layer's own answer for a service reply OpenChamber cannot use: the route answers its status and code.
+    if (error instanceof QuotaRouteError) throw error;
     return buildResult({
       providerId: provider.providerId,
       providerName: provider.providerName,

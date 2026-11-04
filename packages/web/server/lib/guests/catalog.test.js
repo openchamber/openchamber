@@ -550,6 +550,33 @@ describe('session events', () => {
   });
 });
 
+describe('usage providers', () => {
+  test('a quota package publishes the providers whose credentials it receives, for the dialog, and loads no frame', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-quota-'));
+    try {
+      await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
+        apiVersion: 1, contributes: {
+          panel: { id: 'teapot-usage', name: 'Teapot Usage', icon: 'cup' },
+          service: { entry: 'service/main.js', runtime: 'host', provides: ['quota'] },
+          quota: { providers: ['teapot', 'openrouter'] },
+        },
+      } }));
+      await fs.mkdir(path.join(dir, 'service'));
+      await fs.writeFile(path.join(dir, 'service/main.js'), 'console.log("service")');
+      const inspected = await inspectGuestPackage(dir);
+      expect(inspected.ok).toBe(true);
+      expect(inspected.guest.quota).toEqual({ providers: ['teapot', 'openrouter'] });
+      const row = toPublicGuest({ ...inspected.guest, capabilityGrants: [] });
+      expect(row).toMatchObject({
+        quota: { providers: ['teapot', 'openrouter'] },
+        service: { provides: ['quota'] },
+        capabilities: { requested: ['service'], granted: [] },
+      });
+      expect(hasGuestFrame(inspected.guest)).toBe(false);
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+});
+
 describe('notification channels', () => {
   test('a channel package publishes its contribution for the card and the dialog, and loads no frame', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-channel-'));

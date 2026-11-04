@@ -4,6 +4,14 @@ import {
   BROWSER_CONTROL_ACTIONS,
   NOTIFICATIONS_PROVIDER_METHODS,
   type NotificationsProviderMethod,
+  QUOTA_PROVIDER_ERROR_MESSAGE_MAX,
+  QUOTA_PROVIDER_LABEL_MAX,
+  QUOTA_PROVIDER_METHODS,
+  QUOTA_PROVIDER_MODELS_MAX,
+  QUOTA_PROVIDER_NAME_MAX,
+  QUOTA_PROVIDER_WINDOWS_MAX,
+  type QuotaProviderMethod,
+  type QuotaProviderUsageData,
   SOURCE_CONTROL_OUTBOUND_BODY_MAX,
   SOURCE_CONTROL_OUTBOUND_METHODS,
   SOURCE_CONTROL_OUTBOUND_REQUEST_HEADERS,
@@ -464,3 +472,65 @@ export const trackerProviderSchemasV1 = {
 };
 
 export const trackerProviderMethodSchema = z.enum(TRACKER_PROVIDER_METHODS);
+
+/*
+ * Host-side parse of what a usage provider answers. The envelope and the
+ * error are the Git host's. The data is a built-in's result before OpenChamber
+ * derives the remaining share and the formatted strings, bounded in count and
+ * length and asserted both ways against the type the service writes against,
+ * so the two cannot drift. A failed parse is a malformed answer, never an
+ * empty result. Window and model names are object keys the UI iterates, so
+ * the names that would reach `Object.prototype` are refused.
+ */
+
+const QUOTA_RESERVED_NAMES: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+const quotaName = z.string().min(1).max(QUOTA_PROVIDER_NAME_MAX).refine((name) => !QUOTA_RESERVED_NAMES.has(name), { message: 'reserved name' });
+const quotaLabel = z.string().max(QUOTA_PROVIDER_LABEL_MAX);
+const quotaAmount = z.number().finite().nonnegative();
+const quotaWindowSchema = z.object({
+  usedPercent: quotaAmount.nullable(),
+  windowSeconds: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  resetAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  valueLabel: quotaLabel.nullable().optional(),
+  value: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('requests'), count: quotaAmount }).strict(),
+    z.object({ kind: z.literal('spend'), spent: quotaAmount, limit: z.number().finite().positive().nullable() }).strict(),
+  ]).optional(),
+  creditsUsed: quotaAmount.optional(),
+}).strict();
+const quotaWindowsSchema = z.record(quotaName, quotaWindowSchema).refine(
+  (windows) => Object.keys(windows).length <= QUOTA_PROVIDER_WINDOWS_MAX,
+  { message: `at most ${QUOTA_PROVIDER_WINDOWS_MAX} windows` },
+);
+const quotaUsageSchema = z.object({
+  windows: quotaWindowsSchema,
+  models: z.record(quotaName, z.object({ windows: quotaWindowsSchema }).strict()).refine(
+    (models) => Object.keys(models).length <= QUOTA_PROVIDER_MODELS_MAX,
+    { message: `at most ${QUOTA_PROVIDER_MODELS_MAX} models` },
+  ).optional(),
+}).strict();
+const quotaUsageDataSchema = z.object({
+  ok: z.boolean(),
+  configured: z.boolean(),
+  error: z.string().min(1).max(QUOTA_PROVIDER_ERROR_MESSAGE_MAX).optional(),
+  planLabel: quotaLabel.nullable().optional(),
+  usage: quotaUsageSchema.nullable(),
+}).strict();
+
+const assertQuotaUsageParsed: (value: Parsed<typeof quotaUsageDataSchema>) => QuotaProviderUsageData = (value) => value;
+const assertQuotaUsageContract: (value: QuotaProviderUsageData) => Parsed<typeof quotaUsageDataSchema> = (value) => value;
+void assertQuotaUsageParsed; void assertQuotaUsageContract;
+
+const quotaDataSchemas = {
+  'usage.read': quotaUsageDataSchema,
+} satisfies Record<QuotaProviderMethod, z.ZodType>;
+
+/** Wire 1 of the quota role, as the host parses it. `data[method]` checks an `ok: true` answer's `data`. */
+export const quotaProviderSchemasV1 = {
+  envelope: envelopeSchema,
+  error: errorSchema,
+  usage: quotaUsageDataSchema,
+  data: quotaDataSchemas,
+};
+
+export const quotaProviderMethodSchema = z.enum(QUOTA_PROVIDER_METHODS);

@@ -115,6 +115,13 @@ const publicTrackerSchema = z.object({
   oauth: z.object({ scopes: z.array(z.string().trim().min(1).max(64)).max(32) }).optional(),
 });
 
+// The usage provider a `quota` service provides, as the approval dialog shows
+// it: the OpenCode providers whose credentials the service receives. A
+// malformed slice drops the field, never the row.
+const publicQuotaSchema = z.object({
+  providers: z.array(z.string().trim().min(1).max(64)).max(16),
+});
+
 const guestActionSchema = z.object({
   id: z.string().regex(PANEL_ID),
   label: z.string().trim().min(1),
@@ -186,6 +193,7 @@ const installedGuestSchema = z.object({
   sessionEvents: publicSessionEventsSchema.optional().catch(undefined),
   notifications: publicNotificationsSchema.optional().catch(undefined),
   tracker: publicTrackerSchema.optional().catch(undefined),
+  quota: publicQuotaSchema.optional().catch(undefined),
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),

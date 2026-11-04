@@ -361,6 +361,23 @@ describe('notification channel scopes', () => {
   });
 });
 
+describe('quota scopes', () => {
+  test('round-trips the service grant\'s quota scope, an empty list included', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      const scope = { service: { exec: [], sockets: [], quota: { providers: ['deepinfra', 'openrouter'] } } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['service'] }, capabilityScopes: { alpha: scope } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: scope });
+      const empty = { service: { exec: [], sockets: [], quota: { providers: [] } } };
+      await writeExtensionStore(file, { paths: ['/a'], sources: {}, gitOrigins: {}, capabilityGrants: { alpha: ['service'] }, capabilityScopes: { alpha: empty } });
+      expect((await readExtensionStore(file)).capabilityScopes).toEqual({ alpha: empty });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('tracker scopes', () => {
   test('round-trips the service grant\'s tracker scope', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));

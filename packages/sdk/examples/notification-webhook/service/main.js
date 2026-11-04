@@ -240,6 +240,7 @@ var createNotificationsOutbound = ({ env }) => {
   };
 };
 var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
+var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);

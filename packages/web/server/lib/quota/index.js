@@ -7,6 +7,8 @@
 
 /** @public */
 export {
+  attachExtensionQuotaProvider,
+  detachExtensionQuotaProvider,
   listConfiguredQuotaProviders,
   fetchQuotaForProvider,
   fetchClaudeQuota,

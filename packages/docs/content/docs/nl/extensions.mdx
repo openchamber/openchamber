@@ -87,6 +87,16 @@ Pauzeert u de extensie, dan verdwijnt de tracker tot u haar weer inschakelt, en 
 
 De OpenChamber SDK bevat een werkend voorbeeld, `examples/tracker-provider`, met een neptracker om ernaast te draaien. Zie [Een extensie bouwen](/nl/sdk/).
 
+## Een extensie als verbruiksprovider
+
+Een extensie kan naast de ingebouwde providers een verbruiksprovider toevoegen: een provider die OpenChamber niet zelf uitleest, of een eigen provider. Haar toestemmingsdialoog heeft dan een regel die begint met **Rapporteert gebruik als een ingebouwde provider** en de OpenCode-providers noemt waarvan zij de aanmeldgegevens leest, zoals `openrouter`; een extensie die er geen noemt, zegt dat.
+
+Zodra u haar toestaat, staat haar kaart onder **Instellingen → Verbruik** achter de ingebouwde providers, met de naam en het pictogram van de extensie, en verschijnt zij net als elke ingebouwde provider in de limieten in de kopbalk, in de werkstatus, in de popover op de telefoon en in het systeemvak op de desktop wanneer u **Tonen in werkstatus** aanvinkt. Bij elke vernieuwing geeft OpenChamber de extensie de aanmeldgegevens die OpenCode voor elke genoemde provider bewaart, en verder niets; een versie die een andere provider noemt, vraagt opnieuw om uw toestemming. De extensie leest het verbruik zelf, en OpenChamber tekent het zoals bij een ingebouwde provider.
+
+Pauzeert u de extensie, dan verdwijnt de kaart tot u haar weer inschakelt, en uw verbruiksinstellingen ervoor blijven bewaard. Verwijdert u de extensie, dan verdwijnt de kaart voorgoed. VS Code toont geen verbruik uit extensies; op de telefoon wordt de kaart getoond, en de extensie stelt u in vanuit de web- of desktopapp. Een sessie in een geïsoleerde space leest het verbruik van de eigen server van die space, die geen extensies heeft.
+
+De OpenChamber SDK bevat een werkend voorbeeld, `examples/quota-provider`, met een nep-verbruiks-API om ernaast te draaien. Zie [Een extensie bouwen](/nl/sdk/).
+
 ## Het account verbinden
 
 Een extensie die met een dienst communiceert, krijgt bij **Instellingen → Integraties** een kaart onder **Extensieaccounts**. Afhankelijk van de dienst vraagt die om een API-token, gebruikersnaam en token of client-ID voor een aanmeldprocedure. Kies **Verbinden**. **Verbinding verbreken** wist het opgeslagen token. Extra velden van de extensie worden automatisch opgeslagen wanneer u het veld verlaat.

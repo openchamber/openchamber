@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
-import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
+import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
 
 const validBlock = {
@@ -1527,5 +1527,38 @@ describe('contributes.tracker', () => {
     expect(withTracker({ capabilities: { hostAccess: true } })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withTracker({ label: '' })).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withTracker({ extra: 1 })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+});
+
+describe('contributes.quota', () => {
+  const pageless = { id: 'teapot-usage', name: 'Teapot Usage', icon: 'cup' };
+  const role = { entry: 'service/main.js', runtime: 'host', provides: ['quota'] };
+  const quota = { providers: ['openrouter', 'deepinfra'] };
+  const parse = <T,>(contributes: T) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('the role and the contribution come together and name the providers whose credentials the service receives', () => {
+    const result = parse({ panel: pageless, service: role, quota });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error(result.message);
+    expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    expect(result.manifest.contributes.quota).toEqual({ providers: ['openrouter', 'deepinfra'] });
+    expect(toPublicQuota(result.manifest.contributes.quota!)).toEqual({ providers: ['openrouter', 'deepinfra'] });
+    // An extension whose provider OpenCode holds no key for lists nothing and receives nothing.
+    expect(parse({ panel: pageless, service: role, quota: { providers: [] } })).toMatchObject({ ok: true, manifest: { contributes: { quota: { providers: [] } } } });
+
+    expect(parse({ panel: pageless, service: role })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('come together') });
+    expect(parse({ panel: pageless, service: { ...role, provides: undefined }, quota })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: { ...pageless, id: 'a'.repeat(29) }, service: role, quota })).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('28') });
+  });
+
+  test('provider ids are OpenCode ids by shape, unique and bounded, and the failing one is named', () => {
+    for (const id of ['openrouter', 'zai-coding-plan', 'google.oauth', 'kimi_code', '0ai']) expect([id, isOpenCodeProviderId(id)]).toEqual([id, true]);
+    for (const id of ['OpenRouter', '__proto__', '-dash', 'with space', 'a'.repeat(65), '']) expect([id, isOpenCodeProviderId(id)]).toEqual([id, false]);
+    const withProviders = (providers: string[] | string) => parse({ panel: pageless, service: role, quota: { providers } });
+    expect(withProviders(['OpenRouter'])).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('contributes.quota.providers[0]') });
+    expect(withProviders(['openrouter', 'openrouter'])).toMatchObject({ ok: false, code: 'invalid-service', message: expect.stringContaining('unique') });
+    expect(withProviders(Array.from({ length: 17 }, (_, index) => `provider-${index}`))).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(withProviders('openrouter')).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: pageless, service: role, quota: { ...quota, extra: 1 } })).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 });

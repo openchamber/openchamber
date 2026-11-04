@@ -25,6 +25,9 @@ test('Electron dev loads usage through its same-origin proxy before Settings ope
     if (path === '/api/config/settings?surface=desktop') {
       return Response.json({ usageDropdownProviders: ['codex'] });
     }
+    if (path === '/api/quota/extensions') {
+      return Response.json({ extensions: [] });
+    }
     if (path === '/api/quota/codex') {
       return Response.json({
         providerId: 'codex', providerName: 'Codex', ok: true, configured: true, fetchedAt: 123,
@@ -44,14 +47,14 @@ test('Electron dev loads usage through its same-origin proxy before Settings ope
     useQuotaStore.getState().resetForRuntimeSwitch();
     await useQuotaStore.getState().ensureLoadedForRuntime();
 
-    expect(requests).toEqual(['/api/config/settings?surface=desktop', '/api/quota/codex']);
+    expect(requests).toEqual(['/api/config/settings?surface=desktop', '/api/quota/extensions', '/api/quota/codex']);
     expect(getRuntimeKey()).toBe('local');
     expect(getRuntimeApiBaseUrl()).toBe('');
     expect(useQuotaStore.getState().loadedRuntimeKey).toBe('local');
     expect(useQuotaStore.getState().results[0]?.usage?.windows['5h'].remainingPercent).toBe(58);
 
     await useQuotaStore.getState().ensureLoadedForRuntime();
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(3);
   } finally {
     useQuotaStore.getState().resetForRuntimeSwitch();
     useConfigStore.setState({ isInitialized: previousInitialized });

@@ -113,6 +113,17 @@ readout also loads the providers that readout did not request. Runtime switches
 and credential changes invalidate this freshness window and old-account samples.
 A credential event with no visible readout only invalidates samples.
 
+The usage providers installed extensions serve (`extensionProviders`, from
+`GET /api/quota/extensions`) are read with the instance's settings on the first
+load for a runtime, and again when the server announces
+`openchamber:quota-providers-changed` or the event stream reconnects; a failed
+read keeps the list it had. A provider that leaves takes its results, errors,
+in-flight request and page selection with it. A provider that arrives is
+fetched once as soon as the instance has loaded, whether or not a readout is
+shown: the change follows the user's own action in Extensions, a readout opened
+right after would sit inside the freshness window without it, and a Work status
+panel that found no configured provider has no demand left to bring it in.
+
 Hidden documents stop the interval. Electron uses native window visibility
 because Chromium can report `visible` for a hidden window when background
 throttling is disabled. Capacitor additionally uses App foreground state. A

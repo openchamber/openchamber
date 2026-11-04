@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { hasGuestPage, requestedGuestCapabilities, resolveAttachEntry, resolveAttachMode, resolvePageEntry, resolveStatusSectionEntry, resolveStatusSectionSource, toPublicNotifications,
-  toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
+  toPublicQuota, toPublicTracker, toPublicService, toPublicSessionEvents, toPublicSourceControl, toPublicIntegration, hostMeetsOpenChamberEngine, openChamberEngineMinimum } from '@openchamber/sdk';
 import { parseManifestJson } from '@openchamber/sdk/schemas';
 
 import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './html-tokens.js';
@@ -329,6 +329,10 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.tracker) {
     guest.tracker = parsed.manifest.contributes.tracker;
   }
+  // The usage provider a `quota` service provides; the parse requires it exactly then.
+  if (parsed.manifest.contributes.quota) {
+    guest.quota = parsed.manifest.contributes.quota;
+  }
   return { ok: true, guest };
 };
 
@@ -459,6 +463,10 @@ export const toPublicGuest = (guest) => {
   // What the approval dialog and the tracker's account card name: the tracker, where its accounts live, how one signs in.
   if (guest.tracker) {
     row.tracker = toPublicTracker(guest.tracker);
+  }
+  // What the approval dialog names: the OpenCode providers whose credentials the usage provider receives.
+  if (guest.quota) {
+    row.quota = toPublicQuota(guest.quota);
   }
   return row;
 };

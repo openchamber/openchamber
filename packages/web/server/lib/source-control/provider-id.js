@@ -17,9 +17,10 @@ export const isProviderId = (value) => Object.prototype.toString.call(value) ===
 export const isReservedProviderId = (value) => RESERVED_PROVIDER_IDS.includes(value);
 
 /**
- * Ids an installed extension's source-control provider, notification channel
- * or tracker takes: `ext-` plus its guest id, derived by the host and never
- * declared, so no extension can claim a built-in's id or another extension's.
+ * Ids an installed extension's source-control provider, notification channel,
+ * tracker or usage provider takes: `ext-` plus its guest id, derived by the
+ * host and never declared, so no extension can claim a built-in's id or
+ * another extension's.
  * Built-in lists and the tracker registry's built-ins refuse any id with the
  * prefix; an extension's tracker takes it through the registry's extension
  * layer, which is why one extension is a Git host or a tracker, never both.

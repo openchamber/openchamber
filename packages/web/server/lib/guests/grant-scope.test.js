@@ -211,3 +211,24 @@ describe('tracker scope', () => {
     expect(effectiveGrants(['service'], plain, approved)).toEqual([]);
   });
 });
+
+describe('quota scope', () => {
+  const quota = (providers) => ({ ...guest, service: { ...guest.service, provides: ['quota'] }, quota: { providers } });
+
+  test('covers the providers whose credentials the service receives, sorted, an empty list included', () => {
+    expect(guestGrantScope(quota(['openrouter', 'deepinfra'])).service.quota).toEqual({ providers: ['deepinfra', 'openrouter'] });
+    expect(guestGrantScope(quota([])).service.quota).toEqual({ providers: [] });
+    expect(guestGrantScope(guest).service).not.toHaveProperty('quota');
+  });
+
+  test('a list that grows, shrinks or appears needs the service approved again', () => {
+    const approved = guestGrantScope(quota(['openrouter']));
+    expect(effectiveGrants(['service'], approved, approved)).toEqual(['service']);
+    expect(effectiveGrants(['service'], approved, guestGrantScope(quota(['openrouter', 'deepinfra'])))).toEqual([]);
+    expect(effectiveGrants(['service'], approved, guestGrantScope(quota([])))).toEqual([]);
+    expect(effectiveGrants(['service'], guestGrantScope(quota([])), approved)).toEqual([]);
+    // Adding the role to a service approved without it also asks again, and dropping it too.
+    expect(effectiveGrants(['service'], guestGrantScope(guest), approved)).toEqual([]);
+    expect(effectiveGrants(['service'], approved, guestGrantScope(guest))).toEqual([]);
+  });
+});

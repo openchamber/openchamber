@@ -87,6 +87,16 @@ Pausing the extension takes the tracker away until you turn it back on, and your
 
 The OpenChamber SDK has a working example, `examples/tracker-provider`, with a fake tracker to run beside it. See [Build an extension](/sdk/).
 
+## An extension as a usage provider
+
+An extension can add a usage provider next to the built-in ones: a provider OpenChamber does not read itself, or one of its own. Its permission dialog then has a line that starts with **Reports usage like a built-in provider** and lists the OpenCode providers whose credentials it reads, such as `openrouter`; an extension that lists none says so.
+
+Once you allow it, its card sits after the built-in providers on **Settings → Usage**, with the extension's name and icon, and it joins the header's rate limits, Work Status, the phone's popover and the desktop tray when you tick **Show in Work Status**, like any built-in. On every refresh OpenChamber hands the extension the credential OpenCode holds for each provider it listed, and nothing else; a version that lists another provider asks for your approval again. The extension reads the usage itself, and OpenChamber draws it the way it draws a built-in.
+
+Pausing the extension takes the card away until you turn it back on, and your Usage settings for it stay. Removing the extension takes the card away for good. VS Code shows no usage from extensions; on the phone the card shows, and the extension is set up from the web or desktop app. A session inside an isolated space reads usage from that space's own server, which has no extensions.
+
+The OpenChamber SDK has a working example, `examples/quota-provider`, with a fake usage API to run beside it. See [Build an extension](/sdk/).
+
 ## Connect its account
 
 An extension that talks to a service gets a card at **Settings → Integrations** under **Extension accounts**. Depending on the service, the card asks for an API token, a username and token, or a client id for a sign-in flow. Choose **Connect**; **Disconnect** forgets the stored token. Extra fields the extension declares save on their own as you leave them.

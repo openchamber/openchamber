@@ -251,6 +251,7 @@ var createTrackerOutbound = ({ env }) => {
     request: (handle, request) => postOutbound(url, handle, request, TRACKER_OUTBOUND_TIMEOUT_MS, (message, code, status) => new TrackerOutboundError(message, code, status))
   };
 };
+var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
 // packages/sdk/src/service-surface.ts
 var SURFACE_CONTROLLERS = ["none", "agent", "user"];
 var CONTROLLERS = new Set(SURFACE_CONTROLLERS);

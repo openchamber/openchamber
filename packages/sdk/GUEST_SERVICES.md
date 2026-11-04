@@ -88,7 +88,7 @@ Parse rules:
 - `contributes.service` is optional. A guest without `service` is HTML-only.
 - `service.entry` is a relative path inside the package. Ship compiled JS; the host never compiles TypeScript.
 - `service.runtime` phase 1 accepts only `"host"`.
-- `service.provides` is optional: roles the service stands in for on the host, `"browser"`, `"source-control"`, `"notifications"` and `"tracker"` (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself. An extension is a Git host or a tracker, never both: the two would share the id `ext-<panel.id>`.
+- `service.provides` is optional: roles the service stands in for on the host, `"browser"`, `"source-control"`, `"notifications"`, `"tracker"` and `"quota"` (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself. An extension is a Git host or a tracker, never both: the two would share the id `ext-<panel.id>`.
 - `service.surface` is optional (`true`): the service shows a live picture the host draws in the extension's rail panel and takes the user's input back (below). With `panel.entry` too, that page is docked to one edge of the picture (`panel.dock`: `top`, `bottom`, `left`, or `right`, default `top`; `panel.size` in CSS px across that edge, 24 to 480, default 40); without it, the picture is the whole panel.
 - `service.permissions.sockets` and `service.permissions.exec` are shown to the user in the approval dialog. They describe intent and do not confine the process: a service runs with the user's full access. Declaring `contributes.service` adds the `service` capability to the package's request list; the user approves the whole list once when the package is installed (Settings → Extensions), and the first `serviceRequest` is refused with `NO_SERVICE` until then.
 - The catalog adds `service.socketBindings`: `{ id, candidates, resolved, override }` for this host. The user can override a path in Extensions. Override empty clears it and the next spawn re-resolves.
@@ -142,7 +142,7 @@ Env the host sets:
 - `OPENCHAMBER_SERVICE_PORT` — port to bind on `127.0.0.1`
 - `OPENCHAMBER_SERVICE_TOKEN` — shared secret
 - `OPENCHAMBER_SERVICE_SOCKETS` — JSON map `{ [socketId]: absolutePath }` for every binding that resolved (override or first existing candidate)
-- `OPENCHAMBER_HOST_CALLBACK_URL` — only for a service that provides `source-control` or `notifications`: OpenChamber's callback listener for the requests those roles send out (see below)
+- `OPENCHAMBER_HOST_CALLBACK_URL` — only for a service that provides `source-control`, `notifications` or `tracker`: OpenChamber's callback listener for the requests those roles send out (see below)
 
 Inbound auth: every request, including ready, must send:
 
@@ -478,6 +478,42 @@ The service never holds a credential. `createTrackerOutbound({ env: process.env 
 Session comments: when the user turns them on, OpenChamber posts `started` when a session starts from one of your items, then `completed` or `failed` once each when that session's turn ends or fails, each through `comments.create`, with a link only to an origin other people can open. The service runs on demand and stops after `TRACKER_PROVIDER_IDLE_MS` (ten minutes) without a call.
 
 `examples/tracker-provider` is the reference: a tracker over a fake server you run beside it, run by `scripts/tracker-provider-example.test.ts`.
+
+## Usage provider (`provides: ["quota"]`)
+
+A service with this role reports usage next to the built-in providers: a provider OpenChamber does not read itself, or one of the extension's own. The role needs `contributes.quota` in the same manifest, and the manifest needs it only with the role; either alone fails as `invalid-service`. OpenChamber names the provider `ext-<panel.id>` (so `panel.id` is at most `QUOTA_GUEST_ID_MAX`, 28), draws its card with the extension's name and icon after the built-ins on the Usage page, in the header, in Work Status, on the phone and in the desktop tray, and asks the service for usage the way it asks a built-in.
+
+```json
+"service": { "entry": "service/main.js", "runtime": "host", "provides": ["quota"] },
+"quota": { "providers": ["openrouter", "deepinfra"] }
+```
+
+| Field | Rules |
+|---|---|
+| `providers` | Up to `QUOTA_PROVIDERS_MAX` (16) unique OpenCode provider ids (`OPENCODE_PROVIDER_ID`: lowercase letters and digits, then `.`, `_` and `-`), the keys of OpenCode's credential store (`openrouter`, `zai-coding-plan`). Checked by shape alone: a credential can arrive after install, and one OpenCode does not hold is the "not configured" state the card already draws. May be empty, for a provider whose key lives in the extension's own settings |
+
+What the user sees: the approval dialog lists the providers and says the extension receives the credential OpenCode holds for each of them and nothing else; a version that adds or drops one asks again, like a new capability. The card is configured when OpenCode holds at least one listed credential, and always when the list is empty. Pausing the extension takes the card away and keeps the user's Usage settings for it; removing it takes the card away. In enterprise mode the role installs only from an allowed repository like every service, and it receives no conversation content. VS Code loads no extensions and shows no such card; the phone shows the card and sets nothing up; a session inside an isolated space reads usage from that space's own server, which has no extensions.
+
+### Calls
+
+OpenChamber posts `POST /quota` (`QUOTA_PROVIDER_PATH`) with the service bearer, one call per refresh of the card; concurrent refreshes share one call, as they do for a built-in.
+
+```json
+{ "v": 1, "requestId": "…", "method": "usage.read", "provider": "ext-openrouter-usage",
+  "input": { "credentials": { "openrouter": { "type": "api", "key": "sk-or-…" } } } }
+```
+
+| Method | Deadline | `input` | Answer `data` |
+|---|---|---|---|
+| `usage.read` | 20 s | `{ credentials }`: the credential OpenCode holds for each listed provider, keyed by provider id, as OpenCode stores it (`QuotaProviderCredential`: `{ type: "api", key }`, or `{ type: "oauth", access, refresh, expires, … }` for a browser login); a listed provider OpenCode holds nothing for is absent | `QuotaProviderUsageData`: the result a built-in computes, `ok`, `configured`, `error?`, `planLabel?`, and `usage` with `windows` keyed by name (`5h`, `weekly`, `credits_balance`), each `{ usedPercent, windowSeconds?, resetAt?, valueLabel?, value?, creditsUsed? }`, plus `models` for per-model windows |
+
+A listed provider OpenCode holds no credential for is answered as not configured by OpenChamber itself; the service is not called. OpenChamber refreshes no login for the service: an expired one is the service's to report in `error`, as a built-in reports it. `configured: false` draws the card's "not configured" state, which points at the Providers page, so answer it only when a listed OpenCode credential is what is missing; a key of the extension's own that is missing is `configured: true` with an `error` that says where to enter it.
+
+Parse the body with `readQuotaProviderRequest` (`QuotaProviderRequest`; `null` → HTTP 400) and answer HTTP 200 `{ ok: true, data }` or `{ ok: false, error: { message, status?, code? } }` (`QuotaProviderResult`); the envelope's `ok: false` is for a call the service could not handle at all, and its message reaches the card as the error. OpenChamber checks `data` with `quotaProviderSchemasV1`, bounded in count and length (32 windows, 64 models); an answer that does not parse is `502 MALFORMED_PROVIDER_RESPONSE`, never an empty result, and the card keeps its last reading with the failure beside it. OpenChamber adds the provider id, the name and the time of the read, and derives each window's remaining share, reset countdown and formatted strings (`toUsageWindow`), so the card matches a built-in's field for field. The service runs on demand and stops after `QUOTA_PROVIDER_IDLE_MS` (ten minutes) without a call; the Usage page refreshes every three minutes while open, so the service stays up while someone watches.
+
+The service reaches its provider's API itself, with the credential it was handed: there is no outbound proxy and no `OPENCHAMBER_HOST_CALLBACK_URL` for this role. The user approved exactly which credentials cross in the dialog.
+
+`examples/quota-provider` is the reference: a provider over a fake usage API you run beside it, run by `scripts/quota-provider-example.test.ts`.
 
 ## Session events (`contributes.sessionEvents`)
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
 import { formatQuotaResetLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -34,7 +34,7 @@ export const UsageProviderCards: React.FC<{
     {groups.map((group) => (
       <div key={group.providerId} className="min-w-0 rounded-xl bg-foreground/[0.03] p-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <ProviderLogo providerId={group.providerId} className="size-4 shrink-0" />
+          <QuotaProviderLogo providerId={group.providerId} className="size-4 shrink-0" />
           <span className="min-w-0 flex-1 truncate typography-ui-label font-medium text-foreground">
             {group.providerName}
           </span>
