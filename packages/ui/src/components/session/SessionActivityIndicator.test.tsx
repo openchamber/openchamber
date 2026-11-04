@@ -62,7 +62,7 @@ describe('SessionActivityIndicator', () => {
     await renderIndicator({ state: 'running' });
     expect(iconHref('running')).toBe('#oc-circle');
     await renderIndicator({ state: 'subagent' });
-    expect(iconHref('subagent')).toBe('#oc-robot');
+    expect(iconHref('subagent')).toBe('#oc-robot-2');
     await renderIndicator({ state: 'shell' });
     expect(iconHref('shell')).toBe('#oc-terminal');
     await renderIndicator({ state: 'unread' });
