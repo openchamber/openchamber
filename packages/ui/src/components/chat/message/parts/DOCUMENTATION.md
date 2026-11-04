@@ -101,6 +101,17 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
+### Why a collapsed user message shares two lines between text and context
+
+Each context item (a quote, a code comment, terminal output) collapses to one
+row, so a message with ten comments stayed ten rows tall, and with the sticky
+user header on those rows stayed over the chat. A collapsed message now gets
+two lines: the text takes one or two, and context rows get what is left
+(`contextPartsPastCollapse`). The rest waits behind the message's one show more
+link. The text wins because it is what the user typed. Lines follow the chat's
+width, so `UserTextPart` measures them before paint, and clamping the block by
+height would cut a row in half.
+
 ### Bidirectional prose
 
 Shared chat CSS applies `unicode-bidi: plaintext` to prose blocks, including
