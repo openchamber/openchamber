@@ -1,5 +1,6 @@
 import React from 'react';
 import { toast } from 'sonner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
@@ -418,30 +419,43 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           // the keyboard, and a touch screen, which has no hover, shows it always.
           value={(
             <>
-              <button
-                type="button"
-                aria-label={t('references.link.copy')}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  copyLink(entry.url);
-                }}
-                className="hidden shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground group-focus-within/linked:block group-hover/linked:block pointer-coarse:block pointer-coarse:p-2"
-              >
-                <Icon name="link" className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                disabled={!sessionId || !directory}
-                aria-label={t('chat.workStatus.linkedIssues.unlink')}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  unlinkLinkedThread(entry);
-                }}
-                // A finger needs more than the icon, and a missed copy must not land on unlink.
-                className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground pointer-coarse:p-2"
-              >
-                <Icon name="close" className="size-3.5" />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t('references.link.copy')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      copyLink(entry.url);
+                    }}
+                    className="hidden shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground group-focus-within/linked:block group-hover/linked:block pointer-coarse:block pointer-coarse:p-2"
+                  >
+                    <Icon name="link" className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={4}>{t('references.link.copy')}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* A row turns off pointer events on all but buttons; the span keeps the tooltip on a disabled one. */}
+                  <span className="pointer-events-auto inline-flex shrink-0">
+                    <button
+                      type="button"
+                      disabled={!sessionId || !directory}
+                      aria-label={t('chat.workStatus.linkedIssues.unlink')}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        unlinkLinkedThread(entry);
+                      }}
+                      // A finger needs more than the icon, and a missed copy must not land on unlink.
+                      className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground pointer-coarse:p-2"
+                    >
+                      <Icon name="close" className="size-3.5" />
+                    </button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={4}>{t('chat.workStatus.linkedIssues.unlink')}</TooltipContent>
+              </Tooltip>
             </>
           )}
           ariaLabel={entry.kind === 'tracker'
@@ -461,18 +475,26 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           key={note.id}
           muted
           leading={(
-            <button
-              type="button"
-              disabled={!isDraft && (!sessionId || !directory)}
-              aria-label={t('chat.workStatus.breakdown.unpin')}
-              onClick={(event) => {
-                event.stopPropagation();
-                unpinNote(note.id);
-              }}
-              className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
-            >
-              <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A row turns off pointer events on all but buttons; the span keeps the tooltip on a disabled one. */}
+                <span className="pointer-events-auto inline-flex shrink-0">
+                  <button
+                    type="button"
+                    disabled={!isDraft && (!sessionId || !directory)}
+                    aria-label={t('chat.workStatus.breakdown.unpin')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      unpinNote(note.id);
+                    }}
+                    className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
+                  >
+                    <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+                  </button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>{t('chat.workStatus.breakdown.unpin')}</TooltipContent>
+            </Tooltip>
           )}
           label={note.body.trim().split('\n')[0] || note.body.trim()}
           value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedNote')}</WorkStatusValue>}
@@ -483,18 +505,26 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           key={plan.id}
           muted
           leading={(
-            <button
-              type="button"
-              disabled={!isDraft && (!sessionId || !directory)}
-              aria-label={t('chat.workStatus.breakdown.unpin')}
-              onClick={(event) => {
-                event.stopPropagation();
-                unpinPlan(plan.id);
-              }}
-              className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
-            >
-              <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A row turns off pointer events on all but buttons; the span keeps the tooltip on a disabled one. */}
+                <span className="pointer-events-auto inline-flex shrink-0">
+                  <button
+                    type="button"
+                    disabled={!isDraft && (!sessionId || !directory)}
+                    aria-label={t('chat.workStatus.breakdown.unpin')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      unpinPlan(plan.id);
+                    }}
+                    className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
+                  >
+                    <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+                  </button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>{t('chat.workStatus.breakdown.unpin')}</TooltipContent>
+            </Tooltip>
           )}
           label={plan.title}
           value={<WorkStatusValue tone="muted">{t('chat.workStatus.breakdown.pinnedPlan')}</WorkStatusValue>}

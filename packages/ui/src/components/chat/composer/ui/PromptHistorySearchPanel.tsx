@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -177,9 +178,14 @@ function PromptHistorySearchPanelView({ history, initialQuery, olderRequest, onP
                         }}
                         className="h-8 min-w-0 flex-1 bg-transparent p-0 typography-meta text-[max(16px,0.875rem)] outline-none placeholder:text-muted-foreground"
                     />
-                    <Button type="button" variant="ghost" size="xs" aria-label={t('chat.promptHistorySearch.close')} data-prompt-history-search-close onClick={() => onClose('dismiss')} className="size-6 rounded-full p-0">
-                        <Icon name="close" className="size-3.5" />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button type="button" variant="ghost" size="xs" aria-label={t('chat.promptHistorySearch.close')} data-prompt-history-search-close onClick={() => onClose('dismiss')} className="size-6 rounded-full p-0">
+                                <Icon name="close" className="size-3.5" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('chat.promptHistorySearch.close')}</TooltipContent>
+                    </Tooltip>
                 </>}
             >
                 {candidates.length === 0 ? (

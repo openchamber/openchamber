@@ -3,6 +3,7 @@ import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import type { ReplyCommandRun } from '@/lib/opencode/reply-command';
 import { cn } from '@/lib/utils';
@@ -15,17 +16,19 @@ function ReplyCommandButton({ command }: { command: ReplyCommand }) {
   const { t } = useI18n();
   const { running, starting, start, stop } = command;
   return (
-    <Button
-      variant="ghost"
-      size="xs"
-      data-export-ignore
-      data-reply-command-run
-      disabled={starting}
-      title={t(running ? 'markdownRenderer.code.actions.stopTitle' : 'markdownRenderer.code.actions.runTitle')}
-      onClick={running ? stop : start}
-    >
-      {starting ? <Spinner className="size-3.5" /> : <Icon name={running ? 'stop' : 'play'} className="size-3.5" />}
-    </Button>
+    <HoverTooltip label={t(running ? 'markdownRenderer.code.actions.stopTitle' : 'markdownRenderer.code.actions.runTitle')}>
+      <Button
+        variant="ghost"
+        size="xs"
+        data-export-ignore
+        data-reply-command-run
+        disabled={starting}
+        aria-label={t(running ? 'markdownRenderer.code.actions.stopTitle' : 'markdownRenderer.code.actions.runTitle')}
+        onClick={running ? stop : start}
+      >
+        {starting ? <Spinner className="size-3.5" /> : <Icon name={running ? 'stop' : 'play'} className="size-3.5" />}
+      </Button>
+    </HoverTooltip>
   );
 }
 

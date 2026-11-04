@@ -130,6 +130,14 @@ the list, takes the widest as its width, and forgets rows that leave the
 tree. That keeps the sideways scroll when wide rows scroll out of view or
 another folder opens.
 
+### Why `FilesView`'s row menus share one tooltip
+
+`FilesView`'s tree mounts every row and each row's menu button stays mounted,
+so a tooltip per button would keep a root per file. `DelegatedTooltip`
+(`ui/row-tooltip.tsx`) listens on the list and anchors one tooltip to the button
+carrying `data-row-tooltip`. The sidebar tree keeps a tooltip per row because it
+mounts only the rows in view.
+
 ### Why the end lane paints the row's colour under a mask
 
 The fade has to cover the name with exactly the colour of the row behind it,

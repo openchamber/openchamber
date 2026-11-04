@@ -7,6 +7,7 @@ import {
     DropdownMenuRadioItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
@@ -56,18 +57,20 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
 
     return (
         <DropdownMenu open={open} onOpenChange={setOpen}>
-            <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label={t('diffView.scope.selectorAria')}
-                >
-                    <span className="whitespace-nowrap">
-                        {currentLabel}{currentCount !== null && <span className="diff-toolbar__scope-count">: {currentCount}</span>}
-                    </span>
-                    <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
-                </button>
-            </DropdownMenuTrigger>
+            <HoverTooltip label={t('contextTooltips.diff.scope')} side="bottom">
+                <DropdownMenuTrigger asChild>
+                    <button
+                        type="button"
+                        className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={t('diffView.scope.selectorAria')}
+                    >
+                        <span className="whitespace-nowrap">
+                            {currentLabel}{currentCount !== null && <span className="diff-toolbar__scope-count">: {currentCount}</span>}
+                        </span>
+                        <Icon name="arrow-down-s" className="size-4 flex-shrink-0 opacity-60" />
+                    </button>
+                </DropdownMenuTrigger>
+            </HoverTooltip>
             <DropdownMenuContent align="start" className="w-40">
                 <DropdownMenuRadioGroup
                     value={scope}

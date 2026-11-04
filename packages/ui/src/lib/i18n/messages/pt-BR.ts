@@ -50,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Modelos Zen',
@@ -225,6 +234,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['pt-BR'],
   ...sessionReferencesI18n['pt-BR'],
   ...guestStatusViewI18n['pt-BR'],
+  ...tooltipsDiffI18n['pt-BR'],
+  ...tooltipsFilesI18n['pt-BR'],
+  ...tooltipsGitI18n['pt-BR'],
+  ...tooltipsTrackerI18n['pt-BR'],
+  ...tooltipsWalkthroughI18n['pt-BR'],
+  ...tooltipsTerminalBrowserI18n['pt-BR'],
+  ...tooltipsWorkspaceI18n['pt-BR'],
+  ...tooltipsPanelI18n['pt-BR'],
+  ...tooltipsChatI18n['pt-BR'],
   'terminalView.actions.attachSelection': 'Anexar saída selecionada',
   'terminalView.actions.copySelection': 'Copiar saída selecionada',
   'terminalView.toast.selectionCopied': 'Saída copiada',
@@ -1657,7 +1675,6 @@ export const dict: Record<I18nKey, string> = {
   "sidebarFilesTree.actions.addMenuTitle": "Novo arquivo, pasta ou envio",
   "sidebarFilesTree.actions.refreshTitle": "Atualizar",
   "sidebarFilesTree.actions.collapseAllTitle": "Recolher todas as pastas",
-  "sidebarFilesTree.actions.fileMenuTitle": "Menu do arquivo",
   "sidebarFilesTree.state.searching": "Buscando...",
   "sidebarFilesTree.state.loading": "Carregando...",
   "sidebarFilesTree.dialog.createFile.title": "Criar arquivo",
@@ -2470,7 +2487,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.fileMentionAutocomplete.empty": "Nenhuma correspondência encontrada",
   "chat.queuedMessage.attachments": "+{count} arquivo(s)",
   "chat.queuedMessage.empty": "(vazio)",
-  "chat.queuedMessage.title": "Queued messages",
+  "chat.queuedMessage.title": "Mensagens na fila",
   "chat.queuedMessage.edit": "edit",
   "chat.queuedMessage.send": "send",
   "chat.queuedMessage.removeAria": "Excluir da fila",

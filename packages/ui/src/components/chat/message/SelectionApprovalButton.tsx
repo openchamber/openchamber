@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -67,8 +68,10 @@ export function SelectionApprovalButton({ mobile, getSelection, onSuccess }: Sel
   }
 
   return (
-    <Button type="button" variant="ghost" size="icon" onClick={approve} aria-label={label} title={label} className="rounded-full">
-      <Icon name="thumb-up" className="size-4" />
-    </Button>
+    <HoverTooltip label={label}>
+      <Button type="button" variant="ghost" size="icon" onClick={approve} aria-label={label} className="rounded-full">
+        <Icon name="thumb-up" className="size-4" />
+      </Button>
+    </HoverTooltip>
   );
 }

@@ -3,6 +3,7 @@ import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { isWholeFileComment } from './wholeFileComment';
@@ -62,26 +63,34 @@ export function InlineCommentCard({
             ? t('inlineComment.range.wholeFile')
             : <>{t('inlineComment.range.lines', { start: draft.startLine, end: draft.endLine })}{draft.side ? ` (${draft.side})` : ''}</>}
         </span>
-        <button
-          type="button"
-          className={HEADER_ACTION_CLASS}
-          style={{ minHeight: 0, minWidth: 0 }}
-          onClick={onEdit}
-          aria-label={t('inlineComment.actions.editComment')}
-          title={t('inlineComment.actions.editComment')}
-        >
-          <Icon name="pencil" className="h-3 w-3" />
-        </button>
-        <button
-          type="button"
-          className={HEADER_ACTION_CLASS}
-          style={{ minHeight: 0, minWidth: 0 }}
-          onClick={onDelete}
-          aria-label={t('inlineComment.actions.deleteComment')}
-          title={t('inlineComment.actions.deleteComment')}
-        >
-          <Icon name="close" className="h-3 w-3" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className={HEADER_ACTION_CLASS}
+              style={{ minHeight: 0, minWidth: 0 }}
+              onClick={onEdit}
+              aria-label={t('inlineComment.actions.editComment')}
+            >
+              <Icon name="pencil" className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('inlineComment.actions.editComment')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className={HEADER_ACTION_CLASS}
+              style={{ minHeight: 0, minWidth: 0 }}
+              onClick={onDelete}
+              aria-label={t('inlineComment.actions.deleteComment')}
+            >
+              <Icon name="close" className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('inlineComment.actions.deleteComment')}</TooltipContent>
+        </Tooltip>
       </div>
 
       <div className="px-3 pb-2 pt-1">

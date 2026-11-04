@@ -50,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 模型',
@@ -215,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['zh-TW'],
   ...sessionReferencesI18n['zh-TW'],
   ...guestStatusViewI18n['zh-TW'],
+  ...tooltipsDiffI18n['zh-TW'],
+  ...tooltipsFilesI18n['zh-TW'],
+  ...tooltipsGitI18n['zh-TW'],
+  ...tooltipsTrackerI18n['zh-TW'],
+  ...tooltipsWalkthroughI18n['zh-TW'],
+  ...tooltipsTerminalBrowserI18n['zh-TW'],
+  ...tooltipsWorkspaceI18n['zh-TW'],
+  ...tooltipsPanelI18n['zh-TW'],
+  ...tooltipsChatI18n['zh-TW'],
   'terminalView.actions.attachSelection': '附加所選輸出',
   'terminalView.actions.copySelection': '複製所選輸出',
   'terminalView.toast.selectionCopied': '已複製輸出',
@@ -1915,16 +1933,16 @@ export const dict: Record<I18nKey, string> = {
   'diffView.actions.openFileAtFirstChangedLine': '在首個變更行開啟此檔案',
   'diffView.actions.review': 'Review',
   'diffView.actions.reviewAria': 'Review changes',
-  'diffView.reviewDialog.title': 'Review changes',
-  'diffView.reviewDialog.description': 'Start a separate review session for the current changes.',
-  'diffView.reviewDialog.generateHandoff': 'Generate handoff',
+  'diffView.reviewDialog.title': '審查變更',
+  'diffView.reviewDialog.description': '為目前的變更啟動獨立的審查工作階段。',
+  'diffView.reviewDialog.generateHandoff': '產生交接內容',
   'diffView.reviewDialog.autoReview': '執行自動審查循環',
-  'diffView.reviewDialog.info': 'This flow works best if started in the session where the changes were implemented.',
-  'diffView.reviewDialog.actions.cancel': 'Cancel',
-  'diffView.reviewDialog.actions.start': 'Review',
-  'diffView.reviewDialog.actions.starting': 'Starting...',
-  'diffView.reviewDialog.toast.noSessionDirectory': 'Session directory is unavailable',
-  'diffView.reviewDialog.toast.startFailed': 'Failed to start review flow',
+  'diffView.reviewDialog.info': '從實作這些變更的工作階段啟動時，此流程效果最佳。',
+  'diffView.reviewDialog.actions.cancel': '取消',
+  'diffView.reviewDialog.actions.start': '審查',
+  'diffView.reviewDialog.actions.starting': '啟動中...',
+  'diffView.reviewDialog.toast.noSessionDirectory': '無法取得工作階段目錄',
+  'diffView.reviewDialog.toast.startFailed': '無法啟動審查流程',
   'chat.history.loadOlder': '載入更早的訊息',
   'chat.appLink.confirm.title': '要在其他應用程式中開啟此連結嗎？',
   'chat.appLink.confirm.description': '此聊天連結使用 {scheme} 通訊協定，將在其他應用程式中開啟。',
@@ -2477,7 +2495,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileMentionAutocomplete.empty': '找不到符合項目',
   'chat.queuedMessage.attachments': '+{count} 個檔案',
   'chat.queuedMessage.empty': '（空）',
-  'chat.queuedMessage.title': 'Queued messages',
+  'chat.queuedMessage.title': '佇列中的訊息',
   'chat.queuedMessage.edit': 'edit',
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': '從佇列移除',
@@ -3527,7 +3545,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.preview.console.filter.logs': '日誌',
   'filesView.tree.actions.refreshTitle': '重新整理',
   'filesView.tree.actions.showGitignored': '顯示被 git 忽略的檔案',
-  'sidebarFilesTree.actions.fileMenuTitle': '檔案選單',
   'common.date.today': '今天',
   'common.date.yesterday': '昨天',
   'common.date.yesterdayWithTime': '昨天 {time}',

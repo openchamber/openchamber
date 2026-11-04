@@ -47,7 +47,8 @@ const NoteMeta: React.FC<{ note: ProjectNote; pinned: boolean }> = ({ note, pinn
             void openSessionLink(origin.sessionId, origin.messageId ?? null);
           }}
           className="text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          title={t('rightSidebar.contextNotesTodo.notes.source.open')}
+          aria-label={t('rightSidebar.contextNotesTodo.notes.source.open')}
+          data-row-tooltip={t('rightSidebar.contextNotesTodo.notes.source.open')}
         >
           {sourceLabel}
         </button>

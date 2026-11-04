@@ -49,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'Modèles Zen',
@@ -214,6 +223,15 @@ export const dict = {
   ...workflowsI18n['fr'],
   ...sessionReferencesI18n['fr'],
   ...guestStatusViewI18n['fr'],
+  ...tooltipsDiffI18n['fr'],
+  ...tooltipsFilesI18n['fr'],
+  ...tooltipsGitI18n['fr'],
+  ...tooltipsTrackerI18n['fr'],
+  ...tooltipsWalkthroughI18n['fr'],
+  ...tooltipsTerminalBrowserI18n['fr'],
+  ...tooltipsWorkspaceI18n['fr'],
+  ...tooltipsPanelI18n['fr'],
+  ...tooltipsChatI18n['fr'],
   'terminalView.actions.attachSelection': 'Joindre la sortie sélectionnée',
   'terminalView.actions.copySelection': 'Copier la sortie sélectionnée',
   'terminalView.toast.selectionCopied': 'Sortie copiée',
@@ -1464,7 +1482,6 @@ export const dict = {
   'sidebarFilesTree.actions.addMenuTitle': 'Nouveau fichier, dossier ou import',
   'sidebarFilesTree.actions.refreshTitle': 'Rafraîchir',
   'sidebarFilesTree.actions.collapseAllTitle': 'Réduire tous les dossiers',
-  'sidebarFilesTree.actions.fileMenuTitle': 'Menu Fichier',
   'sidebarFilesTree.state.searching': 'Recherche...',
   'sidebarFilesTree.state.loading': 'Chargement...',
   'sidebarFilesTree.dialog.createFile.title': 'Créer un fichier',

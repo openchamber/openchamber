@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
@@ -54,17 +55,18 @@ export const GeneratedJsonResultCard: React.FC<{ result: GeneratedResult }> = ({
             ? t('chat.generatedResult.commit.title')
             : t(changeRequestCopy('chat.generatedResult.pullRequest.title', changeRequestTerm))}
         </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          onClick={() => { void handleCopy(); }}
-          title={copied ? t('chat.generatedResult.actions.copied') : t('chat.generatedResult.actions.copy')}
-          aria-label={copied ? t('chat.generatedResult.actions.copied') : t('chat.generatedResult.actions.copy')}
-          className="text-muted-foreground hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
-        >
-          {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-        </Button>
+        <HoverTooltip label={copied ? t('chat.generatedResult.actions.copied') : t('chat.generatedResult.actions.copy')}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={() => { void handleCopy(); }}
+            aria-label={copied ? t('chat.generatedResult.actions.copied') : t('chat.generatedResult.actions.copy')}
+            className="text-muted-foreground hover:text-foreground md:opacity-0 md:group-hover:opacity-100"
+          >
+            {copied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
+          </Button>
+        </HoverTooltip>
       </div>
       <div className="space-y-3 px-3 py-3">
         {result.kind === 'commit' ? (

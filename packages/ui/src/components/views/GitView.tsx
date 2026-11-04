@@ -57,6 +57,7 @@ import { getSessionWorktreeRepairActions, getMutationBlockingReasons } from '@/s
 import { IntegrateCommitsSection } from './git/IntegrateCommitsSection';
 
 import { GitHeader } from './git/GitHeader';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { StashesDialog } from './git/StashesDialog';
 import { ChangesPanel, type ChangesGroupConfig } from './git/ChangesPanel';
 import { CommitSection } from './git/CommitSection';
@@ -2661,32 +2662,33 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
               <DialogTitle>
                 {gitLogDialogMode === 'graph' ? t('gitView.graph.title') : t('gitView.history.title')}
               </DialogTitle>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="me-6 h-7 shrink-0 gap-1.5 px-2"
-                onClick={() => {
-                  if (gitLogDialogMode === 'graph') {
-                    setGraphLogRefreshToken((token) => token + 1);
-                    return;
-                  }
-                  if (!gitDirectory) return;
-                  void fetchLog(gitDirectory, git, logMaxCountLocal);
-                }}
-                disabled={gitLogDialogMode === 'graph' ? graphLogLoading : isLogLoading}
-                title={t('gitView.history.refresh')}
-                aria-label={t('gitView.history.refresh')}
-              >
-                <Icon
-                  name="refresh"
-                  className={cn(
-                    'size-4',
-                    (gitLogDialogMode === 'graph' ? graphLogLoading : isLogLoading) && 'animate-spin'
-                  )}
-                />
-                {t('gitView.history.refresh')}
-              </Button>
+              <ButtonTooltip label={t('contextTooltips.git.reloadCommits')} side="bottom" className="shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="me-6 h-7 shrink-0 gap-1.5 px-2"
+                  onClick={() => {
+                    if (gitLogDialogMode === 'graph') {
+                      setGraphLogRefreshToken((token) => token + 1);
+                      return;
+                    }
+                    if (!gitDirectory) return;
+                    void fetchLog(gitDirectory, git, logMaxCountLocal);
+                  }}
+                  disabled={gitLogDialogMode === 'graph' ? graphLogLoading : isLogLoading}
+                  aria-label={t('gitView.history.refresh')}
+                >
+                  <Icon
+                    name="refresh"
+                    className={cn(
+                      'size-4',
+                      (gitLogDialogMode === 'graph' ? graphLogLoading : isLogLoading) && 'animate-spin'
+                    )}
+                  />
+                  {t('gitView.history.refresh')}
+                </Button>
+              </ButtonTooltip>
             </div>
             <DialogDescription>
               {t('gitView.history.dialogDescription')}

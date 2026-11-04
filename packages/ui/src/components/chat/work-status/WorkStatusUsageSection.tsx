@@ -2,6 +2,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
@@ -96,17 +97,23 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
         </span>
       )}
       action={(
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-6 shrink-0 text-muted-foreground"
-          onClick={() => void fetchQuotas(dropdownProviderIds)}
-          aria-label={t('settings.usage.sidebar.actions.refreshAria')}
-          title={t('settings.usage.sidebar.actions.refreshTitle')}
-          disabled={isLoading}
-        >
-          <Icon name="refresh" className={cn('size-3.5', isLoading && 'animate-spin')} />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex shrink-0">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6 shrink-0 text-muted-foreground"
+                onClick={() => void fetchQuotas(dropdownProviderIds)}
+                aria-label={t('settings.usage.sidebar.actions.refreshAria')}
+                disabled={isLoading}
+              >
+                <Icon name="refresh" className={cn('size-3.5', isLoading && 'animate-spin')} />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('settings.usage.sidebar.actions.refreshTitle')}</TooltipContent>
+        </Tooltip>
       )}
     >
       {groups.map((group) => (

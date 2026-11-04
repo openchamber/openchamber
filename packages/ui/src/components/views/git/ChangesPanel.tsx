@@ -13,6 +13,8 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from '@/components/icon/Icon';
 import { ChangeRow } from './ChangeRow';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { DelegatedTooltip } from '@/components/ui/row-tooltip';
 import {
   TREE_INDENT_PX,
   buildChangesTree,
@@ -337,15 +339,16 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             !isFirst && 'mt-1 border-t border-edge-muted'
           )}
         >
-          <button
-            type="button"
-            onClick={() => group.onActionAll(group.entries.map((entry) => entry.path))}
-            className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
-            aria-label={group.actionAllLabel}
-            title={group.actionAllLabel}
-          >
-            {group.actionSymbol}
-          </button>
+          <ButtonTooltip sideOffset={8} label={group.actionAllLabel} className="shrink-0">
+            <button
+              type="button"
+              onClick={() => group.onActionAll(group.entries.map((entry) => entry.path))}
+              className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+              aria-label={group.actionAllLabel}
+            >
+              {group.actionSymbol}
+            </button>
+          </ButtonTooltip>
 
           <button
             type="button"
@@ -416,7 +419,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                 disabled={isDirectoryReverting}
                 className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label={t('gitView.changes.revertDirectoryAria', { path: directory.path })}
-                title={t('gitView.changes.revertDirectoryTooltip')}
+                data-row-tooltip={t('gitView.changes.revertDirectoryTooltip')}
               >
                 {isDirectoryReverting ? (
                   <Icon name="loader-4" className="size-3.5 animate-spin" />
@@ -433,10 +436,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                 group.actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria',
                 { path: directory.path }
               )}
-              title={t(
-                group.actionSymbol === '+' ? 'gitView.changes.stageDirectoryAria' : 'gitView.changes.unstageDirectoryAria',
-                { path: directory.path }
-              )}
+              data-row-tooltip={t(group.actionSymbol === '+' ? 'contextTooltips.git.stageFolder' : 'contextTooltips.git.unstageFolder')}
             >
               {group.actionSymbol}
             </button>
@@ -452,16 +452,18 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
       if (row.type === 'revert-all') {
         return (
           <div className={cn('flex justify-end py-2', ROW_PADDING_CLASSNAME)}>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setRevertAllOpen(true)}
-              disabled={isRevertingAll}
-              className="gap-1.5 text-[var(--status-error)] hover:bg-[var(--status-error)]/10 hover:text-[var(--status-error)]"
-            >
-              <Icon name="arrow-go-back" className="size-3.5" />
-              {t('gitView.changes.revertAll')}
-            </Button>
+            <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.discardAll')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setRevertAllOpen(true)}
+                disabled={isRevertingAll}
+                className="gap-1.5 text-[var(--status-error)] hover:bg-[var(--status-error)]/10 hover:text-[var(--status-error)]"
+              >
+                <Icon name="arrow-go-back" className="size-3.5" />
+                {t('gitView.changes.revertAll')}
+              </Button>
+            </ButtonTooltip>
           </div>
         );
       }
@@ -584,6 +586,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           )}
         </ScrollShadow>
         <OverlayScrollbar containerRef={scrollRef} disableHorizontal />
+        <DelegatedTooltip containerRef={scrollRef} sideOffset={8} />
       </div>
 
       {revertFileConfirm.dialog}

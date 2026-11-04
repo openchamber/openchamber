@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Spinner } from '@/components/ui/spinner';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { type Locale, useI18n } from '@/lib/i18n';
 import type { WalkthroughView } from '@/lib/walkthrough/model';
@@ -43,20 +44,27 @@ export const WalkthroughLanguagePicker = ({
   const [open, setOpen] = useState(false);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={cn(dropdownTriggerVariants({ size }), 'min-w-0', className)}
-          aria-label={t('walkthrough.language.selectorAria')}
-          title={label(review.activeLanguage)}
-        >
-          <span className="flex min-w-0 items-center gap-1.5">
-            <Icon name="global" className="shrink-0" />
-            <span className="walkthrough-header__label truncate">{label(review.activeLanguage)}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* The span takes the sizing and the header's fold class: an open tooltip marks its trigger as open, which would paint the picker pressed. */}
+          <span className={cn('inline-flex min-w-0', className)}>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={cn(dropdownTriggerVariants({ size }), 'w-full min-w-0')}
+                aria-label={t('walkthrough.language.selectorAria')}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Icon name="global" className="shrink-0" />
+                  <span className="walkthrough-header__label truncate">{label(review.activeLanguage)}</span>
+                </span>
+                <Icon name="arrow-down-s" className="walkthrough-header__label" />
+              </button>
+            </DropdownMenuTrigger>
           </span>
-          <Icon name="arrow-down-s" className="walkthrough-header__label" />
-        </button>
-      </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.language.selectorAria')}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent
         align="end"
         className="max-h-80 w-48 overflow-y-auto"
@@ -84,19 +92,23 @@ export const WalkthroughLanguagePicker = ({
 };
 
 /** Choosing a roomier model for a risky change is a per-review call, so this is review state rather than a settings edit. */
-export const WalkthroughModelPicker = ({ review, className }: { review: WalkthroughReview; className?: string }) => (
-  <ModelSelector
-    providerId={review.activeProviderId ?? ''}
-    modelId={review.activeModelId}
-    onChange={review.selectModel}
-    // While the auth list is loading, allow none — not every provider.
-    allowedProviderIds={review.modelProviders ?? []}
-    isModelAllowed={review.isStructuredOutputCapable}
-    tooltipsEnabled={false}
-    dropdownPortalToBody
-    className={className}
-  />
-);
+export const WalkthroughModelPicker = ({ review, className }: { review: WalkthroughReview; className?: string }) => {
+  const { t } = useI18n();
+  return (
+    <ModelSelector
+      providerId={review.activeProviderId ?? ''}
+      modelId={review.activeModelId}
+      onChange={review.selectModel}
+      // While the auth list is loading, allow none — not every provider.
+      allowedProviderIds={review.modelProviders ?? []}
+      isModelAllowed={review.isStructuredOutputCapable}
+      tooltipsEnabled={false}
+      dropdownPortalToBody
+      className={className}
+      triggerTooltip={t('contextTooltips.panel.chooseWalkthroughModel')}
+    />
+  );
+};
 
 /** Generate, Regenerate or Cancel, whichever the walkthrough is ready for. */
 export const WalkthroughGenerateButton = ({
@@ -119,41 +131,54 @@ export const WalkthroughGenerateButton = ({
   const { t } = useI18n();
   if (review.isGenerating) {
     return (
-      <Button
-        type="button"
-        variant="outline"
-        size={size}
-        className={className}
-        aria-label={t('walkthrough.action.cancel')}
-        title={t('walkthrough.action.cancel')}
-        onClick={() => {
-          review.cancel();
-          onActed?.();
-        }}
-      >
-        <Icon name="stop" className="size-3.5" />
-        <span className={labelClassName}>{t('walkthrough.action.cancel')}</span>
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size={size}
+            className={className}
+            aria-label={t('walkthrough.action.cancel')}
+            onClick={() => {
+              review.cancel();
+              onActed?.();
+            }}
+          >
+            <Icon name="stop" className="size-3.5" />
+            <span className={labelClassName}>{t('walkthrough.action.cancel')}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.walkthrough.stop')}</TooltipContent>
+      </Tooltip>
     );
   }
   const text = hasView ? t('walkthrough.action.regenerate') : t('walkthrough.action.generate');
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size={size}
-      className={cn(review.generateDisabled ? 'border-border text-muted-foreground' : WALKTHROUGH_ACTION_CLASS, className)}
-      disabled={review.generateDisabled}
-      aria-label={text}
-      title={text}
-      onClick={() => {
-        review.handleGenerate(hasView);
-        onActed?.();
-      }}
-    >
-      <Icon name={hasView ? 'refresh' : 'route'} className="size-3.5" />
-      <span className={labelClassName}>{text}</span>
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* The span keeps the tooltip on a disabled button, and takes the sizing and the header's fold class so a folded button leaves no gap. */}
+        <span className={cn('inline-flex', className)}>
+          <Button
+            type="button"
+            variant="outline"
+            size={size}
+            className={cn(review.generateDisabled ? 'border-border text-muted-foreground' : WALKTHROUGH_ACTION_CLASS, 'w-full')}
+            disabled={review.generateDisabled}
+            aria-label={text}
+            onClick={() => {
+              review.handleGenerate(hasView);
+              onActed?.();
+            }}
+          >
+            <Icon name={hasView ? 'refresh' : 'route'} className="size-3.5" />
+            <span className={labelClassName}>{text}</span>
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={6}>
+        {hasView ? t('contextTooltips.walkthrough.regenerate') : t('contextTooltips.walkthrough.generate')}
+      </TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -174,16 +199,23 @@ export const WalkthroughStepMenu = ({
   if (view.stops.length === 0) return null;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={cn(dropdownTriggerVariants({ size }), 'shrink-0 tabular-nums')}
-          aria-label={t('walkthrough.toc.jumpAria')}
-        >
-          <span dir="ltr">{`${review.activeStopPosition} / ${view.stops.length}`}</span>
-          <Icon name="arrow-down-s" />
-        </button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex shrink-0">
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={cn(dropdownTriggerVariants({ size }), 'shrink-0 tabular-nums')}
+                aria-label={t('walkthrough.toc.jumpAria')}
+              >
+                <span dir="ltr">{`${review.activeStopPosition} / ${view.stops.length}`}</span>
+                <Icon name="arrow-down-s" />
+              </button>
+            </DropdownMenuTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>{t('walkthrough.toc.jumpAria')}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="end" className="max-h-96 w-72 max-w-[calc(100vw-2rem)] overflow-y-auto">
         <DropdownMenuRadioGroup value={review.activeStopId ?? ''} onValueChange={review.handleSelectStop}>
           {view.chapters.map(({ chapter, stops }, index) => (
@@ -245,19 +277,25 @@ export const WalkthroughBanners = ({ review, view }: { review: WalkthroughReview
                 })
                 : t('walkthrough.missing.model', { model: review.activeModelId })}
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="ms-auto shrink-0"
-            disabled={review.generateDisabled}
-            // Not forced: if an entry for this exact request existed the banner
-            // would not be here, and a forced run would refuse the cache it may
-            // find on the way.
-            onClick={() => review.handleGenerate(false)}
-          >
-            {t('walkthrough.action.generate')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="ms-auto inline-flex shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  disabled={review.generateDisabled}
+                  // Not forced: if an entry for this exact request existed the banner
+                  // would not be here, and a forced run would refuse the cache it may
+                  // find on the way.
+                  onClick={() => review.handleGenerate(false)}
+                >
+                  {t('walkthrough.action.generate')}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('contextTooltips.walkthrough.generateRequested')}</TooltipContent>
+          </Tooltip>
         </div>
       )}
 
@@ -267,18 +305,23 @@ export const WalkthroughBanners = ({ review, view }: { review: WalkthroughReview
           <span className="typography-meta min-w-0 text-foreground">
             {t('walkthrough.stale.banner', { count: view.staleStopCount })}
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="ms-auto shrink-0"
-            // Clicking this again mid-flight would abort the running generation
-            // and start another — paying for the same answer twice.
-            disabled={review.isGenerating}
-            onClick={() => review.handleGenerate(true)}
-          >
-            {t('walkthrough.action.regenerate')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="ms-auto shrink-0"
+                // Clicking this again mid-flight would abort the running generation
+                // and start another — paying for the same answer twice.
+                disabled={review.isGenerating}
+                onClick={() => review.handleGenerate(true)}
+              >
+                {t('walkthrough.action.regenerate')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('contextTooltips.walkthrough.regenerateStale')}</TooltipContent>
+          </Tooltip>
         </div>
       )}
 

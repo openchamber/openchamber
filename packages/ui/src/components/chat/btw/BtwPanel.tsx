@@ -3,6 +3,7 @@ import { AnimatePresence } from 'motion/react';
 import { ComposerFloatingPanel } from '../composer/ui/ComposerFloatingPanel';
 import type { Message, Part } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -88,16 +89,20 @@ const BtwPanelView: React.FC<{ parentSessionId: string; panel: BtwPanelState; hi
                 draftHint={t('chat.btw.draftHint')}
                 collapsed={panel.collapsed}
                 actions={(
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={onExit}
-                        aria-label={t('chat.btw.cancelAria')}
-                        title={t('chat.btw.cancelAria')}
-                    >
-                        <Icon name="close" className="size-4" />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={onExit}
+                                aria-label={t('chat.btw.cancelAria')}
+                            >
+                                <Icon name="close" className="size-4" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{t('chat.btw.cancelAria')}</TooltipContent>
+                    </Tooltip>
                 )}
             />
         );
@@ -253,20 +258,24 @@ const BtwFrame: React.FC<{
 }> = ({ actions, onTitleClick, titleClickLabel, collapsed, headerSpinner, draftHint, children }) => (
     <ComposerFloatingPanel role="dialog" ariaLabel="btw" compact={collapsed} header={<>
             {onTitleClick ? (
-                <button
-                    type="button"
-                    onClick={onTitleClick}
-                    aria-label={titleClickLabel}
-                    title={titleClickLabel}
-                    className="flex min-w-0 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
-                >
-                    {headerSpinner ? (
-                        <Spinner className="size-3.5 shrink-0" />
-                    ) : (
-                        <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
-                    )}
-                    <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={onTitleClick}
+                            aria-label={titleClickLabel}
+                            className="flex min-w-0 items-center gap-2 text-start text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                            {headerSpinner ? (
+                                <Spinner className="size-3.5 shrink-0" />
+                            ) : (
+                                <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
+                            )}
+                            <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{titleClickLabel}</TooltipContent>
+                </Tooltip>
             ) : (
                 <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
                     <Icon name="chat-ai-3" className="size-3.5 shrink-0" />
@@ -306,28 +315,36 @@ const BtwSheet: React.FC<{
     const headerButtonClass = 'size-7 rounded-lg text-muted-foreground transition-colors hover:text-foreground hover:!bg-transparent active:!bg-transparent';
     const actions = (
         <div className="flex shrink-0 items-center gap-0.5">
-            <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={headerButtonClass}
-                onClick={handlePromote}
-                aria-label={t('chat.btw.promoteAria')}
-                title={t('chat.btw.promoteAria')}
-            >
-                <Icon name="external-link" className="size-3.5" />
-            </Button>
-            <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={headerButtonClass}
-                onClick={handleDestroy}
-                aria-label={t('chat.btw.destroyAria')}
-                title={t('chat.btw.destroyAria')}
-            >
-                <Icon name="close" className="size-4" />
-            </Button>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={headerButtonClass}
+                        onClick={handlePromote}
+                        aria-label={t('chat.btw.promoteAria')}
+                    >
+                        <Icon name="external-link" className="size-3.5" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{t('chat.btw.promoteAria')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={headerButtonClass}
+                        onClick={handleDestroy}
+                        aria-label={t('chat.btw.destroyAria')}
+                    >
+                        <Icon name="close" className="size-4" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{t('chat.btw.destroyAria')}</TooltipContent>
+            </Tooltip>
         </div>
     );
 

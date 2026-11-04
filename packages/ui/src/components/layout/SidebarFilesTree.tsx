@@ -577,15 +577,14 @@ const FileRow: React.FC<FileRowProps> = ({
                       size="icon"
                       className="h-6 w-6"
                       onClick={handleMenuButtonClick}
-                      title={t('sidebarFilesTree.actions.fileMenuTitle')}
-                      aria-label={t('sidebarFilesTree.actions.fileMenuTitle')}
+                      aria-label={t('diffView.actions.moreActions')}
                     >
                       <Icon name="more-2-fill" className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                 </span>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.fileMenuTitle')}</TooltipContent>
+              <TooltipContent side="bottom" sideOffset={6}>{t('diffView.actions.moreActions')}</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end" side="bottom" onCloseAutoFocus={() => setContextMenuOpen(false)}>
               {renderMenuItems({ Item: DropdownMenuItem, Separator: DropdownMenuSeparator })}
@@ -1610,10 +1609,15 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
         >
           <FileTreeIndentGuides depth={row.depth} />
           <span className="min-w-0 flex-1 truncate text-[var(--status-error)]" title={row.message}>{row.message}</span>
-          <Button variant="ghost" size="xs" className="h-6 gap-1" onClick={() => void refreshDirectory(row.directory)}>
-            <Icon name="refresh" className="h-3.5 w-3.5" />
-            {t('sidebarFilesTree.actions.refreshTitle')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="xs" className="h-6 gap-1" onClick={() => void refreshDirectory(row.directory)}>
+                <Icon name="refresh" className="h-3.5 w-3.5" />
+                {t('sidebarFilesTree.actions.refreshTitle')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('contextTooltips.files.retryFolder')}</TooltipContent>
+          </Tooltip>
         </div>
       );
     }
@@ -1745,22 +1749,29 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
         <div className="relative min-w-0 px-2 py-2">
           {canSearchContents ? (
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute inset-s-3 top-3 size-6 p-0 text-muted-foreground hover:text-foreground"
-                  title={t('sidebarFilesTree.search.mode.aria')}
-                  aria-label={t('sidebarFilesTree.search.mode.aria')}
-                >
-                  <Icon name={contentSearchActive ? 'file-search' : 'search'} className="h-4 w-4" />
-                  {/* The corner marks the icon as a menu. */}
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute bottom-0.5 end-0.5 size-0 border-[3px] border-b-current border-e-current border-s-transparent border-t-transparent opacity-70"
-                  />
-                </Button>
-              </DropdownMenuTrigger>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* The field sits in flow, so the span carries the placement the tooltip anchors to. */}
+                  <span className="absolute inset-s-3 top-3 inline-flex">
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="relative size-6 p-0 text-muted-foreground hover:text-foreground"
+                        aria-label={t('sidebarFilesTree.search.mode.aria')}
+                      >
+                        <Icon name={contentSearchActive ? 'file-search' : 'search'} className="h-4 w-4" />
+                        {/* The corner marks the icon as a menu. */}
+                        <span
+                          aria-hidden="true"
+                          className="pointer-events-none absolute bottom-0.5 end-0.5 size-0 border-[3px] border-b-current border-e-current border-s-transparent border-t-transparent opacity-70"
+                        />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.search.mode.aria')}</TooltipContent>
+              </Tooltip>
               <DropdownMenuContent align="start" side="bottom">
                 <DropdownMenuRadioGroup
                   value={searchMode}
@@ -1788,33 +1799,42 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
             className={cn('h-8 ps-8 typography-meta', contentSearchActive ? 'pe-16' : 'pe-8')}
           />
           {contentSearchActive ? (
-            <Button
-              variant="chip"
-              size="xs"
-              aria-pressed={regexSearch}
-              onClick={() => {
-                setRegexSearch((value) => !value);
-                searchInputRef.current?.focus();
-              }}
-              title={t('sidebarFilesTree.search.regexTitle')}
-              aria-label={t('sidebarFilesTree.search.regexTitle')}
-              className="absolute inset-e-3 top-3.5 h-5 min-w-0 px-1 font-mono typography-micro"
-            >
-              .*
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="chip"
+                  size="xs"
+                  aria-pressed={regexSearch}
+                  onClick={() => {
+                    setRegexSearch((value) => !value);
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label={t('sidebarFilesTree.search.regexTitle')}
+                  className="absolute inset-e-3 top-3.5 h-5 min-w-0 px-1 font-mono typography-micro"
+                >
+                  .*
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t(regexSearch ? 'contextTooltips.files.searchPlainText' : 'sidebarFilesTree.search.regexTitle')}</TooltipContent>
+            </Tooltip>
           ) : null}
           {searchQuery.trim().length > 0 ? (
-            <button
-              type="button"
-              aria-label={t('sidebarFilesTree.search.clearAria')}
-              className={cn('absolute top-4 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground', contentSearchActive ? 'inset-e-10' : 'inset-e-4')}
-              onClick={() => {
-                setSearchQuery('');
-                searchInputRef.current?.focus();
-              }}
-            >
-              <Icon name="close" className="h-4 w-4" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('sidebarFilesTree.search.clearAria')}
+                  className={cn('absolute top-4 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground', contentSearchActive ? 'inset-e-10' : 'inset-e-4')}
+                  onClick={() => {
+                    setSearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                >
+                  <Icon name="close" className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.search.clearAria')}</TooltipContent>
+            </Tooltip>
           ) : null}
         </div>
       </div>
@@ -1894,10 +1914,15 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
           ) : rootLoadError ? (
             <li className="flex flex-col gap-2 px-2 py-1 typography-meta text-muted-foreground">
               <span>{rootLoadError}</span>
-              <Button variant="outline" size="xs" className="w-fit gap-1.5" onClick={() => void refreshRoot()}>
-                <Icon name="refresh" className="h-3.5 w-3.5" />
-                {t('sidebarFilesTree.actions.refreshTitle')}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="xs" className="w-fit gap-1.5" onClick={() => void refreshRoot()}>
+                    <Icon name="refresh" className="h-3.5 w-3.5" />
+                    {t('sidebarFilesTree.actions.refreshTitle')}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{t('contextTooltips.files.retryFileList')}</TooltipContent>
+              </Tooltip>
             </li>
           ) : hasTree && root ? null : (
             <li className="px-2 py-1 typography-meta text-muted-foreground">{t('sidebarFilesTree.state.loading')}</li>

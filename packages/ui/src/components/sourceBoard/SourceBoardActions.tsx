@@ -4,6 +4,7 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
 import { Icon } from '@/components/icon/Icon';
 import { DiffViewIcon } from '@/components/icons/DiffIcon';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { REFERENCE_META_TEXT, referenceNumberLabel } from '@/components/references/referencePickerItems';
 import type { IconName } from '@/components/icon/icons';
 import { toast } from '@/components/ui';
@@ -11,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { reviewDraftCount, useChangeRequestReview } from '@/components/review/useChangeRequestReview';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { usePendingComposerReferences, type ComposerReferenceHandoff } from '@/components/chat/composer/pendingComposerReferences';
 import type { ReferencePickerItem, ReferencePickerSelection } from '@/components/references/referencePickerItems';
 import { readTrackerItemDetail } from '@/components/references/referenceSources';
@@ -87,13 +89,16 @@ function useCapabilities(context: SourceControlReadContext | null): SourceContro
 const ActionButton: React.FC<{
     icon: IconName;
     label: string;
+    tooltip: string;
     onClick: () => void;
     busy?: boolean;
-}> = ({ icon, label, onClick, busy = false }) => (
-    <Button size="sm" variant="outline" onClick={onClick} disabled={busy}>
-        <Icon name={busy ? 'loader-4' : icon} className={busy ? 'size-3.5 animate-spin' : 'size-3.5'} />
-        {label}
-    </Button>
+}> = ({ icon, label, tooltip, onClick, busy = false }) => (
+    <ButtonTooltip label={tooltip}>
+        <Button size="sm" variant="outline" onClick={onClick} disabled={busy}>
+            <Icon name={busy ? 'loader-4' : icon} className={busy ? 'size-3.5 animate-spin' : 'size-3.5'} />
+            {label}
+        </Button>
+    </ButtonTooltip>
 );
 
 /**
@@ -318,36 +323,40 @@ export const SourceBoardActions: React.FC<{
             {waitingMerge ? (
                 <>
                     <span className="text-muted-foreground typography-small">{waitingLabel}</span>
-                    <ActionButton icon="close" label={t('sourceBoard.merge.cancel')} onClick={() => void cancelMerge()} busy={busy === 'merge'} />
+                    <ActionButton icon="close" label={t('sourceBoard.merge.cancel')} tooltip={t('contextTooltips.tracker.cancelMerge')} onClick={() => void cancelMerge()} busy={busy === 'merge'} />
                 </>
             ) : openPull && !openPull.draft && mergeMethod ? (
                 // One control, as on the host: the button says how it merges,
                 // the arrow beside it picks another way.
                 <div className="flex shrink-0 items-center">
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        // Two halves of one control: the inner corners stay square.
-                        className={cn(mergeMethods.length > 1 && 'rounded-e-none')}
-                        disabled={busy === 'merge' || submitBlocked}
-                        onClick={(event) => void merge(event.currentTarget)}
-                    >
-                        <Icon name={busy === 'merge' ? 'loader-4' : 'git-merge'} className={busy === 'merge' ? 'size-3.5 animate-spin' : 'size-3.5'} />
-                        {t(MERGE_METHOD_LABELS[mergeMethod])}
-                    </Button>
+                    <ButtonTooltip label={t(submits ? 'contextTooltips.tracker.submitTo' : 'contextTooltips.tracker.mergeInto', { branch: openPull.base })}>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            // Two halves of one control: the inner corners stay square.
+                            className={cn(mergeMethods.length > 1 && 'rounded-e-none')}
+                            disabled={busy === 'merge' || submitBlocked}
+                            onClick={(event) => void merge(event.currentTarget)}
+                        >
+                            <Icon name={busy === 'merge' ? 'loader-4' : 'git-merge'} className={busy === 'merge' ? 'size-3.5 animate-spin' : 'size-3.5'} />
+                            {t(MERGE_METHOD_LABELS[mergeMethod])}
+                        </Button>
+                    </ButtonTooltip>
                     {mergeMethods.length > 1 ? (
                         <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="rounded-s-none border-s-0 px-1.5"
-                                    disabled={busy === 'merge'}
-                                    aria-label={t('sourceBoard.merge.methodAria')}
-                                >
-                                    <Icon name="arrow-down-s" className="size-3.5" />
-                                </Button>
-                            </DropdownMenuTrigger>
+                            <ButtonTooltip label={t('contextTooltips.tracker.chooseMergeMethod')}>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="rounded-s-none border-s-0 px-1.5"
+                                        disabled={busy === 'merge'}
+                                        aria-label={t('sourceBoard.merge.methodAria')}
+                                    >
+                                        <Icon name="arrow-down-s" className="size-3.5" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                            </ButtonTooltip>
                             <DropdownMenuContent align="start" className="w-56">
                                 <DropdownMenuRadioGroup value={mergeMethod} onValueChange={(value) => chooseMergeMethod(String(value))}>
                                     {mergeMethods.map((method) => (
@@ -360,7 +369,7 @@ export const SourceBoardActions: React.FC<{
                 </div>
             ) : null}
             {openPull && !openPull.draft && unmet.length > 0 ? (
-                // A disabled button shows no tooltip, so what it waits for is said beside it.
+                // What the disabled button waits for is said beside it.
                 <span
                     className="min-w-0 max-w-[16rem] truncate typography-meta text-muted-foreground"
                     title={unmet.map((requirement) => requirement.description ? `${requirement.name}: ${requirement.description}` : requirement.name).join('\n')}
@@ -378,9 +387,9 @@ export const SourceBoardActions: React.FC<{
                 </span>
             ) : null}
             {openPull?.draft && capabilities?.draftChangeRequests ? (
-                <ActionButton icon="git-pull-request" label={t('sourceBoard.actions.markReady')} busy={busy === 'ready'} onClick={() => void markReady()} />
+                <ActionButton icon="git-pull-request" label={t('sourceBoard.actions.markReady')} tooltip={t('contextTooltips.tracker.markReady')} busy={busy === 'ready'} onClick={() => void markReady()} />
             ) : null}
-            {stackOnTop && !project ? <ActionButton icon="stack" label={stackOnTopLabel} onClick={stackOnTop} /> : null}
+            {stackOnTop && !project ? <ActionButton icon="stack" label={stackOnTopLabel} tooltip={t('contextTooltips.tracker.startOnTop')} onClick={stackOnTop} /> : null}
         </>
     );
 
@@ -394,13 +403,18 @@ export const SourceBoardActions: React.FC<{
             </div>
             {project || currentSessionId ? (
                 <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button size="sm" variant="default" className="shrink-0">
-                            <Icon name="attachment-2" className="size-3.5" />
-                            {t('sourceBoard.actions.attach')}
-                            <Icon name="arrow-down-s" className="size-3.5 opacity-70" />
-                        </Button>
-                    </DropdownMenuTrigger>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <DropdownMenuTrigger asChild>
+                                <Button size="sm" variant="default" className="shrink-0">
+                                    <Icon name="attachment-2" className="size-3.5" />
+                                    {t('sourceBoard.actions.attach')}
+                                    <Icon name="arrow-down-s" className="size-3.5 opacity-70" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.chooseAttachTarget')}</TooltipContent>
+                    </Tooltip>
                     <DropdownMenuContent align="end" className="w-64">
                         {currentSessionId ? (
                             <DropdownMenuItem onSelect={attachToCurrentSession}>
@@ -522,17 +536,27 @@ export const SourceBoardPullLinks: React.FC<PullLinkProps> = (props) => {
     if (diffServing === 'not-served') return null;
     return (
         <span className="inline-flex items-center gap-1">
-            <button type="button" className={LINK_CLASS} onClick={() => open('diff')}>
-                <DiffViewIcon className="size-3.5" />
-                {t('sourceBoard.actions.changes')}
-                <Icon name="external-link" className="size-3.5" />
-            </button>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <button type="button" className={LINK_CLASS} onClick={() => open('diff')}>
+                        <DiffViewIcon className="size-3.5" />
+                        {t('sourceBoard.actions.changes')}
+                        <Icon name="external-link" className="size-3.5" />
+                    </button>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.openChanges')}</TooltipContent>
+            </Tooltip>
             {mobile ? null : (
-                <button type="button" className={LINK_CLASS} onClick={() => open('walkthrough')}>
-                    <Icon name="route" className="size-3.5 text-[var(--status-info)]" />
-                    {t('walkthrough.action.open')}
-                    <Icon name="external-link" className="size-3.5" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button type="button" className={LINK_CLASS} onClick={() => open('walkthrough')}>
+                            <Icon name="route" className="size-3.5 text-[var(--status-info)]" />
+                            {t('walkthrough.action.open')}
+                            <Icon name="external-link" className="size-3.5" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.openWalkthrough')}</TooltipContent>
+                </Tooltip>
             )}
         </span>
     );

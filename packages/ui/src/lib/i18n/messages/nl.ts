@@ -49,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'Zen-modellen',
@@ -214,6 +223,15 @@ export const dict = {
   ...workflowsI18n['nl'],
   ...sessionReferencesI18n['nl'],
   ...guestStatusViewI18n['nl'],
+  ...tooltipsDiffI18n['nl'],
+  ...tooltipsFilesI18n['nl'],
+  ...tooltipsGitI18n['nl'],
+  ...tooltipsTrackerI18n['nl'],
+  ...tooltipsWalkthroughI18n['nl'],
+  ...tooltipsTerminalBrowserI18n['nl'],
+  ...tooltipsWorkspaceI18n['nl'],
+  ...tooltipsPanelI18n['nl'],
+  ...tooltipsChatI18n['nl'],
   'terminalView.actions.attachSelection': 'Geselecteerde uitvoer toevoegen',
   'terminalView.actions.copySelection': 'Geselecteerde uitvoer kopiëren',
   'terminalView.toast.selectionCopied': 'Uitvoer gekopieerd',
@@ -1695,7 +1713,6 @@ export const dict = {
   'sidebarFilesTree.actions.addMenuTitle': 'Nieuw bestand, map of uploaden',
   'sidebarFilesTree.actions.refreshTitle': 'Vernieuwen',
   'sidebarFilesTree.actions.collapseAllTitle': 'Alle mappen inklappen',
-  'sidebarFilesTree.actions.fileMenuTitle': 'Bestandsmenu',
   'sidebarFilesTree.state.searching': 'Zoeken...',
   'sidebarFilesTree.state.loading': 'Laden...',
   'sidebarFilesTree.dialog.createFile.title': 'Bestand aanmaken',

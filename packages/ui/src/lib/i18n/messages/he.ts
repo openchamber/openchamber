@@ -49,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'מודלי Zen',
@@ -1633,7 +1642,6 @@ export const dict = {
   'sidebarFilesTree.actions.uploadFilesTitle': 'העלה קבצים',
   'sidebarFilesTree.actions.refreshTitle': 'רענן',
   'sidebarFilesTree.actions.collapseAllTitle': 'כווץ את כל התיקיות',
-  'sidebarFilesTree.actions.fileMenuTitle': 'תפריט קובץ',
   'sidebarFilesTree.state.searching': 'מחפש…',
   'sidebarFilesTree.state.loading': 'טוען…',
   'sidebarFilesTree.dialog.createFile.title': 'יצירת קובץ',
@@ -3920,6 +3928,15 @@ export const dict = {
   ...workflowsI18n['he'],
   ...sessionReferencesI18n['he'],
   ...guestStatusViewI18n['he'],
+  ...tooltipsDiffI18n['he'],
+  ...tooltipsFilesI18n['he'],
+  ...tooltipsGitI18n['he'],
+  ...tooltipsTrackerI18n['he'],
+  ...tooltipsWalkthroughI18n['he'],
+  ...tooltipsTerminalBrowserI18n['he'],
+  ...tooltipsWorkspaceI18n['he'],
+  ...tooltipsPanelI18n['he'],
+  ...tooltipsChatI18n['he'],
   'settings.usage.page.state.claudeSignedOutTitle': 'לא מחובר ל-Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'יש להריץ את הפקודה הזו במסוף:',
   'settings.openchamber.visual.field.confirmFileTreeMove': 'אישור לפני העברת קבצים',

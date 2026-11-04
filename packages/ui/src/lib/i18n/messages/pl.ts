@@ -50,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Modele Zen',
@@ -215,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['pl'],
   ...sessionReferencesI18n['pl'],
   ...guestStatusViewI18n['pl'],
+  ...tooltipsDiffI18n['pl'],
+  ...tooltipsFilesI18n['pl'],
+  ...tooltipsGitI18n['pl'],
+  ...tooltipsTrackerI18n['pl'],
+  ...tooltipsWalkthroughI18n['pl'],
+  ...tooltipsTerminalBrowserI18n['pl'],
+  ...tooltipsWorkspaceI18n['pl'],
+  ...tooltipsPanelI18n['pl'],
+  ...tooltipsChatI18n['pl'],
   'terminalView.actions.attachSelection': 'Dołącz zaznaczone dane wyjściowe',
   'terminalView.actions.copySelection': 'Kopiuj zaznaczone dane wyjściowe',
   'terminalView.toast.selectionCopied': 'Skopiowano dane wyjściowe',
@@ -1073,7 +1091,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileMentionAutocomplete.empty': 'Nie znaleziono pasujących',
   'chat.queuedMessage.attachments': '+{count} plik(i)',
   'chat.queuedMessage.empty': '(puste)',
-  'chat.queuedMessage.title': 'Queued messages',
+  'chat.queuedMessage.title': 'Wiadomości w kolejce',
   'chat.queuedMessage.edit': 'edit',
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': 'Usuń z kolejki',
@@ -1434,7 +1452,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.commands': 'Commands',
   'chat.chatInput.actions.modelAgentSettings': 'Model and agent settings',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
-  'chat.chatInput.actions.sendMessageAria': 'Send message',
+  'chat.chatInput.actions.sendMessageAria': 'Wyślij wiadomość',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.branch': 'Gałąź',
   'chat.chatInput.draftPicker.projectTitle': 'Projekt',
@@ -3319,7 +3337,6 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.actions.addMenuTitle': 'Nowy plik, folder lub przesyłanie',
   'sidebarFilesTree.actions.refreshTitle': 'Odśwież',
   'sidebarFilesTree.actions.collapseAllTitle': 'Zwiń wszystkie foldery',
-  'sidebarFilesTree.actions.fileMenuTitle': 'Menu pliku',
   'sidebarFilesTree.dialog.cancel': 'Anuluj',
   'sidebarFilesTree.dialog.confirm': 'Potwierdź',
   'sidebarFilesTree.dialog.createFile.description': 'Utwórz nowy plik w {path}',
@@ -3396,7 +3413,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.arrowUpAria': 'Arrow up',
   'terminalView.quickKeys.commandModifierAria': 'Command modifier',
   'terminalView.quickKeys.controlLabel': 'Ctrl',
-  'terminalView.quickKeys.controlModifierAria': 'Control modifier',
+  'terminalView.quickKeys.controlModifierAria': 'Modyfikator Control',
   'terminalView.quickKeys.altLabel': 'Alt',
   'terminalView.quickKeys.altModifierAria': 'Modyfikator Alt',
   'terminalView.quickKeys.enterAria': 'Enter',

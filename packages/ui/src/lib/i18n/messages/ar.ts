@@ -49,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'نماذج Zen',
@@ -1633,7 +1642,6 @@ export const dict = {
   'sidebarFilesTree.actions.uploadFilesTitle': 'رفع ملفات',
   'sidebarFilesTree.actions.refreshTitle': 'تحديث',
   'sidebarFilesTree.actions.collapseAllTitle': 'طي كل المجلدات',
-  'sidebarFilesTree.actions.fileMenuTitle': 'قائمة الملف',
   'sidebarFilesTree.state.searching': 'جارٍ البحث…',
   'sidebarFilesTree.state.loading': 'جارٍ التحميل…',
   'sidebarFilesTree.dialog.createFile.title': 'إنشاء ملف',
@@ -3920,6 +3928,15 @@ export const dict = {
   ...workflowsI18n['ar'],
   ...sessionReferencesI18n['ar'],
   ...guestStatusViewI18n['ar'],
+  ...tooltipsDiffI18n['ar'],
+  ...tooltipsFilesI18n['ar'],
+  ...tooltipsGitI18n['ar'],
+  ...tooltipsTrackerI18n['ar'],
+  ...tooltipsWalkthroughI18n['ar'],
+  ...tooltipsTerminalBrowserI18n['ar'],
+  ...tooltipsWorkspaceI18n['ar'],
+  ...tooltipsPanelI18n['ar'],
+  ...tooltipsChatI18n['ar'],
   'settings.usage.page.state.claudeSignedOutTitle': 'لم يتم تسجيل الدخول إلى Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'شغّل هذا الأمر في الطرفية:',
   'settings.openchamber.visual.field.confirmFileTreeMove': 'التأكيد قبل نقل الملفات',

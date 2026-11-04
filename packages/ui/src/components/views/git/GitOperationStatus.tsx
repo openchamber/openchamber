@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { GitActionRecovery } from './useGitOperationRecovery';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 /**
@@ -80,7 +81,9 @@ export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
         {unknown ? <p className="text-muted-foreground">{t('gitView.operation.recovery.inspect')}</p> : null}
       </ScrollableOverlay>
       {unknown || problem ? <div className="mt-3 flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" disabled={entry.checking} onClick={onRefresh}>{t('gitView.operation.refresh')}</Button>
+        <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.checkOperation')}>
+          <Button variant="outline" size="sm" disabled={entry.checking} onClick={onRefresh}>{t('gitView.operation.refresh')}</Button>
+        </ButtonTooltip>
         {canCancel ? <Button variant="ghost" size="sm" disabled={entry.checking} onClick={onCancel}>{t('gitView.operation.cancel')}</Button> : null}
       </div> : null}
     </section>

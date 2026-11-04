@@ -3,6 +3,7 @@ import React from 'react';
 import type { SurfaceInputEvent, SurfaceModifiers } from '@openchamber/sdk';
 
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
 import { isGuestActive } from '@/lib/guests/capabilities';
@@ -271,14 +272,24 @@ export const GuestSurfacePane: React.FC<Props> = ({ mode }) => {
           {t(statusKey)}
         </span>
         {control.controller === 'user' && control.mine ? (
-          <Button size="xs" variant="outline" onClick={release}>
-            {t('contextPanel.surface.handBack')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="xs" variant="outline" onClick={release}>
+                {t('contextPanel.surface.handBack')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.panel.releaseSurface')}</TooltipContent>
+          </Tooltip>
         ) : null}
         {connection.status === 'ended' ? (
-          <Button size="xs" variant="outline" onClick={() => clientRef.current?.retry()}>
-            {t('contextPanel.surface.retry')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="xs" variant="outline" onClick={() => clientRef.current?.retry()}>
+                {t('contextPanel.surface.retry')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.panel.reconnectSurface')}</TooltipContent>
+          </Tooltip>
         ) : null}
       </div>
       <div

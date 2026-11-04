@@ -34,6 +34,7 @@ import {
 } from '@/lib/git/integrateWorktreeCommits';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useI18n } from '@/lib/i18n';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 type IntegrateUiState =
   | { kind: 'idle' }
@@ -377,16 +378,18 @@ export const IntegrateCommitsSection: React.FC<{
             <div className="flex-1" />
 
             <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={dropdownTriggerVariants({ size: 'default' })}
-                >
-                  {t('gitView.integrate.target')}
-                  <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
-                  <Icon name="arrow-down-s" className="size-4 opacity-60" />
-                </button>
-              </DropdownMenuTrigger>
+              <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.integrateTarget')}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={dropdownTriggerVariants({ size: 'default' })}
+                  >
+                    {t('gitView.integrate.target')}
+                    <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
+                    <Icon name="arrow-down-s" className="size-4 opacity-60" />
+                  </button>
+                </DropdownMenuTrigger>
+              </ButtonTooltip>
               <DropdownMenuContent
                 align="end"
                 className="w-72 p-0 max-h-[var(--available-height)] flex flex-col overflow-hidden"
@@ -428,9 +431,11 @@ export const IntegrateCommitsSection: React.FC<{
             </DropdownMenu>
 
             {ui.kind === 'ready' ? (
-              <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
-                {t('gitView.integrate.move')}
-              </Button>
+              <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.integrateMove')}>
+                <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
+                  {t('gitView.integrate.move')}
+                </Button>
+              </ButtonTooltip>
             ) : ui.kind === 'loading' ? (
               <Button size="sm" variant="outline" disabled>
                 {t('gitView.integrate.checking')}
@@ -502,31 +507,39 @@ export const IntegrateCommitsSection: React.FC<{
                 )}
               </div>
               <div className="flex items-center gap-2 pt-1">
-                <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
-                  {t('gitView.operation.abort')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="typography-meta gap-1"
-                  disabled={!currentSessionId}
-                  onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
-                >
-                  <Icon name="sparkling" className="size-3.5" />
-                  {t('gitView.integrate.currentSession')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="typography-meta gap-1"
-                  onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
-                >
-                  <Icon name="sparkling" className="size-3.5" />
-                  {t('gitView.integrate.newSession')}
-                </Button>
-                <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
-                  {t('gitView.operation.continue')}
-                </Button>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.abortOperation')}>
+                  <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
+                    {t('gitView.operation.abort')}
+                  </Button>
+                </ButtonTooltip>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInCurrentSession')}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="typography-meta gap-1"
+                    disabled={!currentSessionId}
+                    onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
+                  >
+                    <Icon name="sparkling" className="size-3.5" />
+                    {t('gitView.integrate.currentSession')}
+                  </Button>
+                </ButtonTooltip>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.resolveInNewSession')}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="typography-meta gap-1"
+                    onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
+                  >
+                    <Icon name="sparkling" className="size-3.5" />
+                    {t('gitView.integrate.newSession')}
+                  </Button>
+                </ButtonTooltip>
+                <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.continueOperation')}>
+                  <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
+                    {t('gitView.operation.continue')}
+                  </Button>
+                </ButtonTooltip>
               </div>
             </div>
           )}

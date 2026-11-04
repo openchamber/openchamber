@@ -8,6 +8,7 @@ import { relativeTimeOf } from '@/components/references/referencePickerItems';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
 import type { ReviewCommentExcerpt } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
@@ -95,12 +96,26 @@ export const ReviewDraftCard: React.FC<{
                 <ReviewAvatar person={comment.author} />
                 <span className="text-xs font-medium text-foreground">{t('review.card.you')}</span>
                 <span className="me-auto rounded-full bg-[var(--status-warning-background)] px-1.5 text-xs text-[var(--status-warning)]">{t('review.card.pending')}</span>
-                <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => setEditing(true)} aria-label={t('inlineComment.actions.editComment')} title={t('inlineComment.actions.editComment')}>
-                    <Icon name="pencil" className="h-3 w-3" />
-                </button>
-                <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => void remove()} aria-label={t('inlineComment.actions.deleteComment')} title={t('inlineComment.actions.deleteComment')}>
-                    {busy ? <Spinner className="size-3" /> : <Icon name="close" className="h-3 w-3" />}
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <span className="inline-flex shrink-0">
+                            <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => setEditing(true)} aria-label={t('inlineComment.actions.editComment')}>
+                                <Icon name="pencil" className="h-3 w-3" />
+                            </button>
+                        </span>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('inlineComment.actions.editComment')}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <span className="inline-flex shrink-0">
+                            <button type="button" className={HEADER_ACTION_CLASS} style={{ minHeight: 0, minWidth: 0 }} disabled={busy} onClick={() => void remove()} aria-label={t('inlineComment.actions.deleteComment')}>
+                                {busy ? <Spinner className="size-3" /> : <Icon name="close" className="h-3 w-3" />}
+                            </button>
+                        </span>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('inlineComment.actions.deleteComment')}</TooltipContent>
+                </Tooltip>
             </div>
             <div className="px-3 pb-2 pt-1 text-sm leading-relaxed text-foreground">
                 <ReviewCommentBody body={comment.body} excerpt={excerpt} />
@@ -236,17 +251,31 @@ export const ReviewThreadCard: React.FC<{
                             {t('references.picker.thread.replyPlaceholder')}
                         </button>
                     ) : <span className="flex-1" />}
-                    <Button size="xs" variant="outline" onClick={() => review.attachThread(thread)}>
-                        <Icon name="attachment-2" className="size-3.5" />
-                        {t('review.action.attach')}
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button size="xs" variant="outline" onClick={() => review.attachThread(thread)}>
+                                <Icon name="attachment-2" className="size-3.5" />
+                                {t('review.action.attach')}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t('contextTooltips.diff.attachThread')}</TooltipContent>
+                    </Tooltip>
                     {thread.canResolve ? (
-                        <Button size="xs" variant="outline" disabled={busy !== null} onClick={() => void toggleResolved()}>
-                            {busy === 'resolve'
-                                ? <Spinner className="size-3.5" />
-                                : <Icon name={thread.resolved ? 'arrow-go-back' : 'check'} className="size-3.5" />}
-                            {t(thread.resolved ? 'references.picker.thread.unresolve' : 'references.picker.thread.resolve')}
-                        </Button>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex">
+                                    <Button size="xs" variant="outline" disabled={busy !== null} onClick={() => void toggleResolved()}>
+                                        {busy === 'resolve'
+                                            ? <Spinner className="size-3.5" />
+                                            : <Icon name={thread.resolved ? 'arrow-go-back' : 'check'} className="size-3.5" />}
+                                        {t(thread.resolved ? 'references.picker.thread.unresolve' : 'references.picker.thread.resolve')}
+                                    </Button>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>
+                                {t(thread.resolved ? 'contextTooltips.diff.unresolveThread' : 'contextTooltips.diff.resolveThread')}
+                            </TooltipContent>
+                        </Tooltip>
                     ) : null}
                 </div>
             )}

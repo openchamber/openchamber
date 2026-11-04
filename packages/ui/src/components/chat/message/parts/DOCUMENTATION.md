@@ -101,6 +101,16 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 
 ## Current important behavior
 
+### Why buttons in message rows use HoverTooltip
+
+A button that repeats in the transcript (a tool row's open action, a code
+block's copy and wrap, a table's toolbar) takes `HoverTooltip` from `ui/row-tooltip.tsx`, not
+`Tooltip`. A `Tooltip` keeps a root mounted per button, and the list mounts and
+unmounts these rows while scrolling, for a tooltip that shows at most once.
+`HoverTooltip` mounts it only while that one button is hovered or focused, and
+keeps the state in its own leaf, so a hover re-renders no row. It adds no DOM
+and needs no provider, so a Markdown block rendered for export is unchanged.
+
 ### Why a collapsed user message shares two lines between text and context
 
 Each context item (a quote, a code comment, terminal output) collapses to one

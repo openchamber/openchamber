@@ -50,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 模型',
@@ -215,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['zh-CN'],
   ...sessionReferencesI18n['zh-CN'],
   ...guestStatusViewI18n['zh-CN'],
+  ...tooltipsDiffI18n['zh-CN'],
+  ...tooltipsFilesI18n['zh-CN'],
+  ...tooltipsGitI18n['zh-CN'],
+  ...tooltipsTrackerI18n['zh-CN'],
+  ...tooltipsWalkthroughI18n['zh-CN'],
+  ...tooltipsTerminalBrowserI18n['zh-CN'],
+  ...tooltipsWorkspaceI18n['zh-CN'],
+  ...tooltipsPanelI18n['zh-CN'],
+  ...tooltipsChatI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
   'terminalView.toast.selectionCopied': '已复制输出',
@@ -1666,7 +1684,6 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.actions.addMenuTitle': '新建文件、文件夹或上传',
   'sidebarFilesTree.actions.refreshTitle': '刷新',
   'sidebarFilesTree.actions.collapseAllTitle': '折叠所有文件夹',
-  'sidebarFilesTree.actions.fileMenuTitle': '文件菜单',
   'sidebarFilesTree.state.searching': '搜索中...',
   'sidebarFilesTree.state.loading': '加载中...',
   'sidebarFilesTree.dialog.createFile.title': '新建文件',

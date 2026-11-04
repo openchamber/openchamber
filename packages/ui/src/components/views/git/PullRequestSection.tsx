@@ -53,6 +53,7 @@ import { BranchPullRequestPreview } from './BranchPullRequestPreview';
 import { useChangeIdPreflight } from './changeIdPreflight';
 import { ReviewPushFields } from './ReviewPushFields';
 import { useBranchPush } from './useBranchPush';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { joinProjectPath } from '@/lib/source-control/projectPath';
 
 const statusColor = (state: string | undefined | null): string => {
@@ -983,10 +984,12 @@ export const PullRequestSection: React.FC<{
         <div className="flex shrink-0 items-center gap-2 border-b border-edge-muted px-4 py-2">
           <Icon name="arrow-up" className="size-3.5 shrink-0 text-[var(--status-warning)]" />
           <span className="min-w-0 flex-1 truncate typography-micro text-muted-foreground">{t('gitView.change.push.notUploaded')}</span>
-          <Button size="sm" className="shrink-0" onClick={() => void uploadPatchset(liveChangeRequest)} disabled={isCreating}>
-            {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="upload-2" className="size-4" />}
-            {nextPatchset !== null ? t('gitView.change.push.uploadPatchset', { number: nextPatchset }) : t('gitView.change.push.uploadNew')}
-          </Button>
+          <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.uploadPatchset')} className="shrink-0">
+            <Button size="sm" className="shrink-0" onClick={() => void uploadPatchset(liveChangeRequest)} disabled={isCreating}>
+              {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="upload-2" className="size-4" />}
+              {nextPatchset !== null ? t('gitView.change.push.uploadPatchset', { number: nextPatchset }) : t('gitView.change.push.uploadNew')}
+            </Button>
+          </ButtonTooltip>
           {branchPush.dialogs}
         </div>
         <div className="min-h-0 flex-1">{preview}</div>
@@ -1013,9 +1016,18 @@ export const PullRequestSection: React.FC<{
       : prVisualState === 'closed'
         ? 'git-close-pull-request'
         : 'git-pull-request';
+  const openOnProviderLabel = providerName
+    ? t('gitView.pr.actions.openOnProviderAria', { provider: providerName })
+    : t('gitView.header.openPullRequest');
   const prStatusText = pr
     ? [
-        `${pr.state}${pr.draft ? ' (draft)' : ''}`,
+        t(pr.state === 'merged'
+          ? 'sessions.sidebar.group.pr.status.merged'
+          : pr.state === 'closed'
+            ? 'sessions.sidebar.group.pr.status.closed'
+            : pr.draft
+              ? 'sessions.sidebar.group.pr.status.draft'
+              : 'sessions.sidebar.group.pr.status.open'),
         // Whether it can merge is a question for an open one only: GitLab reports
         // a merged or closed merge request as not mergeable.
         pr.state === 'open' && pr.mergeable === false ? t('gitView.pr.notMergeable') : null,
@@ -1072,21 +1084,25 @@ export const PullRequestSection: React.FC<{
       {pr ? <div className={headerClassName}>
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
+            <ButtonTooltip
+              sideOffset={8}
+              label={openOnProviderLabel}
               className="shrink-0"
-              onClick={() => void openExternal(pr.url)}
-              aria-label={providerName
-                ? t('gitView.pr.actions.openOnProviderAria', { provider: providerName })
-                : t('gitView.header.openPullRequest')}
             >
-              <Icon name={prStateIconName} className="size-4 shrink-0" style={{ color: prColorVar }} />
-              {providerName
-                ? t('gitView.pr.actions.openOnProvider', { provider: providerName })
-                : t('gitView.header.openPullRequest')}
-            </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="shrink-0"
+                onClick={() => void openExternal(pr.url)}
+                aria-label={openOnProviderLabel}
+              >
+                <Icon name={prStateIconName} className="size-4 shrink-0" style={{ color: prColorVar }} />
+                {providerName
+                  ? t('gitView.pr.actions.openOnProvider', { provider: providerName })
+                  : t('gitView.header.openPullRequest')}
+              </Button>
+            </ButtonTooltip>
             <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('gitView.pullRequest.title')}</h3>
             <span className="typography-meta text-muted-foreground truncate">{formatChangeRequestReference(descriptorOf(statusIdentity?.provider), pr.number)}</span>
           </div>
@@ -1110,28 +1126,30 @@ export const PullRequestSection: React.FC<{
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {showWalkthroughAction && readContext && descriptorRegistered(readContext.provider) ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
-                onClick={() => {
-                  requestWalkthroughTarget(directory, {
-                    source: {
-                      kind: 'pr',
-                      number: pr.number,
-                      ...(statusProject ? { sourceRepo: { owner: statusProject.owner, repo: statusProject.name } } : {}),
-                    },
-                    context: readContext,
-                  });
-                  openContextSurface(directory, 'walkthrough');
-                }}
-                aria-label={t('walkthrough.action.open')}
-              >
-                <Icon name="route" className="size-4" />
-                <span className="pr-actions__walkthrough-label typography-ui-label">
-                  {t('walkthrough.action.open')}
-                </span>
-              </Button>
+              <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.walkthrough')} className="shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                  onClick={() => {
+                    requestWalkthroughTarget(directory, {
+                      source: {
+                        kind: 'pr',
+                        number: pr.number,
+                        ...(statusProject ? { sourceRepo: { owner: statusProject.owner, repo: statusProject.name } } : {}),
+                      },
+                      context: readContext,
+                    });
+                    openContextSurface(directory, 'walkthrough');
+                  }}
+                  aria-label={t('walkthrough.action.open')}
+                >
+                  <Icon name="route" className="size-4" />
+                  <span className="pr-actions__walkthrough-label typography-ui-label">
+                    {t('walkthrough.action.open')}
+                  </span>
+                </Button>
+              </ButtonTooltip>
             ) : null}
           </div>
         </div>
@@ -1194,16 +1212,18 @@ export const PullRequestSection: React.FC<{
                         ? t('gitView.pr.history.merged', { number: pr.number, base: pr.base || targetBaseBranch })
                         : t('gitView.pr.history.closed', { number: pr.number })}
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="xs"
-                      className="shrink-0"
-                      onClick={() => void openExternal(pr.url)}
-                      aria-label={t('gitView.pr.actions.openOnProviderAria', { provider: providerName })}
-                    >
-                      <Icon name="external-link" className="size-3.5" />
-                    </Button>
+                    <ButtonTooltip sideOffset={8} label={openOnProviderLabel} className="shrink-0">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        className="shrink-0"
+                        onClick={() => void openExternal(pr.url)}
+                        aria-label={openOnProviderLabel}
+                      >
+                        <Icon name="external-link" className="size-3.5" />
+                      </Button>
+                    </ButtonTooltip>
                   </div>
                 ) : null}
                 {/* Where it goes: this branch into the base, picked in place. */}
@@ -1216,9 +1236,14 @@ export const PullRequestSection: React.FC<{
                   ) : null}
                   {availableBaseBranches.length > 0 ? (
                     <Select value={targetBaseBranch} onValueChange={chooseTargetBaseBranch}>
-                      <SelectTrigger className="w-auto min-w-0" aria-label={t('gitView.pr.field.baseBranch')}>
-                        <SelectValue placeholder={t('gitView.pr.placeholder.selectBaseBranch')} />
-                      </SelectTrigger>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <SelectTrigger className="w-auto min-w-0" aria-label={t('gitView.pr.field.baseBranch')}>
+                            <SelectValue placeholder={t('gitView.pr.placeholder.selectBaseBranch')} />
+                          </SelectTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent><p>{t('gitView.pr.field.baseBranch')}</p></TooltipContent>
+                      </Tooltip>
                       <SelectContent>
                         {availableBaseBranches.map((candidate) => (
                           <SelectItem key={candidate} value={candidate}>{candidate}</SelectItem>
@@ -1290,28 +1315,32 @@ export const PullRequestSection: React.FC<{
                       <div className="flex items-center justify-between gap-2">
                         <label htmlFor={descriptionId} className="typography-micro text-muted-foreground">{t('gitView.pr.field.description')}</label>
                         <div className="flex items-center">
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            className="rounded-e-none"
-                            onClick={generateDescription}
-                            disabled={isGenerating || isCreating}
-                          >
-                            {isGenerating ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="ai-generate-2" className="size-3.5 text-primary" />}
-                            {t('gitView.commit.generate')}
-                          </Button>
+                          <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.generateDescription')}>
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              className="rounded-e-none"
+                              onClick={generateDescription}
+                              disabled={isGenerating || isCreating}
+                            >
+                              {isGenerating ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="ai-generate-2" className="size-3.5 text-primary" />}
+                              {t('gitView.commit.generate')}
+                            </Button>
+                          </ButtonTooltip>
                           <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="xs"
-                                className="rounded-s-none border-s-0 px-1"
-                                disabled={isGenerating || isCreating}
-                                aria-label={t('gitView.pr.generate.optionsAria')}
-                              >
-                                <Icon name="arrow-down-s" className="size-3.5" />
-                              </Button>
-                            </DropdownMenuTrigger>
+                            <ButtonTooltip sideOffset={8} label={t('gitView.pr.generate.optionsAria')}>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="xs"
+                                  className="rounded-s-none border-s-0 px-1"
+                                  disabled={isGenerating || isCreating}
+                                  aria-label={t('gitView.pr.generate.optionsAria')}
+                                >
+                                  <Icon name="arrow-down-s" className="size-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </ButtonTooltip>
                             <DropdownMenuContent align="end" className="w-60">
                               <DropdownMenuItem onSelect={() => setIsContextOpen(true)}>
                                 <Icon name="sticky-note" className="size-4 shrink-0" />
@@ -1332,18 +1361,23 @@ export const PullRequestSection: React.FC<{
                             aria-label={t('gitView.pr.generate.notesAria')}
                             autoFocus={isContextOpen && !additionalContext}
                           />
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            className="absolute inset-e-1.5 top-1.5 h-6 w-6 px-0"
-                            onClick={() => {
-                              setAdditionalContext('');
-                              setIsContextOpen(false);
-                            }}
-                            aria-label={t('gitView.pr.generate.removeNotesAria')}
-                          >
-                            <Icon name="close" className="size-3.5" />
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="xs"
+                                className="absolute inset-e-1.5 top-1.5 h-6 w-6 px-0"
+                                onClick={() => {
+                                  setAdditionalContext('');
+                                  setIsContextOpen(false);
+                                }}
+                                aria-label={t('gitView.pr.generate.removeNotesAria')}
+                              >
+                                <Icon name="close" className="size-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>{t('gitView.pr.generate.removeNotesAria')}</p></TooltipContent>
+                          </Tooltip>
                         </div>
                       ) : null}
                       <Textarea
@@ -1370,32 +1404,38 @@ export const PullRequestSection: React.FC<{
                 ) : null}
                 <div className="flex justify-end">
                   {createByPush ? (
-                    <Button size="sm" className="justify-center gap-2" onClick={() => void pushForReview()} disabled={pushForReviewDisabled}>
-                      {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="upload-2" className="size-4" />}
-                      <span>{t('gitView.change.push.forReview')}</span>
-                    </Button>
+                    <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.pushForReview')}>
+                      <Button size="sm" className="justify-center gap-2" onClick={() => void pushForReview()} disabled={pushForReviewDisabled}>
+                        {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name="upload-2" className="size-4" />}
+                        <span>{t('gitView.change.push.forReview')}</span>
+                      </Button>
+                    </ButtonTooltip>
                   ) : (
                     <div className="flex items-center">
-                      <Button
-                        size="sm"
-                        className="justify-center gap-2 rounded-e-none"
-                        onClick={createPr}
-                        disabled={createDisabled}
-                      >
-                        {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name={draft ? 'git-pr-draft' : 'git-pull-request'} className="size-4" />}
-                        <span>{createLabel}</span>
-                      </Button>
+                      <ButtonTooltip sideOffset={8} label={t('contextTooltips.git.createChangeRequest')}>
+                        <Button
+                          size="sm"
+                          className="justify-center gap-2 rounded-e-none"
+                          onClick={createPr}
+                          disabled={createDisabled}
+                        >
+                          {isCreating ? <Icon name="loader-4" className="size-4 animate-spin" /> : <Icon name={draft ? 'git-pr-draft' : 'git-pull-request'} className="size-4" />}
+                          <span>{createLabel}</span>
+                        </Button>
+                      </ButtonTooltip>
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            size="sm"
-                            className="rounded-s-none border-s-0 px-1.5"
-                            disabled={isCreating}
-                            aria-label={t('gitView.pr.createKindAria')}
-                          >
-                            <Icon name="arrow-down-s" className="size-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
+                        <ButtonTooltip sideOffset={8} label={t('gitView.pr.createKindAria')}>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="sm"
+                              className="rounded-s-none border-s-0 px-1.5"
+                              disabled={isCreating}
+                              aria-label={t('gitView.pr.createKindAria')}
+                            >
+                              <Icon name="arrow-down-s" className="size-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                        </ButtonTooltip>
                         <DropdownMenuContent align="end" className="w-56">
                           <DropdownMenuRadioGroup value={draft ? 'draft' : 'ready'} onValueChange={(value) => chooseDraft(value === 'draft')}>
                             <DropdownMenuRadioItem value="ready">{t('gitView.pr.actions.createPr')}</DropdownMenuRadioItem>

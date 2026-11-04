@@ -49,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'Zen-Modelle',
@@ -214,6 +223,15 @@ export const dict = {
   ...workflowsI18n['de'],
   ...sessionReferencesI18n['de'],
   ...guestStatusViewI18n['de'],
+  ...tooltipsDiffI18n['de'],
+  ...tooltipsFilesI18n['de'],
+  ...tooltipsGitI18n['de'],
+  ...tooltipsTrackerI18n['de'],
+  ...tooltipsWalkthroughI18n['de'],
+  ...tooltipsTerminalBrowserI18n['de'],
+  ...tooltipsWorkspaceI18n['de'],
+  ...tooltipsPanelI18n['de'],
+  ...tooltipsChatI18n['de'],
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
   'common.image.loading': 'Bild wird geladen',
@@ -1162,8 +1180,8 @@ export const dict = {
   'gitView.pr.actions.openOnProviderAria': 'Pull Request auf {provider} öffnen',
   'gitView.pr.actions.openSettings': 'Einstellungen öffnen',
   'gitView.pr.actions.repo': 'Repository',
-  'gitView.pr.actions.resolveFailedChecks': 'Fehlgeschlagene Checks auflösen',
-  'gitView.pr.actions.sendToAgent': 'An Agent senden',
+  'gitView.pr.actions.resolveFailedChecks': 'Fehlgeschlagene Checks anhängen',
+  'gitView.pr.actions.sendToAgent': 'An Chat anhängen',
   'gitView.pr.actions.refresh': 'PR-Status aktualisieren',
   'gitView.pr.actions.refreshAria': 'Pull-Request-Status aktualisieren',
   'gitView.pr.checkingStatus': 'Pull-Request-Status wird überprüft...',
@@ -1438,7 +1456,6 @@ export const dict = {
   'sidebarFilesTree.actions.uploadFilesTitle': 'Dateien hochladen',
   'sidebarFilesTree.actions.addMenuTitle': 'Neue Datei, neuer Ordner oder Upload',
   'sidebarFilesTree.actions.refreshTitle': 'Aktualisieren',
-  'sidebarFilesTree.actions.fileMenuTitle': 'Dateimenü',
   'sidebarFilesTree.state.searching': 'Suche läuft...',
   'sidebarFilesTree.state.loading': 'Wird geladen...',
   'sidebarFilesTree.dialog.createFile.title': 'Datei erstellen',
@@ -3384,7 +3401,7 @@ export const dict = {
   'gitView.operation.inProgressTitleOneConflict': 'Operation {operation} läuft: {count} Konflikt',
   'gitView.operation.readyToContinueHint': 'Bereit zum Fortfahren',
   'gitView.pr.segment.checks': 'Prüfungen',
-  'gitView.pr.comments.addAll': 'Alle hinzufügen',
+  'gitView.pr.comments.addAll': 'Alle an Chat anhängen',
   'contextPanel.mode.pr': "Tracker",
   'contextPanel.tracker.branchTab': "Aktueller Branch",
   'contextPanel.tracker.loadFailed': "Dieses Element konnte nicht geladen werden.",
@@ -3473,7 +3490,7 @@ export const dict = {
   'walkthrough.action.next': 'Weiter',
   'walkthrough.action.previous': 'Zurück',
   'walkthrough.action.refresh': 'Aktualisieren',
-  'walkthrough.action.open': 'Öffnen',
+  'walkthrough.action.open': 'Walkthrough',
   'walkthrough.stage.collecting': 'Sammeln',
   'walkthrough.stage.asking': 'Fragen',
   'walkthrough.stage.assembling': 'Zusammenstellen',
@@ -3534,7 +3551,7 @@ export const dict = {
   'contextRail.surface.preview.description': 'Vorschaukontext',
   'contextRail.surface.chat.description': 'Chatkontext',
   'contextRail.surface.notes': 'Projektwissen',
-  'contextRail.editorTree.toggle': 'Editorbaum umschalten',
+  'contextRail.editorTree.toggle': 'Dateibaum umschalten',
   'contextRail.editor.toggle': 'Dateieditor umschalten',
   'sidebarFilesTree.actions.collapseAllTitle': 'Alle einklappen',
   'filesView.editor.cannotPreviewBinary': 'Binärdatei kann nicht in der Vorschau angezeigt werden',

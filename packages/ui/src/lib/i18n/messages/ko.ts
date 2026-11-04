@@ -50,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 모델',
@@ -215,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['ko'],
   ...sessionReferencesI18n['ko'],
   ...guestStatusViewI18n['ko'],
+  ...tooltipsDiffI18n['ko'],
+  ...tooltipsFilesI18n['ko'],
+  ...tooltipsGitI18n['ko'],
+  ...tooltipsTrackerI18n['ko'],
+  ...tooltipsWalkthroughI18n['ko'],
+  ...tooltipsTerminalBrowserI18n['ko'],
+  ...tooltipsWorkspaceI18n['ko'],
+  ...tooltipsPanelI18n['ko'],
+  ...tooltipsChatI18n['ko'],
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',
   'terminalView.toast.selectionCopied': '출력을 복사했습니다',
@@ -870,7 +888,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.pr.mergeState': '병합 상태: {state}',
   'sessions.sidebar.group.pr.status.merged': '병합됨',
   'sessions.sidebar.group.pr.status.readyToMerge': '병합 준비됨',
-  'sessions.sidebar.group.pr.status.open': 'PR 열기',
+  'sessions.sidebar.group.pr.status.open': 'PR 열림',
   'sessions.sidebar.group.mr.status.open': 'MR 열림',
   'sessions.sidebar.group.pr.status.mergeConflicts': '병합 충돌',
   'sessions.sidebar.group.pr.status.mergeBlocked': '병합 차단됨',
@@ -1700,7 +1718,6 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.actions.addMenuTitle': '새 파일, 폴더 또는 업로드',
   'sidebarFilesTree.actions.refreshTitle': '새로고침',
   'sidebarFilesTree.actions.collapseAllTitle': '모든 폴더 접기',
-  'sidebarFilesTree.actions.fileMenuTitle': '파일 메뉴',
   'sidebarFilesTree.state.searching': '검색 중…',
   'sidebarFilesTree.state.loading': '로드 중…',
   'sidebarFilesTree.dialog.createFile.title': '파일 생성',
@@ -1907,8 +1924,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.largeDiffDescription': '렌더링이 느릴 수 있습니다. 아래 버튼으로 diff를 계속 볼 수 있습니다.',
   'diffView.summary.changedFilesSingle': '파일 {count}개 변경됨',
   'diffView.summary.changedFilesPlural': '파일 {count}개 변경됨',
-  "diffView.scope.changed": "Changed",
-  "diffView.scope.staged": "Staged",
+  'diffView.scope.changed': '변경됨',
+  'diffView.scope.staged': '스테이지됨',
   "diffView.scope.lastTurn": "마지막 턴",
   "diffView.scope.branch": "브랜치",
   "diffView.branch.resolvingBase": "베이스 브랜치 감지 중...",
@@ -2501,7 +2518,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileMentionAutocomplete.empty': '일치하는 항목 없음',
   'chat.queuedMessage.attachments': '+{count} 파일(s)',
   'chat.queuedMessage.empty': '(비어 있음)',
-  'chat.queuedMessage.title': 'Queued messages',
+  'chat.queuedMessage.title': '대기 중인 메시지',
   'chat.queuedMessage.edit': 'edit',
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': '큐에서 제거',
@@ -2635,7 +2652,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.attachFiles': '파일 첨부',
   'chat.chatInput.actions.addAttachment': '첨부 파일 추가',
   'chat.chatInput.actions.modelAgentSettings': '모델 및 에이전트 설정',
-  'chat.chatInput.actions.sendMessageAria': '보내기 메시지',
+  'chat.chatInput.actions.sendMessageAria': '메시지 보내기',
   'chat.chatInput.actions.queueMessageAria': '메시지 대기열에 추가',
   'chat.chatInput.actions.stopGeneratingAria': '생성 중지',
   'chat.chatInput.linked.byAuthor': '작성자: {author}',

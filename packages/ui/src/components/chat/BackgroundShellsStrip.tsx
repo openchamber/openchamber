@@ -131,18 +131,25 @@ const ShellRow: React.FC<{
         <span className="shrink-0 typography-meta text-muted-foreground">{t('chat.backgroundShells.subagent')}</span>
       ) : null}
       <ShellElapsed startedAt={shell.startedAt} />
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        disabled={stopping}
-        onClick={() => onStop(shell)}
-        onMouseDown={(event) => event.preventDefault()}
-        aria-label={t('chat.backgroundShells.stopAria', { command: shell.command })}
-        className={STOP_BUTTON_CLASS}
-      >
-        {t('chat.backgroundShells.stop')}
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={stopping}
+              onClick={() => onStop(shell)}
+              onMouseDown={(event) => event.preventDefault()}
+              aria-label={t('chat.backgroundShells.stopAria', { command: shell.command })}
+              className={STOP_BUTTON_CLASS}
+            >
+              {t('chat.backgroundShells.stop')}
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.shellStop')}</TooltipContent>
+      </Tooltip>
     </div>
   );
 };
@@ -186,33 +193,45 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
   return (
     <div role="group" className="border-b border-edge" aria-label={t('chat.backgroundShells.aria')}>
       <div className="flex oc-composer-row items-center gap-2 ps-3 pe-1.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setExpanded((value) => !value)}
-          onMouseDown={(event) => event.preventDefault()}
-          aria-expanded={expanded}
-          aria-controls={expanded ? listId : undefined}
-          className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
-        >
-          <Icon name="terminal-box" className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-start">
-            {t('chat.backgroundShells.count', { count: shells.length })}
-          </span>
-          <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={shells.every((shell) => stoppingIds.has(shell.id))}
-          onClick={() => stop(shells)}
-          onMouseDown={(event) => event.preventDefault()}
-          className={STOP_BUTTON_CLASS}
-        >
-          {t('chat.backgroundShells.stopAll')}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setExpanded((value) => !value)}
+              onMouseDown={(event) => event.preventDefault()}
+              aria-expanded={expanded}
+              aria-controls={expanded ? listId : undefined}
+              className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
+            >
+              <Icon name="terminal-box" className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-start">
+                {t('chat.backgroundShells.count', { count: shells.length })}
+              </span>
+              <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t(expanded ? 'contextTooltips.chat.shellsHide' : 'contextTooltips.chat.shellsShow')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex shrink-0">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={shells.every((shell) => stoppingIds.has(shell.id))}
+                onClick={() => stop(shells)}
+                onMouseDown={(event) => event.preventDefault()}
+                className={STOP_BUTTON_CLASS}
+              >
+                {t('chat.backgroundShells.stopAll')}
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('contextTooltips.chat.shellStopAll')}</TooltipContent>
+        </Tooltip>
       </div>
       {expanded ? (
         <div id={listId}>

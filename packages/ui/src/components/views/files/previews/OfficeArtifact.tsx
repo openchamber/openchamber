@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import type { WorkbookSheet } from '@/sync/document-attachments';
 import { columnName } from '@/sync/document-attachments';
@@ -45,9 +46,14 @@ const WorkbookView: React.FC<{ sheets: WorkbookSheet[]; sizeBytes: number | null
       sizeBytes={sizeBytes}
       actions={sheets.length > 1 ? (
         <Select value={String(selected)} onValueChange={(value) => setSelected(Number(value))}>
-          <SelectTrigger className="w-fit max-w-48" aria-label={t('filesView.artifact.office.sheet')}>
-            <SelectValue>{sheet.name}</SelectValue>
-          </SelectTrigger>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <SelectTrigger className="w-fit max-w-48" aria-label={t('filesView.artifact.office.sheet')}>
+                <SelectValue>{sheet.name}</SelectValue>
+              </SelectTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.files.chooseSheet')}</TooltipContent>
+          </Tooltip>
           <SelectContent>
             {sheets.map((entry, index) => (
               <SelectItem key={index} value={String(index)}>{entry.name}</SelectItem>
@@ -110,10 +116,15 @@ export const OfficeArtifact: React.FC<{
         icon={<Icon name="error-warning" className="size-10 text-[color:var(--status-error)]" />}
         title={t('filesView.artifact.state.readFailed', { name })}
         actions={(
-          <Button type="button" variant="outline" size="sm" onClick={() => setAttempt((value) => value + 1)}>
-            <Icon name="refresh" className="me-2 size-4" />
-            {t('filesView.artifact.state.retry')}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button type="button" variant="outline" size="sm" onClick={() => setAttempt((value) => value + 1)}>
+                <Icon name="refresh" className="me-2 size-4" />
+                {t('filesView.artifact.state.retry')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('contextTooltips.files.retryFile')}</TooltipContent>
+          </Tooltip>
         )}
       />
     );

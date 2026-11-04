@@ -817,9 +817,14 @@ const NestedRepositoryChanges = React.memo<NestedRepositoryChangesProps>(({
                         {t('diffView.nestedRepository.description')}
                     </div>
                 </div>
-                <Button variant="outline" size="sm" className="shrink-0" onClick={() => void openAsProject()}>
-                    {t('diffView.nestedRepository.openAsProject')}
-                </Button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button variant="outline" size="sm" className="shrink-0" onClick={() => void openAsProject()}>
+                            {t('diffView.nestedRepository.openAsProject')}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('contextTooltips.diff.openAsProject')}</TooltipContent>
+                </Tooltip>
             </div>
             {status.kind === 'loading' ? (
                 <div className="flex items-center justify-center gap-2 px-4 py-4 typography-meta text-muted-foreground">
@@ -3303,29 +3308,42 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 )}
                 {activeDiffScope === 'pr' && <>
                     <PullRequestComparisonSelector key={JSON.stringify([runtimeKey, effectiveDirectory, currentBranch])} comparison={prComparison} />
-                    {selectedPr && <Button variant="ghost" size="sm" disabled={comparison.loading}
-                        aria-label={t('session.githubIssuePicker.actions.refresh')} title={t('session.githubIssuePicker.actions.refresh')}
-                        onClick={() => void comparison.refresh()}><Icon name="refresh" className="size-4" /></Button>}
+                    {selectedPr && <Tooltip>
+                        <TooltipTrigger asChild>
+                            <span className="inline-flex flex-shrink-0">
+                                <Button variant="ghost" size="sm" disabled={comparison.loading}
+                                    aria-label={t('session.githubIssuePicker.actions.refresh')}
+                                    onClick={() => void comparison.refresh()}><Icon name="refresh" className="size-4" /></Button>
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}>{t('session.githubIssuePicker.actions.refresh')}</TooltipContent>
+                    </Tooltip>}
                 </>}
                 {changedFiles.length > 0 && (
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleExpandOrCollapseAll}
-                        className={cn(
-                            'diff-toolbar__expand-button h-7 flex-shrink-0 gap-1 px-1.5 text-muted-foreground hover:text-foreground',
-                            'ms-auto',
-                        )}
-                        title={expandedFiles.size > 0 ? t('diffView.actions.collapseAll') : t('diffView.actions.expandAll')}
-                    >
-                        <Icon
-                            name="expand-up-down"
-                            className="size-4"
-                        />
-                        <span className="diff-toolbar__expand-label typography-ui-label">
-                            {expandedFiles.size > 0 ? t('diffView.actions.collapseAll') : t('diffView.actions.expandAll')}
-                        </span>
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleExpandOrCollapseAll}
+                                className={cn(
+                                    'diff-toolbar__expand-button h-7 flex-shrink-0 gap-1 px-1.5 text-muted-foreground hover:text-foreground',
+                                    'ms-auto',
+                                )}
+                            >
+                                <Icon
+                                    name="expand-up-down"
+                                    className="size-4"
+                                />
+                                <span className="diff-toolbar__expand-label typography-ui-label">
+                                    {expandedFiles.size > 0 ? t('diffView.actions.collapseAll') : t('diffView.actions.expandAll')}
+                                </span>
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}>
+                            {expandedFiles.size > 0 ? t('contextTooltips.diff.collapseAll') : t('contextTooltips.diff.expandAll')}
+                        </TooltipContent>
+                    </Tooltip>
                 )}
                 {changeRequestReview && reviewProvider ? (
                     <ReviewSubmitButton
@@ -3336,37 +3354,49 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     />
                 ) : null}
                 {changedFiles.length > 0 && showReviewAction && (
-                    <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => setReviewDialogOpen(true)}
-                        disabled={reviewFlowSubmitting}
-                        className="diff-toolbar__review-button h-7 flex-shrink-0 gap-1.5 px-2"
-                        aria-label={t('diffView.actions.reviewAria')}
-                    >
-                        {reviewFlowSubmitting ? (
-                            <Icon name="loader-4" className="size-4 animate-spin" />
-                        ) : (
-                            <Icon name="search-eye" className="size-4" />
-                        )}
-                        <span className="diff-toolbar__review-label typography-ui-label">
-                            {t('diffView.actions.review')}
-                        </span>
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <span className="inline-flex flex-shrink-0">
+                                <Button
+                                    variant="default"
+                                    size="sm"
+                                    onClick={() => setReviewDialogOpen(true)}
+                                    disabled={reviewFlowSubmitting}
+                                    className="diff-toolbar__review-button h-7 flex-shrink-0 gap-1.5 px-2"
+                                    aria-label={t('diffView.actions.reviewAria')}
+                                >
+                                    {reviewFlowSubmitting ? (
+                                        <Icon name="loader-4" className="size-4 animate-spin" />
+                                    ) : (
+                                        <Icon name="search-eye" className="size-4" />
+                                    )}
+                                    <span className="diff-toolbar__review-label typography-ui-label">
+                                        {t('diffView.actions.review')}
+                                    </span>
+                                </Button>
+                            </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.diff.review')}</TooltipContent>
+                    </Tooltip>
                 )}
                 {showWalkthroughButton && (
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={openWalkthrough}
-                        className={cn('diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
-                        aria-label={t('walkthrough.action.open')}
-                    >
-                        <Icon name="route" className="size-4" />
-                        <span className="diff-toolbar__walkthrough-label typography-ui-label">
-                            {t('walkthrough.action.open')}
-                        </span>
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={openWalkthrough}
+                                className={cn('diff-toolbar__walkthrough-button h-7 flex-shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                                aria-label={t('walkthrough.action.open')}
+                            >
+                                <Icon name="route" className="size-4" />
+                                <span className="diff-toolbar__walkthrough-label typography-ui-label">
+                                    {t('walkthrough.action.open')}
+                                </span>
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.diff.walkthrough')}</TooltipContent>
+                    </Tooltip>
                 )}
                 {changedFiles.length > 0 && !isMobileLayout && (
                     <span className="diff-toolbar__tree-toggle flex flex-shrink-0">

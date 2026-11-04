@@ -11,6 +11,7 @@ import { Text } from '@/components/ui/text';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata, isImageFile } from '@/lib/toolHelpers';
 import { Icon } from '@/components/icon/Icon';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
@@ -401,23 +402,24 @@ const StaticToolRowInner: React.FC<{
                 ? readFileEntries.map((entry) => (
                     <React.Fragment key={entry.path}>
                         {canOpenImageExpanded && isImageFile(entry.path) ? (
-                            <button
-                                type="button"
-                                onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    handleOpenImageExpanded(entry.path);
-                                }}
-                                className={cn(
-                                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
-                                    'opacity-60 hover:opacity-100 focus-visible:opacity-100',
-                                )}
-                                style={{ color: 'var(--tools-icon)' }}
-                                title={t('chat.toolPart.openImageExpanded')}
-                                aria-label={t('chat.toolPart.openImageExpanded')}
-                            >
-                                <Icon name="fullscreen" className="h-3 w-3" />
-                            </button>
+                            <HoverTooltip label={t('contextTooltips.chat.openImage')}>
+                                <button
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        handleOpenImageExpanded(entry.path);
+                                    }}
+                                    className={cn(
+                                        'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                        'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                                    )}
+                                    style={{ color: 'var(--tools-icon)' }}
+                                    aria-label={t('chat.toolPart.openImageExpanded')}
+                                >
+                                    <Icon name="fullscreen" className="h-3 w-3" />
+                                </button>
+                            </HoverTooltip>
                         ) : null}
                         <button
                             type="button"

@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { PRESSED_CLASS } from '@/components/ui/action-toolbar';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useUIStore } from '@/stores/useUIStore';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useMarkdownPresentation, type MarkdownPresentation } from './MarkdownPresentationContext';
 import { activateMarkdownFile, useOpenMarkdownFile } from './markdownFileReferences';
@@ -209,26 +210,30 @@ function MarkdownCodeBlock({ children, className, node, command, ...props }: Cod
               className="pointer-events-auto flex shrink-0 items-center gap-2 rounded-md border border-sidebar bg-sidebar/80 px-1.5 py-1 supports-[backdrop-filter]:bg-sidebar/70 supports-[backdrop-filter]:backdrop-blur"
             >
               {command?.button}
-              {!proposal && <Button
-                variant="ghost"
-                size="xs"
-                data-export-ignore
-                className={wrap ? PRESSED_CLASS : undefined}
-                title={t(wrap ? 'markdownRenderer.code.actions.disableWrapTitle' : 'markdownRenderer.code.actions.enableWrapTitle')}
-                aria-pressed={wrap}
-                onClick={() => useUIStore.getState().setCodeBlockLineWrap(!wrap)}
-              >
-                <Icon name="text-wrap" className="size-3.5" />
-              </Button>}
-              <Button
-                variant="ghost"
-                size="xs"
-                data-export-ignore
-                title={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.code.actions.copyTitle')}
-                onClick={copy}
-              >
-                <Icon name={copied ? 'check' : 'file-copy'} className="size-3.5" />
-              </Button>
+              {!proposal && <HoverTooltip label={t(wrap ? 'markdownRenderer.code.actions.disableWrapTitle' : 'markdownRenderer.code.actions.enableWrapTitle')}>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  data-export-ignore
+                  className={wrap ? PRESSED_CLASS : undefined}
+                  aria-label={t(wrap ? 'markdownRenderer.code.actions.disableWrapTitle' : 'markdownRenderer.code.actions.enableWrapTitle')}
+                  aria-pressed={wrap}
+                  onClick={() => useUIStore.getState().setCodeBlockLineWrap(!wrap)}
+                >
+                  <Icon name="text-wrap" className="size-3.5" />
+                </Button>
+              </HoverTooltip>}
+              <HoverTooltip label={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.code.actions.copyTitle')}>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  data-export-ignore
+                  aria-label={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.code.actions.copyTitle')}
+                  onClick={copy}
+                >
+                  <Icon name={copied ? 'check' : 'file-copy'} className="size-3.5" />
+                </Button>
+              </HoverTooltip>
             </div>
           </div>
         )}

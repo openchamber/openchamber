@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import {
   fetchDevServers,
@@ -210,17 +211,21 @@ export const BrowserEmptyState: React.FC<{
                   ) : null}
                 </Button>
                 {candidate.announced ? null : (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 shrink-0 text-muted-foreground opacity-0 group-hover/server:opacity-100 focus-visible:opacity-100"
-                    onClick={() => hideDevServerPort(candidate.port)}
-                    aria-label={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
-                    title={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
-                  >
-                    <Icon name="eye-off" className="size-3.5" aria-hidden="true" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 shrink-0 text-muted-foreground opacity-0 group-hover/server:opacity-100 focus-visible:opacity-100"
+                        onClick={() => hideDevServerPort(candidate.port)}
+                        aria-label={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
+                      >
+                        <Icon name="eye-off" className="size-3.5" aria-hidden="true" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{t('contextPanel.browser.devServers.hide', { port: candidate.port })}</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
             ))}

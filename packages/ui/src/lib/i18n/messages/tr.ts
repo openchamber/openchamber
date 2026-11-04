@@ -49,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'Zen Modelleri',
@@ -153,6 +162,15 @@ export const dict = {
   ...workflowsI18n['tr'],
   ...sessionReferencesI18n['tr'],
   ...guestStatusViewI18n['tr'],
+  ...tooltipsDiffI18n['tr'],
+  ...tooltipsFilesI18n['tr'],
+  ...tooltipsGitI18n['tr'],
+  ...tooltipsTrackerI18n['tr'],
+  ...tooltipsWalkthroughI18n['tr'],
+  ...tooltipsTerminalBrowserI18n['tr'],
+  ...tooltipsWorkspaceI18n['tr'],
+  ...tooltipsPanelI18n['tr'],
+  ...tooltipsChatI18n['tr'],
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
   'terminalView.toast.selectionCopied': 'Çıktı kopyalandı',
@@ -1575,7 +1593,6 @@ export const dict = {
   'sidebarFilesTree.actions.addMenuTitle': 'Yeni dosya, klasör veya yükleme',
   'sidebarFilesTree.actions.refreshTitle': 'Yenile',
   'sidebarFilesTree.actions.collapseAllTitle': 'Tüm klasörleri daralt',
-  'sidebarFilesTree.actions.fileMenuTitle': 'Dosya menüsü',
   'sidebarFilesTree.state.searching': 'Aranıyor...',
   'sidebarFilesTree.state.loading': 'Yükleniyor...',
   'sidebarFilesTree.dialog.createFile.title': 'Dosya Oluştur',

@@ -3,6 +3,7 @@ import type { Part } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useSourceControlDescriptorOf, type SourceControlDescriptorOf } from '@/lib/source-control/providers/registry';
 import { clearStagedRevert } from '@/sync/session-actions';
@@ -95,18 +96,25 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
     };
 
     const restoreButton = (
-        <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={restoring}
-            onClick={() => { void restore(); }}
-            onMouseDown={(event) => event.preventDefault()}
-            className="shrink-0 text-primary/80 hover:bg-transparent hover:text-primary"
-        >
-            {restoring ? <Icon name="loader-4" className="size-3 animate-spin" aria-hidden="true" /> : null}
-            {items.length === 1 ? t('chat.revertPopover.restore') : t('chat.revertPopover.restoreAll')}
-        </Button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <span className="inline-flex shrink-0">
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={restoring}
+                        onClick={() => { void restore(); }}
+                        onMouseDown={(event) => event.preventDefault()}
+                        className="shrink-0 text-primary/80 hover:bg-transparent hover:text-primary"
+                    >
+                        {restoring ? <Icon name="loader-4" className="size-3 animate-spin" aria-hidden="true" /> : null}
+                        {items.length === 1 ? t('chat.revertPopover.restore') : t('chat.revertPopover.restoreAll')}
+                    </Button>
+                </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t(items.length === 1 ? 'contextTooltips.chat.restoreOne' : 'contextTooltips.chat.restoreAll')}</TooltipContent>
+        </Tooltip>
     );
 
     if (items.length === 1) {
@@ -127,22 +135,27 @@ export const RevertedMessagesStrip: React.FC<RevertedMessagesStripProps> = React
     return (
         <div role="group" className="border-b border-edge" aria-label={t('chat.revertPopover.title')}>
             <div className="flex oc-composer-row items-center gap-2 ps-3 pe-1.5">
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setExpandedFor(expanded ? null : expansionKey)}
-                    onMouseDown={(event) => event.preventDefault()}
-                    aria-expanded={expanded}
-                    aria-controls={expanded ? listId : undefined}
-                    className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
-                >
-                    <Icon name="arrow-go-back" className="size-3.5 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 truncate text-start">
-                        {t('chat.revertPopover.staged', { count: items.length })}
-                    </span>
-                    <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
-                </Button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setExpandedFor(expanded ? null : expansionKey)}
+                            onMouseDown={(event) => event.preventDefault()}
+                            aria-expanded={expanded}
+                            aria-controls={expanded ? listId : undefined}
+                            className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
+                        >
+                            <Icon name="arrow-go-back" className="size-3.5 shrink-0" aria-hidden="true" />
+                            <span className="min-w-0 truncate text-start">
+                                {t('chat.revertPopover.staged', { count: items.length })}
+                            </span>
+                            <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{t(expanded ? 'contextTooltips.chat.revertedHide' : 'contextTooltips.chat.revertedShow')}</TooltipContent>
+                </Tooltip>
                 {restoreButton}
             </div>
             {expanded ? (

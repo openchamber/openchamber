@@ -6,6 +6,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useTabletLayout } from '@/lib/device';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
@@ -41,7 +42,7 @@ export function CommitComparisonSelector({ commits, selectedHash, loading, error
       onClick={useSheet ? () => changeOpen(true) : undefined}
       aria-haspopup={useSheet ? 'dialog' : undefined}
       aria-expanded={useSheet ? open : undefined}
-      aria-label={t('commitComparison.select')} title={selectedHash ?? t('commitComparison.select')}>
+      aria-label={t('commitComparison.select')}>
       <Icon name="git-commit" className="size-3.5" />
       <span className="truncate">{selectedHash?.slice(0, 8) ?? t('commitComparison.select')}</span>
       <Icon name="arrow-down-s" className="size-3.5" />
@@ -95,7 +96,9 @@ export function CommitComparisonSelector({ commits, selectedHash, loading, error
   }
   return (
     <DropdownMenu open={open} onOpenChange={changeOpen}>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <HoverTooltip label={selectedHash ? t('contextTooltips.diff.commitShown', { hash: selectedHash }) : t('commitComparison.select')} side="bottom">
+        <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      </HoverTooltip>
       <DropdownMenuContent align="start" className="w-[32rem] max-w-[calc(100vw-2rem)] p-0">
         {picker}
       </DropdownMenuContent>

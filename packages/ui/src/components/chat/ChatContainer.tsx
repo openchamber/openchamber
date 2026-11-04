@@ -106,6 +106,7 @@ import {
     useSessionStartTimes,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useDraftHeading } from './useDraftHeading';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -755,16 +756,20 @@ const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLa
             <div className="flex items-center gap-2 rounded-2xl border border-edge bg-[var(--surface-background)] px-4 py-3 typography-ui-label text-muted-foreground">
                 <span className="min-w-0 flex-1 text-center">{text}</span>
                 {onStop ? (
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="-my-1.5 -me-2 shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
-                        onClick={onStop}
-                        aria-label={stopLabel}
-                        title={stopLabel}
-                    >
-                        <StopIcon className="size-4" />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="-my-1.5 -me-2 shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
+                                onClick={onStop}
+                                aria-label={stopLabel}
+                            >
+                                <StopIcon className="size-4" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{stopLabel}</TooltipContent>
+                    </Tooltip>
                 ) : null}
             </div>
         </div>
@@ -1246,20 +1251,26 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     }, [openColumnSession, parentSession]);
 
     const returnToParentButton = parentSession && !hideReturnToParent ? (
-        <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={handleReturnToParentSession}
-            className="absolute inset-s-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
-            aria-label={t('chat.container.returnToParent.aria')}
-            title={parentSession.title?.trim()
-                ? t('chat.container.returnToParent.titleNamed', { title: parentSession.title })
-                : t('chat.container.returnToParent.title')}
-        >
-            <Icon name="arrow-left" className="h-4 w-4" />
-            {t('chat.container.returnToParent.label')}
-        </Button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={handleReturnToParentSession}
+                    className="absolute inset-s-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
+                    aria-label={t('chat.container.returnToParent.aria')}
+                >
+                    <Icon name="arrow-left" className="h-4 w-4" />
+                    {t('chat.container.returnToParent.label')}
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+                {parentSession.title?.trim()
+                    ? t('chat.container.returnToParent.titleNamed', { title: parentSession.title })
+                    : t('chat.container.returnToParent.title')}
+            </TooltipContent>
+        </Tooltip>
     ) : null;
     // A chat of a deleted isolated space is on the Archive page and read-only; the server refuses
     // to run it whatever the screen shows. Its directory is the archive's own, and the list of

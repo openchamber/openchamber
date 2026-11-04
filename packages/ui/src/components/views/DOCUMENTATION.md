@@ -242,6 +242,15 @@ one attribute per moved
 control; the menu reads them when it opens and shows a check beside each view
 option that is on.
 
+### Why the changes list shares one tooltip and not a Tooltip per button
+
+The changes list is not virtualized below 1000 rows and keeps its stage,
+unstage and folder buttons mounted, so a Tooltip per button would mount
+thousands of them. `DelegatedTooltip` (`ui/row-tooltip.tsx`) listens on the
+list and shows the `data-row-tooltip` label of the button under the pointer.
+Its state stays in its own component because a re-render of `ChangesPanel`
+re-renders every row.
+
 ## Files toolbar
 
 The Files editor's row (`renderFileToolbar`, an `ActionToolbar`) has the actions

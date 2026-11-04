@@ -12,6 +12,7 @@ import { sessionLinkKey } from '@/lib/sessionLinks';
 import { SessionMentionChipsContext } from '../message/parts/sessionMentionChips';
 import { SessionMentionChipButton } from '../message/parts/SessionMentionChipButton';
 import { useUIStore } from '@/stores/useUIStore';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { parseAgentHref, parseAttachmentHref, parseSkillHref, INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS, buildAgentMentionUrl } from '@/lib/messages/inlineMessageLinks';
 import { openAppLinkWithConfirmation } from '../appLinkConfirmation';
@@ -251,17 +252,18 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
         {skill ? <span className={REFERENCE_CHIP_LABEL_CLASS}>{skill}</span> : children}
       </a>
       {showPreview && (
-        <Button
-          variant="ghost"
-          size="xs"
-          className="ms-1 align-middle"
-          data-export-ignore
-          title={t('terminalView.preview.openTitle')}
-          aria-label={t('terminalView.preview.open')}
-          onClick={() => useUIStore.getState().openContextPreview(directory, href)}
-        >
-          <Icon name="global" className="size-3.5" />
-        </Button>
+        <HoverTooltip label={t('terminalView.preview.openTitle')}>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="ms-1 align-middle"
+            data-export-ignore
+            aria-label={t('terminalView.preview.open')}
+            onClick={() => useUIStore.getState().openContextPreview(directory, href)}
+          >
+            <Icon name="global" className="size-3.5" />
+          </Button>
+        </HoverTooltip>
       )}
     </>
   );

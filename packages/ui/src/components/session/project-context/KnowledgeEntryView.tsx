@@ -1,19 +1,24 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
 
 /** Back to the list, at the start of an opened entry's own toolbar. */
 export const KnowledgeBackButton: React.FC<{ label: string; onClick: () => void }> = ({ label, onClick }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className={`${KNOWLEDGE_ICON_BUTTON_CLASS} -ms-1`}
-    aria-label={label}
-    title={label}
-  >
-    <Icon name="arrow-left-s" className="h-4 w-4" />
-  </button>
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${KNOWLEDGE_ICON_BUTTON_CLASS} -ms-1`}
+        aria-label={label}
+      >
+        <Icon name="arrow-left-s" className="h-4 w-4" />
+      </button>
+    </TooltipTrigger>
+    <TooltipContent side="bottom" sideOffset={6}>{label}</TooltipContent>
+  </Tooltip>
 );
 
 /**

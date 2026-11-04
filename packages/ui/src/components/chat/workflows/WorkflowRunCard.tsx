@@ -3,6 +3,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { BusyDots } from '@/components/ui/busy-dots';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { groupWorkflowAgentsByPhase, type WorkflowRun } from '@/lib/workflows/model';
@@ -10,6 +11,7 @@ import { openWorkflowRunInPanel } from '@/lib/workflows/panel';
 import { useWorkflowRunsStore, useWorkflowRun } from '@/lib/workflows/store';
 import { useUIStore } from '@/stores/useUIStore';
 import { selectWorkflowsShown } from '@/lib/workflows/availability';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { useWorkflowRunAction, workflowRunLook } from './workflowRunPresentation';
 
 /**
@@ -62,15 +64,20 @@ const WorkflowRunCardBody: React.FC<{ run: WorkflowRun }> = ({ run }) => {
       <div className="flex min-w-0 items-center gap-2">
         <Icon name="flow-chart" className="size-4 shrink-0 text-muted-foreground" />
         {panelAvailable ? (
-          <button
-            type="button"
-            onClick={() => openWorkflowRunInPanel(run.directory, run.parentSessionId, run.id)}
-            title={t('chat.workStatus.workflow.openRun', { name: run.name })}
-            className="min-w-0 truncate text-start typography-ui-label text-foreground/80 hover:text-foreground"
-            dir="auto"
-          >
-            {run.name}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => openWorkflowRunInPanel(run.directory, run.parentSessionId, run.id)}
+                aria-label={t('chat.workStatus.workflow.openRun', { name: run.name })}
+                className="min-w-0 truncate text-start typography-ui-label text-foreground/80 hover:text-foreground"
+                dir="auto"
+              >
+                {run.name}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('chat.workStatus.workflow.openRun', { name: run.name })}</TooltipContent>
+          </Tooltip>
         ) : (
           <span className="min-w-0 truncate typography-ui-label text-foreground" dir="auto">{run.name}</span>
         )}
@@ -104,27 +111,35 @@ const WorkflowRunCardBody: React.FC<{ run: WorkflowRun }> = ({ run }) => {
 
       {run.state === 'awaiting-approval' ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" disabled={busy} onClick={() => act(run.id, 'approve')}>
-            <Icon name="play" className="size-3.5" />
-            {t('chat.workflow.action.run')}
-          </Button>
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'decline')}>
-            {t('chat.workflow.action.decline')}
-          </Button>
+          <ButtonTooltip label={t('contextTooltips.workspace.workflow.approve')} className="shrink-0">
+            <Button type="button" size="sm" disabled={busy} onClick={() => act(run.id, 'approve')}>
+              <Icon name="play" className="size-3.5" />
+              {t('chat.workflow.action.run')}
+            </Button>
+          </ButtonTooltip>
+          <ButtonTooltip label={t('contextTooltips.workspace.workflow.decline')} className="shrink-0">
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'decline')}>
+              {t('chat.workflow.action.decline')}
+            </Button>
+          </ButtonTooltip>
         </div>
       ) : run.state === 'running' ? (
         <div className="mt-3 flex items-center gap-2">
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'stop')}>
-            <Icon name="stop" className="size-3.5" />
-            {t('chat.workflow.action.stop')}
-          </Button>
+          <ButtonTooltip label={t('contextTooltips.workspace.workflow.stop')} className="shrink-0">
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'stop')}>
+              <Icon name="stop" className="size-3.5" />
+              {t('chat.workflow.action.stop')}
+            </Button>
+          </ButtonTooltip>
         </div>
       ) : run.state === 'failed' || run.state === 'stopped' ? (
         <div className="mt-3 flex items-center gap-2">
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'resume')}>
-            <Icon name="restart" className="size-3.5" />
-            {t('chat.workflow.action.resume')}
-          </Button>
+          <ButtonTooltip label={t('contextTooltips.workspace.workflow.resume')} className="shrink-0">
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => act(run.id, 'resume')}>
+              <Icon name="restart" className="size-3.5" />
+              {t('chat.workflow.action.resume')}
+            </Button>
+          </ButtonTooltip>
         </div>
       ) : null}
     </div>
