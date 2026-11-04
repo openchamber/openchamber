@@ -37,7 +37,7 @@ import process from "node:process"
 import { ACCESSIBILITY_CATEGORY, accessibilityInWindow, accessibilityState, describeAccessibility, FORCE_ACCESSIBILITY_ARGS } from "./perf/accessibility.mjs"
 import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, resolveProfileDir, wait } from "./perf/cdp.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
-import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
+import { expandProjects, expandSessionLists, settlePage } from "./perf/scenario.mjs"
 import { percentile, round } from "./perf/metrics.mjs"
 import { createNetworkRecorder, endpointPattern, summarizeRequests } from "./perf/network.mjs"
 import { buildRenderProbeSource, printRenderProbe, readRenderProbe, RENDER_PROBE_GLOBAL, summarizeRenderProbe } from "./perf/render-probe.mjs"
@@ -65,7 +65,12 @@ Options:
   --park <id>              Session to open on load (default: the first sidebar
                            row outside the plan). Keeps the restored session
                            out of the plan, so its first click is really cold.
-  --settle <seconds>       Wait after load before clicking (default: 12)
+  --settle <seconds>       Longest wait after load for the app to be ready and
+                           its main thread quiet (default: 12)
+  --timing                 Timing run: no sampler and no RunTask trace, so the
+                           longest task per switch is missing. The figures to
+                           compare between builds; attribution needs a run
+                           without this flag.
   --hover <ms>             Rest the pointer on the row before pressing
                            (default: 400). Sidebar tooltips open on hover, so
                            a click straight after the move would measure the
@@ -126,6 +131,7 @@ const parseArgs = (argv) => {
     coldReload: false,
     park: null,
     settle: 12,
+    timing: false,
     hover: 400,
     gap: 2500,
     shiftWindow: 1500,
@@ -156,6 +162,7 @@ const parseArgs = (argv) => {
     else if (value === "--cold-reload") options.coldReload = true
     else if (value === "--park") options.park = argv[++index]
     else if (value === "--settle") options.settle = Number(argv[++index])
+    else if (value === "--timing") options.timing = true
     else if (value === "--hover") options.hover = Number(argv[++index])
     else if (value === "--gap") options.gap = Number(argv[++index])
     else if (value === "--shift-window") options.shiftWindow = Number(argv[++index])
@@ -470,6 +477,7 @@ const main = async () => {
     await Promise.all([
       client.send("Page.enable"),
       client.send("Runtime.enable"),
+      client.send("Performance.enable"),
       client.send("Profiler.enable"),
       client.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }),
     ])
@@ -497,8 +505,9 @@ const main = async () => {
       const loaded = client.once("Page.loadEventFired", 60_000)
       await client.send("Page.navigate", { url: url.toString() })
       await loaded
-      console.log(`Loaded ${options.url}${parkId ? ` parked on ${parkId}` : ""}; settling for ${options.settle}s.`)
-      await wait(options.settle * 1000)
+      console.log(`Loaded ${options.url}${parkId ? ` parked on ${parkId}` : ""}; settling for up to ${options.settle}s.`)
+      const settle = await settlePage(client, options.settle)
+      console.log(`Settled after ${settle.seconds}s.`)
       const expanded = await expandSessionLists(client)
       if (expanded > 0) await wait(3000)
     }
@@ -531,9 +540,13 @@ const main = async () => {
 
     const traceEvents = []
     client.on("Tracing.dataCollected", ({ value }) => { for (const event of value ?? []) traceEvents.push(event) })
-    await client.send("Profiler.setSamplingInterval", { interval: 250 })
-    await client.send("Profiler.start")
-    const categories = [...new Set(["devtools.timeline", "disabled-by-default-devtools.timeline", "blink.user_timing", ACCESSIBILITY_CATEGORY, ...options.extraCategories])]
+    if (!options.timing) {
+      await client.send("Profiler.setSamplingInterval", { interval: 250 })
+      await client.send("Profiler.start")
+    }
+    // A timing run keeps the marks that place each switch and the accessibility
+    // work inside it, without `RunTask` on every thread.
+    const categories = [...new Set([...(options.timing ? [] : ["devtools.timeline", "disabled-by-default-devtools.timeline"]), "blink.user_timing", ACCESSIBILITY_CATEGORY, ...options.extraCategories])]
     await client.send("Tracing.start", { transferMode: "ReportEvents", categories: categories.join(",") })
 
     const switches = []
@@ -609,13 +622,13 @@ const main = async () => {
     await client.send("Tracing.end")
     await tracingComplete
     await wait(500)
-    const { profile } = await client.send("Profiler.stop")
+    const profile = options.timing ? null : (await client.send("Profiler.stop")).profile
 
     // Attribute the longest task to each switch from the user-timing marks.
     const marks = traceEvents.filter((event) => event.cat?.includes("blink.user_timing") && (event.name === "switch:start" || event.name === "switch:end"))
       .sort((left, right) => left.ts - right.ts)
     const tasks = traceEvents.filter((event) => event.name === "RunTask" && event.ph === "X" && Number(event.dur) > 0)
-    if (tasks.length === 0) console.warn("Warning: the trace contains no RunTask events; longest-task metrics are unavailable, not zero.")
+    if (tasks.length === 0 && !options.timing) console.warn("Warning: the trace contains no RunTask events; longest-task metrics are unavailable, not zero.")
     if (marks.length !== switches.length * 2) console.warn(`Warning: ${marks.length} switch marks for ${switches.length} switches; longest-task attribution may be misaligned.`)
     let switchIndex = 0
     for (let markIndex = 0; markIndex + 1 < marks.length && switchIndex < switches.length; markIndex += 2) {
@@ -651,11 +664,12 @@ const main = async () => {
       accessibility: accessibilityState(traceEvents, { categories, forced: options.forceAccessibility }),
       ...summarizeSwitches(switches, titles),
       switches,
-      cpuProfile: summarizeCpuProfile(profile),
+      timing: options.timing,
+      cpuProfile: profile ? summarizeCpuProfile(profile) : null,
     }
     await writeFile(join(output, "switch-summary.json"), JSON.stringify(summary, null, 2))
     await writeFile(join(output, "trace.json"), JSON.stringify({ traceEvents }))
-    await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
+    if (profile) await writeFile(join(output, "cpu-profile.cpuprofile"), JSON.stringify(profile))
     if (renderProbeRaw) await writeFile(join(output, "render-probe.json"), renderProbeRaw)
 
     console.log(`\n${describeAccessibility(summary.accessibility)}`)
