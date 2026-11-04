@@ -1086,7 +1086,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const languageContext = React.useMemo<ComposerLanguageContext>(() => ({
         inputMode,
         knownAgentNames,
-        confirmedMentions: confirmedMentionsRef.current,
+        // Draft persistence and restoration can replace the set between edits.
+        get confirmedMentions() { return confirmedMentionsRef.current; },
         knownSlashNames: knownSlashNamesWithGuests,
         knownSnippetTriggers,
         attachmentFilenames,

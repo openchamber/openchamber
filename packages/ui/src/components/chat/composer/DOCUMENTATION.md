@@ -477,6 +477,14 @@ copy.
 - `tokenize.ts` — one pass producing every highlight range. Adding a construct
    to the language means adding it here, once.
 
+### Why confirmed paths are read through the draft ref
+
+The memoized editor language context reads confirmed paths through a getter on
+the composer's draft ref. Persistence and restoration can replace that set;
+capturing one set leaves chips using paths from an earlier draft snapshot while
+send preparation reads the current paths. The getter keeps both on the same
+source without rebuilding the language context on each keystroke.
+
 ### Why completion follows selection and not chip rendering
 
 Enter, clicking, tapping and the existing Tab route all use the shared mention
