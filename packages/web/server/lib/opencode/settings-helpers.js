@@ -596,6 +596,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.layoutAnimations === true || candidate.layoutAnimations === false) {
       result.layoutAnimations = candidate.layoutAnimations;
     }
+    if (typeof candidate.sidebarEdgePeekEnabled === 'boolean') {
+      result.sidebarEdgePeekEnabled = candidate.sidebarEdgePeekEnabled;
+    }
     if (candidate.openLinksInBrowserPanel === true || candidate.openLinksInBrowserPanel === false) {
       result.openLinksInBrowserPanel = candidate.openLinksInBrowserPanel;
     }

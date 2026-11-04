@@ -1039,6 +1039,8 @@ interface UIStore {
    * as they open and close. Off, they snap (`useLayoutAnimationMs`).
    */
   layoutAnimations: boolean;
+  /** The collapsed sidebar slides over the chat when a mouse rests on the window's start edge. Off, it only opens with a click. */
+  sidebarEdgePeekEnabled: boolean;
   /** Plain clicks on links in chat open in the built-in browser panel (desktop only). */
   openLinksInBrowserPanel: boolean;
   /** How many of the user's browser tabs keep their page loaded, across projects (desktop only). */
@@ -1363,6 +1365,7 @@ interface UIStore {
   setFileEditorWrapLines: (value: boolean) => void;
   setConfirmFileTreeMove: (value: boolean) => void;
   setLayoutAnimations: (value: boolean) => void;
+  setSidebarEdgePeekEnabled: (value: boolean) => void;
   setOpenLinksInBrowserPanel: (value: boolean) => void;
   setLiveBrowserTabLimit: (value: number) => void;
   setOpenTrackerLinksOnBoard: (value: boolean) => void;
@@ -1621,6 +1624,7 @@ export const useUIStore = create<UIStore>()(
         fileEditorWrapLines: true,
         confirmFileTreeMove: true,
         layoutAnimations: true,
+        sidebarEdgePeekEnabled: true,
         openLinksInBrowserPanel: false,
         liveBrowserTabLimit: LIVE_BROWSER_TABS_DEFAULT,
         openTrackerLinksOnBoard: true,
@@ -2768,6 +2772,10 @@ export const useUIStore = create<UIStore>()(
           set({ layoutAnimations: value });
         },
 
+        setSidebarEdgePeekEnabled: (value) => {
+          set({ sidebarEdgePeekEnabled: value });
+        },
+
         setOpenLinksInBrowserPanel: (value) => {
           set({ openLinksInBrowserPanel: value });
         },
@@ -3868,6 +3876,7 @@ export const useUIStore = create<UIStore>()(
           fileEditorWrapLines: state.fileEditorWrapLines,
           confirmFileTreeMove: state.confirmFileTreeMove,
           layoutAnimations: state.layoutAnimations,
+          sidebarEdgePeekEnabled: state.sidebarEdgePeekEnabled,
           openLinksInBrowserPanel: state.openLinksInBrowserPanel,
           liveBrowserTabLimit: state.liveBrowserTabLimit,
           openTrackerLinksOnBoard: state.openTrackerLinksOnBoard,

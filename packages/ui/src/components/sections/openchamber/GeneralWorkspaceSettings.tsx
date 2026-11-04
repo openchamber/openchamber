@@ -310,6 +310,8 @@ const PanelsAndLinksSection: React.FC = () => {
   const setSessionTabsPerWorkspace = useUIStore((state) => state.setSessionTabsPerWorkspace);
   const layoutAnimations = useUIStore((state) => state.layoutAnimations);
   const setLayoutAnimations = useUIStore((state) => state.setLayoutAnimations);
+  const sidebarEdgePeekEnabled = useUIStore((state) => state.sidebarEdgePeekEnabled);
+  const setSidebarEdgePeekEnabled = useUIStore((state) => state.setSidebarEdgePeekEnabled);
   const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel);
   const setOpenLinksInBrowserPanel = useUIStore((state) => state.setOpenLinksInBrowserPanel);
   const liveBrowserTabLimit = useUIStore((state) => state.liveBrowserTabLimit);
@@ -347,6 +349,16 @@ const PanelsAndLinksSection: React.FC = () => {
           ariaLabel={t('settings.openchamber.visual.field.layoutAnimationsAria')}
           info={t('settings.openchamber.visual.field.layoutAnimationsInfo')}
           settingsItem="appearance.layout-animations"
+        />
+      ) : null}
+      {!isMobile ? (
+        <SettingsCheckboxRow
+          checked={sidebarEdgePeekEnabled}
+          onChange={setSidebarEdgePeekEnabled}
+          label={t('settings.openchamber.visual.field.sidebarEdgePeek')}
+          ariaLabel={t('settings.openchamber.visual.field.sidebarEdgePeekAria')}
+          info={t('settings.openchamber.visual.field.sidebarEdgePeekInfo')}
+          settingsItem="appearance.sidebar-edge-peek"
         />
       ) : null}
       {isDesktopShell() && !isMobile ? (

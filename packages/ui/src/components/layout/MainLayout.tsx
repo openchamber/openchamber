@@ -82,7 +82,8 @@ const OnDemand: React.FC<{
  */
 const LeftSidebar = React.memo<{ isMobile: boolean }>(({ isMobile }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-    const peek = useSidebarPeek({ enabled: !isSidebarOpen && !isMobile, layoutAnimationMs: useLayoutAnimationMs() });
+    const sidebarEdgePeekEnabled = useUIStore((state) => state.sidebarEdgePeekEnabled);
+    const peek = useSidebarPeek({ enabled: sidebarEdgePeekEnabled && !isSidebarOpen && !isMobile, layoutAnimationMs: useLayoutAnimationMs() });
     return (
         <Sidebar
             isOpen={isSidebarOpen}

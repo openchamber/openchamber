@@ -233,6 +233,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
   },
   {
+    id: 'appearance.sidebar-edge-peek',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.sidebarEdgePeek',
+    descriptionKey: 'settings.openchamber.visual.field.sidebarEdgePeekInfo',
+    keywords: ['sidebar', 'edge', 'hover', 'peek', 'reveal', 'mouse', 'collapsed'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'appearance.open-links-in-browser-panel',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.openLinksInBrowserPanel',
