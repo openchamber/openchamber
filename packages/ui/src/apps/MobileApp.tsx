@@ -61,7 +61,9 @@ import { useUIStore } from '@/stores/useUIStore';
 import { closeTopmostBackLayer } from '@/lib/mobileBackLayers';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openSessionFromToast } from '@/sync/session-navigation';
 import { SyncProvider } from '@/sync/sync-context';
+import { toast } from '@/components/ui';
 
 import { SyncAppEffects } from './AppEffects';
 import { BusyDots } from '@/components/ui/busy-dots';
@@ -70,6 +72,7 @@ import { MobileHeader } from './MobileHeader';
 import { MobileInstancesSurface } from './MobileInstancesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
+import { fileNameOf, sessionLineage } from './mobileFileRequest';
 import { connectMobileSettingsNavigation } from './mobileSettingsNavigation';
 import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { ArchiveSessionsView } from '@/components/views/ArchiveView';
@@ -237,14 +240,56 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   }, []);
 
   // The agent asked for a file to be shown: open the files drawer and stage
-  // the path the way a chat file link does, so the surface routes to it.
+  // the path the way a chat file link does, so the surface routes to it. A
+  // session the user is not looking at only announces the file, and staging
+  // waits for the tap: a stored path would send the files drawer of the session
+  // on screen to that file the next time it opens.
   React.useEffect(() => subscribeOpenchamberEvents((event) => {
     if (event.type !== 'file-open-request') return;
     const directory = event.directory ?? useDirectoryStore.getState().currentDirectory;
     if (!directory) return;
-    useUIStore.getState().openContextFile(directory, event.path);
-    openFilesSurface();
-  }), [openFilesSurface]);
+    const showFile = () => {
+      useUIStore.getState().openContextFile(directory, event.path);
+      openFilesSurface();
+    };
+    const { sessionId } = event;
+    if (!sessionId) {
+      showFile();
+      return;
+    }
+    // A subagent can ask before its session reaches the global list, so a
+    // session the list does not know is read from the server.
+    const readSession = async (id: string) => useGlobalSessionsStore.getState().entityById.get(id)
+      ?? await opencodeClient.getSession(id).catch(() => null);
+    void sessionLineage(sessionId, readSession).then((lineage) => {
+      const isViewed = () => {
+        const { currentSessionId } = useSessionUIStore.getState();
+        return currentSessionId === sessionId || lineage.some((session) => session.id === currentSessionId);
+      };
+      if (isViewed()) {
+        showFile();
+        return;
+      }
+      const title = lineage[0]?.title;
+      toast.info(fileNameOf(event.path), {
+        id: `file-open-${sessionId}:${event.path}`,
+        description: title
+          ? t('chat.fileOpenRequest.toast.description', { session: title })
+          : t('chat.fileOpenRequest.toast.descriptionUntitled'),
+        action: {
+          label: t('chat.fileOpenRequest.toast.openSession'),
+          onClick: () => {
+            openSessionFromToast(sessionId, directory);
+            closeSurface();
+            setSessionsSheetOpen(false);
+            // A folder waiting for the user's trust switches later or never, and
+            // the drawer of the session still on screen must not get the file.
+            if (isViewed()) showFile();
+          },
+        },
+      });
+    });
+  }), [closeSurface, openFilesSurface, t]);
 
   // The agent asked for a saved plan to be shown: the plan opens the way a tap
   // on it in the Project knowledge drawer opens it.
