@@ -1934,7 +1934,11 @@ async function restoreSessionTree(
   return { restoredIds, failedIds }
 }
 
-async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: string): Promise<boolean> {
+async function restoreArchivedSession(
+  sessionId: string,
+  expectedRuntimeKey: string,
+  { relocate = true }: { relocate?: boolean } = {},
+): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
@@ -1977,7 +1981,7 @@ async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: str
     // Its worktree may have been removed while it sat in the archive; such a
     // session moves to its project root so it can be written to again. Loaded
     // lazily: the relocation module builds on this one.
-    if (!isStaleRuntime(expectedRuntimeKey)) {
+    if (relocate && !isStaleRuntime(expectedRuntimeKey)) {
       void import("@/lib/worktrees/relocateRestoredSession")
         .then((module) => module.relocateRestoredSessionWithNotice(sessionId))
         .catch((error: unknown) => console.warn("[session-actions] restored session relocation failed", error))
@@ -1998,8 +2002,10 @@ export type UnarchiveSessionsOptions = {
   expectedRuntimeKey?: string
   /**
    * Undo of an archive that just happened: put back exactly the sessions it
-   * moved, subsessions included. Without it a subsession is restored on its
-   * own only while its parent is active (`isRestorableOnItsOwn`).
+   * moved, subsessions included, where they were, even when their folder is
+   * gone. Without it a subsession is restored on its own only while its parent
+   * is active (`isRestorableOnItsOwn`), and a session whose folder is gone
+   * moves to its project.
    */
   undo?: boolean
 }
@@ -2036,7 +2042,7 @@ export async function unarchiveSessions(
     }
     if (settled.has(id)) continue
     if (options?.undo) {
-      if (await restoreArchivedSession(id, expectedRuntimeKey)) restoredIds.push(id)
+      if (await restoreArchivedSession(id, expectedRuntimeKey, { relocate: false })) restoredIds.push(id)
       else failedIds.push(id)
       settled.add(id)
       continue

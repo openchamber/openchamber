@@ -6803,15 +6803,18 @@ const readWorktreeStateTree = async (worktreeDirectory) => {
   }
 };
 
-const writeWorktreeSnapshot = async (worktreeDirectory, { ref, message, oldValue }) => {
-  const { head, tree } = await readWorktreeStateTree(worktreeDirectory);
-  const env = { ...(await buildGitEnv(worktreeDirectory)), ...SNAPSHOT_IDENTITY_ENV };
-  const commit = await runGitCommand(worktreeDirectory, ['commit-tree', tree, '-p', head, '-m', message], { env });
+const commitSnapshot = async (directory, { ref, message, oldValue, head, tree }) => {
+  const env = { ...(await buildGitEnv(directory)), ...SNAPSHOT_IDENTITY_ENV };
+  const commit = await runGitCommand(directory, ['commit-tree', tree, '-p', head, '-m', message], { env });
   if (!commit.success) throw new Error(commit.message || 'Failed to write snapshot commit');
   const commitSha = commit.stdout.trim();
-  await runGitCommandOrThrow(worktreeDirectory, ['update-ref', ref, commitSha, ...(oldValue === undefined ? [] : [oldValue])], 'Failed to store snapshot ref');
+  await runGitCommandOrThrow(directory, ['update-ref', ref, commitSha, ...(oldValue === undefined ? [] : [oldValue])], 'Failed to store snapshot ref');
   return { ref, commit: commitSha, head };
 };
+
+const writeWorktreeSnapshot = async (worktreeDirectory, options) => (
+  commitSnapshot(worktreeDirectory, { ...options, ...(await readWorktreeStateTree(worktreeDirectory)) })
+);
 
 /** A run's snapshot of its worktree, under `refs/openchamber/runs/`. */
 export async function snapshotWorktree(directory, input = {}) {
@@ -6931,16 +6934,17 @@ export async function archiveWorktree(directory, input = {}, options = {}) {
   }
 }
 
-const isRegisteredWorktree = async (primaryWorktree, targetCanonical) => {
+const findRegisteredWorktree = async (primaryWorktree, targetCanonical) => {
   const entries = await listWorktreeEntries(primaryWorktree);
   const registered = await Promise.all(entries.map(async (entry) => (entry?.worktree ? canonicalPath(entry.worktree) : null)));
-  return registered.includes(targetCanonical);
+  return entries[registered.indexOf(targetCanonical)] ?? null;
 };
 
 const archiveRegisteredWorktree = async ({ directory, id, worktreeDirectory, targetCanonical, context, input, options }) => {
   // Only a checkout git registers here: the removal below would otherwise
   // treat the folder as a leftover and delete it without a trace in git.
-  if (!(await isRegisteredWorktree(context.primaryWorktree, targetCanonical))) throw new Error('Not a worktree of this repository');
+  const entry = await findRegisteredWorktree(context.primaryWorktree, targetCanonical);
+  if (!entry) throw new Error('Not a worktree of this repository');
   // A new worktree's files land in the background: a snapshot taken before
   // they do records every missing file as deleted. A failure while fetching
   // submodules or LFS objects comes after every file landed, so that worktree
@@ -6951,10 +6955,9 @@ const archiveRegisteredWorktree = async ({ directory, id, worktreeDirectory, tar
     throw new Error('The worktree did not finish setting up, so it cannot be archived. Delete it instead.');
   }
 
-  const head = await runGitCommand(worktreeDirectory, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
-  const branch = head.success ? String(head.stdout || '').trim() : '';
+  const branch = entry.branch ?? '';
   // The task title; without one, the name the sidebar showed for the work.
-  const title = (branch ? toTaskTitle(await readGitConfigValue(worktreeDirectory, `branch.${branch}.description`)) : '')
+  const title = (branch ? toTaskTitle(await readGitConfigValue(context.primaryWorktree, `branch.${branch}.description`)) : '')
     || toTaskTitle(z.string().catch('').parse(input?.title));
   const record = {
     path: worktreeDirectory,
@@ -6964,11 +6967,20 @@ const archiveRegisteredWorktree = async ({ directory, id, worktreeDirectory, tar
     sessionIds: sessionIdListSchema.parse(input?.sessionIds),
   };
   const ref = `${WORKTREE_ARCHIVE_REF_PREFIX}${id}`;
-  const snapshot = await writeWorktreeSnapshot(worktreeDirectory, {
-    ref,
-    message: `${WORKTREE_ARCHIVE_SUBJECT}\n\n${JSON.stringify(record)}`,
-    oldValue: '',
-  });
+  const message = `${WORKTREE_ARCHIVE_SUBJECT}\n\n${JSON.stringify(record)}`;
+  // A folder deleted outside the app leaves nothing to record, so the snapshot
+  // equals the commit it stood on. Git also reports a folder that only lost its
+  // `.git` file as prunable; its files are still there, so that one must fail.
+  const folderGone = entry.prunable === true && !(await checkPathExists(worktreeDirectory));
+  const snapshot = folderGone
+    ? await commitSnapshot(context.primaryWorktree, {
+      ref,
+      message,
+      oldValue: '',
+      head: entry.head,
+      tree: (await runGitCommandOrThrow(context.primaryWorktree, ['rev-parse', `${entry.head}^{tree}`], 'Failed to read the worktree head')).stdout.trim(),
+    })
+    : await writeWorktreeSnapshot(worktreeDirectory, { ref, message, oldValue: '' });
   try {
     await removeWorktree(directory, {
       directory: worktreeDirectory,
@@ -6981,7 +6993,7 @@ const archiveRegisteredWorktree = async ({ directory, id, worktreeDirectory, tar
     // still registered, on disk, and in the very state the snapshot holds.
     const snapshotTree = (await runGitCommand(context.primaryWorktree, ['rev-parse', `${snapshot.commit}^{tree}`])).stdout?.trim();
     const intact = await checkPathExists(worktreeDirectory)
-      && await isRegisteredWorktree(context.primaryWorktree, targetCanonical)
+      && await findRegisteredWorktree(context.primaryWorktree, targetCanonical)
       && (await readWorktreeStateTree(worktreeDirectory).catch(() => null))?.tree === snapshotTree;
     if (intact) {
       await runGitCommand(context.primaryWorktree, ['update-ref', '-d', ref, snapshot.commit]);
