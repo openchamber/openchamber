@@ -78,6 +78,12 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                         }
                     }}
                 >
+                    <DropdownMenuRadioItem value="turn">
+                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                            <span>{t('diffView.scope.lastTurn')}</span>
+                            <span className="typography-meta text-muted-foreground">{turnCount ?? '…'}</span>
+                        </span>
+                    </DropdownMenuRadioItem>
                     <DropdownMenuRadioItem value="working">
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                             <span>{t('diffView.scope.changed')}</span>
@@ -90,20 +96,6 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                             <span className="typography-meta text-muted-foreground">{stagedCount}</span>
                         </span>
                     </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="turn">
-                        <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                            <span>{t('diffView.scope.lastTurn')}</span>
-                            <span className="typography-meta text-muted-foreground">{turnCount ?? '…'}</span>
-                        </span>
-                    </DropdownMenuRadioItem>
-                    {showBranchOption ? (
-                        <DropdownMenuRadioItem value="branch">
-                            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                                <span>{t('diffView.scope.branch')}</span>
-                                <span className="typography-meta text-muted-foreground">{branchCount ?? '…'}</span>
-                            </span>
-                        </DropdownMenuRadioItem>
-                    ) : null}
                     {showCommitOption && (
                         <DropdownMenuRadioItem value="commit">
                             <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
@@ -112,6 +104,14 @@ export const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                             </span>
                         </DropdownMenuRadioItem>
                     )}
+                    {showBranchOption ? (
+                        <DropdownMenuRadioItem value="branch">
+                            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                                <span>{t('diffView.scope.branch')}</span>
+                                <span className="typography-meta text-muted-foreground">{branchCount ?? '…'}</span>
+                            </span>
+                        </DropdownMenuRadioItem>
+                    ) : null}
                     {showCommitOption && <DropdownMenuRadioItem value="pr">
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                             <span>{t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestTerm))}</span>
