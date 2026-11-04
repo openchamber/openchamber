@@ -37,6 +37,13 @@ supplies the validated result; failure leaves the existing projects intact.
 Ordinary folder addition keeps its existing optimistic behavior. The import
 suggestion's lifecycle belongs to `components/session/project-import`.
 
+Icon discovery for an added folder joins the debounced settings write and starts
+after it succeeds, because the discovery route finds the project in the server's
+list. A failed save starts no discovery. The answer contributes only that
+project's icon, never the list: the search can outlast changes made in this
+window. The list holding the icon is then written, because a full-list write
+already queued or in flight lacks it and would erase it on the server.
+
 There are multiple store categories in this directory.
 
 ### Catalog refresh

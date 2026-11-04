@@ -1052,7 +1052,7 @@ within a ten-minute overall deadline.
   - `GET /api/projects/:projectId/icon`
   - `PUT /api/projects/:projectId/icon`
   - `DELETE /api/projects/:projectId/icon`
-  - `POST /api/projects/:projectId/icon/discover`
+  - `POST /api/projects/:projectId/icon/discover`: writes the icon through `persistResolvedSettings`, so a save that lands during the file search keeps its projects.
 
 ## Public exports (skills.js)
 - `getSkillSources(skillName, workingDirectory, discoveredSkill?, options?)`: returns the skill's Markdown metadata and instructions, source paths and scopes, and supporting files. Supporting files are included by default. `GET /api/config/skills` calls it once per skill with `{ includeSupportingFiles: false }`, which omits `md.supportingFiles` and skips walking supporting files.
