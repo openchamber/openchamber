@@ -132,7 +132,9 @@ export const SourceBoardActions: React.FC<{
     submitRequirementsUnreadable?: boolean;
     /** Whether the host would merge or submit the previewed change, from its status; null when it does not say. */
     mergeable?: boolean | null;
-}> = ({ item, project, context, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null }) => {
+}> = ({ item, project, context: readContext, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable, stack = null, onStartOnTop, submitRequirements, submitRequirementsUnreadable = false, mergeable = null }) => {
+    // A linked item is only read: it can be attached, and nothing here acts on it.
+    const context = readContext?.linked ? null : readContext;
     const { t } = useI18n();
     const { sourceControl, trackers } = useRuntimeAPIs();
     const confirmation = useConfirmDialog();
@@ -166,7 +168,7 @@ export const SourceBoardActions: React.FC<{
     const attachToComposer = (target: ComposerReferenceHandoff) => {
         void resolveComposerReferences([selectionOf(item)], {
             sourceControl,
-            context,
+            context: readContext,
             readTrackerDetail: (provider, itemId) => (trackers
                 ? readTrackerItemDetail(trackers, provider, itemId)
                 : Promise.reject(new Error('Trackers are not available here'))),
@@ -478,6 +480,7 @@ const useOpenPull = ({ pull, project, repository, context, projectOwnsDirectory,
         const source: PullRequestSource = {
             kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo },
             ...(revision ? { revision } : {}),
+            linked: context.linked,
         };
         const ui = useUIStore.getState();
         const target = resolvePullLinkTarget({

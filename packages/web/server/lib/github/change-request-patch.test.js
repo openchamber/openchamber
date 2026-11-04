@@ -17,8 +17,8 @@ describe('readGitHubChangeRequestPatch', () => {
   let resolveRepoNetwork;
   const session = { instance: 'github.com', accountId: 'github.com#7' };
 
-  const read = ({ sourceRepo, ...overrides } = {}) => readGitHubChangeRequestPatch(
-    { session, directory: '/repo', remote: 'upstream', number: 2122, sourceRepo },
+  const read = ({ sourceRepo, linked, ...overrides } = {}) => readGitHubChangeRequestPatch(
+    { session, directory: '/repo', remote: 'upstream', number: 2122, sourceRepo, linked },
     { getOctokitForAccountId, resolveGitHubRepoFromDirectory, resolveRepoNetwork, onAccountUnavailable, ...overrides },
   );
 
@@ -94,6 +94,11 @@ describe('readGitHubChangeRequestPatch', () => {
       statusCode: 409,
     });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('reads a pull request a link named, wherever its repository is', async () => {
+    await read({ sourceRepo: { owner: 'stranger', repo: 'elsewhere' }, linked: true });
+    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/pulls/{pull_number}', expect.objectContaining({ owner: 'stranger', repo: 'elsewhere' }));
   });
 
   it('passes an empty diff on (the caller decides) but rejects malformed GitHub bodies', async () => {

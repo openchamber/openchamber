@@ -198,14 +198,18 @@ const pullStatusesResultSchema = z.discriminatedUnion('connected', [
 
 const errorSchema = z.object({ error: z.string() });
 
-const readContextQuery = (context: SourceControlReadContext): URLSearchParams => new URLSearchParams({
-  directory: context.directory,
-  instance: context.instance,
-  repositoryId: context.repositoryId,
-  accountId: context.accountId,
-  bindingRevision: String(context.bindingRevision),
-  primaryRemote: context.primaryRemote,
-});
+const readContextQuery = (context: SourceControlReadContext): URLSearchParams => {
+  const query = new URLSearchParams({
+    directory: context.directory,
+    instance: context.instance,
+    repositoryId: context.repositoryId,
+    accountId: context.accountId,
+    bindingRevision: String(context.bindingRevision),
+    primaryRemote: context.primaryRemote,
+  });
+  if (context.linked) query.set('linked', '1');
+  return query;
+};
 
 /** The parsed answer, or the server's own reason when the request failed. */
 const readPayload = async <TSchema extends z.ZodType>(

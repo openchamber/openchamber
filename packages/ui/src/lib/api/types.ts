@@ -1714,6 +1714,8 @@ type RepositoryReferenceCommon = {
   labels: Label[];
   commentCount: number;
   sourceRepo: RepositorySelector & { source: string };
+  /** Read through a link, outside the project's repository network: it can be read and attached, never acted on. */
+  linked?: true;
   /** The provider's own project id (GitLab's is numeric); absent on GitHub, where `owner/repo` is the id. */
   projectId?: string;
   /** The provider the item was read from; the adapter stamps it from the read context. */

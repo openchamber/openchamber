@@ -178,6 +178,15 @@ describe("Gitea fork pull requests through the maintainer's upstream clone", () 
     return { ...gitea, service: createGiteaResourceService({ origin: ORIGIN, client, resolveRepos: resolveUpstreamRemote }) };
   };
 
+  it('reads an issue a link named in another repository, and refuses it without the link', async () => {
+    const { service } = setupUpstream({
+      'GET /repos/bob/app/issues/6': fixtures.issue,
+    });
+    const selector = { owner: 'bob', name: 'app' };
+    await expect(service.getIssue('/repo', 6, selector, 'origin')).rejects.toMatchObject({ status: 404 });
+    await expect(service.getIssue('/repo', 6, selector, 'origin', { linked: true })).resolves.toMatchObject({ number: fixtures.issue.number });
+  });
+
   it("reads the patch, both sides of a file at the fork's head and the context from the upstream", async () => {
     const { service, calls } = setupUpstream({
       'GET /repos/alice/app/pulls/1.diff': fixtures.forkPullDiff,

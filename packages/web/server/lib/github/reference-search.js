@@ -827,6 +827,16 @@ export function parseReferenceLookup(text, repos, kind = 'issue') {
 }
 
 /**
+ * The repository and number a link to an item on `host` names, wherever the
+ * repository is; null for anything else.
+ */
+export function parseReferenceLink(text, host) {
+  const url = text.trim().match(/^https?:\/\/(?:www\.)?([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/(?:issues|pull|discussions)\/(\d+)(?:[/?#]\S*)?$/i);
+  if (!url || url[1].toLowerCase() !== String(host).toLowerCase()) return null;
+  return { owner: url[2], repo: url[3], number: Number(url[4]) };
+}
+
+/**
  * The GitHub search string for one picker page. The user's text may carry
  * its own qualifiers; state and sort are added only when it does not. A
  * discussion search is its own search type, so it names no kind.

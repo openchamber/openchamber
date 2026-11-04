@@ -964,6 +964,15 @@ describe('GitLab merge request comparison reads', () => {
     expect(showRaw).toHaveBeenCalledWith('2', 'a.ts', diffRefs.base_sha);
   });
 
+  it('reads a merge request a link named outside the bound repository network', async () => {
+    const { service, client } = setup({
+      MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => ({ ...openMR, target_project_id: 99 })) },
+    });
+    const { meta } = await service.changeRequestPatch('/repo', 5, { project: { owner: 'stranger', name: 'elsewhere' }, remote: 'origin', linked: true });
+    expect(meta).toMatchObject({ number: 5 });
+    expect(client.MergeRequests.allDiffs).toHaveBeenCalled();
+  });
+
   it('refuses a merge request outside the bound repository network', async () => {
     const { service, client } = setup({
       MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => ({ ...openMR, target_project_id: 99 })) },

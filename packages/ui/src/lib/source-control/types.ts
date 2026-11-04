@@ -40,6 +40,11 @@ export interface SourceControlReadContext extends SourceControlIdentity {
   accountId: string;
   bindingRevision: number;
   primaryRemote: string;
+  /**
+   * Reads an item a link named wherever its repository is, with this account.
+   * The server honours it on reads only, so such a context changes nothing.
+   */
+  linked?: true;
 }
 
 export interface SourceControlProviderBinding extends SourceControlIdentity {

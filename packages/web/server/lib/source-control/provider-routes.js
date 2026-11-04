@@ -411,15 +411,23 @@ export function registerProviderRoutes(app, {
       return kind === 'unreachable' || kind === 'temporarily-unavailable';
     };
 
-    const readContextOf = (req, instance, directory) => validateReadContext?.({
-      directory,
-      repositoryId: req.query?.repositoryId,
-      provider: id,
-      instance,
-      accountId: req.query?.accountId,
-      bindingRevision: Number(req.query?.bindingRevision),
-      primaryRemote: req.query?.primaryRemote,
-    });
+    /**
+     * `linked=1` asks to read an item a link names wherever its repository
+     * is, with the bound account. Only these reads honour it: writes validate
+     * their own context, so the network still decides what can be changed.
+     */
+    const readContextOf = async (req, instance, directory) => {
+      const context = await validateReadContext?.({
+        directory,
+        repositoryId: req.query?.repositoryId,
+        provider: id,
+        instance,
+        accountId: req.query?.accountId,
+        bindingRevision: Number(req.query?.bindingRevision),
+        primaryRemote: req.query?.primaryRemote,
+      });
+      return context && req.query?.linked === '1' ? { ...context, linked: true } : context;
+    };
 
     /**
      * A bound read: validates the context before any credential lookup, then
@@ -1112,6 +1120,7 @@ export function registerProviderRoutes(app, {
       throw error;
     }
   };
+  const linkedRead = (context) => (context?.linked ? { linked: true } : {});
   const invalidProvider = () => Object.assign(new Error('Change request source provider is invalid'), {
     code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
   });
@@ -1157,11 +1166,11 @@ export function registerProviderRoutes(app, {
     },
     /** `revision` (40-hex) only for a provider that keeps revisions; others refuse it with 400. */
     readChangeRequestPatch: async ({ context, number, sourceRepo, revision }) => readWithBoundAccount(
-      context, 'readChangeRequestPatch', withRevision({ number, sourceRepo }, readRevision(providers.describe(context?.provider), revision)),
+      context, 'readChangeRequestPatch', withRevision({ number, sourceRepo, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
     readChangeRequestFile: async ({ context, number, sourceRepo, path, previousPath, status, revision }) => readWithBoundAccount(
       context, 'readChangeRequestFile',
-      withRevision({ number, sourceRepo, path, previousPath, status }, readRevision(providers.describe(context?.provider), revision)),
+      withRevision({ number, sourceRepo, path, previousPath, status, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
     /** A change request's head on the context's primary project network, for a worktree made from it. */
     readChangeRequestHead: (input) => trustedRead(input, 'readChangeRequestHead', () => ({ number: input.number })),

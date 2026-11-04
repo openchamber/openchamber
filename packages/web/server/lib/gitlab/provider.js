@@ -706,14 +706,14 @@ export function createProvider({
       listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
         .listChangeRequests(directory, { page, query, state, people, remote }),
       reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
-      changeRequestContext: ({ session, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
+      changeRequestContext: ({ session, context, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, {
-          includeDiff, includeCIDetails, includeTimeline, project, remote, constrainToPrimary: true,
+          includeDiff, includeCIDetails, includeTimeline, project, remote, constrainToPrimary: true, linked: context?.linked,
         }),
       listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
         .listIssues(directory, { page, query, state, people, remote }),
-      getIssue: ({ session, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote),
-      issueComments: ({ session, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote),
+      getIssue: ({ session, context, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote, { linked: context?.linked }),
+      issueComments: ({ session, context, directory, number, project, remote }) => serviceFor(session).issueComments(directory, number, project, remote, { linked: context?.linked }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),
       projectBranches: ({ session, directory, project, remote }) => serviceFor(session).projectBranches(directory, project, remote),
       listLabels: ({ session, directory, project, remote }) => serviceFor(session).listLabels(directory, project, remote),
@@ -723,12 +723,12 @@ export function createProvider({
        * checks its type and streams it. The credential goes to the instance
        * only (`createGitLabDownloader`).
        */
-      readUpload: ({ session, directory, project, remote, secret, filename, range, signal }) => serviceFor(session)
-        .readUpload(directory, project, remote, { secret, filename, range, signal }),
-      readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote }) => serviceFor(session)
-        .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote }),
-      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status }) => serviceFor(session)
-        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status }),
+      readUpload: ({ session, context, directory, project, remote, secret, filename, range, signal }) => serviceFor(session)
+        .readUpload(directory, project, remote, { secret, filename, range, signal, linked: context?.linked }),
+      readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }) => serviceFor(session)
+        .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
+      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, linked }) => serviceFor(session)
+        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, linked }),
       /** Live state of known merge requests and issues. */
       liveSummaries: ({ session, refs, issueRefs, details }) => serviceFor(session, { canonicalReads: false }).liveSummaries({ refs, issueRefs, details }),
       /** A merge request's head on the context's primary project network, by number, for a worktree made from it. */

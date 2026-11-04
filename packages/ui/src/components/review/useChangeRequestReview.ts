@@ -210,7 +210,7 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
 
 type ComparisonReview = { review: ChangeRequestReview | null; provider: SourceControlProvider | null };
 
-/** The review of the open change request a comparison surface (Changes, Walkthrough, mobile Changes) shows. An earlier revision reads only. */
+/** The review of the open change request a comparison surface (Changes, Walkthrough, mobile Changes) shows. An earlier revision, and a change request outside the project, read only. */
 export function useComparisonReview(
     comparison: {
         selectedSource: PullRequestSource | null;
@@ -226,7 +226,7 @@ export function useComparisonReview(
     const owner = source?.sourceRepo?.owner ?? record?.project.owner;
     const name = source?.sourceRepo?.repo ?? record?.project.name;
     const number = source?.number;
-    const reviewable = enabled && !source?.revision && (!record || record.state === 'open');
+    const reviewable = enabled && !source?.revision && !source?.linked && (!record || record.state === 'open');
     const headSha = record?.headSha;
     const target = React.useMemo<ChangeRequestReviewTarget | null>(() => (
         // A top-level project on a path-style host has an empty owner.

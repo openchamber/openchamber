@@ -97,9 +97,10 @@ export function createGerritResourceService({
     return primary;
   };
 
-  /** The bound project, and the one a selector names, which must be it. */
-  const boundProject = async (directory, selector, remote) => {
+  /** The bound project, and the one a selector names, which must be it unless a link named it (`linked`). */
+  const boundProject = async (directory, selector, remote, { linked = false } = {}) => {
     const primary = await primaryProject(directory, remote);
+    if (linked && selector) return { ...primary, project: joinProjectPath(selector.owner, selector.name), owner: selector.owner, name: selector.name };
     if (selector && joinProjectPath(selector.owner, selector.name) !== primary.project) throw notFound('Gerrit project is outside the bound project');
     return primary;
   };
@@ -127,8 +128,8 @@ export function createGerritResourceService({
 
   const requireChange = (raw, project) => requireMapped(mapGerritChange(raw, identity, project), 'Gerrit returned an invalid change');
 
-  const findChange = async (directory, number, selector, remote, options) => {
-    const primary = await boundProject(directory, selector, remote);
+  const findChange = async (directory, number, selector, remote, options, { linked } = {}) => {
+    const primary = await boundProject(directory, selector, remote, { linked });
     const project = projectOf(primary, { remoteName: primary.remoteName });
     const raw = await readChange(primary.project, number, options);
     return { primary, project, raw, request: requireChange(raw, project) };
@@ -258,7 +259,7 @@ export function createGerritResourceService({
      * commit SHA), the current patchset when none is named.
      */
     async changeRequestContext(directory, number, options = {}) {
-      const { primary, project, raw, request } = await findChange(directory, number, options.project, options.remote, CONTEXT_OPTIONS);
+      const { primary, project, raw, request } = await findChange(directory, number, options.project, options.remote, CONTEXT_OPTIONS, { linked: options.linked });
       const sha = revisionOf(raw, options.revision);
       const path = changePath(primary.project, number);
       const [files, patch, inline, stack] = await Promise.all([
@@ -357,8 +358,8 @@ export function createGerritResourceService({
     },
 
     /** A patchset's changes as one unified diff (`/patch` is a base64 mail; its diff part is kept). */
-    async changeRequestPatch(directory, number, { project, remote, revision } = {}) {
-      const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS);
+    async changeRequestPatch(directory, number, { project, remote, revision, linked } = {}) {
+      const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS, { linked });
       const sha = revisionOf(raw, revision);
       const patch = await client.base64(`${changePath(primary.project, number)}/revisions/${sha}/patch`);
       return { patch: diffOfPatch(patch.toString('utf8')), meta: { owner: primary.owner, repo: primary.name, number } };
@@ -369,8 +370,8 @@ export function createGerritResourceService({
      * the patchset. `/COMMIT_MSG` is the commit message, which has no
      * earlier side.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, revision }) {
-      const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS);
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, revision, linked }) {
+      const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS, { linked });
       const sha = revisionOf(raw, revision);
       const readFile = async (filePath, parent) => {
         const content = await client.base64(`${changePath(primary.project, number)}/revisions/${sha}/files/${enc(filePath)}/content`, parent ? { parent: 1 } : undefined);

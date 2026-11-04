@@ -2834,7 +2834,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 onFindWordRequest={handleFindWordRequest}
                 onFullContextChange={handleFullContextChange}
                 findReveal={findReveal && isFindRevealFor(file.path, findReveal.key) ? findReveal : null}
-                showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn' && !foreign}
+                showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn' && !foreign && !(activeDiffScope === 'pr' && selectedPr?.linked)}
                 isOpeningInEditor={openingEditorFilePath === file.path}
                 onOpenInEditor={handleOpenInEditor}
                 staged={getFileStaged(file.path)}

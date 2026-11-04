@@ -150,6 +150,16 @@ describe('Gerrit change context', () => {
     await expect(service.changeRequestContext('/repo', 42, { remote: 'origin', revision: 'd'.repeat(40) })).rejects.toMatchObject({ status: 404 });
   });
 
+  it('reads a change a link named in another project', async () => {
+    const { service } = setup({
+      'GET /changes/other%2Fapp~7': { ...fixtures.change, _number: 7, project: 'other/app' },
+      'GET /changes/other%2Fapp~7/comments': {},
+      'GET /changes/other%2Fapp~7/revisions/current/related': { changes: [] },
+    });
+    const { changeRequest } = await service.changeRequestContext('/repo', 7, { project: { owner: 'other', name: 'app' }, remote: 'origin', linked: true });
+    expect(changeRequest).toMatchObject({ number: 7 });
+  });
+
   it('refuses a selector outside the bound project and a change of another project', async () => {
     const { service } = setup({ 'GET /changes/platform%2Fapp~7': { ...fixtures.change, _number: 7, project: 'other/app' } });
     await expect(service.changeRequestContext('/repo', 42, { project: { owner: 'other', name: 'app' }, remote: 'origin' })).rejects.toMatchObject({ status: 404 });

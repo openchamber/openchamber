@@ -59,6 +59,7 @@ export const uploadUrls = (context: SourceControlReadContext, project: Repositor
         accountId: context.accountId,
         bindingRevision: context.bindingRevision,
         primaryRemote: context.primaryRemote,
+        linked: context.linked ? '1' : undefined,
         owner: project.owner,
         repo: project.repo,
     };
@@ -89,7 +90,9 @@ export const uploadUrls = (context: SourceControlReadContext, project: Repositor
  */
 export function useProjectUploadRewrite(directory: string | null, reference: RepositoryReference | null): ((markdown: string) => string) | null {
     const uploads = useSourceControlProvider(reference?.provider).features.projectUploads;
-    const context = useRepositoryReadContext(uploads ? directory : null);
+    const bound = useRepositoryReadContext(uploads ? directory : null);
+    const linked = reference?.linked === true;
+    const context = React.useMemo(() => (bound && bound !== 'missing' && linked ? { ...bound, linked: true as const } : bound), [bound, linked]);
     // `img` and `video` cannot send headers, so the address carries the URL
     // token. It is kept fresh while such an item is shown; without one the
     // cookie authenticates, so a failed mint still renders.

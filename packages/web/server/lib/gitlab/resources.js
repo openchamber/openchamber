@@ -202,6 +202,11 @@ export function createGitLabResourceService({ origin, client, download, resolveP
   };
 
   const constrainedProjectNetwork = async (directory, selector, remote, options = {}) => {
+    // A link named this project: read it wherever it is.
+    if (options.linked && selector) {
+      const target = await showProject(projectPath(selector.owner, selector.name));
+      return { primary: target, target, targets: [target] };
+    }
     const resolved = await resolveDirectoryProjects(directory, remote);
     const primary = resolved.projects[0];
     const targets = await expandTargets([primary], { ...options, requireComplete: Boolean(selector) || options.requireComplete });
@@ -410,7 +415,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
   };
 
   const findByNumber = async (directory, number, selector, options = {}) => {
-    if (options.constrainToPrimary) {
+    if (options.constrainToPrimary && !(options.linked && selector)) {
       const resolved = await resolveDirectoryProjects(directory, options.remote);
       const targets = await expandTargets([resolved.projects[0]], { requireComplete: canonicalReads });
       const selectedTargets = selector
@@ -764,12 +769,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
 
     /**
      * A file attached in a description or a note of a project in the bound
-     * network, as the upstream response. GitLab lets any member with the
-     * Guest role or above read it by secret and file name.
+     * network or one a link named (`linked`), as the upstream response. GitLab
+     * lets any member with the Guest role or above read it by secret and file
+     * name.
      */
-    async readUpload(directory, selector, remote, { secret, filename, range, signal }) {
+    async readUpload(directory, selector, remote, { secret, filename, range, signal, linked }) {
       if (!download) throw new Error('GitLab file downloads are unavailable');
-      const target = await constrainedProject(directory, selector, remote);
+      const target = await constrainedProject(directory, selector, remote, { linked });
       return download(`projects/${target.project.id}/uploads/${secret}/${encodeURIComponent(filename)}`, { range, signal });
     },
 
@@ -1179,6 +1185,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       const { target, raw } = await findByNumber(directory, number, options.project, {
         constrainToPrimary: options.constrainToPrimary,
         remote: options.remote,
+        linked: options.linked,
       });
       const [noteSource, diffs, ci, headProject, commitPage, diffStats, threadPermissions, chain] = await Promise.all([
         // The preview's timeline reads the notes as their threads; other readers keep the plain list.
@@ -1287,8 +1294,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { items, page: options.page ?? 1, hasMore: page.hasMore };
     },
 
-    async getIssue(directory, number, selector, remote) {
-      const target = await constrainedProject(directory, selector, remote);
+    async getIssue(directory, number, selector, remote, { linked } = {}) {
+      const target = await constrainedProject(directory, selector, remote, { linked });
       const raw = await client.Issues.show(number, { projectId: target.project.id });
       return canonicalReads
         ? requireIssue(raw, target.project)
@@ -1303,7 +1310,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
      */
     async changeRequestPatch(directory, number, options = {}) {
       const { target } = await findByNumber(directory, number, options.project, {
-        constrainToPrimary: true, remote: options.remote, requireNetwork: true,
+        constrainToPrimary: true, remote: options.remote, requireNetwork: true, linked: options.linked,
       });
       const diffs = await readCollection((page) => client.MergeRequests.allDiffs(target.project.id, number, page), 'GitLab merge request has more changed files than OpenChamber reads', DIFF_PER_PAGE);
       if (!Array.isArray(diffs)) throw new Error('GitLab returned an invalid merge request diff list');
@@ -1321,9 +1328,9 @@ export function createGitLabResourceService({ origin, client, download, resolveP
      * diff was taken against, never the target branch tip. A fork's head
      * commit is reachable from the target project, so every read goes there.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status }) {
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, linked }) {
       const { target, raw } = await findByNumber(directory, number, project, {
-        constrainToPrimary: true, remote, requireNetwork: true,
+        constrainToPrimary: true, remote, requireNetwork: true, linked,
       });
       const baseSha = raw?.diff_refs?.base_sha;
       const headSha = raw?.diff_refs?.head_sha;
@@ -1379,8 +1386,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { summaries: summaries.filter(Boolean), issueSummaries: issueSummaries.filter(Boolean) };
     },
 
-    async issueComments(directory, number, selector, remote) {
-      const target = await constrainedProject(directory, selector, remote);
+    async issueComments(directory, number, selector, remote, { linked } = {}) {
+      const target = await constrainedProject(directory, selector, remote, { linked });
       const issue = await client.Issues.show(number, { projectId: target.project.id });
       const mappedIssue = canonicalReads
         ? requireIssue(issue, target.project)

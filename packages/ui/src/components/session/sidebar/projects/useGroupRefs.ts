@@ -57,6 +57,7 @@ export const useGroupRefs = (group: SessionGroup, sessions: readonly Session[], 
   const issueItems = React.useMemo(
     () => buildSessionIssueItems(issues, issueStates, trackerStates).map((item) => ({
       ...item,
+      status: item.statusKey ? t(item.statusKey) : item.statusText,
       text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
     })),
     [issueStates, issues, t, trackerStates],
@@ -64,6 +65,8 @@ export const useGroupRefs = (group: SessionGroup, sessions: readonly Session[], 
   const prLinks: SidebarRefLink[] = prSummary && prStatusLabel ? [{
     key: `pr:${prSummary.number}`,
     icon: 'git-pull-request',
+    label: prReference,
+    status: prStatusLabel,
     text: `${prReference} · ${prStatusLabel}`,
     title: prSummary.title,
     color: prColor,

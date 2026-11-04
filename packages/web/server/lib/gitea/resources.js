@@ -86,8 +86,15 @@ export function createGiteaResourceService({
     return targets;
   };
 
-  /** The primary repository's network, and the one repository a selector names in it. */
-  const network = async (directory, selector, remote, { requireComplete = false } = {}) => {
+  /**
+   * The primary repository's network, and the one repository a selector names
+   * in it. A `linked` read takes the repository a link named, wherever it is.
+   */
+  const network = async (directory, selector, remote, { requireComplete = false, linked = false } = {}) => {
+    if (linked && selector) {
+      const target = await showRepo({ owner: selector.owner, name: selector.name });
+      return { primary: target, target, targets: [target] };
+    }
     const [primary] = await resolveDirectoryRepos(directory, remote);
     const targets = await withParents([primary], { requireComplete: requireComplete || Boolean(selector) });
     if (!selector) return { primary, target: targets[0], targets };
@@ -151,8 +158,8 @@ export function createGiteaResourceService({
    * Its head may come from any fork: the pull request is the authority for
    * it (`changeRequestNetworkTarget`).
    */
-  const findPull = async (directory, number, selector, { remote } = {}) => {
-    const net = await network(directory, selector, remote, { requireComplete: true });
+  const findPull = async (directory, number, selector, { remote, linked } = {}) => {
+    const net = await network(directory, selector, remote, { requireComplete: true, linked });
     const candidates = selector ? [net.target] : net.targets;
     for (const target of candidates) {
       let raw;
@@ -366,7 +373,7 @@ export function createGiteaResourceService({
     },
 
     async changeRequestContext(directory, number, options = {}) {
-      const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote });
+      const { target, raw, request, net } = await findPull(directory, number, options.project, { remote: options.remote, linked: options.linked });
       const repo = repoPath(target.project);
       const [comments, reviews, diffText, changedFiles, ci, headProject, commits] = await Promise.all([
         readIssueComments(target.project, number),
@@ -442,13 +449,13 @@ export function createGiteaResourceService({
       return { items, page, hasMore: result.hasMore };
     },
 
-    async getIssue(directory, number, selector, remote) {
-      const { target } = await network(directory, selector, remote);
+    async getIssue(directory, number, selector, remote, { linked } = {}) {
+      const { target } = await network(directory, selector, remote, { linked });
       return requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
     },
 
-    async issueComments(directory, number, selector, remote) {
-      const { target } = await network(directory, selector, remote);
+    async issueComments(directory, number, selector, remote, { linked } = {}) {
+      const { target } = await network(directory, selector, remote, { linked });
       const issue = requireIssue(await client.get(`${repoPath(target.project)}/issues/${number}`), target.project);
       const comments = await readIssueComments(target.project, number);
       return comments.map((comment) => requireMapped(mapGiteaComment(comment, identity, issue.url), `${providerLabel} returned an invalid issue comment`));
@@ -493,8 +500,8 @@ export function createGiteaResourceService({
     },
 
     /** The pull request's changes as one unified diff; its target must be in the bound network. */
-    async changeRequestPatch(directory, number, { project, remote } = {}) {
-      const { target } = await findPull(directory, number, project, { remote });
+    async changeRequestPatch(directory, number, { project, remote, linked } = {}) {
+      const { target } = await findPull(directory, number, project, { remote, linked });
       const patch = await client.text(`${repoPath(target.project)}/pulls/${number}.diff`);
       if (!isString(patch)) throw malformed(`${providerLabel} returned an invalid pull request diff`);
       return { patch, meta: { owner: target.project.owner, repo: target.project.name, number } };
@@ -505,8 +512,8 @@ export function createGiteaResourceService({
      * the head commit. Gitea keeps a fork pull request's head under the
      * target repository's `refs/pull/<n>/head`, so both reads go there.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status }) {
-      const { target, raw } = await findPull(directory, number, project, { remote });
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, linked }) {
+      const { target, raw } = await findPull(directory, number, project, { remote, linked });
       const baseSha = raw?.merge_base;
       const headSha = raw?.head?.sha;
       if (!COMMIT_SHA.test(String(baseSha)) || !COMMIT_SHA.test(String(headSha))) throw malformed(`${providerLabel} returned invalid pull request refs`);

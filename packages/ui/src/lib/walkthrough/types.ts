@@ -17,8 +17,10 @@ export type WalkthroughSource =
   /**
    * `revision`: a full commit SHA naming an earlier revision (a patchset) on
    * a host that keeps them; absent, the change request's current one.
+   * `linked`: a link named it outside the bound repository network, so it is
+   * read wherever it is and offers no review.
    */
-  | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string }; revision?: string };
+  | { kind: 'pr'; number: number; sourceRepo?: { owner: string; repo: string }; revision?: string; linked?: true };
 
 type WalkthroughLocalSource = Exclude<WalkthroughSource, { kind: 'pr' }>;
 type WalkthroughPullRequestSource = Extract<WalkthroughSource, { kind: 'pr' }>;

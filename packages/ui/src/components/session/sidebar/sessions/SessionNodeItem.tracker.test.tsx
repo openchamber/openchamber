@@ -23,6 +23,9 @@ mock.module('@/sync/use-session-ai-rename', () => ({
 mock.module('@/components/sourceBoard/openTrackerItem', () => ({
   useOpenTrackerItem: () => (url: string, directory: string | null) => opened.push({ url, directory }),
 }));
+mock.module('@/components/sourceBoard/boardRepository', () => ({
+  useLinkRepository: () => ({ status: 'ready', directory: '', owned: true, retry: () => undefined }),
+}));
 mock.module('./useSessionRefLines', () => ({
   useSessionRefLines: () => {
     rowRenders += 1;
