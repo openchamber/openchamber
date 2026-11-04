@@ -66,20 +66,81 @@ test('a desktop-dropped file carries its on-disk path while the chip label stays
   expect(file?.agentPath).toBe('/Users/me/Documents/report.txt');
 });
 
-test('a desktop file over the send limit is refused, while one under it still attaches by path', async () => {
+for (const [label, name, bytes] of [
+  ['over the inline limit', 'dump.log', 15 * 1024 * 1024],
+  ['over the OpenCode attachment limit', 'book.pdf', 25 * 1024 * 1024],
+] as const) {
+  test(`a desktop file ${label} goes as a note naming its path, never as its bytes`, async () => {
+    const { useInputStore } = await import('./input-store');
+    const store = useInputStore.getState();
+    store.clearAttachedFiles();
+
+    expect(await store.addAttachedFile(new File([new Uint8Array(bytes)], name))).toBe(true);
+
+    const [file] = useInputStore.getState().attachedFiles;
+    expect(file?.filename).toBe(name);
+    expect(file?.size).toBe(bytes);
+    expect(file?.agentPath).toBe(`/Users/me/Documents/${name}`);
+    expect(file?.dataUrl.startsWith('data:text/plain;')).toBe(true);
+    expect(await file?.file?.text()).toContain(`/Users/me/Documents/${name}`);
+  });
+}
+
+test('a desktop reference survives prompt history and stops an @-mention of its path', async () => {
   const { useInputStore } = await import('./input-store');
-  useInputStore.getState().clearAttachedFiles();
+  const { createInputHistorySubmission } = await import('@/stores/useInputHistoryStore');
+  const { mapInputHistoryEntriesToValues } = await import('@/components/chat/inputHistory');
+  const { isMentionAlreadyAttached } = await import('@/components/chat/composer/attachments/inlineMentionAttachments');
+  const store = useInputStore.getState();
+  store.clearAttachedFiles();
+  await store.addAttachedFile(new File([new Uint8Array(15 * 1024 * 1024)], 'dump.log'));
+  const attachments = useInputStore.getState().attachedFiles;
 
-  await expect(useInputStore.getState().addAttachedFile(
-    new File([new Uint8Array(20 * 1024 * 1024 + 1)], 'map.bin'),
-  )).rejects.toThrow('map.bin');
-  expect(useInputStore.getState().attachedFiles).toEqual([]);
+  const entry = { ...createInputHistorySubmission('text', attachments), submittedAt: 1 };
+  const [restored] = mapInputHistoryEntriesToValues([entry])[0].attachments;
 
-  expect(await useInputStore.getState().addAttachedFile(
-    new File([new Uint8Array(15 * 1024 * 1024)], 'dump.log'),
-  )).toBe(true);
-  expect(useInputStore.getState().attachedFiles.map((file) => file.serverPath)).toEqual(['/Users/me/Documents/dump.log']);
+  expect(restored?.dataUrl).toBe(attachments[0]?.dataUrl);
+  expect(attachmentWireName(restored)).toBe('/Users/me/Documents/dump.log');
+  const mention = { serverPath: '/Users/me/Documents/dump.log', filename: 'dump.log' };
+  expect(isMentionAlreadyAttached(mention, attachments)).toBe(true);
+  expect(isMentionAlreadyAttached(mention, [restored])).toBe(true);
 });
+
+test('a desktop file of a type the prompt cannot carry goes as a note naming its path', async () => {
+  const { useInputStore } = await import('./input-store');
+  const store = useInputStore.getState();
+  store.clearAttachedFiles();
+
+  const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]);
+  expect(await store.addAttachedFile(new File([zip], 'book.epub'))).toBe(true);
+
+  const [file] = useInputStore.getState().attachedFiles;
+  expect(file?.agentPath).toBe('/Users/me/Documents/book.epub');
+  expect(await file?.file?.text()).toContain('/Users/me/Documents/book.epub');
+});
+
+test('a desktop reference is dropped when the draft is cleared while it is prepared', async () => {
+  const { useInputStore } = await import('./input-store');
+  const store = useInputStore.getState();
+  store.clearAttachedFiles();
+
+  const adding = store.addAttachedFile(new File([new Uint8Array(15 * 1024 * 1024)], 'dump.log'));
+  store.clearAttachedFiles();
+
+  expect(await adding).toBe(false);
+  expect(useInputStore.getState().attachedFiles).toEqual([]);
+});
+
+for (const name of ['capture.har', 'analysis.ipynb']) {
+  test(`a large ${name} is refused: a path would hand over what intake removes`, async () => {
+    const { useInputStore } = await import('./input-store');
+    const store = useInputStore.getState();
+    store.clearAttachedFiles();
+
+    await expect(store.addAttachedFile(new File([new Uint8Array(15 * 1024 * 1024)], name))).rejects.toThrow(name);
+    expect(useInputStore.getState().attachedFiles).toEqual([]);
+  });
+}
 
 for (const [wireName, basename] of [
   ['/Users/me/Documents/report.txt', 'report.txt'],

@@ -158,7 +158,7 @@ Local chat attachments are normalized by `attachment-files.ts` before entering `
 
 A local desktop drop or picker resolves the original file's on-disk path through `pathForDroppedFile` and stores it as `agentPath`. `attachmentWireName` sends that path as OpenCode's prompt-file name, falling back to `filename` when unavailable. This lets the model locate files outside the session directory without searching by basename. Web, VS Code, hosted mobile, Capacitor, and remote desktop hosts do not resolve a native path.
 
-HAR and IPYNB never carry `agentPath`, because reopening the original bypasses credential redaction or output omission. A document's first prepared entry, its extracted text, carries the original path; extracted images do not. Converted HEIC/HEIF carries the original path with JPEG bytes. Attachments carrying a path keep the original basename as `filename`, including converted HEIC/HEIF, so composer citations match the transcript's `attachmentBasename`. Queue serialization preserves `agentPath` for automatic delivery and manual take.
+HAR and IPYNB never carry `agentPath`, because reopening the original bypasses credential redaction or output omission, and past the inline limit they are refused. A document's first prepared entry, its extracted text, carries the original path; extracted images do not. Converted HEIC/HEIF carries the original path with JPEG bytes. Attachments carrying a path keep the original basename as `filename`, including converted HEIC/HEIF, so composer citations match the transcript's `attachmentBasename`. Queue serialization preserves `agentPath` for automatic delivery and manual take.
 
 Sent-message citation lookup uses the same `attachmentBasename` rule as display. Restoring a sent attachment for editing or forking splits its wire name back into the UI basename and `agentPath`, preserving the original name on resend without breaking `[basename]` citations.
 
@@ -167,6 +167,12 @@ Office and OpenDocument packages are metadata-validated before asynchronous extr
 The composer compares normalized attachment MIME types with the selected model's declared input modalities. It warns when a newly attached file or an existing attachment after a model change requires an unsupported modality, but does not block sending. Missing modality metadata remains unknown and does not produce a warning.
 
 Attachment drafts stay in memory for the page's lifetime, including composer remounts, independently of text persistence. `selectAttachmentDraft` saves the outgoing list and restores the rendered composer's runtime, directory, and session before paint. Switching cancels unfinished attachment reads. Send and queue recovery pass their captured draft identity so a late failure restores files to the source rather than the currently open session. Clearing or deleting a draft releases only its files. Opening a new-session draft leaves the outgoing session's files available for a return visit. With a chat pinned in the side panel two composers are on screen; each shows its own draft's files (`useDraftAttachedFiles`) and the selected slot follows the composer the user works in (composer documentation, *Pinned composer*).
+
+### Why a large desktop file goes as a note and not as a `file://` URL
+
+OpenCode reads every `file://` attachment whole, detects its type from the bytes, and hands all of it to the model: a 15 MB PDF becomes a 21 MB request, a 15 MB log overflows the context, and a type it has no use for, such as EPUB or a ZIP, is stored and left out of the request with no error. Over 20 MB it refuses the send.
+
+So on the desktop a file past `MAX_INLINE_ATTACHMENT_BYTES`, or one `attachment-files.ts` cannot prepare, attaches as a short `text/plain` note that gives its path and size, with `agentPath` set to that path and no size limit. The agent reads what it needs with its own tools. The note is a plain data URL attachment, so the chip, queue, drafts, restore and resend need no case of their own. Outside the desktop OpenCode may not share the disk, so these files are refused or fail intake as before.
 
 ### Why sends read the server's agent
 

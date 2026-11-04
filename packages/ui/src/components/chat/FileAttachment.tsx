@@ -403,10 +403,8 @@ export const AttachedFilesList = memo(({ onShowPopup, className, draftIdentity }
   const attachedFiles = useDraftAttachedFiles(draftIdentity);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
-  // A file attached by path (`source: 'server'`, a desktop file over the
-  // inline limit) gets a chip too: it leaves with every send, so the user
-  // has to see it and be able to remove it. An @-mention a failed send put
-  // back is shown by its mention in the text, which decides whether it goes.
+  // An @-mention a failed send put back is shown by its mention in the text,
+  // which decides whether it goes.
   const files = attachedFiles.filter((file) => file.source !== 'vscode'
     && !file.id.startsWith(INLINE_SERVER_ATTACHMENT_ID_PREFIX));
 
