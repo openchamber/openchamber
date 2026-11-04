@@ -1,4 +1,5 @@
 import React from 'react';
+import { useMobileAppActions } from '@/apps/mobileAppContext';
 import type { FilePart, Part } from '@/lib/opencode/model';
 
 import { sessionMentionChipsOf } from './parts/sessionMentionChips';
@@ -155,8 +156,14 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
     const navigateToDiff = useUIStore((state) => state.navigateToDiff);
     const openContextDiff = useUIStore((state) => state.openContextDiff);
     const setPendingTurnDiffFile = useUIStore((state) => state.setPendingTurnDiffFile);
+    const mobileActions = useMobileAppActions();
 
     const openLastTurnDiff = React.useCallback((file: string) => {
+        if (mobileActions) {
+            mobileActions.openChanges({ diffPath: file, scope: 'turn' });
+            return;
+        }
+
         if (!isMobile && effectiveDirectory) {
             openContextDiff(effectiveDirectory, file, false, 'turn');
             setPendingTurnDiffFile({ file, sessionId: useSessionUIStore.getState().currentSessionId });
@@ -164,7 +171,7 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
         }
 
         navigateToDiff(file, false, 'turn');
-    }, [effectiveDirectory, isMobile, navigateToDiff, openContextDiff, setPendingTurnDiffFile]);
+    }, [effectiveDirectory, isMobile, mobileActions, navigateToDiff, openContextDiff, setPendingTurnDiffFile]);
 
     return (
         <>
