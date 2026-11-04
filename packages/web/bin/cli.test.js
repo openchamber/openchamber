@@ -931,6 +931,26 @@ describe('CLI HTTP helpers', () => {
     }
   });
 
+  it('keeps parsed CLI options out of fetch', async () => {
+    const originalFetch = globalThis.fetch;
+    let init;
+    globalThis.fetch = async (_url, options = {}) => {
+      init = options;
+      return createMockJsonResponse({ status: 'ok' });
+    };
+    try {
+      await requestControlAction(45677, 'session.status', { sessionId: 'ses_1', directory: '/repo' }, {
+        session: 'ses_1',
+        directory: '/repo',
+        json: true,
+        uiPassword: 'secret',
+      });
+      expect(Object.keys(init).filter((key) => init[key] !== undefined).sort()).toEqual(['body', 'headers', 'method', 'signal']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('reports the enabled state the server saved and fails when it did not change', async () => {
     const originalFetch = globalThis.fetch;
     let saved = { task: { id: 'loop:user:mine', name: 'mine', enabled: true }, enabled: true };
