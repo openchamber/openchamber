@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import { getRepositoryRemoteUrls, resolveRepositoryGitPaths } from '../git/service.js';
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
-import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
+import { fingerprintRemoteUrl, isDiskPathRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 
 const resolveIdentity = async (directory, {
   fsImpl,
@@ -22,6 +22,7 @@ const resolveIdentity = async (directory, {
       fetchUrl: remote.fetchUrl || '',
       pushUrl: remote.pushUrl || remote.fetchUrl || '',
     }))
+    .filter((remote) => !isDiskPathRemoteUrl(remote.fetchUrl) && !isDiskPathRemoteUrl(remote.pushUrl))
     .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
   const transportRevision = includeRawEndpoints ? await getTransportRevision(directory) : undefined;
   const repositoryId = `repo_${crypto.createHash('sha256')

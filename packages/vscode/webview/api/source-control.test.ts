@@ -75,6 +75,21 @@ describe('createVSCodeSourceControlAPI', () => {
     }
   });
 
+  test('keeps a remote on disk readable, since System Git on the extension host can use it', async () => {
+    const api = createVSCodeSourceControlAPI();
+    const reading = api.repositoryBinding('/workspace/repo');
+    respond(await nextMessage(), [
+      { name: 'local', fetchUrl: '/srv/git/project.git', pushUrl: '/srv/git/project.git' },
+      { name: 'origin', fetchUrl: 'https://example.com/team/repo.git', pushUrl: 'https://example.com/team/repo.git' },
+    ]);
+    const read = await reading;
+    assert.ok(read.binding);
+    assert.deepEqual(read.binding.remotes.map((remote) => [remote.name, remote.fetch.displayUrl, remote.readiness]), [
+      ['local', '/srv/git/project.git', 'ready'],
+      ['origin', 'https://example.com/team/repo.git', 'ready'],
+    ]);
+  });
+
   test('config revision follows remote topology and the context rejects an empty directory', async () => {
     const api = createVSCodeSourceControlAPI();
     const first = api.repositoryContext('/workspace/repo');

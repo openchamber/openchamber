@@ -182,6 +182,8 @@ describe('git route renderer DTOs', () => {
     gitLibraries.getCurrentIdentity.mockReset();
     gitLibraries.getRemoteUrl.mockReset();
     gitLibraries.getRemotes.mockReset();
+    gitLibraries.getRepositoryRemoteUrls.mockReset();
+    gitLibraries.getRepositoryRemoteUrls.mockResolvedValue([]);
     gitLibraries.getProfiles.mockReset();
     gitLibraries.createProfile.mockReset();
     gitLibraries.updateProfile.mockReset();
@@ -241,6 +243,29 @@ describe('git route renderer DTOs', () => {
 
     expect(urlResponse.body).toEqual({ url: null });
     expect(remotesResponse.body).toEqual([{ name: 'origin', fetchUrl: '', pushUrl: '' }]);
+  });
+
+  it('does not offer a remote that is a path on disk', async () => {
+    gitLibraries.getRemotes.mockResolvedValue([
+      // A path with a space reads as empty here, the way simple-git splits it.
+      { name: 'backup', fetchUrl: '', pushUrl: '' },
+      { name: 'mirror', fetchUrl: 'https://example.com/team/mirror.git', pushUrl: 'file:///srv/git/mirror.git' },
+      { name: 'origin', fetchUrl: 'git@example.com:team/repo.git', pushUrl: 'git@example.com:team/repo.git' },
+    ]);
+    gitLibraries.getRepositoryRemoteUrls.mockResolvedValue([
+      { name: 'backup', fetchUrl: '/srv/My Drive/project.git', pushUrl: '/srv/My Drive/project.git' },
+      { name: 'mirror', fetchUrl: 'https://example.com/team/mirror.git', pushUrl: 'file:///srv/git/mirror.git' },
+      { name: 'origin', fetchUrl: 'git@example.com:team/repo.git', pushUrl: 'git@example.com:team/repo.git' },
+    ]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('GET', '/api/git/remotes')({ query: { directory: '/repo' } }, response);
+
+    expect(response.body).toEqual([
+      { name: 'origin', fetchUrl: 'git@example.com:team/repo.git', pushUrl: 'git@example.com:team/repo.git' },
+    ]);
   });
 
   it('projects stored profiles to the public author DTO', async () => {
