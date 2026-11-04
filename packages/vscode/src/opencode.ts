@@ -18,6 +18,7 @@ import { runOpenCodeCliUpgrade } from '../../web/server/lib/opencode/cli-upgrade
 import { spawnManagedOpenCodeProcess } from './managed-opencode-process';
 import { readEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 import { isExecutable, isKnownOpenCodeDesktopAppPath, isMacOpenCodeAppBundlePath, resolveDetectedOpencodeCliPath } from './opencodeCliDiscovery';
+import { readMachineSetting } from './machine-settings';
 
 const t = vscode.l10n.t;
 
@@ -253,8 +254,7 @@ function validateConfiguredOpencodeBinaryForManagedStart(): string | null {
 
   const candidates: string[] = [];
   try {
-    const config = vscode.workspace.getConfiguration('openchamber');
-    const raw = config.get<string>('opencodeBinary') || '';
+    const raw = readMachineSetting('opencodeBinary');
     if (raw.trim()) {
       candidates.push(raw.trim());
     }
@@ -297,8 +297,7 @@ function resolveOpencodeCliPath(): string | null {
 
   const configured = (() => {
     try {
-      const config = vscode.workspace.getConfiguration('openchamber');
-      return normalizeConfiguredOpencodeBinary(config.get<string>('opencodeBinary') || '');
+      return normalizeConfiguredOpencodeBinary(readMachineSetting('opencodeBinary'));
     } catch {
       return null;
     }
@@ -694,8 +693,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
 
   let pendingOperation: Promise<void> | null = null;
 
-  const config = vscode.workspace.getConfiguration('openchamber');
-  const configuredApiUrl = config.get<string>('apiUrl') || '';
+  const configuredApiUrl = readMachineSetting('apiUrl');
   const useConfiguredUrl = configuredApiUrl && configuredApiUrl.trim().length > 0;
 
   let configuredPort: number | null = null;
