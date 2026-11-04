@@ -153,7 +153,9 @@ only the note for such a row.
 Git, Changes, Walkthrough, pull requests and mobile Changes use the shared
 repository picker. Selection, discovery refresh and persistence belong to
 [`useGitStore`](../../stores/DOCUMENTATION.md#usegitstorets) and
-`useNestedGitDirectory`; diff rows do not change that selection.
+`useNestedGitDirectory`; diff rows do not change that selection. A changed-file
+chip falling back to Changed does (*Last turn scope*), since the chip names a
+file and only its own repository can show it.
 
 ## Find in changes
 
@@ -315,6 +317,25 @@ it; mobile Changes has no counts and reads it only in that scope. Outside the
 scope a running turn is not read, and its count shows as unknown until the
 turn ends. A failed read keeps its own error and retry, and another session's
 turn never shows while this one's loads.
+
+A changed-file chip under a reply opens Last turn, but the chip comes from the
+turn's tool calls and the scope from its snapshots, so they can disagree:
+snapshots are off, the project folder is no git repository (a repository nested
+in it still gets the edits), or a step took no snapshot. Each click therefore
+asks once (`pendingTurnDiffFile`, dropped when another session is on screen)
+whether the file is in the turn's diff. Until the list answers the session's
+current state the view shows loading; a failed read keeps its error and retry.
+A file that is not there opens Changed instead, in the repository holding the
+file, read afresh, expanded. A repository the picker drops again ends the
+attempt on the repository left on screen. Picking Last turn by hand asks
+nothing and stays there, empty or not. The phone is different: there the chip
+opens nothing at all, so no empty view exists to fall back from.
+
+### Why the click is a one-shot request and not derived from the tab
+
+A tab keeps its target across scope changes, so a tab opened from a chip and a
+tab where the person picked Last turn by hand look the same. Deriving the
+fallback from the tab would send that person back to Changed every time.
 
 ### Why the count waits for the turn to end outside the scope
 

@@ -154,15 +154,17 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
     const isMobile = useUIStore((state) => state.isMobile);
     const navigateToDiff = useUIStore((state) => state.navigateToDiff);
     const openContextDiff = useUIStore((state) => state.openContextDiff);
+    const setPendingTurnDiffFile = useUIStore((state) => state.setPendingTurnDiffFile);
 
     const openLastTurnDiff = React.useCallback((file: string) => {
         if (!isMobile && effectiveDirectory) {
             openContextDiff(effectiveDirectory, file, false, 'turn');
+            setPendingTurnDiffFile({ file, sessionId: useSessionUIStore.getState().currentSessionId });
             return;
         }
 
         navigateToDiff(file, false, 'turn');
-    }, [effectiveDirectory, isMobile, navigateToDiff, openContextDiff]);
+    }, [effectiveDirectory, isMobile, navigateToDiff, openContextDiff, setPendingTurnDiffFile]);
 
     return (
         <>
