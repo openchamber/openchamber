@@ -1,4 +1,5 @@
 import React from 'react';
+import { readAssetBlob } from '@/lib/runtime-asset';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { toast } from '@/components/ui';
@@ -58,9 +59,9 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getRevealLabelKey } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isOfficePreviewFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
-import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
+import { MAX_OFFICE_PREVIEW_BYTES, MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
@@ -92,6 +93,7 @@ import { useFileTreeUpload } from './files/useFileTreeUpload';
 import { moveWorkspacePath } from './files/moveWorkspacePath';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
 import { BinaryArtifact } from './files/previews/BinaryArtifact';
+import { OfficeArtifact } from './files/previews/OfficeArtifact';
 import { PdfArtifact } from './files/previews/PdfArtifact';
 import { FontArtifact } from './files/previews/FontArtifact';
 import { ImageArtifact, type ImageNeighbor } from './files/previews/ImageArtifact';
@@ -3798,6 +3800,54 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     </Button>
   ) : null;
 
+  const fetchSelectedFile = React.useCallback(async (signal: AbortSignal): Promise<Response> => {
+    const path = selectedFilePathRef.current;
+    if (!path) throw new Error('No file is open.');
+    const readOptions = resolveFileReadOptions(path);
+    const response = await runtimeFetch('/api/fs/raw', {
+      signal,
+      cache: 'no-store',
+      query: {
+        path,
+        allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined,
+        directory: root || undefined,
+      },
+    });
+    if (!response.ok) throw new Error(t('filesView.error.readFileFailed'));
+    return response;
+  }, [resolveFileReadOptions, root, t]);
+
+  const loadCanvasBytes = React.useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
+    const response = await fetchSelectedFile(AbortSignal.timeout(60_000));
+    return new Uint8Array(await response.arrayBuffer());
+  }, [fetchSelectedFile]);
+
+  // The stat that names the size can arrive after this read starts, so the
+  // read is bounded itself and stops when the preview goes away.
+  const loadOfficeBytes = React.useCallback(async (cancel: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
+    const signal = AbortSignal.any([cancel, AbortSignal.timeout(60_000)]);
+    const response = await fetchSelectedFile(signal);
+    const blob = await readAssetBlob(response, MAX_OFFICE_PREVIEW_BYTES, signal);
+    return new Uint8Array(await blob.arrayBuffer());
+  }, [fetchSelectedFile]);
+
+  const openInDefaultAppButton = selectedFile && isDesktopLocalOriginActive() ? (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => {
+        void openDesktopPath(selectedFile.path).then((opened) => {
+          if (!opened) toast.error(t('sidebarFilesTree.toast.operationFailed'));
+        });
+      }}
+    >
+      <Icon name="external-link" className="me-2 size-4" />
+      {t('sidebarFilesTree.menu.openInDefaultApp')}
+    </Button>
+  ) : null;
+  const binaryFileActions = <>{downloadButton}{openInDefaultAppButton}</>;
+
   // Everything shown as an artifact rather than as editable text. One place
   // for both the docked and the fullscreen viewer, so they cannot drift.
   const renderArtifactPreview = (file: FileNode): React.ReactNode => {
@@ -3832,7 +3882,28 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return <FontArtifact src={pdfSrc} name={file.name} sizeBytes={artifactSize} />;
     }
     if (isUnsupportedBinary) {
-      return <BinaryArtifact name={file.name} path={file.path} sizeBytes={artifactSize} download={downloadButton} />;
+      const officeTooLarge = artifactSize !== null && artifactSize > MAX_OFFICE_PREVIEW_BYTES;
+      if (isOfficePreviewFile(file.path) && !officeTooLarge) {
+        return (
+          <OfficeArtifact
+            key={`${file.path}:${fileContentRevision}`}
+            name={file.name}
+            path={file.path}
+            sizeBytes={artifactSize}
+            loadBytes={loadOfficeBytes}
+            actions={binaryFileActions}
+          />
+        );
+      }
+      return (
+        <BinaryArtifact
+          name={file.name}
+          path={file.path}
+          sizeBytes={artifactSize}
+          download={binaryFileActions}
+          description={isOfficePreviewFile(file.path) ? t('filesView.artifact.office.tooLarge') : undefined}
+        />
+      );
     }
     if (isTable && tableViewMode === 'table') {
       return <TableArtifact path={file.path} content={fileContent} sizeBytes={artifactSize} />;
@@ -4525,23 +4596,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (binaryCanvasRef.current && lastLoadedPathRef.current === loadedFilePath) setCanvasRemountNonce((nonce) => nonce + 1);
     lastLoadedPathRef.current = loadedFilePath;
   }, [loadedFilePath]);
-
-  const loadCanvasBytes = React.useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
-    const path = selectedFilePathRef.current;
-    if (!path) throw new Error('No file is open.');
-    const readOptions = resolveFileReadOptions(path);
-    const response = await runtimeFetch('/api/fs/raw', {
-      signal: AbortSignal.timeout(60_000),
-      cache: 'no-store',
-      query: {
-        path,
-        allowOutsideWorkspace: readOptions.allowOutsideWorkspace ? 'true' : undefined,
-        directory: root || undefined,
-      },
-    });
-    if (!response.ok) throw new Error(t('filesView.error.readFileFailed'));
-    return new Uint8Array(await response.arrayBuffer());
-  }, [resolveFileReadOptions, root, t]);
 
   const handleCanvasLoadProblem = React.useCallback((message: string) => {
     const path = selectedFilePathRef.current;

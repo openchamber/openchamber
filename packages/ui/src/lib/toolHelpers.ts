@@ -831,6 +831,13 @@ export function isDelimitedTableFile(filePath: string): boolean {
   return ext === 'csv' || ext === 'tsv';
 }
 
+/** Office documents the viewer can draw. The older doc, xls and ppt formats stay downloads. */
+const OFFICE_PREVIEW_EXTENSIONS = new Set(['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp']);
+
+export function isOfficePreviewFile(filePath: string): boolean {
+  return OFFICE_PREVIEW_EXTENSIONS.has(getFileExtension(filePath));
+}
+
 export function isMermaidFile(filePath: string): boolean {
   const ext = getFileExtension(filePath);
   return ext === 'mmd' || ext === 'mermaid';

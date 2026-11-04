@@ -219,9 +219,10 @@ element, duration and dimensions once metadata loads, a stated failure when
 the runtime cannot decode the codec), `FontArtifact` (a specimen under a
 throwaway `FontFace` family removed when the tab closes), `TableArtifact`
 (CSV/TSV through `delimitedText.ts`, capped rows stated in the meta line),
-and `BinaryArtifact` (name, type, size, download; never a decode attempt).
-`FilesView.renderArtifactPreview` is the single switch both the docked and
-the fullscreen viewer use.
+`OfficeArtifact` (docx, xlsx, pptx, odt, ods, odp, read-only, see below),
+and `BinaryArtifact` (name, type, size, download, and the desktop's open in
+the default app; never a decode attempt). `FilesView.renderArtifactPreview`
+is the single switch both the docked and the fullscreen viewer use.
 
 A file that cannot be shown fills the pane with `ContentState`
 (`components/ui/content-state.tsx`): icon, title, one sentence, actions. A
@@ -322,6 +323,58 @@ It reads the file in one GET, because a Range request needs a CORS header the
 server does not allow to the Android app. There is no pinch zoom, and PDFs that
 need pdf.js's CMap, standard font or wasm data (CJK text without embedded
 fonts, JPEG 2000 images) may lose that text or image.
+
+### Office documents
+
+`OfficeArtifact` reads the file's bytes through `runtimeFetch`, so it works on
+every runtime that can read the file, relay and phones included, and loads its
+renderers on first use (`officeDocument.ts`). An extension's binary editor that
+matches the file still comes first. `docx` goes through docx-preview, `pptx`
+through @jvmr/pptx-to-html, `xlsx` and `ods` through `readWorkbook`
+(`sync/document-attachments.ts`) into the same grid CSV uses, with column
+letters, the sheet's own row numbers and a sheet picker. `odt` and `odp` show
+the text and images the chat attachment reader extracts, without their layout.
+`doc`, `xls` and `ppt` have no renderer and stay `BinaryArtifact`. So does a
+document over `MAX_OFFICE_PREVIEW_BYTES`, and one that cannot be parsed, such as
+a damaged or password-protected file, with a sentence saying so. A failed read
+offers Retry instead, because the file itself may be fine.
+
+A document is somebody else's content, and the renderers turn its text and link
+targets into HTML. `officeFrameDocument` is what keeps that contained, and
+these must stay true: the page runs in a frame whose `sandbox` has no
+`allow-same-origin`; its CSP allows no network, only `data:` images and fonts
+and one script by nonce; `cleanDocumentHtml` removes scripts, handlers, active
+elements and every URL outside the file, so a link in a preview is not clickable
+and shows its target on hover. Macros never run. A workbook's cells go through
+React as text and need none of this.
+
+Shown spreadsheet values come from the file: formulas show the result saved in
+it and are not calculated. `xl/styles.xml` decides how a number reads for dates,
+times, elapsed hours, percents and decimals. Currency symbols and digit grouping
+stay out, and a format the reader does not apply, such as scientific notation,
+keeps the stored number instead of rounding it. Charts and merged cells in a
+workbook are not drawn.
+
+### Why these renderers
+
+Sending the file to Office Online or Google's viewer would take its contents to
+a third party, which `enterprise-boundary` rules out. `@docmentis/udoc-viewer`
+draws closest to the original, but its WASM engine is proprietary and needs
+online authorization. SheetJS on npm is stuck on an old release with known
+vulnerabilities, and the workbook reader already existed for chat attachments.
+`pptx-preview` drew images and shape outlines better than @jvmr/pptx-to-html,
+and lost on the rest: empty charts with a placeholder title in Chinese in the
+same test, 441 KB gzipped against 47 KB, and no public source. The chosen one
+draws an unknown shape as a rectangle.
+
+### Why the page is built in the app and shown in a frame
+
+Rendering inside the frame would keep the renderers themselves away from the
+app, at the cost of sending them and the file over `postMessage`, and of a
+parser and a bundle that run nowhere else. docx-preview builds into a document
+with no browsing context, so nothing it creates loads or runs there, and only the
+cleaned result enters the frame. The frame's one script scales paper down to a
+narrow pane, down to 25%; with a host's CSP in the way the page scrolls sideways.
 
 An HTML file's preview is untrusted content. `useHtmlPreviewUrl` asks the
 server for a grant (`POST /api/fs/preview`) and loads the page from

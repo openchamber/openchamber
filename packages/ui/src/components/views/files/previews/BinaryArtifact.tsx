@@ -17,7 +17,9 @@ export const BinaryArtifact: React.FC<{
   path: string;
   sizeBytes: number | null;
   download?: React.ReactNode;
-}> = ({ name, path, sizeBytes, download }) => {
+  /** Replaces the sentence for a file that has a preview but could not get it here. */
+  description?: string;
+}> = ({ name, path, sizeBytes, download, description }) => {
   const { t } = useI18n();
   const extension = getFileExtension(path).toUpperCase();
   return (
@@ -26,9 +28,9 @@ export const BinaryArtifact: React.FC<{
       <ContentState
         icon={<FileTypeIcon filePath={path} className="size-10" />}
         title={name}
-        description={extension
+        description={description ?? (extension
           ? t('filesView.artifact.binary.descriptionWithType', { extension })
-          : t('filesView.artifact.binary.description')}
+          : t('filesView.artifact.binary.description'))}
         actions={download}
       />
     </div>

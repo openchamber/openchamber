@@ -17,7 +17,7 @@ type DelimitedTable = {
   truncated: boolean;
 };
 
-const DEFAULT_TABLE_ROW_CAP = 2_000;
+export const DEFAULT_TABLE_ROW_CAP = 2_000;
 
 export const delimiterForPath = (filePath: string): ',' | '\t' => (
   filePath.toLowerCase().endsWith('.tsv') ? '\t' : ','
