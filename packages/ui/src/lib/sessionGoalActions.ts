@@ -50,17 +50,24 @@ export const sessionGoalIntro = (tokenBudget: number | null): string => {
     ? ` A token budget of ${tokenBudget} tokens applies to this goal.`
     : '';
   return wrapSystemReminder(
-    'Goal mode is active for this session. The user message above defines the goal objective. '
-    + 'Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue.'
+    'Goal mode is active for this session. The user message above defines the goal objective.'
     + budgetLine
-    // Same text as GOAL_REPORT_INSTRUCTIONS in the server's session-goal/audit.js.
-    + '\n\nBefore you end a turn, stop every background command you started that does not finish on its own, such as a dev server or a watcher. Start it again in a later turn if you need it.\n'
-    + '\nProgress is checked independently after each turn, from your final message only. End every turn with a short status block, in the language of your reply, with exactly these four lines:\n'
+    // Same text as GOAL_MISSION_INSTRUCTIONS and GOAL_REPORT_INSTRUCTIONS in
+    // the server's session-goal/audit.js.
+    + '\n\nWork autonomously through the entire objective in this one run. The user is away and is not reading progress updates.\n'
+    + '- When a step is finished, start the next one in the same run.\n'
+    + '- Decide open questions yourself with the most sensible default, note the choice, and go on.\n'
+    + '- When something fails, find the cause and try another route.\n'
+    + '- Check each part by running it, and fix what the check finds.\n'
+    + '- Autonomy covers the objective\'s own work. Leave out irreversible or outward-facing actions it does not ask for.\n'
+    + '\nYour final message is read by an independent check, and it ends the run. Send it only when the whole objective is done and verified, or when only the user can unblock you. Stopping with work you could still do yourself is an early stop.\n'
+    + '\nBefore that message, stop every background command you started that does not finish on its own, such as a dev server or a watcher.\n'
+    + '\nEnd that message with a short status block, in the language of your reply, with exactly these four lines:\n'
     + '- Done: what is finished.\n'
     + '- Verified: how you checked it (the command, test or file), or "not verified".\n'
     + '- Remaining: the parts of the objective you still have to do yourself, or "nothing".\n'
-    + '- Needs from the user: what only the user can provide before you can go on (a decision, credentials, access), or "nothing".\n'
-    + 'Testing in the app, review and committing are the user\'s steps after the work, not remaining work and not blockers.',
+    + '- Needs from the user: what only the user can provide before you can go on (credentials, access, a choice you cannot safely default), or "nothing".\n'
+    + 'Unless the objective asks for them, testing in the app, review and committing are the user\'s steps after the work, not remaining work and not blockers. When it asks for them, such as a commit or a pull request, they are part of the work. Report what is true: unfinished work goes in Remaining.',
   );
 };
 
