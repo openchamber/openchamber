@@ -213,6 +213,7 @@ jobs:
           private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
           permission-contents: read
           permission-issues: write
+          permission-metadata: read
           permission-pull-requests: write
 
       - name: Check review safety
@@ -449,6 +450,22 @@ jobs:
 
           find "$context" -type f | head -n 200
 
+      # `role_name` tells maintain from write, which `permission` reports alike.
+      # A failed read leaves the author under the contributor rules.
+      - name: Read author role
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
+        id: author
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+        run: |
+          if ! role="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${PR_AUTHOR}/permission" --jq '.role_name')"; then
+            echo "::warning::Could not read the role of ${PR_AUTHOR}; reviewing under the contributor rules."
+            role="none"
+          fi
+          echo "Author role: $role"
+          echo "role=$role" >> "$GITHUB_OUTPUT"
+
       - name: Record review start
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         id: review-start
@@ -463,6 +480,7 @@ jobs:
           PR_URL: ${{ steps.pr.outputs.url }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          AUTHOR_ROLE: ${{ steps.author.outputs.role }}
           PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
           PR_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
@@ -494,6 +512,7 @@ jobs:
           PR: $PR_URL
           Number: $PR_NUMBER
           Author: $PR_AUTHOR
+          Author repository role: $AUTHOR_ROLE
           Base: $PR_BASE_REF
           Head: $PR_HEAD_REPO_OWNER:$PR_HEAD_REF
           Required reviewed HEAD: $REVIEW_HEAD_SHA" | tee "$output"
