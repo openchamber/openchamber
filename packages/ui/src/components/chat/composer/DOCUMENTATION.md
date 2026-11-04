@@ -974,7 +974,13 @@ goes as its own context part (`sessionReferences.ts`, kinds `session` and
 - A pasted session or message link pastes as usual and draws as a chip once
   read. One this server cannot resolve, or a message that cannot be read,
   gets a toast and stays a plain link. A message with no text of its own
-  names its session instead. A bare `ses_…` id is text.
+  names its session instead.
+- A paste that is one `ses_…` id, apart from whitespace around it, lands as
+  text and becomes the session's link once read, archived sessions included
+  (`pastedSessionIds.ts`). The editor's changes carry its position through the
+  read, so later edits survive. An id that was edited, now runs into the text
+  around it, or names a session this server cannot read stays text, with no
+  toast. Any other bare id, typed or inside longer text, is text.
 - The text decides what is sent: each linked session or message once, in the
   order it appears; one deleted from the text is not sent. A link not read yet
   (typed by hand, or still loading) is read at send, so it never goes bare.

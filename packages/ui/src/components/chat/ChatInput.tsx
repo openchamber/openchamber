@@ -116,7 +116,8 @@ import {
     sessionReferencesInText,
     type SessionReference,
 } from './composer/sessionReferences';
-import { findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/sessionLinks';
+import { PastedSessionIds, sessionLinkOverPastedId, type PastedSessionIdRange } from './composer/pastedSessionIds';
+import { bareSessionId, findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/sessionLinks';
 import { sessionMentionChip } from '@/lib/messages/sessionMentionChip';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
 import type { Session } from '@/lib/opencode/model';
@@ -1070,6 +1071,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         return true;
     }, [resolveSessionLinks, sessionLinkOrigins]);
+    const [pastedSessionIds] = React.useState(() => new PastedSessionIds());
+    // A pasted id becomes the link once its session is read. One this server
+    // does not have stays the text it is, with nothing to announce.
+    const linkPastedSessionId = useStableHandler(async (range: PastedSessionIdRange) => {
+        // This composer's own draft: focus moving to another column must not
+        // cancel the link, so the shared attachment slot stays out of it.
+        const scope = largeTextPasteScopeRef.current;
+        const reference = await loadSessionLinkReference({ sessionId: range.sessionId, messageId: null }).catch(() => null);
+        const followed = pastedSessionIds.settle(range);
+        const editor = composerRef.current;
+        if (!reference || !followed || !editor || scope !== largeTextPasteScopeRef.current) return;
+        const replacement = sessionLinkOverPastedId(editor.getValue(), range, editor.getSelection(), sessionLinkOrigins);
+        if (!replacement) return;
+        rememberSessionMentions([reference]);
+        editor.replaceRange(range.from, range.to, replacement.link, replacement.selection.start, replacement.selection.end);
+    });
     // What the text mentions, once each, in order.
     const sessionMentionsIn = React.useCallback((text: string): SessionReference[] => (
         isVSCodeRuntime() ? [] : sessionReferencesInText(text, sessionLinkOrigins, sessionMentionsRef.current).references
@@ -3187,6 +3204,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
 
     const handleComposerChange = ({ value, selection, changes, fromPaste, insertedText, fromValueProp }: ComposerChange) => {
+        const pastedSessionId = pastedSessionIds.applyChange({ value, changes, fromPaste, fromValueProp });
+        if (pastedSessionId) void linkPastedSessionId(pastedSessionId);
         if (fromValueProp) {
             mentionCompletion.clear();
         } else {
@@ -3543,6 +3562,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 if (pastedText.includes('@')) {
                     markFileMentionPasteSuppression();
                 }
+                const sessionId = !isVSCodeRuntime() && inputMode === 'normal' ? bareSessionId(pastedText) : null;
+                if (sessionId) pastedSessionIds.expect(sessionId);
                 return;
             }
 
@@ -3676,7 +3697,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
-    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins]);
+    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins, pastedSessionIds]);
 
     // Android commits an image through the IME instead of the page (see nativeImagePaste).
     React.useEffect(() => {
