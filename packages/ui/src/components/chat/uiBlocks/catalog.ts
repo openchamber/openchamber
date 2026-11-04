@@ -218,34 +218,53 @@ const parser = createParser(uiBlockLibrary.toJSONSchema(), 'Stack');
 
 export type UiBlockParse =
   | { kind: 'empty' }
-  | { kind: 'ready'; root: BlockValue }
+  /** `dropped` says what a salvaged block lost; it is empty for a whole block. */
+  | { kind: 'ready'; root: BlockValue; dropped: string[] }
   | { kind: 'invalid'; errors: string[] };
+
+// Read off the source: the parser's tree has already lost whatever sat under a
+// broken parent. The word in a string only costs that block its salvage.
+const asksSomething = /\b(?:Choice|Input|DateInput|Slider|Button)\s*\(/;
+
+/**
+ * Whether a block may draw without its broken parts: it shows something and
+ * asks nothing. A form that lost an option or a button would take an answer
+ * to a different question.
+ */
+const canDropParts = (source: string, kept: BlockValue): boolean => (
+  !asksSomething.test(source) && (childSlots.safeParse(blockNode.safeParse(kept).data?.props).data?.children?.length ?? 0) > 0
+);
 
 /**
  * Parses one block. While it streams, a partial tree renders as far as it has
- * arrived; once complete, any error makes the whole block invalid, so a
- * finished reply never shows a block with parts silently dropped.
+ * arrived. Once complete, any error makes the block invalid; with `salvage`, a
+ * block that only shows things draws the parts that are sound and names the
+ * rest in `dropped`. A block cut short or written in a shape the chat does not
+ * support stays invalid either way.
  */
-export function parseUiBlock(source: string, complete: boolean): UiBlockParse {
+export function parseUiBlock(source: string, complete: boolean, salvage = false): UiBlockParse {
   const result = parser.parse(source);
-  const errors = result.meta.errors.map((error) => (
-    [error.component, error.path].filter(Boolean).join(' ') + `: ${error.message}`
-  ));
+  // A fold with nothing inside loses nothing by not drawing, and the parser
+  // has already left it out of the tree.
+  const errors = result.meta.errors
+    .filter((error) => !(error.component === 'Details' && error.path === '/children' && error.code === 'missing-required'))
+    .map((error) => [error.component, error.path].filter(Boolean).join(' ') + `: ${error.message}`);
   if (complete) {
-    if (result.meta.incomplete) errors.push('The block ends in the middle of a statement');
     if (result.meta.unresolved.length) errors.push(`Undefined names: ${result.meta.unresolved.join(', ')}`);
     if (result.meta.orphaned.length) errors.push(`Defined but never used: ${result.meta.orphaned.join(', ')}`);
+    const unusable: string[] = [];
+    if (result.meta.incomplete) unusable.push('The block ends in the middle of a statement');
     if (Object.keys(result.stateDeclarations).length || result.queryStatements.length || result.mutationStatements.length) {
-      errors.push('State, queries and mutations are not supported');
+      unusable.push('State, queries and mutations are not supported');
     }
-    if (result.root?.typeName !== 'Stack') errors.push('The block needs root = Stack([...])');
-    if (errors.length) return { kind: 'invalid', errors };
+    if (result.root?.typeName !== 'Stack') unusable.push('The block needs root = Stack([...])');
+    if (unusable.length || (errors.length && !salvage)) return { kind: 'invalid', errors: [...errors, ...unusable] };
   }
   if (!result.root || result.root.typeName !== 'Stack') return { kind: 'empty' };
   if (!complete) {
     // Expressions such as "a" + "b" are evaluated by the language's own
     // built-ins once the block is complete; until then the block waits.
-    return result.root.hasDynamicProps ? { kind: 'empty' } : { kind: 'ready', root: toBlockValue(result.root) };
+    return result.root.hasDynamicProps ? { kind: 'empty' } : { kind: 'ready', root: toBlockValue(result.root), dropped: [] };
   }
   let root = result.root;
   if (root.hasDynamicProps) {
@@ -261,8 +280,13 @@ export function parseUiBlock(source: string, complete: boolean): UiBlockParse {
   }
   const tree = toBlockValue(root);
   const treeErrors: string[] = [];
-  checkFinishedNode(tree, treeErrors);
-  return treeErrors.length ? { kind: 'invalid', errors: treeErrors } : { kind: 'ready', root: tree };
+  const kept = soundNode(tree, treeErrors);
+  const problems = [...errors, ...treeErrors];
+  if (!problems.length) return { kind: 'ready', root: tree, dropped: [] };
+  // An expression over a broken name evaluates to a made-up value, so a block
+  // with expressions is not salvaged.
+  if (!salvage || !kept || result.root.hasDynamicProps || !canDropParts(source, kept)) return { kind: 'invalid', errors: problems };
+  return { kind: 'ready', root: kept, dropped: problems };
 }
 
 /** The parser's tree as plain JSON: absent optional fields drop out. */
@@ -277,21 +301,23 @@ const chart = z.object({ labels: z.array(z.string()), series: nodes });
  * What the parser lets through but a finished block must not show: a node it
  * kept as partial, a node whose props do not match its component (an element
  * written as an object literal), and a chart whose series do not have one
- * value per label.
+ * value per label. Returns the node without such parts, null when the node
+ * itself is one, and lists every one found in `errors`.
  */
-function checkFinishedNode(value: BlockValue, errors: string[]): void {
+function soundNode(value: BlockValue, errors: string[]): BlockValue | null {
   const node = blockNode.safeParse(value);
   const name = blockName.safeParse(node.data?.typeName);
   if (!node.success || !name.success) {
     errors.push('A component in the block is not one of the catalog');
-    return;
+    return null;
   }
+  const errorsBefore = errors.length;
   if (node.data.partial) errors.push(`${name.data} is incomplete`);
   if (!blockProps[name.data].safeParse(node.data.props).success) errors.push(`${name.data} has arguments that do not match its signature`);
   const slots = childSlots.safeParse(node.data.props);
   if (!slots.success) {
     errors.push(`${name.data} has child slots that are not lists of components`);
-    return;
+    return null;
   }
   const chartProps = name.data === 'BarChart' || name.data === 'LineChart' ? chart.safeParse(node.data.props) : null;
   if (chartProps?.success) {
@@ -302,7 +328,12 @@ function checkFinishedNode(value: BlockValue, errors: string[]): void {
       }
     }
   }
-  for (const child of [...slots.data.children ?? [], ...slots.data.tabs ?? [], ...slots.data.series ?? []]) checkFinishedNode(child, errors);
+  const broken = errors.length > errorsBefore;
+  const props = { ...node.data.props };
+  for (const [slot, children] of Object.entries(slots.data)) {
+    props[slot] = (children ?? []).flatMap((child) => soundNode(child, errors) ?? []);
+  }
+  return broken ? null : { ...node.data, props };
 }
 
 /** A field of a block; `initial` is the value it starts with, which an answer carries unless the user changes it. */

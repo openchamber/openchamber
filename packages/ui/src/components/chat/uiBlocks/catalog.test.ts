@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue } from './catalog';
+import { blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue, type UiBlockParse } from './catalog';
 
 const program = `root = Stack([note, flow])
 note = Callout("Routers rewrite **MAC** addresses", "info")
@@ -145,6 +145,69 @@ describe('catalog additions', () => {
 
   test('a card with an empty title parses', () => {
     expect(parseUiBlock('root = Stack([Card("", [Text("no title")])])', true).kind).toBe('ready');
+  });
+});
+
+describe('a reply salvaging a block', () => {
+  const salvaged = (...lines: string[]) => parseUiBlock(lines.join('\n'), true, true);
+  const childNames = (parsed: UiBlockParse) => (parsed.kind === 'ready'
+    ? (blockProps.Stack.parse(blockNode.parse(parsed.root).props).children).map((child) => blockNode.parse(child).typeName)
+    : parsed.kind);
+  const dropped = (parsed: UiBlockParse) => (parsed.kind === 'ready' ? parsed.dropped : parsed.kind);
+
+  test('draws what is sound and names what it lost', () => {
+    const parsed = salvaged(
+      'root = Stack([chart, note])',
+      'chart = BarChart(["a", "b"], [Series("s", [1, 2])])',
+      'note = Callout()',
+    );
+    expect(childNames(parsed)).toEqual(['BarChart']);
+    expect(String(dropped(parsed))).toContain('Callout');
+  });
+
+  const survives: [string, string[]][] = [
+    ['an undefined name', ['root = Stack([a, gone])', 'a = Badge("ok")']],
+    ['an unused name', ['root = Stack([a])', 'a = Badge("ok")', 'b = Badge("left out")']],
+    ['an unknown component', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = Pie("x")']],
+    ['a chart with the wrong number of values', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = BarChart(["x", "y"], [Series("s", [1])])']],
+  ];
+  for (const [name, lines] of survives) {
+    test(`survives ${name}`, () => {
+      const parsed = salvaged(...lines);
+      expect(childNames(parsed)).toEqual(['Badge']);
+      expect(dropped(parsed)).toHaveLength(1);
+    });
+  }
+
+  test('keeps a whole block whole, with nothing dropped', () => {
+    expect(dropped(salvaged('root = Stack([Badge("ok")])'))).toEqual([]);
+  });
+
+  const refused: [string, string[]][] = [
+    ['a form that lost a part', ['root = Stack([c, d])', 'c = Choice("a", ["x"])', 'd = Callout()']],
+    ['a lost field', ['root = Stack([a, c])', 'a = Badge("ok")', 'c = Choice("a")']],
+    ['a lost button', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = Button(1)']],
+    ['a form under a broken parent', ['root = Stack([a, c])', 'a = Badge("ok")', 'c = Card(1, [Choice("pick", ["A", "B"])])']],
+    ['a form left unused', ['root = Stack([a])', 'a = Badge("ok")', 'c = Choice("pick", ["A", "B"])']],
+    ['an expression over an undefined name', ['root = Stack([a, s])', 'a = Badge("ok")', 's = Stat("Revenue", missing * 100)']],
+    ['a block cut short', ['root = Stack([a])', 'a = Badge("no']],
+    ['a block with nothing left', ['root = Stack([d])', 'd = Callout()']],
+    ['no Stack root', ['root = Card("x", [Badge("ok")])']],
+  ];
+  for (const [name, lines] of refused) {
+    test(`refuses ${name}`, () => {
+      expect(salvaged(...lines).kind).toBe('invalid');
+    });
+  }
+
+  test('a page keeps the whole block invalid', () => {
+    expect(parseUiBlock('root = Stack([a, d])\na = Badge("ok")\nd = Callout()', true).kind).toBe('invalid');
+  });
+
+  test('a fold with nothing inside goes without a word, on a page and in a form too', () => {
+    const source = 'root = Stack([c, d])\nc = Choice("a", ["x"])\nd = Details("Method notes")';
+    expect(childNames(parseUiBlock(source, true))).toEqual(['Choice']);
+    expect(dropped(salvaged(source))).toEqual([]);
   });
 });
 

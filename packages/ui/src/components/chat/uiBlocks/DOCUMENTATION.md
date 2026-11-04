@@ -8,7 +8,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 
 - Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and copies and image exports keep the source. User messages, reasoning, tool output and documents show the fence as code.
 - The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
-- A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. A block never shows with parts silently dropped.
+- A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. One exception: a reply's block with no fields, Buttons or expressions that is not cut short draws its sound parts and says what it lost, under the block. A block never shows with parts silently dropped.
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.
 - A page takes one answer: a press answers the waiting call at once, and the block freezes.
@@ -68,6 +68,8 @@ A form an agent waits on (`openchamber_render` with `ui` and `awaitAnswer`) show
 
 For the same reason a waiting form with no Button gets a "Send" button after the note. Only a press answers a page, and an agent that wrote two Choices and no Button left the user with a form that could not be sent while the agent waited on it.
 
+A reply's block with fields and no Button gets the same "Send": with no Button it has no decision, so nothing would ever send its fields, and the user was left picking options that went nowhere. It stays disabled until a field has a value, since an empty answer would start an agent turn with nothing in it.
+
 In a reply each decision card takes its own note. Its toggle is an icon at the end of the card's buttons, so a card is no taller until the user wants a note; the note opens above the buttons, and "Answer with the note only" takes the icon's place at once, disabled until the note has text, so the row does not shift while typing. A note alone answers the card: the user can say "not like this, ask the author first" without picking an option that does not fit.
 
 ### Why a titled card is one decision whatever its buttons' values say
@@ -85,6 +87,10 @@ The guidance reaches the agent inside XML context tags, and weaker models (GLM F
 ### Why a block that cannot be drawn shows its reasons and folds its source
 
 A block with an error shows the parser's reasons and a folded "Source". The source used to show in full under "Its source:": a form of several options filled the reply, and the reasons were nowhere, so users read it as a crash of the whole feature. On a page the chat sends those reasons to the agent, which usually draws the page again at once; the failed page's status line says it went back to the agent, so the two pages in a row read as a retry.
+
+### Why a reply's block draws without its broken parts and a form does not
+
+One bad part used to cost the whole block: GLM wrote two charts and a table, then a `Details("Method notes")` with no children, and the user got an error in their place. A `Details` with no children is not an error at all now and draws nothing, since it holds nothing to lose. A reply has no second try, since the agent has finished and never hears of it, so a block that only shows things draws what is sound, with the reasons and the folded source under it. A form stays whole, because a form that lost an option or a button takes an answer to a different question. A page stays whole too: its reasons go back to the agent, which draws it again. Repairing each mistake in the program was the alternative; dropping the broken part handles all of them.
 
 ### Why OpenUI's state, bindings and actions are left out
 
