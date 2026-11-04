@@ -283,11 +283,13 @@
         "openchamber.apiUrl": {
           "type": "string",
           "default": "",
+          "scope": "machine-overridable",
           "description": "%configuration.apiUrl.description%"
         },
         "openchamber.opencodeBinary": {
           "type": "string",
           "default": "",
+          "scope": "machine-overridable",
           "description": "%configuration.opencodeBinary.description%"
         }
       }
