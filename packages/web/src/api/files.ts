@@ -160,6 +160,7 @@ export const createWebFilesAPI = ({ getDirectory, searchFiles = defaultSearchFil
 
       const response = await runtimeFetch('/api/fs/search', {
         query: params,
+        signal: payload.signal,
         headers: directoryHeaders(getDirectory, directory),
       });
       if (!response.ok) {

@@ -1382,6 +1382,7 @@ export interface FileSearchQuery {
   maxResults?: number;
   includeHidden?: boolean;
   respectGitignore?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface FileSearchResult {

@@ -2792,6 +2792,47 @@ describe('GET /api/fs/search', () => {
     expect((await ask({ query: 'needle', includeHidden: 'true', respectGitignore: 'false', limit: '1' })).body.files).toHaveLength(1);
   });
 
+  it('stops the walk and sends nothing once the client closes the response', async () => {
+    let reads = 0;
+    let closeResponse;
+    const fsPromises = {
+      ...nativeFs,
+      stat: nativeFs.stat,
+      realpath: nativeFs.realpath,
+      readdir: async (...args) => {
+        reads += 1;
+        closeResponse();
+        return nativeFs.readdir(...args);
+      },
+    };
+    await nativeFs.mkdir(path.join(repo, 'src/deep'), { recursive: true });
+    const { app, getRoute } = createRouteRegistry();
+    const { spawn } = await import('node:child_process');
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' }, path, fsPromises, spawn,
+      crypto: { randomUUID: () => 'job-0' }, normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: repo }),
+      buildAugmentedPath: () => '/usr/bin', resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const response = createMockResponse();
+    response.on = (event, listener) => {
+      if (event === 'close') closeResponse = listener;
+      return response;
+    };
+    await getRoute('GET', '/api/fs/search')({ query: { query: 'needle', respectGitignore: 'false' }, headers: {} }, response);
+    expect(reads).toBe(1);
+    expect(response.body).toBeNull();
+
+    // Already gone before the route got this far: no walk at all.
+    reads = 0;
+    const gone = createMockResponse();
+    gone.destroyed = true;
+    await getRoute('GET', '/api/fs/search')({ query: { query: 'needle', respectGitignore: 'false' }, headers: {} }, gone);
+    expect(reads).toBe(0);
+    expect(gone.body).toBeNull();
+  });
+
   it('returns paths under the requested symlink and reports missing directories', async () => {
     const link = `${repo}-link`;
     await nativeFs.symlink(repo, link);
