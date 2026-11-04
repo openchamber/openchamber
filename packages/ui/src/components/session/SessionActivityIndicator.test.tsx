@@ -71,6 +71,15 @@ describe('SessionActivityIndicator', () => {
     expect(host.querySelector('[data-spinner]')).toBeNull();
   });
 
+  test('a session waiting on its pull request shows the running circle under its own label', async () => {
+    useSessionDisplayStore.setState({ animatedActivityIndicators: false });
+    await renderIndicator({ state: 'running' });
+    const runningLabel = host.querySelector('[data-session-activity-indicator]')?.getAttribute('aria-label');
+    await renderIndicator({ state: 'pullRequest' });
+    expect(iconHref('pullRequest')).toBe('#oc-circle');
+    expect(host.querySelector('[data-session-activity-indicator]')?.getAttribute('aria-label')).not.toBe(runningLabel);
+  });
+
   test('labels the state for assistive technology and hover', async () => {
     useSessionDisplayStore.setState({ animatedActivityIndicators: false });
     await renderIndicator({ state: 'shell' });
