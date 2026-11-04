@@ -26,9 +26,9 @@ beforeEach(() => {
   network.mockImplementation(async (input) => {
     const url = input.toString();
     requested.push(url);
-    if (url.endsWith('/api/quota/providers')) {
-      if (extensions === 'down') return new Response('{"error":"OpenCode is not connected yet"}', { status: 500 });
-      return Response.json({ providers: [], extensions });
+    if (url.endsWith('/api/quota/extensions')) {
+      if (extensions === 'down') return new Response('{"error":"Failed"}', { status: 500 });
+      return Response.json({ extensions });
     }
     // The path's last segment is the id the store asked for; `fetchQuota` checks the echo itself.
     const providerId = decodeURIComponent(url.slice(url.lastIndexOf('/') + 1));
@@ -41,7 +41,7 @@ afterEach(() => {
 });
 afterAll(() => network.mockRestore());
 
-const fetchedQuotas = () => requested.filter((url) => url.includes('/api/quota/') && !url.endsWith('/providers'));
+const fetchedQuotas = () => requested.filter((url) => url.includes('/api/quota/') && !url.endsWith('/extensions'));
 
 describe('the extensions\' usage providers in the quota store', () => {
   test('reads the list, draws it after the built-ins, and shows it in Work Status by default like a built-in', async () => {
@@ -77,11 +77,31 @@ describe('the extensions\' usage providers in the quota store', () => {
     expect(useQuotaStore.getState().extensionProviders).toBe(before);
   });
 
+  test('changing the Work Status list while an extension is paused keeps its choice', async () => {
+    extensions = [TEAPOT];
+    await useQuotaStore.getState().loadExtensionProviders();
+    useQuotaStore.setState({ savedDropdownProviderIds: ['claude', 'codex', TEAPOT.id] });
+    extensions = [];
+    await useQuotaStore.getState().loadExtensionProviders();
+    expect(useQuotaStore.getState().setProviderInDropdown('codex', false)).toEqual(['claude', TEAPOT.id]);
+    extensions = [TEAPOT];
+    await useQuotaStore.getState().loadExtensionProviders();
+    expect(useQuotaStore.getState().dropdownProviderIds).toEqual(['claude', TEAPOT.id]);
+  });
+
+  test('an extension with a very long name stays in the list beside the others', async () => {
+    const long = { ...GARBAGE, name: 'G'.repeat(300) };
+    extensions = [TEAPOT, long];
+    await useQuotaStore.getState().loadExtensionProviders();
+    expect(useQuotaStore.getState().extensionProviders).toEqual([TEAPOT, long]);
+  });
+
   test('a saved Work Status list is narrowed to the providers known now and widens when they come back', async () => {
     extensions = [TEAPOT];
     await useQuotaStore.getState().loadExtensionProviders();
     // The user unticks every built-in but Claude on the Usage page; the extension's card stays ticked.
-    useQuotaStore.getState().setDropdownProviderIds(['claude', TEAPOT.id]);
+    useQuotaStore.setState({ savedDropdownProviderIds: ['claude', 'codex', TEAPOT.id] });
+    useQuotaStore.getState().setProviderInDropdown('codex', false);
     expect(useQuotaStore.getState().dropdownProviderIds).toEqual(['claude', TEAPOT.id]);
     // Paused: the saved choice is kept and the list shown is narrowed to what exists now.
     extensions = [];
@@ -103,7 +123,7 @@ describe('the extensions\' usage providers in the quota store', () => {
     // The second call joins the read on the wire and asks for one more after it, since that read may predate the change.
     await Promise.all([useQuotaStore.getState().loadExtensionProviders(), useQuotaStore.getState().loadExtensionProviders()]);
     await pause();
-    expect(requested.filter((url) => url.endsWith('/api/quota/providers'))).toHaveLength(4);
+    expect(requested.filter((url) => url.endsWith('/api/quota/extensions'))).toHaveLength(4);
     expect(useQuotaStore.getState().extensionProviders).toEqual([TEAPOT, GARBAGE]);
   });
 

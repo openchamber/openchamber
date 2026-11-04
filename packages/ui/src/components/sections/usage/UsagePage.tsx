@@ -51,7 +51,7 @@ export const UsagePage: React.FC = () => {
   const lastUpdated = useQuotaStore((state) => state.lastUpdated);
   const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
-  const setDropdownProviderIds = useQuotaStore((state) => state.setDropdownProviderIds);
+  const setProviderInDropdown = useQuotaStore((state) => state.setProviderInDropdown);
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
@@ -95,12 +95,8 @@ export const UsagePage: React.FC = () => {
     if (!selectedProviderId) {
       return;
     }
-    const next = enabled
-      ? Array.from(new Set([...dropdownProviderIds, selectedProviderId]))
-      : dropdownProviderIds.filter((id) => id !== selectedProviderId);
-    setDropdownProviderIds(next);
-    void updateDesktopSettings({ usageDropdownProviders: next });
-  }, [dropdownProviderIds, selectedProviderId, setDropdownProviderIds]);
+    void updateDesktopSettings({ usageDropdownProviders: setProviderInDropdown(selectedProviderId, enabled) });
+  }, [selectedProviderId, setProviderInDropdown]);
 
   const providerModels = React.useMemo((): ModelInfo[] => {
     if (!usage?.models) return [];

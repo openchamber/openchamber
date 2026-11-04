@@ -1,7 +1,8 @@
 import express from 'express';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { attachExtensionQuotaProvider, detachExtensionQuotaProvider } from './extension-registry.js';
 import { QuotaRouteError } from './route-error.js';
 import { registerQuotaRoutes } from './routes.js';
 
@@ -12,13 +13,19 @@ const app = (providers) => {
 };
 
 describe('quota routes with extension providers', () => {
-  it('lists the extensions\' providers beside the configured ids', async () => {
-    const response = await request(app({
-      listConfiguredQuotaProviders: async () => ['codex', 'ext-teapot-usage'],
-      listExtensionQuotaProviders: () => [{ id: 'ext-teapot-usage', name: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' }],
-    })).get('/api/quota/providers');
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ providers: ['codex', 'ext-teapot-usage'], extensions: [{ id: 'ext-teapot-usage', name: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' }] });
+  it('lists the extensions\' providers from memory, without the quota module or OpenCode', async () => {
+    attachExtensionQuotaProvider({ providerId: 'ext-teapot-usage', providerName: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' });
+    try {
+      const server = express();
+      const getQuotaProviders = vi.fn(async () => { throw new Error('OpenCode is not connected yet'); });
+      registerQuotaRoutes(server, { getQuotaProviders });
+      const response = await request(server).get('/api/quota/extensions');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ extensions: [{ id: 'ext-teapot-usage', name: 'Teapot Usage', icon: 'cup', guestId: 'teapot-usage' }] });
+      expect(getQuotaProviders).not.toHaveBeenCalled();
+    } finally {
+      detachExtensionQuotaProvider('ext-teapot-usage');
+    }
   });
 
   it('answers an extension\'s malformed answer with its own status and code, and anything else with 500', async () => {

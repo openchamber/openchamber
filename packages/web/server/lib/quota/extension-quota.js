@@ -25,7 +25,7 @@ import { buildResult, toUsageWindow } from './utils/formatters.js';
  * service (`POST /quota` on its loopback, the SDK's wire 1).
  *
  * The service receives, on every read, the entries OpenCode holds for the
- * provider ids the manifest lists, as `readOpenCodeCredentials` answers them,
+ * provider ids the current catalog row lists, as `readOpenCodeCredentials` answers them,
  * and nothing else of the map: the hand-over the user approved in the dialog.
  * A listed credential OpenCode does not hold is the "not configured" state a
  * built-in answers for its own missing key, and the service is not called.
@@ -111,9 +111,8 @@ export function createExtensionQuotaProvider({
   const fetchQuota = async () => {
     // Thrown when OpenCode cannot be asked; the registry reports that as it does a built-in's throw.
     const auth = await readCredentials();
-    const credentials = pickCredentials(auth, providerIds);
-    if (providerIds.length > 0 && Object.keys(credentials).length === 0) return failure(false, 'Not configured');
 
+    // After the read, so nothing withdrawn while it ran is handed over.
     let current;
     try {
       current = await eligibleGuest();
@@ -121,6 +120,11 @@ export function createExtensionQuotaProvider({
       return failure(true, `${providerName} could not answer: the extension catalog could not be read: ${error?.message ?? error}`);
     }
     if (!current) return failure(true, `${providerName} could not answer: the extension may no longer report usage`);
+
+    // The list the catalog holds now: a re-approval can narrow it before this adapter is replaced.
+    const listed = current.quota.providers;
+    const credentials = pickCredentials(auth, listed);
+    if (listed.length > 0 && Object.keys(credentials).length === 0) return failure(false, 'Not configured');
 
     let proxied;
     try {

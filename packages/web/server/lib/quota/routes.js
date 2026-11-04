@@ -4,6 +4,7 @@ import { importCursorCredential, validateCursorCredential } from './providers/cu
 import { fetchExeDevUsage } from './providers/exe-dev.js';
 import { aliases as zaiAliases, giftResetTypes as zaiGiftResetTypes, useZaiGiftReset } from './providers/zai.js';
 import { fetchQuota as fetchZenmuxQuota } from './providers/zenmux.js';
+import { listExtensionQuotaProviders } from './extension-registry.js';
 import { QuotaRouteError } from './route-error.js';
 
 // Keyed by the same provider ids as `normalizers`: a provider with a normalizer
@@ -32,12 +33,17 @@ const credentialError = (res, error) => res.status(400).json({
 });
 
 export function registerQuotaRoutes(app, { getQuotaProviders }) {
-  // `extensions` are the usage providers installed extensions serve right now
-  // (id, name, icon, extension), which the UI draws beside its built-in list.
+  // The usage providers installed extensions serve right now (id, name, icon,
+  // extension), which the UI draws beside its built-in list. Every client reads
+  // this on each stream connect, so it answers from memory and asks OpenCode nothing.
+  app.get('/api/quota/extensions', (_req, res) => {
+    res.json({ extensions: listExtensionQuotaProviders() });
+  });
+
   app.get('/api/quota/providers', async (_req, res) => {
     try {
-      const { listConfiguredQuotaProviders, listExtensionQuotaProviders } = await getQuotaProviders();
-      res.json({ providers: await listConfiguredQuotaProviders(), extensions: listExtensionQuotaProviders() });
+      const { listConfiguredQuotaProviders } = await getQuotaProviders();
+      res.json({ providers: await listConfiguredQuotaProviders() });
     } catch (error) {
       console.error('Failed to list quota providers:', error);
       res.status(500).json({ error: error.message || 'Failed to list quota providers' });

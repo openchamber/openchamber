@@ -49,7 +49,7 @@ interface QuotaStore extends QuotaSettingsState {
   results: ProviderResult[];
   /**
    * Usage providers installed extensions serve on this instance, after the
-   * built-ins (`GET /api/quota/providers`). Read on connect and whenever the
+   * built-ins (`GET /api/quota/extensions`). Read on connect and whenever the
    * server announces a change; a failed read keeps the list it had.
    */
   extensionProviders: ExtensionQuotaProvider[];
@@ -73,7 +73,8 @@ interface QuotaStore extends QuotaSettingsState {
   fetchProviderQuota: (providerId: QuotaProviderId, invalidate?: boolean) => Promise<boolean>;
   setSelectedProvider: (providerId: QuotaProviderId | null) => void;
   setDisplayMode: (mode: 'usage' | 'remaining') => void;
-  setDropdownProviderIds: (providerIds: QuotaProviderId[]) => void;
+  /** Shows or hides one provider in the "show in Work Status" list; answers the list to save. */
+  setProviderInDropdown: (providerId: QuotaProviderId, shown: boolean) => string[];
   setSelectedModels: (providerId: string, modelNames: string[]) => void;
   toggleModelSelected: (providerId: string, modelName: string) => void;
   setExpandedFamilies: (providerId: string, familyIds: string[]) => void;
@@ -400,7 +401,14 @@ export const useQuotaStore = create<QuotaStore>()(
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
       setDisplayMode: (mode) => set({ displayMode: mode }),
-      setDropdownProviderIds: (providerIds) => set({ dropdownProviderIds: providerIds, savedDropdownProviderIds: providerIds }),
+      setProviderInDropdown: (providerId, shown) => {
+        const { savedDropdownProviderIds, dropdownProviderIds, extensionProviders } = get();
+        // The saved list, since the shown one lacks a provider absent right now, such as a paused extension's.
+        const base: readonly string[] = savedDropdownProviderIds ?? dropdownProviderIds;
+        const next = shown ? [...new Set([...base, providerId])] : base.filter((id) => id !== providerId);
+        set({ savedDropdownProviderIds: next, dropdownProviderIds: resolveDropdownProviderIds(next, quotaProviderIds(extensionProviders)) });
+        return next;
+      },
 
       setSelectedModels: (providerId, modelNames) => {
         set((state) => ({

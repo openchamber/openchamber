@@ -57,6 +57,7 @@ const harness = ({ guest = quotaGuest(), auth = AUTH, answer = usageAnswer() } =
     },
     readCredentials: async () => {
       if (state.readFailure) throw state.readFailure;
+      if (state.withdrawDuringRead) state.catalog = quotaGuest({ capabilityGrants: [] });
       return state.auth;
     },
     createId: () => 'req-1',
@@ -134,6 +135,20 @@ describe('an extension usage provider', () => {
     const empty = harness({ guest: quotaGuest({ quota: { providers: [] } }), auth: { anthropic: AUTH.anthropic } });
     expect((await empty.provider.fetchQuota()).ok).toBe(true);
     expect(empty.calls[0].request.input).toEqual({ credentials: {} });
+  });
+
+  it('hands over only what the catalog lists now, when a re-approval narrowed the list before the adapter was replaced', async () => {
+    const h = harness();
+    h.state.catalog = quotaGuest({ quota: { providers: ['teapot'] } });
+    await h.provider.fetchQuota();
+    expect(Object.keys(h.calls[0].request.input.credentials)).toEqual(['teapot']);
+  });
+
+  it('hands over nothing when approval is withdrawn while the credentials are being read', async () => {
+    const h = harness();
+    h.state.withdrawDuringRead = true;
+    expect(await h.provider.fetchQuota()).toMatchObject({ ok: false, error: expect.stringContaining('may no longer report usage') });
+    expect(h.calls).toHaveLength(0);
   });
 
   it('lets a credential read that fails throw, as a built-in\'s does', async () => {

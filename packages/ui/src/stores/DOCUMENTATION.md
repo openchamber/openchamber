@@ -114,7 +114,7 @@ and credential changes invalidate this freshness window and old-account samples.
 A credential event with no visible readout only invalidates samples.
 
 The usage providers installed extensions serve (`extensionProviders`, from
-`GET /api/quota/providers`) are read with the instance's settings on the first
+`GET /api/quota/extensions`) are read with the instance's settings on the first
 load for a runtime, and again when the server announces
 `openchamber:quota-providers-changed` or the event stream reconnects; a failed
 read keeps the list it had. A provider that leaves takes its results, errors,
