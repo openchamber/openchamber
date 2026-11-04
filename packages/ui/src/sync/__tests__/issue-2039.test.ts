@@ -711,13 +711,14 @@ describe("issue 2039 draft auto-accept", () => {
     useSessionUIStore.getState().openNewSessionDraft()
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(activateDirectoryCalls).toEqual([null])
+    expect(activateDirectoryCalls).toEqual(["/home/test/.config/openchamber/chats"])
     expect(applyDefaultModelAgentSelectionCalls.at(-1)).toEqual({
       projectDefaultAgent: undefined,
       projectDefaultModel: undefined,
       projectDefaultVariant: undefined,
     })
   })
+
 
   test("restores project defaults when the next draft restores the previous project target", async () => {
     const project = {

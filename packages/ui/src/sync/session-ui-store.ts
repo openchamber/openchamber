@@ -40,7 +40,7 @@ import { markPendingUserSendAnimation } from "@/lib/userSendAnimation"
 import { prepareUserMessageResume } from "./user-message-resume"
 import { normalizePath } from "@/lib/pathNormalization"
 import { descendingId } from "@/lib/opencode/ids"
-import { CHAT_DRAFT_PROJECT_ID, captureChatDirectoryCleanup as captureChatCleanup, createChatDirectory, deleteChatDirectory, getChatsRootFromDirectory, isChatDirectoryPath, warmChatsRootDirectory } from "@/lib/chatDirectories"
+import { CHAT_DRAFT_PROJECT_ID, captureChatDirectoryCleanup as captureChatCleanup, createChatDirectory, deleteChatDirectory, getChatsRoot, getChatsRootFromDirectory, isChatDirectoryPath, resolveChatsRootDirectory, warmChatsRootDirectory } from "@/lib/chatDirectories"
 import { isSpaceArchiveDirectory } from "@/lib/spaces/space-archives"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { isSpaceDirectoryClosedToNewSessions } from "@/lib/spaces/spaces-store"
@@ -779,6 +779,16 @@ const activateConfigForDirectory = async (
   await useConfigStore.getState().activateDirectory(normalizePath(directory), options)
 }
 
+// A chat draft has no folder of its own yet. It reads the managed Chats root,
+// where its commands and skills come from, so the catalog and defaults it starts
+// on are the ones its folder will have. Null until the server names the root.
+const resolveDraftConfigDirectory = (
+  draft: NewSessionDraftState,
+  project: { path?: string | null } | null | undefined,
+): string | null => normalizePath(draft.directoryOverride ?? null)
+  ?? normalizePath(project?.path ?? null)
+  ?? (draft.target === "chat" ? getChatsRoot() : null)
+
 const applyDraftTargetSelectionDefaults = (
   draft: NewSessionDraftState,
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
@@ -803,15 +813,13 @@ const applyDraftTargetSelectionDefaults = (
           normalizePath(draft.directoryOverride ?? null),
         )))
 
-  const configDirectory = normalizePath(draft.directoryOverride ?? null)
-    ?? normalizePath(selectedProject?.path ?? null)
+  const configDirectory = resolveDraftConfigDirectory(draft, selectedProject)
 
   if (previousDraft?.open && previousDraft.draftId === draft.draftId && previousDraft.target === draft.target) {
     const previousProject = previousDraft.target !== 'project' ? null
       : projects.find((project) => project.id === previousDraft.selectedProjectId)
         ?? resolveDraftProjectForDirectory(projects, availableWorktreesByProject, normalizePath(previousDraft.directoryOverride ?? null))
-    const previousConfigDirectory = normalizePath(previousDraft.directoryOverride ?? null)
-      ?? normalizePath(previousProject?.path ?? null)
+    const previousConfigDirectory = resolveDraftConfigDirectory(previousDraft, previousProject)
     if (previousConfigDirectory === configDirectory && draft.worktreeStartDirectory?.directory !== null) return
   }
 
@@ -839,16 +847,28 @@ const applyDraftTargetSelectionDefaults = (
   if (configDirectory && worktreeProject) {
     useSessionUIStore.getState().setDraftWorktreeStartDirectory(draft.draftId, configDirectory, null)
   }
+  const isDraftStillCurrent = () => {
+    const current = useSessionUIStore.getState()
+    return revision === draftDefaultsRevision && getRuntimeKey() === runtimeKey
+      && current.newSessionDraft.open && current.newSessionDraft.draftId === draft.draftId
+  }
   const activation = configDirectory && worktreeProject
     // A worktree that failed to populate has no folder to read; its root is the fallback.
     ? resolveStartDirectory(worktreeProject, configDirectory).then(({ directory }) => directory, () => configDirectory).then(async (directory) => {
-      const current = useSessionUIStore.getState()
-      if (revision !== draftDefaultsRevision || getRuntimeKey() !== runtimeKey
-        || !current.newSessionDraft.open || current.newSessionDraft.draftId !== draft.draftId) return
+      if (!isDraftStillCurrent()) return
       useSessionUIStore.getState().setDraftWorktreeStartDirectory(draft.draftId, configDirectory, directory)
       await activateConfigForDirectory(directory, activationOptions)
     })
-    : activateConfigForDirectory(configDirectory, activationOptions)
+    : !configDirectory && draft.target === "chat"
+      // A failed lookup leaves the catalog as it is; the next draft asks again.
+      ? resolveChatsRootDirectory().then(async (chatsRoot) => {
+        if (!isDraftStillCurrent()) return
+        const activated = activateConfigForDirectory(chatsRoot, activationOptions)
+        // The root's saved snapshot can hold another draft's pick; this draft starts on defaults.
+        applyDefaults()
+        await activated
+      }, () => undefined)
+      : activateConfigForDirectory(configDirectory, activationOptions)
   applyDefaults()
   void activation.then(() => {
     const current = useSessionUIStore.getState()
@@ -1547,6 +1567,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (get().materializedDraftSessionId !== materializedDraftSessionId) {
       set({ materializedDraftSessionId })
     }
+    const leavesChatDraft = Boolean(id) && get().newSessionDraft.open && get().newSessionDraft.target === "chat"
     if (id) {
       get().closeNewSessionDraft()
     }
@@ -1608,6 +1629,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
         directoryState.setDirectory(resolvedDir, { showOverlay: false })
+      } else if (resolvedDir && leavesChatDraft) {
+        // A chat draft keeps the app's directory but reads the Chats root's catalog.
+        void activateConfigForDirectory(resolvedDir).catch((error) => {
+          console.warn("Failed to activate directory after leaving a chat draft:", error)
+        })
       }
       if (sessionProject && projectsState.activeProjectId !== sessionProject.id) {
         projectsState.setActiveProjectIdOnly(sessionProject.id)

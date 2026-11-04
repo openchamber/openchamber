@@ -23,6 +23,7 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
 import { isSpaceDirectory } from "@/lib/spaces/space-route";
+import { resolveChatsRootDirectory } from "@/lib/chatDirectories";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier";
 import { readRememberedEffort, rememberEffort, resolveEffortChoice, type EffortChoice } from "@/lib/modelEfforts";
@@ -1058,14 +1059,17 @@ const getFallbackProjectDirectory = (): string | null => {
 
 type ProjectDefaults = { projectDefaultAgent?: string; projectDefaultModel?: string; projectDefaultVariant?: string };
 
+const isChatDraftOpen = (): boolean => {
+    const session = useSessionUIStore.getState();
+    return !session.currentSessionId && Boolean(session.newSessionDraft?.open) && session.newSessionDraft.target === 'chat';
+};
+
 const getProjectDefaultsForConfigDirectory = (directory: string | null | undefined): ProjectDefaults => {
     const configDirectory = normalizeConfigPath(directory);
     if (!configDirectory) {
         return {};
     }
-    const session = useSessionUIStore.getState();
-    if (!session.currentSessionId && session.newSessionDraft?.open && session.newSessionDraft.target === 'chat'
-        && toDirectoryKey(configDirectory) === useConfigStore.getState().activeDirectoryKey) return {};
+    if (isChatDraftOpen() && toDirectoryKey(configDirectory) === useConfigStore.getState().activeDirectoryKey) return {};
     return readProjectDefaults(configDirectory);
 };
 
@@ -4477,6 +4481,12 @@ export const useConfigStore = create<ConfigStore>()(
                             const resolvedInitialDirectory = (resolvedProject || resolveProjectDirectory(initialDirectory))
                                 ? resolveConfigDirectory(initialDirectory)
                                 : null;
+                            // A chat draft reads the managed Chats root, so it does not start on the
+                            // agents and defaults of the project the app is on. The user can leave
+                            // the draft during this wait, so the session state is read after it.
+                            const chatsRoot = isChatDraftOpen() ? await resolveChatsRootDirectory().catch(() => null) : null;
+                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            const chatDraftDirectory = isChatDraftOpen() ? resolveConfigDirectory(chatsRoot) : null;
                             // An open session offers its own folder's agents and models,
                             // the catalog activateDirectory loads when it is opened. A
                             // folder outside every project (a chat) must not borrow the
@@ -4485,13 +4495,13 @@ export const useConfigStore = create<ConfigStore>()(
                             const openSessionDirectory = sessionState.currentSessionId
                                 ? resolveConfigDirectory(sessionState.currentSessionDirectory)
                                 : null;
-                            const configDirectory = openSessionDirectory ?? resolvedInitialDirectory ?? getFallbackProjectDirectory();
+                            const configDirectory = openSessionDirectory ?? chatDraftDirectory ?? resolvedInitialDirectory ?? getFallbackProjectDirectory();
                             if (!configDirectory) {
                                 markStartupTrace('initializeApp:noProjectConfigDirectory');
                                 set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected", lastInitFailure: null });
                                 return;
                             }
-                            if (!openSessionDirectory && !resolvedInitialDirectory && initialDirectory !== configDirectory) {
+                            if (!openSessionDirectory && !chatDraftDirectory && !resolvedInitialDirectory && initialDirectory !== configDirectory) {
                                 markStartupTrace('initializeApp:normalizedUnknownDirectoryToProject', {
                                     initialDirectory,
                                     configDirectory,
@@ -4803,6 +4813,8 @@ if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
         }
 
         markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey });
+        // A chat draft stays on the Chats root's catalog while the app moves between projects.
+        if (isChatDraftOpen()) return;
         void hydrateConfigCatalogFromCache(toConfigDirectoryKey(state.currentDirectory));
         void useConfigStore.getState().activateDirectory(state.currentDirectory);
     });
