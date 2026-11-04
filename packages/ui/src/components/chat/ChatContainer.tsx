@@ -134,6 +134,9 @@ const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
 const DRAFT_EXIT_DURATION_MS = 120;
 const COMPOSER_MOVE_DURATION_MS = 180;
 const CHAT_SCROLL_STYLE = {
+    // A chat column squeezed to 0px gives the rows no area, and the browser
+    // drops the scroll position with the scrollable height.
+    minWidth: 1,
     overflowAnchor: 'none',
     overscrollBehavior: 'contain',
     overscrollBehaviorY: 'contain',
