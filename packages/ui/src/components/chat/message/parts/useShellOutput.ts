@@ -7,7 +7,7 @@ const MAX_POLL_INTERVAL_MS = 4_000;
 /** The live view keeps the newest output only, like a terminal's scrollback. */
 const MAX_OUTPUT_CHARS = 256 * 1024;
 
-const keepTail = (text: string): string => {
+export const keepTail = (text: string): string => {
     if (text.length <= MAX_OUTPUT_CHARS) return text;
     const cut = text.slice(text.length - MAX_OUTPUT_CHARS);
     const lineStart = cut.indexOf('\n');

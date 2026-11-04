@@ -2164,6 +2164,11 @@ diffs-container {
   margin: 0;
 }
 
+/* The run button is a third action in the header. */
+[data-streamdown="code-block"]:has([data-reply-command-run]) [data-streamdown="code-block-header"] {
+  padding-inline-end: 7.25rem;
+}
+
 /* Disable Streamdown's code block virtualization and keep block chrome fixed */
 .markdown-content [data-streamdown="code-block"] {
   content-visibility: visible !important;

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 import { keepCommandSubagentReports } from '@/lib/opencode/subagent-run';
+import { dropReplyCommandRows } from '@/lib/opencode/reply-command';
 import { isOpencodeNotFound, opencodeClient } from '@/lib/opencode/client';
 
 import { ChatInput } from './ChatInput';
@@ -1425,10 +1426,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // A subagent report opens a turn of its own at the end of the chat only for
     // a `subagent: true` command; a call's report finishes that call's row
     // (see `ToolPart`), and a run started before the loaded history stays in
-    // the session's subagent list, so the chat never shifts for either.
+    // the session's subagent list, so the chat never shifts for either. A
+    // command run from a code block of a reply shows in that block.
     const sessionStartTimes = useSessionStartTimes(effectiveSessionDirectory);
     const viewportMessages = React.useMemo(
-        () => keepCommandSubagentReports(sessionMessages, (childSessionID) => sessionStartTimes.get(childSessionID)),
+        () => dropReplyCommandRows(keepCommandSubagentReports(sessionMessages, (childSessionID) => sessionStartTimes.get(childSessionID))),
         [sessionStartTimes, sessionMessages],
     );
 

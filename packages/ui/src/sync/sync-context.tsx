@@ -112,6 +112,7 @@ import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, settledPageKey
 import { requestHostTurnStarts } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
+import { applyReplyCommandEvents } from "./reply-commands"
 import {
   CHAT_LOCATION_RELEASE_DELAY_MS,
   PROJECT_LOCATION_RELEASE_DELAY_MS,
@@ -329,6 +330,7 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     // Before statuses: an idle that follows a command's start in the same
     // flush must see the command.
     applyBackgroundShellEvents(directory, events)
+    applyReplyCommandEvents(events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
     applyRecoverableQuestionEvents(directory, events)
@@ -2216,6 +2218,7 @@ export function handleEvent(
       // Child stores remain the primary source for synced directories; these
       // indexes cover unopened directories and list/status races.
       applyBackgroundShellEvents(directory, [payload])
+      applyReplyCommandEvents([payload])
       applyGlobalSessionStatusEvent(directory, payload)
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
       applyRecoverableQuestionEvents(directory, [payload])

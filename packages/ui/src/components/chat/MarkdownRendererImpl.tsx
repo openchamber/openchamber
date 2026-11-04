@@ -435,7 +435,7 @@ export function MarkdownContent({
     // Only an assistant reply on screen draws UI blocks; copies and image
     // exports keep the block's source.
     uiBlocks: uiBlocks && !purpose,
-    uiBlockReply: uiBlocks && !purpose && settled && sessionId && messageId ? { sessionId, messageId } : null,
+    settledReply: uiBlocks && !purpose && settled && sessionId && messageId ? { sessionId, messageId } : null,
     disableLinkSafety,
     theme,
     mermaidControls,
