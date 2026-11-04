@@ -1,4 +1,3 @@
-import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/en';
 import { settingsDict } from './en.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -26,6 +25,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -103,7 +103,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': 'Used {count} subagents',
   'sessions.sidebar.projectAction.active': 'Project action active',
   ...settingsDict,
-  ...selectionApprovalMessages,
+  ...selectionApprovalI18n.en,
   'gitView.operation.title': 'Git operation',
   'gitView.operation.recovery.storage': 'OpenChamber can\'t save the state of Git transfers here. Allow site storage and reload; pushing and pulling are paused until then.',
   'gitView.operation.recovery.capacity': 'Too many unfinished Git transfers are saved. Check the ones below before starting another.',

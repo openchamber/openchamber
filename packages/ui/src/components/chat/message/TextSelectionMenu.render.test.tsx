@@ -460,7 +460,7 @@ describe('TextSelectionMenu render subscriptions', () => {
       const quotes = useInlineCommentDraftStore.getState().getDrafts(target);
       expect(quotes).toHaveLength(2);
       expect(quotes[0]).toBe(existing);
-      expect(quotes[1]).toMatchObject({ source: 'chat-quote', sessionKey: target.sessionKey, fileLabel: 'message-1', code: 'picked', text: 'LGTM', anchor });
+      expect(quotes[1]).toMatchObject({ source: 'chat-quote', sessionKey: target.sessionKey, fileLabel: 'message-1', code: 'picked', text: 'Sounds good', anchor });
       expect(useInlineCommentDraftStore.getState().getDrafts({ directory, sessionKey: column.sessionId })).toEqual([]);
       expect(useInputStore.getState().pendingInputText).toBe('Keep my draft');
       expect(useInputStore.getState().getAttachedFiles(identity)).toBe(files);

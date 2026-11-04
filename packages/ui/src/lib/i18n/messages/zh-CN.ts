@@ -1,4 +1,3 @@
-import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/zh-CN';
 import type { I18nKey } from './en';
 import { settingsDict } from './zh-CN.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -27,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -104,7 +104,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '使用了 {count} 个子智能体',
   'sessions.sidebar.projectAction.active': '项目操作正在运行',
   ...settingsDict,
-  ...selectionApprovalMessages,
+  ...selectionApprovalI18n['zh-CN'],
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber 无法在这里保存 Git 传输的状态。请允许站点存储并重新加载；在此之前 push 和 pull 已暂停。',
   'gitView.operation.recovery.capacity': '保存的未完成 Git 传输太多。开始新的传输前，请先检查下面这些。',

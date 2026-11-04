@@ -863,6 +863,7 @@ describe('settings registry gate', () => {
       const response = helpers.formatSettingsResponse(JSON.parse(JSON.stringify(stored)));
       expect(response.selectionApprovalText).toBe(text);
     }
+    expect(helpers.sanitizeSettingsUpdate({ selectionApprovalText: 'x'.repeat(1001) }).selectionApprovalText).toHaveLength(1000);
     const invalid = helpers.sanitizeSettingsUpdate({ selectionApprovalText: null });
     expect(helpers.mergePersistedSettings({ selectionApprovalText: 'previous' }, invalid).selectionApprovalText).toBe('previous');
   });

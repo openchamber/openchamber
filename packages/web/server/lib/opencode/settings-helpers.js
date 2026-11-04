@@ -581,7 +581,7 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.tableCellWrap === 'boolean') {
       result.tableCellWrap = candidate.tableCellWrap;
     }
-    const selectionApprovalText = z.string().safeParse(candidate.selectionApprovalText);
+    const selectionApprovalText = z.string().transform((value) => value.slice(0, 1000)).safeParse(candidate.selectionApprovalText);
     if (selectionApprovalText.success) {
       result.selectionApprovalText = selectionApprovalText.data;
     }

@@ -1,4 +1,3 @@
-import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/fr';
 import { settingsDict } from './fr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -26,6 +25,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -103,7 +103,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} sous-agents utilisés',
   'sessions.sidebar.projectAction.active': 'Action du projet en cours',
   ...settingsDict,
-  ...selectionApprovalMessages,
+  ...selectionApprovalI18n.fr,
   'gitView.operation.title': 'Opération Git',
   'gitView.operation.recovery.storage': 'OpenChamber ne peut pas enregistrer ici l’état des transferts Git. Autorisez le stockage du site et rechargez ; d’ici là, push et pull sont en pause.',
   'gitView.operation.recovery.capacity': 'Trop de transferts Git inachevés sont enregistrés. Vérifiez ceux ci-dessous avant d’en lancer un autre.',

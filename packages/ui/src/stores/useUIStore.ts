@@ -1531,6 +1531,9 @@ const openFileTab = (state: UIStore, directory: string, filePath: string, previe
   }
 };
 
+/** What the selection menu's thumb-up says when the user set no text of their own. */
+export const DEFAULT_SELECTION_APPROVAL_TEXT = 'Sounds good';
+
 export const useUIStore = create<UIStore>()(
   devtools(
     persist(

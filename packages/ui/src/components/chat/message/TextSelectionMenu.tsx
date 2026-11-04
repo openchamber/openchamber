@@ -28,7 +28,7 @@ import {
     useMobileCommentComposerController,
     useMobileCommentDraft,
 } from '../composer/comment/MobileCommentComposerContext';
-import { SelectionApprovalModule } from '../selection-approval';
+import { SelectionApprovalButton } from './SelectionApprovalButton';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { resolveShadowSelectionRange } from './shadowSelection';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
@@ -818,9 +818,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     : null;
 
   const approvalButton = currentSessionId && selectedMessageId
-    ? isMobile
-      ? <SelectionApprovalModule.Mobile getSelection={getApprovalSelection} onSuccess={finishApproval} />
-      : <SelectionApprovalModule.Desktop getSelection={getApprovalSelection} onSuccess={finishApproval} />
+    ? <SelectionApprovalButton mobile={isMobile} getSelection={getApprovalSelection} onSuccess={finishApproval} />
     : null;
 
   const commentInput = (

@@ -48,6 +48,7 @@ describe('settings registry', () => {
       expect(useUIStore.getState().selectionApprovalText).toBe('Keep this');
       expect(parseSettingsDocument({ selectionApprovalText: null })).toEqual({});
       expect(parseSettingsDocument({ selectionApprovalText: 42 })).toEqual({});
+      expect(parseSettingsDocument({ selectionApprovalText: 'x'.repeat(1001) })).toEqual({});
     } finally {
       useUIStore.persist.setOptions(options);
       useUIStore.setState(original, true);

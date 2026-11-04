@@ -1,4 +1,3 @@
-import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/pl';
 import type { I18nKey } from './en';
 import { settingsDict } from './pl.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -27,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -104,7 +104,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': 'Użyci subagenci: {count}',
   'sessions.sidebar.projectAction.active': 'Trwa wykonywanie akcji projektu',
   ...settingsDict,
-  ...selectionApprovalMessages,
+  ...selectionApprovalI18n.pl,
   'gitView.operation.title': 'Operacja Git',
   'gitView.operation.recovery.storage': 'OpenChamber nie może tu zapisać stanu przesyłów Git. Zezwól na pamięć witryny i odśwież; do tego czasu push i pull są wstrzymane.',
   'gitView.operation.recovery.capacity': 'Zapisano zbyt wiele niedokończonych przesyłów Git. Sprawdź te poniżej, zanim zaczniesz kolejny.',

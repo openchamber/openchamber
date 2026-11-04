@@ -105,7 +105,7 @@ describe('ChatSettings', () => {
     const field = host.querySelector<HTMLInputElement>('[data-settings-item="chat.selection-approval-text"] input');
     if (!field) throw new Error('Missing selection approval field');
     expect(field.value).toBe('Existing feedback');
-    expect(field.placeholder).toBe('LGTM');
+    expect(field.placeholder).toBe('Sounds good');
     const setValue = Object.getOwnPropertyDescriptor(windowInstance.HTMLInputElement.prototype, 'value')?.set;
     if (!setValue) throw new Error('Missing input value setter');
     for (const value of ['Ship this', '']) {

@@ -1361,7 +1361,7 @@ A quote taken inside a page the agent showed (`openchamber_render`) has `page: {
 The selection menu's thumbs-up attaches a normal `chat-quote` draft to the
 column's published comment scope, including an expanded BTW composer. Its
 comment uses the trimmed `selectionApprovalText` setting, falling back to
-`LGTM`. Existing drafts, attachments and linked references stay in place;
+`Sounds good`. Existing drafts, attachments and linked references stay in place;
 the user sends them together through the normal Send action. The shortcut
 focuses the composer on desktop and does not request keyboard focus on mobile.
 
