@@ -304,7 +304,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=-${systemdEscapeArg(envFilePath)}
+EnvironmentFile=-${systemdUnitPath(envFilePath)}
 ExecStart="${systemdEscapeArg(process.execPath)}" ${args}
 WorkingDirectory=${systemdUnitPath(os.homedir())}
 Restart=always

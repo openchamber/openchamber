@@ -34,6 +34,25 @@ describe('buildSystemdUserService', () => {
     expect(unit).toMatch(/^SuccessExitStatus=143$/m);
   });
 
+  it('escapes a data directory with a space in every path directive', () => {
+    const previousDataDir = process.env.OPENCHAMBER_DATA_DIR;
+    try {
+      // OPENCHAMBER_DATA_DIR is a supported override, so a space is reachable
+      // through normal use. systemd splits EnvironmentFile= on whitespace and
+      // has no shell-style quoting, so a raw space there loses the file.
+      process.env.OPENCHAMBER_DATA_DIR = join('/home/me', 'My Data', 'openchamber');
+
+      const unit = buildSystemdUserService({ port: 3000 });
+      const directive = (name) => unit.split('\n').find((line) => line.startsWith(`${name}=`));
+
+      expect(directive('EnvironmentFile')).not.toMatch(/ /);
+      expect(directive('WorkingDirectory')).not.toMatch(/ /);
+    } finally {
+      if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+      else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    }
+  });
+
   it('starts a pnpm 11+ global install through the link that survives updates', () => {
     const pnpmHome = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-pnpm-'));
     const globalDir = join(pnpmHome, 'global', 'v11');
