@@ -202,8 +202,9 @@ export async function routeMessage(params: {
   const requestDirectory = params.directory ?? undefined
   // The request goes to the directory the session lives in when it leaves:
   // a session created from a draft can end up elsewhere than where its first
-  // message was shown, and its record is there.
-  const sendDirectory = () => getSyncSessionDirectory(params.sessionId) ?? requestDirectory
+  // message was shown, and its record is there. The record decides, since a
+  // store holding the session proves containment only.
+  const sendDirectory = () => getAuthoritativeSessionDirectory(params.sessionId) ?? requestDirectory
   // The session carries its own model and agent server-side. Sending them on
   // every turn would switch the session to whatever the composer happens to
   // show, so only a genuine change travels with the prompt. Resolved when the
