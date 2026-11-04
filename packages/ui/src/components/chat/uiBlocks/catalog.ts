@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createLibrary, createParser, defineComponent, evaluateRoot, type ElementNode, type OpenUIError } from '@openuidev/lang-core';
+import { createLibrary, createParser, defineComponent, evaluateRoot, tokenize, type ElementNode, type OpenUIError, type ParseResult } from '@openuidev/lang-core';
 
 /**
  * The fixed component catalog an agent writes UI blocks against.
@@ -249,6 +249,8 @@ export function parseUiBlock(source: string, complete: boolean, salvage = false)
   const errors = result.meta.errors
     .filter((error) => !(error.component === 'Details' && error.path === '/children' && error.code === 'missing-required'))
     .map((error) => [error.component, error.path].filter(Boolean).join(' ') + `: ${error.message}`);
+  // A key shifts every argument after it, so the other errors of such a block mislead.
+  const namedError = complete ? namedArgumentError(source, result.meta) : null;
   if (complete) {
     if (result.meta.unresolved.length) errors.push(`Undefined names: ${result.meta.unresolved.join(', ')}`);
     if (result.meta.orphaned.length) errors.push(`Defined but never used: ${result.meta.orphaned.join(', ')}`);
@@ -258,6 +260,7 @@ export function parseUiBlock(source: string, complete: boolean, salvage = false)
       unusable.push('State, queries and mutations are not supported');
     }
     if (result.root?.typeName !== 'Stack') unusable.push('The block needs root = Stack([...])');
+    if (namedError) errors.splice(0, errors.length, namedError);
     if (unusable.length || (errors.length && !salvage)) return { kind: 'invalid', errors: [...errors, ...unusable] };
   }
   if (!result.root || result.root.typeName !== 'Stack') return { kind: 'empty' };
@@ -281,12 +284,58 @@ export function parseUiBlock(source: string, complete: boolean, salvage = false)
   const tree = toBlockValue(root);
   const treeErrors: string[] = [];
   const kept = soundNode(tree, treeErrors);
-  const problems = [...errors, ...treeErrors];
+  const problems = namedError ? errors : [...errors, ...treeErrors];
   if (!problems.length) return { kind: 'ready', root: tree, dropped: [] };
   // An expression over a broken name evaluates to a made-up value, so a block
   // with expressions is not salvaged.
   if (!salvage || !kept || result.root.hasDynamicProps || !canDropParts(source, kept)) return { kind: 'invalid', errors: problems };
   return { kind: 'ready', root: kept, dropped: problems };
+}
+
+// The library does not export its token kinds, so they are read from its own tokenizer.
+const tokenKind = (text: string) => tokenize(text)[0].t;
+const NEWLINE = tokenKind('\n');
+const CALL_OPEN = tokenKind('(');
+const COMMA = tokenKind(',');
+const COLON = tokenKind(':');
+const IDENTIFIER = tokenKind('name');
+const ARRAY_OPEN = tokenKind('[');
+const OBJECT_OPEN = tokenKind('{');
+const OPENERS = new Set([CALL_OPEN, ARRAY_OPEN, OBJECT_OPEN]);
+const OPENER_OF = new Map([[tokenKind(')'), CALL_OPEN], [tokenKind(']'), ARRAY_OPEN], [tokenKind('}'), OBJECT_OPEN]]);
+
+/**
+ * The keys written as `key: value` where a call takes an argument. A key of an
+ * object literal sits inside braces, and a ternary's `:` follows an expression
+ * that starts after its `?`, so neither counts.
+ */
+function namedArguments(source: string): string[] {
+  const tokens = tokenize(source).filter((token) => token.t !== NEWLINE);
+  const open: (typeof CALL_OPEN)[] = [];
+  const names = new Set<string>();
+  tokens.forEach((token, index) => {
+    if (OPENERS.has(token.t)) open.push(token.t);
+    else if (OPENER_OF.has(token.t)) {
+      if (OPENER_OF.get(token.t) === open.at(-1)) open.pop();
+    } else if (token.t === COLON && open.at(-1) === CALL_OPEN && tokens[index - 1]?.t === IDENTIFIER) {
+      const before = tokens[index - 2]?.t;
+      if (before === CALL_OPEN || before === COMMA) names.add(String(tokens[index - 1].v));
+    }
+  });
+  return [...names];
+}
+
+/**
+ * The error for a block that writes named arguments. The scan reads text the
+ * parser skips, such as comments, so the parser has to show the shift too: an
+ * excess argument, or a key it took for an undefined name.
+ */
+function namedArgumentError(source: string, meta: ParseResult['meta']): string | null {
+  const excess = meta.errors.some((error) => error.code === 'excess-args');
+  if (!excess && !meta.unresolved.length) return null;
+  const named = namedArguments(source);
+  if (!excess && !named.some((name) => meta.unresolved.includes(name))) return null;
+  return named.length ? `Named arguments aren't supported: pass ${named.join(', ')} by position` : null;
 }
 
 /** The parser's tree as plain JSON: absent optional fields drop out. */
