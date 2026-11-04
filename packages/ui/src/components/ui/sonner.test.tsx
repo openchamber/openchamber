@@ -49,7 +49,12 @@ describe('Toaster', () => {
     await act(async () => {
       toast('Saved');
     });
-    await settle();
+    // The observer pins the toast on its own schedule, which a loaded machine
+    // pushes past any fixed wait.
+    for (let tries = 0; tries < 100; tries += 1) {
+      await settle();
+      if (document.querySelector<HTMLElement>('[data-sonner-toast]')?.style.getPropertyPriority('box-shadow')) break;
+    }
 
     const toastElement = document.querySelector<HTMLElement>('[data-sonner-toast]');
     expect(toastElement).not.toBeNull();

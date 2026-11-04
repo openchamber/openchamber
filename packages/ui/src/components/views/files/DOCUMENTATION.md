@@ -507,6 +507,15 @@ An agent can ask for a file to be shown (`file.open` on the managed
 opens the files drawer. VS Code has no shared file viewer and no managed
 tool, so the event never reaches it.
 
+On a phone the drawer covers the chat, so `MobileApp` opens it only for a request
+from the session on screen, a subagent or `/btw` side chat under it, or no session
+at all. Any other session gets a toast with "Open session", and the tap opens that
+session and the file; a tablet with the side panel does the same. The path is not
+staged before the tap, because `pendingFileFocusPath` is global and would send the
+current session's drawer to the other session's file. A session in a folder still
+waiting for the user's trust switches later or never, so that tap opens only the
+session.
+
 ## Editor aids
 
 The text editor's helpers live in `lib/codemirror/` and need no language

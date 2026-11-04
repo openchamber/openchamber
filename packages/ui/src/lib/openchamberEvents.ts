@@ -72,7 +72,8 @@ const UNKNOWN_BROWSER_CONTROL_CONTEXT: BrowserControlRequestContext = { director
 
 /**
  * The agent asked for a file to be shown in the user's file panel. Every
- * client receives it; one showing that project opens the file.
+ * client receives it; the desktop file panel opens the file, and the mobile
+ * shell opens it only for the session on screen and announces the others.
  */
 const fileOpenRequestSchema = z.object({
   path: z.string().min(1),
