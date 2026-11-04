@@ -142,6 +142,22 @@ describe('icon discovery for an added project', () => {
     expect(persisted.projects[0].iconImage).toEqual(iconImage);
   });
 
+  test('drops an icon answered after the server was switched', async () => {
+    const first = { id: automatic.id, path: automatic.path };
+    const iconImage = { mime: 'image/svg+xml', updatedAt: 5, source: 'auto' };
+    useProjectsStore.setState({ projects: [first] });
+    globalThis.fetch = async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (!url.pathname.endsWith('/icon/discover')) return new Response(null, { status: 503 });
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://other-server.test', runtimeKey: `${root}-other` });
+      // The other server lists the same folder, so only the switch can tell them apart.
+      useProjectsStore.setState({ projects: [first] });
+      return Response.json({ project: { ...first, iconImage } });
+    };
+    await originalProjects.discoverProjectIcon(first.id);
+    expect(useProjectsStore.getState().projects[0].iconImage).toBeUndefined();
+  });
+
   test('does not start when saving the project failed', async () => {
     let asked = false;
     useProjectsStore.setState({ discoverProjectIcon: async () => { asked = true; return { ok: true }; } });
