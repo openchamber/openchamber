@@ -6,11 +6,31 @@ import {
   getRelativeFilePath,
   isAbsoluteFilePath,
   isFilePathWithinDirectory,
+  isSameRepoFile,
   normalizeFilePath,
   toAbsoluteFilePath,
 } from './path-utils';
 
 describe('path-utils', () => {
+  test('a path git lists names a file only when all of the file\'s path under the directory matches', () => {
+    // Project in a subfolder: git answers from the repository's top.
+    expect(isSameRepoFile('/repo/sub/in-sub.md', '/repo/sub', 'sub/in-sub.md')).toBe(true);
+    expect(isSameRepoFile('/repo/sub/in-sub.md', '/repo', 'sub/in-sub.md')).toBe(true);
+    // Same name, other folder.
+    expect(isSameRepoFile('/proj/vendor/README.md', '/proj', 'README.md')).toBe(false);
+    expect(isSameRepoFile('/proj/vendor/docs/a.md', '/proj/vendor', 'a.md')).toBe(false);
+    expect(isSameRepoFile('/repo/my-a.md', '/repo', 'a.md')).toBe(false);
+    // A file outside the directory, and nothing to compare.
+    expect(isSameRepoFile('/repo/top.md', '/repo/sub', 'top.md')).toBe(true);
+    expect(isSameRepoFile('/repo/top.md', '/repo/sub', 'other.md')).toBe(false);
+    expect(isSameRepoFile('/repo/a.md', '/repo', undefined)).toBe(false);
+  });
+
+  test('Windows paths compare in any case, Unix paths do not', () => {
+    expect(isSameRepoFile('C:\\Repo\\SRC\\a.ts', 'c:/repo', 'src/a.ts')).toBe(true);
+    expect(isSameRepoFile('/repo/SRC/a.ts', '/repo', 'src/a.ts')).toBe(false);
+  });
+
   test('preserves filename whitespace only when requested', () => {
     const options = { preserveWhitespace: true };
     expect(normalizeFilePath('  report.md  ')).toBe('report.md');

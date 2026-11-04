@@ -1,3 +1,5 @@
+import { isFilePathWithinDirectory } from '@/lib/path-utils';
+
 /**
  * Which discovered nested repository a surface may select on its own.
  *
@@ -36,6 +38,19 @@ export const chooseAutoNestedRepo = (
   if (!Array.isArray(repositories) || repositories.length === 0) return null;
   const visible = repositories.find((repository) => !isHiddenRepository(root, repository));
   return visible ?? null;
+};
+
+/**
+ * The repository a file belongs to, among those known: the deepest one holding
+ * it, since a nested repository's files are not its parent's.
+ */
+export const findFileRepository = (file: string, repositories: readonly string[]): string | null => {
+  let found: string | null = null;
+  for (const repository of repositories) {
+    if (!isFilePathWithinDirectory(file, repository)) continue;
+    if (found === null || repository.length > found.length) found = repository;
+  }
+  return found;
 };
 
 const withoutTrailingSeparator = (value: string): string => value.replace(/[\\/]+$/, '');

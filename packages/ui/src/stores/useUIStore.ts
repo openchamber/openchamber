@@ -947,6 +947,8 @@ interface UIStore {
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
   pendingDiffScope: PendingDiffScope | null;
+  /** A file a click asked to see in the session's last turn diff, until Changes answers whether it is there. */
+  pendingTurnDiffFile: { file: string; sessionId: string | null } | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
@@ -1301,6 +1303,7 @@ interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
+  setPendingTurnDiffFile: (request: { file: string; sessionId: string | null } | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
   navigateToDiff: (filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
@@ -1567,6 +1570,7 @@ export const useUIStore = create<UIStore>()(
         pendingDiffFile: null,
         pendingDiffStaged: false,
         pendingDiffScope: null,
+        pendingTurnDiffFile: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
@@ -2482,6 +2486,10 @@ export const useUIStore = create<UIStore>()(
             pendingDiffStaged: filePath ? staged : false,
             pendingDiffScope: filePath ? scope : null,
           });
+        },
+
+        setPendingTurnDiffFile: (request) => {
+          set({ pendingTurnDiffFile: request });
         },
 
         setPendingFileNavigation: (navigation) => {

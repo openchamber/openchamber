@@ -222,5 +222,9 @@ export const useNestedGitDirectory = (
     repositoryOptions = rootIsGitRepo === true ? [root, ...discovered] : discovered;
   }
 
-  return { rootIsGitRepo, gitDirectory, nestedRepos, nestedRepoSelection, repositoryOptions };
+  // Whether `repositoryOptions` is the answer: a failed discovery counts, since
+  // nothing more is coming, and a root that is not searched has none to wait for.
+  const repositoriesKnown = rootIsGitRepo !== null && (!searchesNested || nestedRepos !== undefined);
+
+  return { rootIsGitRepo, gitDirectory, nestedRepos, nestedRepoSelection, repositoryOptions, repositoriesKnown };
 };

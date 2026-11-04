@@ -146,7 +146,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
   const render = () => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory={directory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MobileChangesPane rootDirectory={directory}
-        repository={{ rootIsGitRepo: true, gitDirectory: directory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
+        repository={{ rootIsGitRepo: true, gitDirectory: directory, nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
         visible={visible} initialDiff={initialDiff} />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
@@ -382,7 +382,7 @@ test('bounds Revert All fan-out to two in-flight revert requests', async () => {
     await act(async () => {
       root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
         <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
           visible />
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
@@ -512,7 +512,7 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     await act(async () => {
       root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
         <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
           visible />
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
@@ -646,7 +646,7 @@ test('mobile changes last turn scope paints loading before the turn fetch settle
     await act(async () => {
       root.render(<SyncProvider sdk={SYNC_SDK} directory="/repo"><I18nProvider><RuntimeAPIContext.Provider value={apis}>
         <MobileChangesPane rootDirectory="/repo"
-          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null }}
+          repository={{ rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true }}
           visible />
       </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
     });
@@ -757,32 +757,32 @@ test('keeps the nested repository picker reachable once the working list resolve
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     }
   };
-  const render = (rootDirectory: string, repository: { rootIsGitRepo: boolean; gitDirectory: string; nestedRepos: string[] | null; nestedRepoSelection: string | null; repositoryOptions: string[] | null }) => act(async () => {
+  const render = (rootDirectory: string, repository: { rootIsGitRepo: boolean; gitDirectory: string; nestedRepos: string[] | null; nestedRepoSelection: string | null; repositoryOptions: string[] | null; repositoriesKnown: boolean }) => act(async () => {
     root.render(<SyncProvider sdk={SYNC_SDK} directory={rootDirectory}><I18nProvider><RuntimeAPIContext.Provider value={apis}>
       <MobileChangesPane rootDirectory={rootDirectory} repository={repository} visible />
     </RuntimeAPIContext.Provider></I18nProvider></SyncProvider>);
   });
   try {
-    await render('/root', { rootIsGitRepo: false, gitDirectory: '/root/one', nestedRepos: ['/root/one', '/root/two'], nestedRepoSelection: '/root/one', repositoryOptions: ['/root/one', '/root/two'] });
+    await render('/root', { rootIsGitRepo: false, gitDirectory: '/root/one', nestedRepos: ['/root/one', '/root/two'], nestedRepoSelection: '/root/one', repositoryOptions: ['/root/one', '/root/two'], repositoriesKnown: true });
     await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')));
     let picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker) throw new Error('Missing nested repository picker in the working list header');
     if (!picker.textContent?.includes('one')) throw new Error('Picker does not show the resolved repository');
 
     // A root that is a repository offers itself first, then what is nested.
-    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: ['/repo/sub'], nestedRepoSelection: null, repositoryOptions: ['/repo', '/repo/sub'] });
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: ['/repo/sub'], nestedRepoSelection: null, repositoryOptions: ['/repo', '/repo/sub'], repositoriesKnown: true });
     await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('repo')));
     picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker?.textContent?.includes('repo')) throw new Error('Picker does not show the root repository');
 
     // Picking the nested repository (a submodule) switches the surface to it.
-    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo/sub', nestedRepos: ['/repo/sub'], nestedRepoSelection: '/repo/sub', repositoryOptions: ['/repo', '/repo/sub'] });
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo/sub', nestedRepos: ['/repo/sub'], nestedRepoSelection: '/repo/sub', repositoryOptions: ['/repo', '/repo/sub'], repositoriesKnown: true });
     await settle(() => Boolean(container.querySelector('[aria-label="Select a repository..."]')?.textContent?.includes('sub')));
     picker = container.querySelector('[aria-label="Select a repository..."]');
     if (!picker?.textContent?.includes('sub')) throw new Error('Picker does not show the selected nested repository');
 
     // A root repository with nothing nested keeps the picker hidden.
-    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null });
+    await render('/repo', { rootIsGitRepo: true, gitDirectory: '/repo', nestedRepos: null, nestedRepoSelection: null, repositoryOptions: null, repositoriesKnown: true });
     await settle(() => !container.querySelector('[aria-label="Select a repository..."]'));
     if (container.querySelector('[aria-label="Select a repository..."]')) throw new Error('Picker should stay hidden without nested repositories');
   } finally {
