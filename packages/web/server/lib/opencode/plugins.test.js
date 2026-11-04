@@ -237,6 +237,58 @@ describe('opencode plugins data layer', () => {
     ]);
   });
 
+  test('lists and edits entries in an opencode.jsonc beside opencode.json', () => {
+    delete process.env.OPENCODE_CONFIG;
+    const jsonPath = path.join(globalDir, 'opencode.json');
+    const jsoncPath = path.join(globalDir, 'opencode.jsonc');
+    writeJson(jsonPath, { $schema: 'https://opencode.ai/config.json' });
+    fs.writeFileSync(jsoncPath, '{\n  // mine\n  "plugins": ["alpha@latest", "-opencode.tool.patch",],\n}\n', 'utf8');
+
+    expect(plugins.listPluginEntries(projectDir).map((entry) => [entry.spec, entry.sourcePath])).toEqual([
+      ['alpha@latest', jsoncPath],
+      ['-opencode.tool.patch', jsoncPath],
+    ]);
+
+    plugins.updatePluginEntry(plugins.encodePluginId('config', 'user:alpha@latest'), { options: { a: 1 } }, projectDir);
+    expect(fs.readFileSync(jsoncPath, 'utf8')).toContain('// mine');
+    expect(plugins.listPluginEntries(projectDir)[0]).toMatchObject({ spec: 'alpha@latest', options: { a: 1 }, sourcePath: jsoncPath });
+    expect(readJson(jsonPath)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+  });
+
+  test('lists entries from every folder config OpenCode finds above the project', () => {
+    delete process.env.OPENCODE_CONFIG;
+    const childDir = path.join(projectDir, 'child');
+    writeJson(path.join(projectDir, 'opencode.json'), { plugins: ['parent-plugin'] });
+    writeJson(path.join(childDir, 'opencode.json'), { plugins: ['root-plugin'] });
+    writeJson(path.join(childDir, '.opencode', 'opencode.json'), { plugins: ['dot-plugin'] });
+
+    expect(plugins.listPluginEntries(childDir).map((entry) => [entry.spec, entry.scope])).toEqual([
+      ['parent-plugin', 'user'],
+      ['root-plugin', 'project'],
+      ['dot-plugin', 'project'],
+    ]);
+
+    plugins.deletePluginEntry(plugins.encodePluginId('config', 'user:parent-plugin'), childDir);
+    expect(readJson(path.join(projectDir, 'opencode.json')).plugins).toBeUndefined();
+  });
+
+  test('edits the listed project entry when OPENCODE_CONFIG is another project file', () => {
+    const customPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const rootPath = path.join(projectDir, 'opencode.json');
+    process.env.OPENCODE_CONFIG = customPath;
+    writeJson(customPath, { plugins: [{ package: 'shared', options: { from: 'custom' } }] });
+    writeJson(rootPath, { plugins: [{ package: 'shared', options: { from: 'root' } }] });
+
+    expect(plugins.listPluginEntries(projectDir).map((entry) => [entry.scope, entry.sourcePath])).toEqual([
+      ['user', customPath],
+      ['project', rootPath],
+    ]);
+
+    plugins.updatePluginEntry(plugins.encodePluginId('config', 'project:shared'), { options: { from: 'edited' } }, projectDir);
+    expect(readJson(rootPath).plugins).toEqual([{ package: 'shared', options: { from: 'edited' } }]);
+    expect(readJson(customPath).plugins).toEqual([{ package: 'shared', options: { from: 'custom' } }]);
+  });
+
   test('rewrites a v1 plugin array into v2 plugins when one entry is updated', () => {
     writeJson(userConfigPath, { plugin: ['first', ['second', { a: 1 }], 'third'] });
 
