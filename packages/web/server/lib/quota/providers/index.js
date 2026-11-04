@@ -192,7 +192,8 @@ const registry = {
   zenmux: {
     providerId: zenmux.providerId,
     providerName: zenmux.providerName,
-    isConfigured: zenmux.isConfigured,
+    // ZenMux reads its own managed credential; the list's OpenCode auth is not for it.
+    isConfigured: () => zenmux.isConfigured(),
     fetchQuota: zenmux.fetchQuota
   },
   xai: {

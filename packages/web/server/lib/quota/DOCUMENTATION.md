@@ -29,6 +29,11 @@ the entries keep. The provider list reads it once and hands it to every
 `isConfigured(auth)`; each `fetchQuota` reads it again. When OpenCode cannot be
 asked, `/api/quota/providers` answers 500 instead of an empty list.
 
+The UI fetches quota only for what that list names, and treats a failed list as
+"ask every provider", never as "none". So a provider's `isConfigured` must say
+true whenever its `fetchQuota` would find a credential: a provider missing from
+the list loses its usage card with no error.
+
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
 | `antigravity` | Antigravity | `providers/antigravity/index.js` | Antigravity accounts file (`~/.config/opencode/antigravity-accounts.json` or the `$OPENCODE_CONFIG_DIR` equivalent) |

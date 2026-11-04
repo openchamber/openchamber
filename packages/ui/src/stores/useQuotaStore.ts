@@ -8,7 +8,7 @@ import { getDesktopWindowVisibility, isDesktopShell, type DesktopSettings } from
 import { isCapacitorApp } from '@/lib/platform';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
-import { fetchQuota } from '@/lib/quota/fetchQuota';
+import { fetchConfiguredQuotaProviders, fetchQuota } from '@/lib/quota/fetchQuota';
 import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
@@ -25,6 +25,7 @@ let inFlightRuntimeLoad: Promise<void> | null = null;
 let inFlightExtensionLoad: Promise<void> | null = null;
 let extensionLoadAgain = false;
 const quotaRequests = new Map<QuotaProviderId, { controller: AbortController; promise: Promise<boolean> }>();
+let configuredProvidersRequest: Promise<ReadonlySet<string> | null> | null = null;
 const quotaAutoRefreshConsumers = new Map<symbol, boolean>();
 let quotaAutoRefreshInterval: number | null = null;
 let lastVisibleRefreshAt: number | null = null;
@@ -169,6 +170,40 @@ const applyExtensionProviders = (next: ExtensionQuotaProvider[]): void => {
   if (arrived.length > 0 && (loadedRuntimeKey !== null || results.length > 0)) void fetchQuotas(arrived);
 };
 
+/** Overlapping loads share one list read, as they share one request per provider. */
+const readConfiguredProviders = () => {
+  if (configuredProvidersRequest) return configuredProvidersRequest;
+  const request: Promise<ReadonlySet<string> | null> = fetchConfiguredQuotaProviders().finally(() => {
+    if (configuredProvidersRequest === request) configuredProvidersRequest = null;
+  });
+  configuredProvidersRequest = request;
+  return request;
+};
+
+/**
+ * The answer the server gives for a provider without a credential, so every
+ * provider keeps a result and a removed credential clears its old sample.
+ */
+const recordNotConfigured = (set: (update: (state: QuotaStore) => Partial<QuotaStore>) => void, providerIds: QuotaProviderId[]) => {
+  const absent = new Set<QuotaProviderId>(providerIds);
+  const fetchedAt = Date.now();
+  set((state) => {
+    const refreshErrors = { ...state.refreshErrors };
+    for (const providerId of absent) delete refreshErrors[providerId];
+    return {
+      results: [
+        ...state.results.filter((entry) => !absent.has(entry.providerId)),
+        ...quotaProviderList(state.extensionProviders).filter((provider) => absent.has(provider.id)).map((provider) => ({
+          providerId: provider.id, providerName: provider.name, ok: false, configured: false, error: 'Not configured', usage: null, fetchedAt,
+        })),
+      ],
+      refreshErrors,
+      error: Object.values(refreshErrors)[0] ?? null,
+      lastUpdated: fetchedAt,
+    };
+  });
+};
+
 export const useQuotaStore = create<QuotaStore>()(
   devtools(
     (set, get) => ({
@@ -224,11 +259,18 @@ export const useQuotaStore = create<QuotaStore>()(
       fetchQuotas: async (providerIds, { invalidate = false } = {}) => {
         const generation = quotaGeneration;
         try {
-          const answered = await Promise.all(
-            providerIds.map((providerId) => get().fetchProviderQuota(providerId, invalidate))
-          );
+          // One read instead of a request per provider nobody has a credential
+          // for. An account switch names providers it knows are configured.
+          if (!invalidate) set({ isLoading: true });
+          const configured = invalidate ? null : await readConfiguredProviders();
           if (generation !== quotaGeneration) return false;
-          return answered.some(Boolean);
+          const absent = configured ? providerIds.filter((providerId) => !configured.has(providerId)) : [];
+          const targets = providerIds.filter((providerId) => !absent.includes(providerId));
+          if (absent.length > 0) recordNotConfigured(set, absent);
+          if (targets.length === 0) set({ isLoading: quotaRequests.size > 0 });
+          const answered = await Promise.all(targets.map((providerId) => get().fetchProviderQuota(providerId, invalidate)));
+          if (generation !== quotaGeneration) return false;
+          return absent.length > 0 || answered.some(Boolean);
         } catch (error) {
           if (generation !== quotaGeneration) return false;
           const message = error instanceof Error ? error.message : 'Failed to fetch quotas';
@@ -358,6 +400,7 @@ export const useQuotaStore = create<QuotaStore>()(
 
       resetForRuntimeSwitch: () => {
         quotaGeneration += 1;
+        configuredProvidersRequest = null;
         for (const request of quotaRequests.values()) request.controller.abort();
         quotaRequests.clear();
         inFlightRuntimeLoad = null;
@@ -387,6 +430,7 @@ export const useQuotaStore = create<QuotaStore>()(
       refreshAfterCredentialChange: async () => {
         // Samples describe the account just left, even when no readout is open.
         quotaGeneration += 1;
+        configuredProvidersRequest = null;
         for (const request of quotaRequests.values()) request.controller.abort();
         quotaRequests.clear();
         inFlightRuntimeLoad = null;
