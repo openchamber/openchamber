@@ -148,9 +148,11 @@ jobs:
               GATE_LABEL,
               GATE_MARKER,
               MISSING_SCREENSHOTS,
+              TEAM_LABEL,
               evaluateContributionGate,
               evaluateVisualEvidence,
               hasMarkerComment,
+              isMaintainer,
               listPullFiles,
             } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-checks.cjs`);
 
@@ -186,7 +188,7 @@ jobs:
                 }
               }
             };
-            for (const label of [...sizeLabels, GATE_LABEL, COMMITTED_MEDIA.label, MISSING_SCREENSHOTS.label]) {
+            for (const label of [...sizeLabels, GATE_LABEL, COMMITTED_MEDIA.label, MISSING_SCREENSHOTS.label, TEAM_LABEL]) {
               await ensureLabel(label);
             }
 
@@ -244,6 +246,18 @@ jobs:
             }
             if (!currentLabelNames.includes(sizeLabel)) {
               await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [sizeLabel] });
+            }
+
+            // A failed read must not stop the checks below; the stale workflow
+            // labels what this misses before it closes anything.
+            if (!currentLabelNames.includes(TEAM_LABEL.name)) {
+              try {
+                if (await isMaintainer({ github, owner, repo, username: pr.user.login })) {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [TEAM_LABEL.name] });
+                }
+              } catch (error) {
+                core.warning(`Could not set the ${TEAM_LABEL.name} label on PR #${number}: ${error.message}`);
+              }
             }
 
             let comments;
