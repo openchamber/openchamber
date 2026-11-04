@@ -12,6 +12,10 @@ import { z } from 'zod';
 const id = z.string().trim().min(1).max(32_768);
 const ids = z.array(id).max(10_000);
 const name = z.string().trim().min(1).max(10_000);
+// Which folder of the scope each chat was in when the user moved it (null: in
+// none). A chat that has since moved elsewhere stays there, so a move sent late
+// or sent twice cannot undo a newer one from another client.
+const chatPlacement = z.record(z.string(), id.nullable());
 
 const folderSchema = z.object({
   id: z.string(),
@@ -29,8 +33,8 @@ const folderChangeSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('rename'), scopeKey: id, folderId: id, name }),
   z.object({ type: z.literal('delete'), scopeKey: id, folderIds: ids.min(1) }),
-  z.object({ type: z.literal('assign'), scopeKey: id, folderId: id, sessionIds: ids.min(1) }),
-  z.object({ type: z.literal('unassign'), scopeKey: id, sessionIds: ids.min(1) }),
+  z.object({ type: z.literal('assign'), scopeKey: id, folderId: id, sessionIds: ids.min(1), from: chatPlacement.optional() }),
+  z.object({ type: z.literal('unassign'), scopeKey: id, sessionIds: ids.min(1), from: chatPlacement.optional() }),
   z.object({ type: z.literal('forget-sessions'), sessionIds: ids.min(1) }),
   z.object({ type: z.literal('forget-scopes'), scopeKeys: ids.min(1) }),
   // Sent once by a client that still has folders from the time each device
@@ -62,6 +66,20 @@ const withoutSessions = (folders, sessionIds) => {
   });
   return changed ? next : folders;
 };
+
+const folderHolding = (folders, sessionId) => (
+  folders.find((folder) => folder.sessionIds.includes(sessionId))?.id ?? null
+);
+
+const chatsStillInPlace = (folders, sessionIds, from) => (
+  sessionIds.filter((sessionId) => {
+    const expected = from?.[sessionId];
+    if (expected === undefined) return true;
+    const holding = folderHolding(folders, sessionId);
+    // A chat left in no folder because its folder was deleted was not moved by anyone.
+    return holding === expected || (holding === null && !folders.some((folder) => folder.id === expected));
+  })
+);
 
 const descendantIds = (folders, rootIds) => {
   const result = new Set(rootIds);
@@ -181,7 +199,7 @@ export const applyFolderChanges = (snapshot, changes, now) => {
         const folders = foldersMap[change.scopeKey] ?? [];
         const target = folders.find((folder) => folder.id === change.folderId);
         if (!target) break;
-        const moving = new Set(change.sessionIds);
+        const moving = new Set(chatsStillInPlace(folders, change.sessionIds, change.from));
         const settled = [...moving].every((sessionId) => target.sessionIds.includes(sessionId))
           && folders.every((folder) => folder === target || !folder.sessionIds.some((sessionId) => moving.has(sessionId)));
         if (settled) break;
@@ -190,9 +208,11 @@ export const applyFolderChanges = (snapshot, changes, now) => {
         )));
         break;
       }
-      case 'unassign':
-        setScope(change.scopeKey, withoutSessions(foldersMap[change.scopeKey] ?? [], new Set(change.sessionIds)));
+      case 'unassign': {
+        const folders = foldersMap[change.scopeKey] ?? [];
+        setScope(change.scopeKey, withoutSessions(folders, new Set(chatsStillInPlace(folders, change.sessionIds, change.from))));
         break;
+      }
       case 'forget-sessions': {
         const forgotten = new Set(change.sessionIds);
         for (const [scopeKey, folders] of Object.entries(foldersMap)) setScope(scopeKey, withoutSessions(folders, forgotten));
