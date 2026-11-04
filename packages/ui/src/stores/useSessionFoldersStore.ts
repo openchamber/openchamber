@@ -8,6 +8,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import {
   applyFolderChange,
   applyFolderChanges,
+  chatPlacement,
   collectFolderSubtree,
   folderChangeSchema,
   folderSnapshotSchema,
@@ -73,6 +74,9 @@ const SERVER_WRITE_DEBOUNCE_MS = 150;
 // long time offline) goes in several.
 const MAX_CHANGES_PER_REQUEST = 500;
 const MAX_RETRY_DELAY_MS = 30_000;
+// A request that never settles, such as one on a connection that went half-open
+// across sleep, must not hold the folder sync of this window until a reload.
+const FOLDER_REQUEST_TIMEOUT_MS = 15_000;
 
 const safeStorage = getDeferredSafeStorage();
 const immediateSafeStorage = getSafeStorage();
@@ -165,6 +169,12 @@ const writePendingChanges = (runtimeKey: string, changes: readonly FolderChange[
   } catch {
     // The change stays queued in memory for this session.
   }
+};
+
+const withoutPlacement = (change: FolderChange): FolderChange => {
+  if (change.type !== 'assign' && change.type !== 'unassign') return change;
+  const { from: _from, ...unconditional } = change;
+  return unconditional;
 };
 
 const isFolderSharingDone = (runtimeKey: string): boolean => (
@@ -355,6 +365,15 @@ type ServerResult =
   | { kind: 'rejected' }
   | { kind: 'failed' };
 
+const folderRequest = (init?: RequestInit): Promise<Response> => runtimeFetch(SESSION_FOLDERS_API_PATH, {
+  ...init,
+  signal: AbortSignal.timeout(FOLDER_REQUEST_TIMEOUT_MS),
+});
+
+// A write on its way holds the browser's cache entry for this URL; a read that
+// uses the cache would wait for that write, however long it hangs.
+const readFolders = (): Promise<Response> => folderRequest({ cache: 'no-store' });
+
 const readServerResult = async (request: Promise<Response>): Promise<ServerResult> => {
   const response = await request.catch(() => null);
   if (!response) return { kind: 'failed' };
@@ -366,7 +385,7 @@ const readServerResult = async (request: Promise<Response>): Promise<ServerResul
   return parsed.success ? { kind: 'snapshot', snapshot: parsed.data } : { kind: 'failed' };
 };
 
-const sendChanges = (changes: readonly unknown[]): Promise<ServerResult> => readServerResult(runtimeFetch(SESSION_FOLDERS_API_PATH, {
+const sendChanges = (changes: readonly unknown[]): Promise<ServerResult> => readServerResult(folderRequest({
   method: 'PATCH',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ changes }),
@@ -374,7 +393,7 @@ const sendChanges = (changes: readonly unknown[]): Promise<ServerResult> => read
 
 /** The whole-copy write a server from before shared folders understands; it merges the copy in. */
 const sendLegacySnapshot = async (foldersMap: SessionFoldersMap, deletedFolderIds: FolderTombstones): Promise<boolean> => {
-  const response = await runtimeFetch(SESSION_FOLDERS_API_PATH, {
+  const response = await folderRequest({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -393,9 +412,11 @@ let inflightChanges: readonly FolderChange[] = [];
 let serverRevision = 0;
 let serverHydrated = false;
 let hydrationInFlight = false;
+let importRejected = false;
 let legacyServer = false;
 let refreshInFlight = false;
 let refreshAgain = false;
+let refreshFailed = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryAttempt = 0;
@@ -435,8 +456,12 @@ const scheduleRetry = (): void => {
   retryAttempt += 1;
   retryTimer = setTimeout(() => {
     retryTimer = null;
-    if (serverHydrated) void flushChanges();
-    else void hydrateFromServer();
+    if (!serverHydrated) {
+      void hydrateFromServer();
+      return;
+    }
+    void flushChanges();
+    if (refreshFailed) void refreshFromServer();
   }, delay);
 };
 
@@ -510,7 +535,7 @@ const flushChanges = async (): Promise<void> => {
   }
 };
 
-/** Read the server's folders again and show them. A failed read keeps what is shown. */
+/** Read the server's folders again and show them. A failed read keeps what is shown and tries again. */
 const refreshFromServer = async (): Promise<void> => {
   if (!serverHydrated) {
     await hydrateFromServer();
@@ -526,10 +551,16 @@ const refreshFromServer = async (): Promise<void> => {
   try {
     do {
       refreshAgain = false;
-      const result = await readServerResult(runtimeFetch(SESSION_FOLDERS_API_PATH));
+      const result = await readServerResult(readFolders());
       if (!isCurrent(runtimeKey, generation)) return;
-      if (result.kind === 'snapshot') adoptServerSnapshot(result.snapshot);
+      refreshFailed = result.kind === 'failed';
+      if (result.kind === 'snapshot') {
+        adoptServerSnapshot(result.snapshot);
+        // A write that is still failing keeps its own backoff.
+        if (pendingChanges.length === 0) retryAttempt = 0;
+      }
     } while (refreshAgain);
+    if (refreshFailed) scheduleRetry();
   } finally {
     if (isCurrent(runtimeKey, generation)) refreshInFlight = false;
   }
@@ -542,7 +573,7 @@ const refreshFromServer = async (): Promise<void> => {
  * the local copy stays as it is and changes wait.
  */
 const hydrateFromServer = async (): Promise<void> => {
-  if (!isServerSyncAvailable() || serverHydrated || hydrationInFlight) return;
+  if (!isServerSyncAvailable() || serverHydrated || hydrationInFlight || importRejected) return;
   const runtimeKey = activeFolderRuntimeKey;
   const generation = folderRuntimeGeneration;
   hydrationInFlight = true;
@@ -562,9 +593,10 @@ const hydrateFromServer = async (): Promise<void> => {
         change.type === 'create' || change.type === 'rename' || change.type === 'assign' || change.type === 'delete'
       )));
       const hasLocal = Object.values(localFolders).some((folders) => folders.length > 0) || Object.keys(localDeletions).length > 0;
-      const dropCoveredChanges = (): void => {
-        if (coveredByImport.size === 0) return;
-        pendingChanges = pendingChanges.filter((change) => !coveredByImport.has(change));
+      const settleQueueAfterImport = (): void => {
+        if (pendingChanges.length === 0) return;
+        // The folder ids a queued change started from may have joined server folders.
+        pendingChanges = pendingChanges.filter((change) => !coveredByImport.has(change)).map(withoutPlacement);
         writePendingChanges(runtimeKey, pendingChanges);
       };
       if (hasLocal) {
@@ -581,14 +613,15 @@ const hydrateFromServer = async (): Promise<void> => {
         } else if (result.kind !== 'snapshot') {
           // A rejected import would never pass; the folders stay on this device.
           if (result.kind === 'failed') scheduleRetry();
+          else importRejected = true;
           return;
         }
       }
-      dropCoveredChanges();
+      settleQueueAfterImport();
       markFolderSharingDone(runtimeKey);
     }
 
-    const result = await readServerResult(runtimeFetch(SESSION_FOLDERS_API_PATH));
+    const result = await readServerResult(readFolders());
     if (!isCurrent(runtimeKey, generation)) return;
     if (result.kind !== 'snapshot') {
       scheduleRetry();
@@ -612,7 +645,7 @@ export const handleSessionFoldersChanged = (updatedAt: number): void => {
   void refreshFromServer();
 };
 
-/** The event stream (re)connected: anything may have changed meanwhile, and waiting changes can go now. */
+/** The event stream (re)connected or the window came back: anything may have changed meanwhile, and waiting changes can go now. */
 export const handleSessionFoldersStreamReady = (): void => {
   if (!isServerSyncAvailable()) return;
   if (!serverHydrated) {
@@ -655,9 +688,11 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
           serverRevision = 0;
           serverHydrated = false;
           hydrationInFlight = false;
+          importRejected = false;
           legacyServer = false;
           refreshInFlight = false;
           refreshAgain = false;
+          refreshFailed = false;
           retryAttempt = 0;
           set({
             foldersMap: readPersistedFolders(runtimeKey),
@@ -700,24 +735,24 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
 
         addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string): void => {
           if (!scopeKey || !folderId || !sessionId) return;
-          commit({ type: 'assign', scopeKey, folderId, sessionIds: [sessionId] });
+          commit({ type: 'assign', scopeKey, folderId, sessionIds: [sessionId], from: chatPlacement(get().foldersMap[scopeKey], [sessionId]) });
         },
 
         addSessionsToFolder: (scopeKey: string, folderId: string, sessionIds: string[]): void => {
           const ids = Array.from(new Set(sessionIds.filter((id) => typeof id === 'string' && id.length > 0)));
           if (!scopeKey || !folderId || ids.length === 0) return;
-          commit({ type: 'assign', scopeKey, folderId, sessionIds: ids });
+          commit({ type: 'assign', scopeKey, folderId, sessionIds: ids, from: chatPlacement(get().foldersMap[scopeKey], ids) });
         },
 
         removeSessionsFromFolders: (scopeKey: string, sessionIds: string[]): void => {
           const ids = Array.from(new Set(sessionIds.filter((id) => typeof id === 'string' && id.length > 0)));
           if (!scopeKey || ids.length === 0) return;
-          commit({ type: 'unassign', scopeKey, sessionIds: ids });
+          commit({ type: 'unassign', scopeKey, sessionIds: ids, from: chatPlacement(get().foldersMap[scopeKey], ids) });
         },
 
         removeSessionFromFolder: (scopeKey: string, sessionId: string): void => {
           if (!scopeKey || !sessionId) return;
-          commit({ type: 'unassign', scopeKey, sessionIds: [sessionId] });
+          commit({ type: 'unassign', scopeKey, sessionIds: [sessionId], from: chatPlacement(get().foldersMap[scopeKey], [sessionId]) });
         },
 
         removeSessionEverywhere: (runtimeKey: string, sessionId: string): void => {
