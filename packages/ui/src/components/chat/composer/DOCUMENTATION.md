@@ -79,10 +79,30 @@ React effect feeds the border-excluding `scrollHeight` back into a border-box
 height; deleting a long answer then causes repeated shrinking updates and a
 maximum-update-depth crash. Text changes trigger measurement; the measured
 height and overflow never trigger another React update.
-The field wrapper keeps its current minimum height during that measurement,
-then restores its original minimum. This prevents a scrolling form body from
-clamping its offset during the temporary collapse, while allowing genuine
-shrinking after deletion.
+The answer row (the textarea's parent, which also carries the dictation mic)
+keeps its current minimum height during that measurement, then restores its
+original minimum. Holding that row holds the field above it, so a scrolling
+form body cannot clamp its offset during the temporary collapse, while
+allowing genuine shrinking after deletion.
+
+### Why the answer dictation mic shares the box's row
+
+`FormFieldControl` mounts `InlineDictationButton` at the trailing edge of the
+same flex row as the textarea, rather than overlaying the box or joining the
+label row. The component renders null when dictation is off, capture is
+unsupported, or the runtime is VS Code, and a row with one child has no gap,
+so those hosts get the box exactly as before. The transcript reaches the
+answer through the field's own `onValueChange`, so one path writes the
+answer, and the row's height stays the box's height (the mic is
+shorter than the two-line minimum), so the layout pass above keeps measuring
+the right wrapper. The mic has no keyboard shortcut of its own: the
+`toggle_dictation` shortcut dispatches with no editable-target guard, and
+because `FormDock` and the BTW sheet's `FormCard` mount inside the composer
+form, the focused answer box resolves through
+`document.activeElement.closest('form')` to that same form, so the shortcut
+still starts the composer's recording rather than dictation for the box;
+whether it should instead follow the focused field is an open question for
+the maintainer.
 
 Recovered questions appear on both surfaces with a warning that Submit starts
 a new paid turn in the asking session. Dismissal is local; rejected sends keep
