@@ -1379,6 +1379,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         checkLinkedMessage,
         onLinkedMessageMissing: handleLinkedMessageMissing,
         sessionIsWorking,
+        pinned,
         revealGate,
         onActiveTurnChange: handleActiveTurnChange,
     });
