@@ -20,9 +20,10 @@ export const replaceWithCaret = (
     from: number,
     to: number,
     insert: string,
-    caret?: { anchor: number; head: number },
+    caret?: { anchor: number; head: number } | 'preserve',
 ): TransactionSpec => {
     const changes = state.changes({ from, to, insert });
+    if (caret === 'preserve') return { changes, selection: state.selection.map(changes) };
     const clamp = (position: number): number => Math.min(Math.max(position, 0), changes.newLength);
     // What CodeMirror inserted, measured on the document rather than on the
     // string: the new length minus everything the change left untouched.

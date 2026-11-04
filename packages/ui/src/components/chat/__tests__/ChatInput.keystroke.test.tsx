@@ -8,6 +8,7 @@ import type { RuntimeAPIs } from '@/lib/api/types';
 import type { Session } from '@/lib/opencode/model';
 import type { EditorView as CodeMirrorView } from '@codemirror/view';
 import type { Root } from 'react-dom/client';
+import type { SessionReference } from '../composer/sessionReferences';
 
 /**
  * Counts which components render per keystroke without instrumenting them.
@@ -80,6 +81,7 @@ Object.assign(globalThis, {
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
   window: browser,
+  Window,
   document: browser.document,
   navigator: browser.navigator,
   localStorage: browser.localStorage,
@@ -415,6 +417,7 @@ const mountComposer = async (draftText: string): Promise<MountedComposer> => {
   const view = content ? EditorView.findFromDOM(content) : null;
   if (!view) throw new Error('The composer editor did not mount');
   await act(async () => {
+    view.focus();
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: draftText } });
   });
   return { container, root, view };
@@ -525,5 +528,185 @@ test('a picked prompt with CRLF line breaks leaves the caret at the end of the e
     expect(composer.view.hasFocus).toBe(true);
   } finally {
     await unmountComposer(composer);
+  }
+});
+
+const sessionReferences = await import('../composer/sessionReferences');
+const { useUIStore } = await import('@/stores/useUIStore');
+const { undo, redo } = await import('@codemirror/commands');
+
+const pasteText = async (composer: MountedComposer, text: string, selectAll = false) => {
+  await act(async () => {
+    if (selectAll) composer.view.dispatch({ selection: { anchor: 0, head: composer.view.state.doc.length } });
+    const clipboardData = new browser.DataTransfer();
+    clipboardData.setData('text/plain', text);
+    // happy-dom does not alias `text` to `text/plain` as browser clipboards do.
+    clipboardData.setData('text', text);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: clipboardData });
+    composer.view.contentDOM.dispatchEvent(event);
+  });
+};
+
+test('a bare session ID paste resolves to the existing title chip and reference format', async () => {
+  const reference = sessionReferences.sessionReference({ id: 'ses_pasted', title: 'Referenced session' });
+  const read = spyOn(sessionReferences, 'loadSessionLinkReference').mockResolvedValue(reference);
+  const composer = await mountComposer('replace me');
+  try {
+    await pasteText(composer, '\r\n ses_pasted \r\n', true);
+    expect(composer.view.state.doc.toString()).toBe('\n openchamber://session/ses_pasted \n');
+    expect(composer.view.state.selection.main.head).toBe(composer.view.state.doc.length);
+    expect(composer.view.contentDOM.textContent).toContain('Referenced session');
+  } finally {
+    await unmountComposer(composer);
+    read.mockRestore();
+  }
+});
+
+test('hand-typed IDs and mixed or invalid clipboard text never request session resolution', async () => {
+  const composer = await mountComposer('ses_pasted');
+  const read = spyOn(sessionReferences, 'loadSessionLinkReference');
+  try {
+    for (const text of ['ses_', '/ses_pasted', 'see ses_pasted in this log', '```\nses_pasted\n```', 'ses_bad!']) {
+      await act(async () => composer.view.dispatch({ changes: { from: 0, to: composer.view.state.doc.length, insert: '' } }));
+      await pasteText(composer, text);
+      expect(composer.view.state.doc.toString()).toBe(text);
+    }
+    expect(read).not.toHaveBeenCalled();
+  } finally {
+    await unmountComposer(composer);
+    read.mockRestore();
+  }
+});
+
+const deferredSessionReference = () => {
+  let resolve!: (reference: SessionReference | null) => void;
+  const promise = new Promise<SessionReference | null>((done) => { resolve = done; });
+  return { promise, resolve };
+};
+
+test('a pending ID paste maps edits before it and preserves later typing and selection', async () => {
+  const pending = deferredSessionReference();
+  const read = spyOn(sessionReferences, 'loadSessionLinkReference').mockImplementation(() => pending.promise);
+  const composer = await mountComposer('before ');
+  try {
+    let selectedAfterConversion = '';
+    let backwardsAfterConversion = false;
+    const update = composer.view.update.bind(composer.view);
+    composer.view.update = (transactions) => {
+      for (const transaction of transactions) {
+        if (transaction.docChanged && transaction.newDoc.toString().includes('openchamber://')) {
+          const { from, to } = transaction.newSelection.main;
+          selectedAfterConversion = transaction.newDoc.sliceString(from, to);
+          backwardsAfterConversion = transaction.newSelection.main.anchor > transaction.newSelection.main.head;
+        }
+      }
+      update(transactions);
+    };
+    await act(async () => composer.view.dispatch({ selection: { anchor: composer.view.state.doc.length } }));
+    await pasteText(composer, 'ses_pasted');
+    await act(async () => {
+      composer.view.dispatch({ changes: { from: 0, insert: 'new ' } });
+      const end = composer.view.state.doc.length;
+      composer.view.dispatch({ changes: { from: end, insert: ' after' }, selection: { anchor: end + 6, head: end + 1 } });
+      pending.resolve(sessionReferences.sessionReference({ id: 'ses_pasted', title: 'Referenced session' }));
+      await pending.promise;
+    });
+    expect(composer.view.state.doc.toString()).toBe('new before openchamber://session/ses_pasted after');
+    expect(selectedAfterConversion).toBe('after');
+    expect(backwardsAfterConversion).toBe(true);
+  } finally {
+    await unmountComposer(composer);
+    read.mockRestore();
+  }
+});
+
+test('undoing a conversion preserves typing on either side of the paste', async () => {
+  const pending = deferredSessionReference();
+  const read = spyOn(sessionReferences, 'loadSessionLinkReference').mockImplementation(() => pending.promise);
+  const composer = await mountComposer('');
+  const clock = spyOn(Date, 'now').mockImplementation(() => 1_000_000);
+  try {
+    await act(async () => composer.view.dispatch({ changes: { from: 0, insert: 'before ' }, selection: { anchor: 7 }, userEvent: 'input.type' }));
+    await pasteText(composer, 'ses_pasted');
+    await act(async () => {
+      const end = composer.view.state.doc.length;
+      composer.view.dispatch({ changes: { from: end, insert: ' after' }, selection: { anchor: end + 6 }, userEvent: 'input.type' });
+      pending.resolve(sessionReferences.sessionReference({ id: 'ses_pasted', title: 'Referenced session' }));
+      await pending.promise;
+    });
+    await act(async () => { undo(composer.view); });
+    expect(composer.view.state.doc.toString()).toBe('before ses_pasted after');
+    await act(async () => { undo(composer.view); });
+    expect(composer.view.state.doc.toString()).toBe('before ses_pasted');
+    await act(async () => { undo(composer.view); });
+    expect(composer.view.state.doc.toString()).toBe('before ');
+    await act(async () => { redo(composer.view); redo(composer.view); redo(composer.view); });
+    expect(composer.view.state.doc.toString()).toBe('before openchamber://session/ses_pasted after');
+  } finally {
+    clock.mockRestore();
+    await unmountComposer(composer);
+    read.mockRestore();
+  }
+});
+
+for (const action of ['edit', 'delete', 'session', 'draft', 'mode', 'runtime', 'editor'] as const) {
+  test(`a late ID lookup cannot change the draft after ${action}`, async () => {
+    const pending = deferredSessionReference();
+    const read = spyOn(sessionReferences, 'loadSessionLinkReference').mockImplementation(() => pending.promise);
+    const viewport = { width: browser.innerWidth, height: browser.innerHeight };
+    if (action === 'editor') browser.happyDOM.setWindowSize({ width: 390, height: 844 });
+    const composer = await mountComposer('');
+    try {
+      await pasteText(composer, 'ses_pasted');
+      await act(async () => {
+        if (action === 'edit') composer.view.dispatch({ changes: { from: 4, to: 5, insert: 'x' } });
+        else if (action === 'delete') composer.view.dispatch({ changes: { from: 0, to: composer.view.state.doc.length } });
+        else if (action === 'session') useSessionUIStore.setState({ currentSessionId: 'ses_other' });
+        else if (action === 'draft') useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: {
+          ...useSessionUIStore.getState().newSessionDraft, open: true,
+          draftId: useSessionUIStore.getState().newSessionDraft.draftId + 1, target: 'project', directoryOverride: '/workspace',
+        } });
+        else if (action === 'mode') composer.view.dispatch({ changes: { from: 0, insert: '!' } });
+        else if (action === 'editor') useUIStore.setState({ isMobile: true });
+        else {
+          const { switchRuntimeEndpoint, getRuntimeApiBaseUrl } = await import('@/lib/runtime-switch');
+          const runtimeKey = getRuntimeKey();
+          const apiBaseUrl = getRuntimeApiBaseUrl();
+          switchRuntimeEndpoint({ apiBaseUrl: 'http://other.test', runtimeKey: 'other' });
+          switchRuntimeEndpoint({ apiBaseUrl, runtimeKey });
+        }
+      });
+      if (action === 'editor') expect(composer.container.querySelector('.cm-content') === null).toBe(true);
+      const value = composer.view.state.doc.toString();
+      await act(async () => {
+        pending.resolve(sessionReferences.sessionReference({ id: 'ses_pasted', title: 'Late reference' }));
+        await pending.promise;
+      });
+      expect(composer.view.state.doc.toString()).toBe(value);
+      expect(composer.view.contentDOM.textContent).not.toContain('Late reference');
+    } finally {
+      if (action === 'editor') await act(async () => {
+        useUIStore.setState({ isMobile: false });
+        browser.happyDOM.setWindowSize(viewport);
+      });
+      await unmountComposer(composer);
+      read.mockRestore();
+    }
+  });
+}
+
+test('a missing session and a failed reference read retain the original ID paste', async () => {
+  const read = spyOn(sessionReferences, 'loadSessionLinkReference')
+    .mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('offline'));
+  const composer = await mountComposer('');
+  try {
+    await pasteText(composer, 'ses_missing');
+    expect(composer.view.state.doc.toString()).toBe('ses_missing');
+    await pasteText(composer, 'ses_offline', true);
+    expect(composer.view.state.doc.toString()).toBe('ses_offline');
+  } finally {
+    await unmountComposer(composer);
+    read.mockRestore();
   }
 });

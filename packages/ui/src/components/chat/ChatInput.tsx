@@ -38,7 +38,7 @@ import type { AttachIssueRequest } from '@openchamber/sdk';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { loadMagicPrompts } from '@/lib/magicPrompts';
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
     createChatDraftIdentity,
@@ -241,6 +241,7 @@ import type { PromptHistoryCandidate } from './composer/state/promptHistorySearc
 import { registerPromptHistorySearchRoute } from './composer/state/promptHistorySearchRoute';
 import { useComposerDraft } from './composer/state/useComposerDraft';
 import { MentionCompletionState } from './composer/state/mentionCompletion';
+import { SessionIdPaste } from './composer/sessionIdPaste';
 import { useSessionDraftPublishing } from './composer/state/useSessionDraftPublishing';
 import { useDictationOrigin } from './composer/state/useDictationOrigin';
 import { useDraftTarget } from './composer/state/useDraftTarget';
@@ -507,6 +508,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Message history navigation state (up/down arrow to recall previous messages)
     const composerRef = React.useRef<ComposerEditorHandle>(null);
     const [mentionCompletion] = React.useState(() => new MentionCompletionState());
+    const [sessionIdPaste] = React.useState(() => new SessionIdPaste());
     const completingMentionRef = React.useRef(false);
     // The mobile composer swaps between the collapsed pill and the full
     // composer, which unmounts the editor. Building a CodeMirror view is far
@@ -650,6 +652,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
     const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
     const attachedFiles = useDraftAttachedFiles(chatDraftIdentity);
+    React.useLayoutEffect(() => {
+        sessionIdPaste.clear();
+        return () => sessionIdPaste.clear();
+    }, [sessionIdPaste, chatDraftIdentity, inputMode]);
     const addAttachedFile = useInputStore((s) => s.addAttachedFile);
     const clearAttachedFiles = useInputStore((s) => s.clearAttachedFiles);
     const pickSessionAgent = useSelectionStore((s) => s.pickSessionAgent);
@@ -3187,6 +3193,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, []);
 
     const handleComposerChange = ({ value, selection, changes, fromPaste, insertedText, fromValueProp }: ComposerChange) => {
+        sessionIdPaste.applyChange(changes, fromValueProp);
         if (fromValueProp) {
             mentionCompletion.clear();
         } else {
@@ -3513,6 +3520,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const pastedText = e.clipboardData.getData('text');
         const sessionReady = Boolean(currentSessionId || newSessionDraftOpen);
 
+        const pasteEditor = composerRef.current;
+        if (!isVSCodeRuntime() && inputMode === 'normal'
+            && imageFiles.length === 0 && otherFiles.length === 0 && pasteEditor) {
+            const isCurrentRuntime = captureRuntimeInstance();
+            const pastedSession = sessionIdPaste.paste(pastedText, pasteEditor,
+                () => composerRef.current === pasteEditor && isCurrentRuntime());
+            if (pastedSession) {
+                e.preventDefault();
+                largeTextPasteGesture.invalidate();
+                const result = await pastedSession;
+                if (result.status === 'resolved') rememberSessionMentions([result.reference]);
+                else if (result.status === 'unavailable') toast.error(t('chat.sessionReference.unavailable'));
+                return;
+            }
+        }
+
         let conversion: LargeTextPasteCandidate | null = null;
         if (largeTextPasteBehavior === 'inline-double-paste') {
             const snapshot = readLargeTextPasteSnapshot();
@@ -3676,7 +3699,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
-    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins]);
+    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState, resolveSessionLinks, sessionLinkOrigins, sessionIdPaste, rememberSessionMentions]);
 
     // Android commits an image through the IME instead of the page (see nativeImagePaste).
     React.useEffect(() => {

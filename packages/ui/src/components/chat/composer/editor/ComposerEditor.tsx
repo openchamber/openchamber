@@ -22,7 +22,7 @@
  */
 
 import React from 'react';
-import { history, historyKeymap, insertNewline, standardKeymap } from '@codemirror/commands';
+import { history, historyKeymap, insertNewline, isolateHistory, standardKeymap } from '@codemirror/commands';
 import { Annotation, Compartment, EditorState, Prec, type ChangeDesc, type Extension } from '@codemirror/state';
 import {
     EditorView,
@@ -79,7 +79,9 @@ export interface ComposerEditorHandle {
     setSelection(start: number, end?: number): void;
     selectAll(): void;
     /** Replace the current selection, leaving the caret after the insertion. */
-    insertText(text: string): void;
+    insertText(text: string, userEvent?: 'input.type' | 'input.paste'): void;
+    /** Resolve a pasted range without moving the live selection or joining surrounding undo groups. */
+    replacePastedRange(from: number, to: number, text: string): void;
     /** Replace a range; selection defaults to a caret after the inserted text. */
     replaceRange(from: number, to: number, text: string, selectionStart?: number, selectionEnd?: number): void;
     /** Viewport coordinates of the caret, for positioning popups. */
@@ -648,13 +650,23 @@ export const ComposerEditor = React.memo(React.forwardRef<ComposerEditorHandle, 
                 if (!view) return;
                 view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
             },
-            insertText(text) {
+            insertText(text, userEvent = 'input.type') {
                 const view = viewRef.current;
                 if (!view || !text) return;
                 const { from, to } = view.state.selection.main;
                 view.dispatch({
                     ...replaceWithCaret(view.state, from, to, text),
-                    userEvent: 'input.type',
+                    userEvent,
+                    annotations: userEvent === 'input.paste' ? isolateHistory.of('full') : undefined,
+                });
+            },
+            replacePastedRange(from, to, text) {
+                const view = viewRef.current;
+                if (!view) return;
+                view.dispatch({
+                    ...replaceWithCaret(view.state, from, to, text, 'preserve'),
+                    userEvent: 'input.paste',
+                    annotations: isolateHistory.of('full'),
                 });
             },
             replaceRange(from, to, text, selectionStart, selectionEnd = selectionStart) {

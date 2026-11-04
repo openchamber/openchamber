@@ -364,7 +364,7 @@ chat header.
 | `largeTextPasteOffer.ts` | Large-paste choice offer id begin/resolve (supersede + double-apply guards) |
 
 `ChatInput.handlePaste` owns paste orchestration: URL-over-selection markdown
-links, clipboard files, and large plain-text pastes. Pasted and dropped files
+links, clipboard files, bare session IDs, and large plain-text pastes. Pasted and dropped files
 share `attachFilesWithCitation`: every file attaches and is cited in the draft
 as `[name]`; images get a generated unique name first, other files keep their
 own name and are cited only after they attached. A copied file's filename text
@@ -434,6 +434,28 @@ editor focus, expanding the collapsed pill if needed. Hosted mobile focuses
 inside the tap; Capacitor uses the shell's existing next-frame keyboard timing
 when the pill expands. A newer large paste replaces an unanswered choice, and a
 draft, mode or runtime change drops it, so it never lands in another draft.
+
+### Why bare session IDs convert only at paste time
+
+In normal mode, a text-only paste whose trimmed clipboard is one valid `ses_…`
+ID resolves through the existing active/archived session-link loader. Success
+replaces that occurrence with `openchamber://session/<id>`, using the same title
+chip and send, queue, copy and restore format as a session chosen under `@`.
+Missing sessions and failed reads retain the original paste and show the existing
+unavailable-reference toast. VS Code keeps session references unsupported.
+
+`sessionIdPaste.ts` tracks pending occurrences through CodeMirror changes and
+maps the live selection when replacing one. Edits inside an occurrence cancel
+its conversion; edits outside it preserve the new text. External value writes,
+draft/mode changes and unmount clear the occurrences, and a runtime-instance
+guard rejects results even after switching away and back. Editor-handle identity
+also cancels a read when the mobile editor unmounts while the composer stays.
+The inserted range comes from the normalized editor transaction. Paste and
+conversion each have an isolated undo group; undoing conversion restores the ID
+without consuming text typed while it loaded. Selection mapping preserves
+anchor and head, including backwards selections. Hand-typed IDs and mixed pasted
+text remain prose, so ordinary messages and logs never gain references from a
+global bare-ID scan.
 
 ## The prompt language
 
