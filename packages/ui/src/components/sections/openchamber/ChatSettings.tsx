@@ -42,6 +42,12 @@ const ACTIVITY_RENDER_MODE_OPTIONS: ChipOption<'collapsed' | 'summary'>[] = [
   { id: 'summary', labelKey: 'settings.openchamber.visual.option.activityRenderMode.summary.label' },
 ];
 
+const WIDE_TRANSCRIPT_WIDTH_OPTIONS: ChipOption<'full' | 'wide' | 'column'>[] = [
+  { id: 'full', labelKey: 'settings.openchamber.visual.option.wideTranscript.full.label' },
+  { id: 'wide', labelKey: 'settings.openchamber.visual.option.wideTranscript.wide.label' },
+  { id: 'column', labelKey: 'settings.openchamber.visual.option.wideTranscript.column.label' },
+];
+
 const USER_MESSAGE_RENDERING_OPTIONS: ChipOption<'markdown' | 'plain'>[] = [
   { id: 'markdown', labelKey: 'settings.openchamber.visual.option.userMessageRendering.markdown.label' },
   { id: 'plain', labelKey: 'settings.openchamber.visual.option.userMessageRendering.plain.label' },
@@ -102,6 +108,8 @@ const MessagesTab: React.FC = () => {
   const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
   const setStreamingAutoFollowEnabled = useUIStore((state) => state.setStreamingAutoFollowEnabled);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const wideChatTranscriptWidth = useUIStore((state) => state.wideChatTranscriptWidth);
+  const setWideChatTranscriptWidth = useUIStore((state) => state.setWideChatTranscriptWidth);
   const setWideChatLayoutEnabled = useUIStore((state) => state.setWideChatLayoutEnabled);
   const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
   const setPromptNavigatorEnabled = useUIStore((state) => state.setPromptNavigatorEnabled);
@@ -124,6 +132,7 @@ const MessagesTab: React.FC = () => {
   const copyMessagesAsPlainText = useUIStore((state) => state.copyMessagesAsPlainText);
   const setCopyMessagesAsPlainText = useUIStore((state) => state.setCopyMessagesAsPlainText);
   const activityOptions = useChipOptions(ACTIVITY_RENDER_MODE_OPTIONS);
+  const wideTranscriptWidthOptions = useChipOptions(WIDE_TRANSCRIPT_WIDTH_OPTIONS);
   const userMessageOptions = useChipOptions(USER_MESSAGE_RENDERING_OPTIONS);
   const mermaidOptions = useChipOptions(MERMAID_RENDERING_OPTIONS);
   const diffLayoutOptions = useChipOptions(DIFF_LAYOUT_OPTIONS);
@@ -212,6 +221,22 @@ const MessagesTab: React.FC = () => {
           ariaLabel={t('settings.openchamber.visual.field.wideChatLayoutAria')}
           settingsItem="chat.wide-layout"
         />
+        {wideChatLayoutEnabled ? (
+          <SettingsFieldRow
+            label={t('settings.openchamber.visual.field.wideChatTranscriptWidth')}
+            settingsItem="chat.wide-transcript-width"
+          >
+            <SettingsChipGroup
+              value={wideChatTranscriptWidth}
+              options={wideTranscriptWidthOptions}
+              onChange={(value) => {
+                setWideChatTranscriptWidth(value);
+                void updateDesktopSettings({ wideChatTranscriptWidth: value });
+              }}
+              aria-label={t('settings.openchamber.visual.field.wideChatTranscriptWidthAria')}
+            />
+          </SettingsFieldRow>
+        ) : null}
         <SettingsCheckboxRow
           checked={streamingAutoFollowEnabled}
           onChange={setStreamingAutoFollowEnabled}

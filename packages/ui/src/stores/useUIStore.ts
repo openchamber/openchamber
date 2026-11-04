@@ -1200,6 +1200,8 @@ interface UIStore {
   enterToSendConfigured: boolean;
   mobileReturnKeySends: boolean;
   wideChatLayoutEnabled: boolean;
+  /** Transcript width inside the wide layout. 'full' is the whole chat width; the others cap the readable column. */
+  wideChatTranscriptWidth: 'full' | 'wide' | 'column';
   codeBlockLineWrap: boolean;
   tableCellWrap: boolean;
   copyMessagesAsPlainText: boolean;
@@ -1480,6 +1482,7 @@ interface UIStore {
   setMobileReturnKeySends: (value: boolean) => void;
   setEnterToSendConfigured: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
+  setWideChatTranscriptWidth: (value: 'full' | 'wide' | 'column') => void;
   setCodeBlockLineWrap: (value: boolean) => void;
   setTableCellWrap: (value: boolean) => void;
   setCopyMessagesAsPlainText: (value: boolean) => void;
@@ -1728,6 +1731,7 @@ export const useUIStore = create<UIStore>()(
         enterToSendConfigured: false,
         mobileReturnKeySends: false,
         wideChatLayoutEnabled: false,
+        wideChatTranscriptWidth: 'full',
         codeBlockLineWrap: true,
         tableCellWrap: true,
         copyMessagesAsPlainText: true,
@@ -3443,6 +3447,10 @@ export const useUIStore = create<UIStore>()(
         setWideChatLayoutEnabled: (value) => {
           set({ wideChatLayoutEnabled: value });
         },
+
+        setWideChatTranscriptWidth: (value) => {
+          set({ wideChatTranscriptWidth: value });
+        },
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
         },
@@ -3953,6 +3961,7 @@ export const useUIStore = create<UIStore>()(
           enterToSendConfigured: state.enterToSendConfigured,
           mobileReturnKeySends: state.mobileReturnKeySends,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
+          wideChatTranscriptWidth: state.wideChatTranscriptWidth,
           codeBlockLineWrap: state.codeBlockLineWrap,
           tableCellWrap: state.tableCellWrap,
           copyMessagesAsPlainText: state.copyMessagesAsPlainText,

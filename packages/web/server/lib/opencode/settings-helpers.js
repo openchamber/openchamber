@@ -977,6 +977,12 @@ export const createSettingsHelpers = (dependencies) => {
         result.activityRenderMode = mode;
       }
     }
+    if (typeof candidate.wideChatTranscriptWidth === 'string') {
+      const width = candidate.wideChatTranscriptWidth.trim();
+      if (width === 'full' || width === 'wide' || width === 'column') {
+        result.wideChatTranscriptWidth = width;
+      }
+    }
     if (typeof candidate.mermaidRenderingMode === 'string') {
       const mode = candidate.mermaidRenderingMode.trim();
       if (mode === 'svg' || mode === 'ascii') {

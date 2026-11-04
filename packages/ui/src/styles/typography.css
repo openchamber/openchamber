@@ -113,9 +113,19 @@
 
   /* Wide layout: the transcript uses the whole chat width; the composer and
      the rows docked above it (.chat-input-column, .chat-column cards) keep a
-     readable column. */
+     readable column. The width comes from the root class set for
+     wideChatTranscriptWidth (.wide-transcript-column/.wide-transcript-wide);
+     without one the fallback keeps the full chat width. */
   .wide-chat-layout .chat-message-column {
-    width: 100%;
+    width: var(--wide-transcript-width, 100%);
+  }
+
+  .wide-transcript-column {
+    --wide-transcript-width: min(100%, 64rem);
+  }
+
+  .wide-transcript-wide {
+    --wide-transcript-width: min(100%, 80rem);
   }
 
   /* On a wide window the side padding follows the chat's own width (a
@@ -239,7 +249,7 @@
 }
 
 .wide-chat-layout .chat-message-column {
-  width: 100%;
+  width: var(--wide-transcript-width, 100%);
 }
 
 /* A message reached through a message link shows a selection tint behind its

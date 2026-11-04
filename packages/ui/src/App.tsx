@@ -239,6 +239,7 @@ function App({ apis }: AppProps) {
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
+  const wideChatTranscriptWidth = useUIStore((state) => state.wideChatTranscriptWidth);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
@@ -315,6 +316,18 @@ function App({ apis }: AppProps) {
       document.documentElement.classList.remove('wide-chat-layout');
     };
   }, [wideChatLayoutEnabled]);
+
+  // Transcript width inside the wide layout (wideChatTranscriptWidth). Only
+  // the non-default presets carry a class; 'full' (the default) rides the
+  // CSS fallback, so nothing to clean between 'full' and a removed setting.
+  React.useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('wide-transcript-column', wideChatTranscriptWidth === 'column');
+    root.classList.toggle('wide-transcript-wide', wideChatTranscriptWidth === 'wide');
+    return () => {
+      root.classList.remove('wide-transcript-column', 'wide-transcript-wide');
+    };
+  }, [wideChatTranscriptWidth]);
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);

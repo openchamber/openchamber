@@ -405,6 +405,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['layout', 'wide', 'messages'],
   },
   {
+    id: 'chat.wide-transcript-width',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.wideChatTranscriptWidth',
+    descriptionKey: 'settings.openchamber.visual.field.wideChatTranscriptWidthInfo',
+    keywords: ['wide', 'layout', 'transcript', 'width', 'full', 'column', 'readable'],
+  },
+  {
     id: 'chat.message-appearance',
     page: 'chat',
     titleKey: 'settings.layout.chat.section.reading',
