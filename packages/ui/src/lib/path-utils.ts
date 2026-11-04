@@ -167,6 +167,23 @@ export const isSameRepoFile = (
     : endsWithPath(path, listed);
 };
 
+/**
+ * The entry of a git listing that names an absolute file. Several can match,
+ * since the root's `a.md` also matches a listed `docs/a.md`. The longest entry
+ * the file's whole path ends with is the exact one; the shortest match stands
+ * in when none does, as with a file reached through a symlink.
+ */
+export const findRepoFile = (
+  filePath: string | null | undefined,
+  directory: string | null | undefined,
+  repoPaths: readonly string[],
+): string | undefined => {
+  const matches = repoPaths
+    .filter((repoPath) => isSameRepoFile(filePath, directory, repoPath))
+    .sort((a, b) => a.length - b.length);
+  return matches.filter((repoPath) => isSameRepoFile(filePath, null, repoPath)).at(-1) ?? matches[0];
+};
+
 const sameParts = (a: readonly string[], b: readonly string[]): boolean => (
   a.length === b.length && a.every((part, index) => part === b[index])
 );
