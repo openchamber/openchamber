@@ -63,6 +63,9 @@ import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { ToolbarButton, ToolbarTooltipButton } from '@/components/ui/action-toolbar';
+import { ReviewFileMark } from '@/components/review/ReviewFileMark';
+import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
+import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { StatusImage } from '@/components/ui/status-image';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
@@ -419,6 +422,7 @@ const FileTree = React.memo<FileListProps>(({
                                 <FileTypeIcon filePath={row.file.path} className="ms-0.5 size-3.5 flex-shrink-0" />
                                 <span className="oc-file-tree-row-name typography-meta">{row.name}</span>
                                 <FileTreeRowEnd className="pe-2">
+                                    <ReviewFileMark path={row.file.path} />
                                     <FileTreeStatusLetter
                                         code={descriptor.code}
                                         color={descriptor.color}
@@ -1366,6 +1370,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         </span>
                     </div>
                     <div className="relative flex shrink-0 items-center justify-self-end gap-2">
+                        <ReviewFileMark path={file.path} />
                         {formatDiffTotals(file.insertions, file.deletions)}
                         {showOpenInEditorAction && onOpenInEditor ? (
                             <ToolbarTooltipButton
@@ -1843,6 +1848,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
         [comparisonSource, prComparison.provider, selectedPrHead],
     );
+    const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, effectiveDirectory, visible && activeDiffScope === 'pr' && !isVSCodeRuntime());
     const comparison = useGitComparison(effectiveDirectory ?? null, comparisonSource, visible && !isVSCodeRuntime(), activeDiffScope === 'branch' ? branchRevision : '', prComparison.readContext, prComparison.provider);
     const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
     const commitFiles = activeDiffScope === 'commit' ? comparison.files : null;
@@ -3145,6 +3151,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     };
 
     return (
+        <ChangeRequestReviewContext.Provider value={changeRequestReview}>
         <div ref={diffRootRef} data-find-surface="" className="flex h-full flex-col overflow-hidden bg-background">
             <ContextPanelHeaderToolbar>
             <div ref={toolbarRef} className={cn('flex min-w-0 items-center gap-2', inPanelHeader ? 'flex-1 py-1 pe-1' : 'px-3 py-2 bg-background')}>
@@ -3240,6 +3247,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         </span>
                     </Button>
                 )}
+                {changeRequestReview && reviewProvider ? (
+                    <ReviewSubmitButton
+                        review={changeRequestReview}
+                        provider={reviewProvider}
+                        className="diff-toolbar__review-button"
+                        labelClassName="diff-toolbar__review-label"
+                    />
+                ) : null}
                 {changedFiles.length > 0 && showReviewAction && (
                     <Button
                         variant="default"
@@ -3351,5 +3366,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
             {renderContent()}
         </div>
+        </ChangeRequestReviewContext.Provider>
     );
 };

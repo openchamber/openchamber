@@ -31,6 +31,10 @@ import type {
   DiscussionCloseReason,
   DiscussionCommentInput,
   ReviewChangeRequestInput,
+  ReviewCommentDeleteInput,
+  ReviewCommentInput,
+  ReviewCommentUpdateInput,
+  ReviewDiscardInput,
   SetDiscussionAnswerInput,
   SetDiscussionStateInput,
   SetStateInput,
@@ -74,7 +78,7 @@ import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
-import { fetchChangeRequestListStatuses, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
+import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 
 interface ErrorResponse {
@@ -190,7 +194,7 @@ interface MutationResultDTO {
 /** A review on the wire: `{ verdict, body? }` as before, or `{ votes, body? }` for a host that reviews by votes. */
 type ReviewBody = MutationBody<SourceControlExistingMutationTarget> & { body?: string } & (
   | { verdict: NonNullable<ReviewChangeRequestInput['verdict']> }
-  | { votes: Record<string, number> }
+  | { votes: Record<string, number>; publishDrafts?: boolean }
 );
 
 type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
@@ -1408,16 +1412,47 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       let body: ReviewBody;
       if (payload.votes !== undefined) {
         const entries = Object.entries(payload.votes);
-        if (payload.verdict !== undefined || entries.length === 0 || entries.some(([label, value]) => !isNonEmptyString(label) || !isVoteValue(value))) {
+        if (payload.verdict !== undefined || (entries.length === 0 && payload.publishDrafts !== true)
+          || entries.some(([label, value]) => !isNonEmptyString(label) || !isVoteValue(value))) {
           throw new Error('Source control review input is invalid');
         }
-        body = { ...context, votes: Object.fromEntries(entries) };
+        body = { ...context, votes: Object.fromEntries(entries), publishDrafts: payload.publishDrafts };
       } else {
         body = { ...context, verdict: payload.verdict };
       }
       if (payload.body !== undefined) body.body = payload.body;
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review', body);
       return parseMutationReceipt(result, payload, identity, parseReviewMutationResult);
+    },
+    changeRequestReviewState: (context, ref) => fetchChangeRequestReviewState(fetch, context, ref),
+    changeRequestReviewComment: async (payload: ReviewCommentInput) => {
+      const identity = normalizeIdentity(payload);
+      const position = payload.line === undefined
+        ? { path: payload.path }
+        : { path: payload.path, side: payload.side, line: payload.line, startLine: payload.startLine };
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment', {
+        ...mutationBody(payload, identity, 'existing'), ...position, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewCommentUpdate: async (payload: ReviewCommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewCommentDelete: async (payload: ReviewCommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewDiscard: async (payload: ReviewDiscardInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/discard', mutationBody(payload, identity, 'existing'));
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     changeRequestSetState: async (payload: SetStateInput) => {
       const identity = normalizeIdentity(payload);

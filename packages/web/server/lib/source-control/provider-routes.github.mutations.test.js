@@ -860,10 +860,174 @@ describe('canonical GitHub mutations', () => {
 
       expect(approved.body.result).toEqual({ commented: false });
       expect(requested.body.result).toEqual({ commented: true });
-      expect(requests.filter((entry) => entry.method === 'POST')).toEqual([
+      expect(requests.filter((entry) => entry.path.endsWith('/reviews'))).toEqual([
         { method: 'POST', path: '/repos/acme/app/pulls/7/reviews', body: { commit_id: 'abc123', event: 'APPROVE' } },
         { method: 'POST', path: '/repos/acme/app/pulls/7/reviews', body: { commit_id: 'abc123', event: 'REQUEST_CHANGES', body: 'Rename it' } },
       ]);
+    });
+
+    describe('review drafts', () => {
+      const reviewed = { ...pullTarget, headSha: 'abc123' };
+      const pendingReview = (id, commit = pullRequest().head.sha) => ({ data: { repository: { pullRequest: { reviews: { nodes: id ? [{ id, viewerDidAuthor: true, commit: { oid: commit } }] : [] } } } } });
+      const pendingComment = (overrides = {}) => ({
+        data: { node: {
+          __typename: 'PullRequestReviewComment', state: 'PENDING', viewerDidAuthor: true,
+          pullRequest: { number: 7, repository: { name: 'app', owner: { login: 'acme' } } }, ...overrides,
+        } },
+      });
+      const respondWith = (answers) => (entry) => {
+        if (entry.method === 'GET') return jsonResponse({ ...pullRequest(), node_id: 'PR_node' });
+        const found = Object.entries(answers).find(([name]) => entry.body.query.includes(name));
+        return jsonResponse(found ? found[1] : { message: 'unexpected' }, found ? 200 : 500);
+      };
+      const writes = (requests) => requests.filter((entry) => /^\s*mutation/.test(entry.body?.query ?? ''));
+
+      it('starts a pending review on the head commit, then adds the comment to it', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(respondWith({
+          'reviews(states': pendingReview(null),
+          'addPullRequestReview(input': { data: { addPullRequestReview: { pullRequestReview: { id: 'PRR_new' } } } },
+          addPullRequestReviewThread: { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_1' } } } },
+        }));
+        const { app, store } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/comment').send({
+          ...context(account.accountId, { target: reviewed }), path: 'src/a.ts', side: 'new', startLine: 3, line: 5, body: 'Here',
+        }).expect(200);
+
+        expect(writes(requests).map((entry) => entry.body.variables)).toEqual([
+          { pullRequestId: 'PR_node', commitOID: 'abc123' },
+          { input: { pullRequestReviewId: 'PRR_new', path: 'src/a.ts', body: 'Here', subjectType: 'LINE', line: 5, side: 'RIGHT', startLine: 3, startSide: 'RIGHT' } },
+        ]);
+        expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-review-comment', state: 'succeeded' });
+      });
+
+      it('adds to the pending review that exists, on a whole file or an old line', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(respondWith({
+          'reviews(states': pendingReview('PRR_open'),
+          addPullRequestReviewThread: { data: { addPullRequestReviewThread: { thread: { id: 'PRRT_1' } } } },
+        }));
+        const { app } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/comment')
+          .send({ ...context(account.accountId, { target: reviewed }), path: 'src/a.ts', body: 'File' }).expect(200);
+        await request(app).post('/api/source-control/github/pr/review/comment')
+          .send({ ...context(account.accountId, { target: reviewed, idempotencyKey: 'request-two' }), path: 'src/a.ts', side: 'old', line: 2, body: 'Gone' }).expect(200);
+
+        expect(writes(requests).map((entry) => entry.body.variables.input)).toEqual([
+          { pullRequestReviewId: 'PRR_open', path: 'src/a.ts', body: 'File', subjectType: 'FILE' },
+          { pullRequestReviewId: 'PRR_open', path: 'src/a.ts', body: 'Gone', subjectType: 'LINE', line: 2, side: 'LEFT' },
+        ]);
+      });
+
+      it('refuses a position that does not name real lines and writes nothing', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(() => jsonResponse(pullRequest()));
+        const { app } = makeApp();
+        const send = (position, idempotencyKey) => request(app).post('/api/source-control/github/pr/review/comment')
+          .send({ ...context(account.accountId, { target: reviewed, idempotencyKey }), path: 'a.ts', body: 'x', ...position });
+
+        await send({ side: 'new', line: 0 }, 'one').expect(400);
+        await send({ side: 'middle', line: 1 }, 'two').expect(400);
+        await send({ side: 'new', line: 2, startLine: 2 }, 'three').expect(400);
+        await send({ startLine: 2 }, 'four').expect(400);
+
+        expect(requests).toEqual([]);
+      });
+
+      it('edits and deletes only the viewer\'s own unpublished comment', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        let node = pendingComment();
+        const requests = recordRequests((entry) => respondWith({
+          'on PullRequestReviewComment': node,
+          updatePullRequestReviewComment: { data: { updatePullRequestReviewComment: { pullRequestReviewComment: { id: 'PRRC_1' } } } },
+          deletePullRequestReviewComment: { data: { deletePullRequestReviewComment: { clientMutationId: null } } },
+        })(entry));
+        const { app } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/comment/update')
+          .send({ ...context(account.accountId, { target: pullTarget }), commentId: 'PRRC_1', body: 'New' }).expect(200);
+        await request(app).post('/api/source-control/github/pr/review/comment/delete')
+          .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-two' }), commentId: 'PRRC_1' }).expect(200);
+        expect(writes(requests)).toHaveLength(2);
+
+        node = pendingComment({ state: 'SUBMITTED' });
+        const refused = await request(app).post('/api/source-control/github/pr/review/comment/delete')
+          .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-three' }), commentId: 'PRRC_1' }).expect(409);
+        expect(refused.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+        expect(writes(requests)).toHaveLength(2);
+      });
+
+      it('sends a pending review with the verdict, so GitHub does not refuse a second one', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(respondWith({
+          'reviews(states': pendingReview('PRR_open'),
+          submitPullRequestReview: { data: { submitPullRequestReview: { pullRequestReview: { state: 'APPROVED' } } } },
+        }));
+        const { app } = makeApp();
+
+        const response = await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed }), verdict: 'approve', body: 'Good' }).expect(200);
+
+        expect(response.body.result).toEqual({ commented: true });
+        expect(writes(requests).map((entry) => entry.body.variables)).toEqual([{ id: 'PRR_open', event: 'APPROVE', body: 'Good' }]);
+        expect(requests.some((entry) => entry.path.endsWith('/reviews'))).toBe(false);
+      });
+
+      it('refuses a verdict on a draft from an older commit, and sends it as a comment', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests(respondWith({
+          'reviews(states': pendingReview('PRR_open', 'older'),
+          submitPullRequestReview: { data: { submitPullRequestReview: { pullRequestReview: { state: 'COMMENTED' } } } },
+        }));
+        const { app } = makeApp();
+
+        const refused = await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed }), verdict: 'approve' }).expect(409);
+        expect(refused.body.error).toMatch(/older commit/);
+        expect(writes(requests)).toEqual([]);
+
+        await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed, idempotencyKey: 'request-two' }), verdict: 'comment' }).expect(200);
+        expect(writes(requests).map((entry) => entry.body.variables.event)).toEqual(['COMMENT']);
+      });
+
+      it('publishes a comment-only review, and asks for text when there is nothing to publish', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        const requests = recordRequests((entry) => (entry.path.endsWith('/reviews')
+          ? jsonResponse({ id: 12, state: 'COMMENTED' })
+          : respondWith({ 'reviews(states': pendingReview(null) })(entry)));
+        const { app } = makeApp();
+
+        const empty = await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed }), verdict: 'comment' }).expect(422);
+        await request(app).post('/api/source-control/github/pr/review')
+          .send({ ...context(account.accountId, { target: reviewed, idempotencyKey: 'request-two' }), verdict: 'comment', body: 'Note' }).expect(200);
+
+        expect(empty.body.error).toBe('A review with no comments needs text');
+        expect(requests.filter((entry) => entry.path.endsWith('/reviews')).map((entry) => entry.body))
+          .toEqual([{ commit_id: 'abc123', event: 'COMMENT', body: 'Note' }]);
+      });
+
+      it('discards the pending review, and says so when there is none', async () => {
+        const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+        let pending = 'PRR_open';
+        const requests = recordRequests((entry) => respondWith({
+          'reviews(states': pendingReview(pending),
+          deletePullRequestReview: { data: { deletePullRequestReview: { clientMutationId: null } } },
+        })(entry));
+        const { app } = makeApp();
+
+        await request(app).post('/api/source-control/github/pr/review/discard')
+          .send(context(account.accountId, { target: pullTarget })).expect(200);
+        expect(writes(requests).map((entry) => entry.body.variables)).toEqual([{ id: 'PRR_open' }]);
+
+        pending = null;
+        const none = await request(app).post('/api/source-control/github/pr/review/discard')
+          .send(context(account.accountId, { target: pullTarget, idempotencyKey: 'request-two' })).expect(409);
+        expect(none.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+      });
     });
 
     it('refuses a review once the pull request moved past the commit the client read', async () => {
@@ -1044,9 +1208,11 @@ describe('canonical GitHub mutations', () => {
 
     it("passes GitHub's reason when it refuses a review", async () => {
       const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
-      recordRequests((entry) => (entry.method === 'GET'
-        ? jsonResponse(pullRequest())
-        : jsonResponse({ message: 'Unprocessable Entity', errors: ['Review Can not approve your own pull request'] }, 422)));
+      recordRequests((entry) => {
+        if (entry.method === 'GET') return jsonResponse(pullRequest());
+        if (entry.path.endsWith('/graphql')) return jsonResponse({ data: { repository: { pullRequest: { reviews: { nodes: [] } } } } });
+        return jsonResponse({ message: 'Unprocessable Entity', errors: ['Review Can not approve your own pull request'] }, 422);
+      });
       const { app, store } = makeApp();
 
       const response = await request(app).post('/api/source-control/github/pr/review')

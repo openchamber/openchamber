@@ -35,6 +35,7 @@ import {
   searchGitHubReferences,
   searchGitHubReferencesAcross,
 } from './reference-search.js';
+import { fetchReviewState } from './review-draft.js';
 
 /**
  * GitHub's bound reads behind the shared route shell: change request status,
@@ -824,6 +825,14 @@ export function createGitHubResources({
       }
       const read = kind === 'discussion' ? fetchDiscussionDetail : fetchReferenceDetail;
       return { connected: true, detail: await read({ octokit, owner: repo.owner, repo: repo.repo, number }) };
+    }),
+
+    /** The viewer's review draft and the open threads of one PR, read with the bound account. */
+    reviewState: ({ session, directory, remote, project, number }) => pickerRead(async () => {
+      const { octokit } = accountOf(session);
+      const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
+      if (!repo) throw notInProject();
+      return fetchReviewState({ octokit, owner: repo.owner, repo: repo.repo, number });
     }),
 
     /**

@@ -243,6 +243,10 @@ const MUTATION_ROUTES = [
   ['/issues/labels', 'labels'],
   ['/pr/reviewers', 'reviewers'],
   ['/pr/review', 'reviews'],
+  ['/pr/review/comment', 'reviewDrafts'],
+  ['/pr/review/comment/update', 'reviewDrafts'],
+  ['/pr/review/comment/delete', 'reviewDrafts'],
+  ['/pr/review/discard', 'reviewDrafts'],
   ['/discussions/comment', 'discussions'],
   ['/discussions/state', 'discussions'],
   ['/discussions/answer', 'discussions'],
@@ -901,6 +905,20 @@ export function registerProviderRoutes(app, {
         number: requestIssueNumber(req.query?.number),
         host: requestText(req.query?.host),
         kind,
+      }));
+    }, {
+      validate: (req) => (!requestText(req.query?.directory) || !namesProject(req)
+        || !requestIssueNumber(req.query?.number) ? 'directory, owner, repo and number are required' : null),
+    });
+
+    // A change request's review as the diff draws it: the viewer's draft and the threads on its lines.
+    boundRead('reviewDrafts', '/pr/review/state', async ({ req, res, impl, directory, instance, trustedContext }) => {
+      const read = requireResource(impl, 'reviewState');
+      const session = await sessionFor(impl, instance, trustedContext.accountId);
+      return res.json(await read({
+        session, directory, context: trustedContext, remote: trustedContext.primaryRemote,
+        project: optionalProject(req),
+        number: requestIssueNumber(req.query?.number),
       }));
     }, {
       validate: (req) => (!requestText(req.query?.directory) || !namesProject(req)

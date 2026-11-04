@@ -84,6 +84,22 @@ function mutationOperations() {
       perform: (service, normalized, resolved) => service.reviewChangeRequest(call(resolved, { verdict: normalized.verdict, body: normalized.body })),
       reconcile: unknownOutcome,
     },
+    '/pr/review/comment': {
+      perform: (service, normalized, resolved) => service.addReviewComment(call(resolved, { position: normalized.position, body: normalized.body })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/comment/update': {
+      perform: (service, normalized, resolved) => service.updateReviewComment(call(resolved, { commentId: normalized.commentId, body: normalized.body })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/comment/delete': {
+      perform: (service, normalized, resolved) => service.deleteReviewComment(call(resolved, { commentId: normalized.commentId })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/discard': {
+      perform: (service, _normalized, resolved) => service.discardReview(call(resolved)),
+      reconcile: unknownOutcome,
+    },
   };
   for (const route of ['/pr/comment', '/issues/comment']) {
     operations[route] = {
@@ -202,6 +218,7 @@ export function createGiteaFamilyProvider({
         .listChangeRequests(directory, { page, query, state, people, remote }),
       changeRequestContext: ({ session, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, { includeDiff, includeCIDetails, includeTimeline, project, remote }),
+      reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
       listIssues: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
         .listIssues(directory, { page, query, state, people, remote }),
       getIssue: ({ session, directory, number, project, remote }) => serviceFor(session).getIssue(directory, number, project, remote),

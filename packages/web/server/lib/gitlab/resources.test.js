@@ -742,11 +742,65 @@ describe('GitLab comments and reviews', () => {
     ...overrides,
   });
   const notes = (create) => ({ MergeRequestNotes: { ...setup().client.MergeRequestNotes, create } });
+  const noDrafts = { MergeRequestDraftNotes: { all: vi.fn(async () => []) } };
+
+  describe('review drafts', () => {
+    const refs = { base_sha: 'b', start_sha: 's', head_sha: 'h' };
+    const diff = { old_path: 'a.ts', new_path: 'a.ts', diff: '@@ -10,3 +10,4 @@\n ctx\n-old\n+new\n+more\n ctx2\n' };
+    const drafts = (overrides = {}) => ({
+      all: vi.fn(async () => []), publishBulk: vi.fn(async () => ({})), remove: vi.fn(async () => ({})),
+      create: vi.fn(async () => ({ id: 3 })), edit: vi.fn(async () => ({ id: 3 })), ...overrides,
+    });
+    const service = (notes) => setup({
+      MergeRequestDraftNotes: notes,
+      MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => ({ diff_refs: refs })), allDiffs: list([diff]) },
+      MergeRequestApprovals: { approve: vi.fn(async () => ({})) },
+    }).service;
+    const providerTarget = { projectId: '2', number: 5 };
+
+    it('names an unchanged line by both sides and a range by its ends', async () => {
+      const notes = drafts();
+      await service(notes).addReviewComment({ providerTarget, position: { path: 'a.ts', side: 'new', line: 10 }, body: 'Here' });
+      expect(notes.create.mock.calls[0][3].position).toMatchObject({ positionType: 'text', oldLine: 10, newLine: 10, headSha: 'h' });
+
+      await service(notes).addReviewComment({ providerTarget, position: { path: 'a.ts', side: 'new', startLine: 11, line: 12 }, body: 'Both' });
+      const { position } = notes.create.mock.calls[1][3];
+      expect(position.newLine).toBe(12);
+      expect(position.oldLine).toBeUndefined();
+      expect(position.lineRange.start).toMatchObject({ type: 'new', newLine: 11 });
+      expect(position.lineRange.start.lineCode).toMatch(/^[0-9a-f]{40}_11_11$/);
+    });
+
+    it('refuses a line the diff does not show and writes nothing', async () => {
+      const notes = drafts();
+      await expect(service(notes).addReviewComment({ providerTarget, position: { path: 'a.ts', side: 'new', line: 90 }, body: 'x' }))
+        .rejects.toMatchObject({ status: 422 });
+      expect(notes.create).not.toHaveBeenCalled();
+    });
+
+    it('publishes the draft notes before the verdict, and refuses an empty comment review', async () => {
+      const order = [];
+      const notes = drafts({ all: vi.fn(async () => [{ id: 3, note: 'Mine' }]), publishBulk: vi.fn(async () => { order.push('publish'); }) });
+      const approve = vi.fn(async () => { order.push('approve'); });
+      const reviewing = setup({ MergeRequestDraftNotes: notes, MergeRequestApprovals: { approve } }).service;
+
+      await reviewing.reviewChangeRequest(review());
+      expect(order).toEqual(['publish', 'approve']);
+
+      await expect(service(drafts()).reviewChangeRequest(review({ verdict: 'comment' }))).rejects.toMatchObject({ status: 422 });
+    });
+
+    it('discards every draft note', async () => {
+      const notes = drafts({ all: vi.fn(async () => [{ id: 3, note: 'a' }, { id: 4, note: 'b' }]) });
+      await service(notes).discardReview({ providerTarget });
+      expect(notes.remove.mock.calls.map((call) => call[2])).toEqual([3, 4]);
+    });
+  });
 
   it('approves the commit the user read, then posts the text as a note', async () => {
     const approve = vi.fn(async () => ({}));
     const create = vi.fn(async () => ({ id: 7 }));
-    const { service } = setup({ MergeRequestApprovals: { approve }, ...notes(create) });
+    const { service } = setup({ MergeRequestApprovals: { approve }, ...notes(create), ...noDrafts });
 
     await expect(service.reviewChangeRequest(review({ body: 'Nice' }))).resolves.toEqual({ commented: true });
     await expect(service.reviewChangeRequest(review())).resolves.toEqual({ commented: false });
@@ -758,7 +812,7 @@ describe('GitLab comments and reviews', () => {
 
   it('keeps the verdict when its note fails and says the text did not post', async () => {
     const create = vi.fn(async () => { throw Object.assign(new Error('locked'), { cause: { response: { status: 403 } } }); });
-    const { service } = setup({ MergeRequestApprovals: { approve: vi.fn(async () => ({})) }, ...notes(create) });
+    const { service } = setup({ MergeRequestApprovals: { approve: vi.fn(async () => ({})) }, ...notes(create), ...noDrafts });
 
     await expect(service.reviewChangeRequest(review({ body: 'Nice' }))).resolves.toEqual({ commented: false });
   });
@@ -766,8 +820,8 @@ describe('GitLab comments and reviews', () => {
   it('turns an approval GitLab does not allow into a refusal, not a lost sign-in', async () => {
     const refused = Object.assign(new Error('401 Unauthorized'), { cause: { response: { status: 401 } } });
     const moved = Object.assign(new Error('SHA does not match'), { cause: { response: { status: 409 } } });
-    const own = setup({ MergeRequestApprovals: { approve: vi.fn(async () => { throw refused; }) } });
-    const late = setup({ MergeRequestApprovals: { approve: vi.fn(async () => { throw moved; }) } });
+    const own = setup({ MergeRequestApprovals: { approve: vi.fn(async () => { throw refused; }) }, ...noDrafts });
+    const late = setup({ MergeRequestApprovals: { approve: vi.fn(async () => { throw moved; }) }, ...noDrafts });
 
     await expect(own.service.reviewChangeRequest(review())).rejects.toMatchObject({ status: 403 });
     await expect(late.service.reviewChangeRequest(review())).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409 });
@@ -775,7 +829,7 @@ describe('GitLab comments and reviews', () => {
 
   it('requests changes through GraphQL and reports its errors as a refusal', async () => {
     const post = vi.fn(async () => ({ body: { data: { mergeRequestRequestChanges: { mergeRequest: { iid: '5' }, errors: [] } } } }));
-    const { service } = setup({ MergeRequests: { ...setup().client.MergeRequests, requester: { post } } });
+    const { service } = setup({ ...noDrafts, MergeRequests: { ...setup().client.MergeRequests, requester: { post } } });
 
     await expect(service.reviewChangeRequest(review({ verdict: 'request-changes' }))).resolves.toEqual({ commented: false });
     expect(post).toHaveBeenCalledWith('../graphql', {

@@ -42,6 +42,22 @@ function mutationOperations() {
       perform: (service, normalized, resolved) => service.vote(call(resolved, { votes: normalized.votes, body: normalized.body })),
       reconcile: unknownOutcome,
     },
+    '/pr/review/comment': {
+      perform: (service, normalized, resolved) => service.addReviewComment(call(resolved, { position: normalized.position, body: normalized.body })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/comment/update': {
+      perform: (service, normalized, resolved) => service.updateReviewComment(call(resolved, { commentId: normalized.commentId, body: normalized.body })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/comment/delete': {
+      perform: (service, normalized, resolved) => service.deleteReviewComment(call(resolved, { commentId: normalized.commentId })),
+      reconcile: unknownOutcome,
+    },
+    '/pr/review/discard': {
+      perform: (service, _normalized, resolved) => service.discardReview(call(resolved)),
+      reconcile: unknownOutcome,
+    },
     '/pr/comment': {
       perform: (service, normalized, resolved) => service.comment(call(resolved, { body: normalized.body })),
       reconcile: unknownOutcome,
@@ -130,6 +146,7 @@ export function createProvider({
       changeRequestStatus: ({ session, directory, branch, remote }) => serviceFor(session).changeRequestStatus(directory, branch, remote),
       listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
         .listChangeRequests(directory, { page, query, state, people, remote }),
+      reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
       changeRequestContext: ({ session, directory, number, project, remote, includeDiff, includeTimeline, revision }) => serviceFor(session)
         .changeRequestContext(directory, number, { includeDiff, includeTimeline, project, remote, revision }),
       projectUpstream: ({ session, directory, remote }) => serviceFor(session).projectUpstream(directory, remote),

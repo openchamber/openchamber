@@ -1,5 +1,6 @@
 import { digestMutationInput } from '../source-control/mutation-executor.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
+import { reviewCommentPosition } from '../source-control/review-position.js';
 import { cancelWaitingMerge, enableMergeWhenReady, readWaitingMerge } from './merge-when-ready.js';
 import {
   invalidProviderPayload,
@@ -10,6 +11,7 @@ import {
   requireGitHubRepoNetwork,
   requireProviderArray,
 } from './mappers.js';
+import { readPendingReview } from './review-draft.js';
 
 /**
  * GitHub's durable mutations behind the shared route shell: the persisted
@@ -42,6 +44,10 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/pr/ready': 'ready',
   '/pr/comment': 'comment',
   '/pr/review': 'review',
+  '/pr/review/comment': 'review-comment',
+  '/pr/review/comment/update': 'review-comment-update',
+  '/pr/review/comment/delete': 'review-comment-delete',
+  '/pr/review/discard': 'review-discard',
   '/pr/thread/reply': 'thread-reply',
   '/pr/thread/resolve': 'thread-resolve',
   '/issues/comment': 'issue-comment',
@@ -54,6 +60,14 @@ const ROUTE_OPERATIONS = Object.freeze({
   '/discussions/state': 'discussion-state',
   '/discussions/answer': 'discussion-answer',
   '/discussions/labels': 'discussion-labels',
+});
+
+// The operations on the viewer's own pending review.
+const REVIEW_DRAFT_OPERATIONS = new Set(['review-comment', 'review-comment-update', 'review-comment-delete', 'review-discard']);
+const REVIEW_EVENTS = Object.freeze({
+  approve: { event: 'APPROVE', state: 'APPROVED' },
+  'request-changes': { event: 'REQUEST_CHANGES', state: 'CHANGES_REQUESTED' },
+  comment: { event: 'COMMENT', state: 'COMMENTED' },
 });
 
 const mutationError = (message, code = 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status = 400) => Object.assign(new Error(message), { code, status });
@@ -235,7 +249,7 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
   }
   if (operation === 'review') {
     const { verdict } = body;
-    if (verdict !== 'approve' && verdict !== 'request-changes') throw mutationError('review verdict is invalid');
+    if (!Object.hasOwn(REVIEW_EVENTS, verdict)) throw mutationError('review verdict is invalid');
     // A verdict names the commit it is for; without one it would land on whatever was pushed last.
     requiredText(context.target.headSha, 'target headSha');
     // GitHub asks for the reason when changes are requested.
@@ -245,6 +259,22 @@ function normalizeOperation(operation, body, context, actor, credential, limits)
       digest: (target) => digestOf(text === undefined ? { target, verdict } : { target, verdict, body: text }),
     };
   }
+  if (operation === 'review-comment') {
+    requiredText(context.target.headSha, 'target headSha');
+    const position = reviewCommentPosition(body, (message) => { throw mutationError(message); });
+    const text = commentText(body.body, true, limits.commentMaxLength);
+    return { input: { ...position, body: text }, digest: (target) => digestOf({ target, ...position, body: text }) };
+  }
+  if (operation === 'review-comment-update') {
+    const commentId = nodeId(body.commentId, 'commentId');
+    const text = commentText(body.body, true, limits.commentMaxLength);
+    return { input: { commentId, body: text }, digest: (target) => digestOf({ target, commentId, body: text }) };
+  }
+  if (operation === 'review-comment-delete') {
+    const commentId = nodeId(body.commentId, 'commentId');
+    return { input: { commentId }, digest: (target) => digestOf({ target, commentId }) };
+  }
+  if (operation === 'review-discard') return { input: {}, digest: (target) => digestOf({ target }) };
   throw mutationError('Mutation kind is invalid');
 }
 
@@ -454,6 +484,90 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     if (!isProviderString(data?.addPullRequestReviewThreadReply?.comment?.id)) throw invalidProviderPayload('GitHub returned an invalid reply');
     return {};
   };
+  const PENDING_COMMENT_QUERY = `query($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on PullRequestReviewComment { state viewerDidAuthor pullRequest { number repository { name owner { login } } } }
+  }
+}`;
+  /** Only the viewer's own unpublished comment on the target pull request can be changed here. */
+  const requirePendingComment = async (octokit, commentId, project, number) => {
+    let data;
+    try {
+      data = await octokit.graphql(PENDING_COMMENT_QUERY, { id: commentId });
+    } catch (error) {
+      if (!Array.isArray(error?.errors)) throw error;
+      data = error.data;
+    }
+    const node = data?.node;
+    const repository = node?.pullRequest?.repository;
+    if (node?.__typename !== 'PullRequestReviewComment' || node.state !== 'PENDING' || node.viewerDidAuthor !== true
+      || node.pullRequest.number !== number
+      || !isProviderString(repository?.owner?.login) || !isProviderString(repository?.name)
+      || repository.owner.login.toLowerCase() !== project.owner.toLowerCase()
+      || repository.name.toLowerCase() !== project.name.toLowerCase()) {
+      throw mutationError('Review comment is not a draft of yours on this pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+    }
+  };
+  /** The viewer's pending review, started on the head commit when there is none yet. */
+  const pendingReview = async (octokit, { pendingReviewId, pullRequestId }, headSha) => {
+    if (pendingReviewId) return pendingReviewId;
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($pullRequestId: ID!, $commitOID: GitObjectID!) { addPullRequestReview(input: { pullRequestId: $pullRequestId, commitOID: $commitOID }) { pullRequestReview { id } } }',
+      { pullRequestId, commitOID: headSha },
+    );
+    const id = data?.addPullRequestReview?.pullRequestReview?.id;
+    if (!isProviderString(id) || !id) throw invalidProviderPayload('GitHub returned an invalid review');
+    return id;
+  };
+  const addReviewComment = async (octokit, providerTarget, headSha, { path, side, startLine, line, body }) => {
+    const pullRequestReviewId = await pendingReview(octokit, providerTarget, headSha);
+    const diffSide = side === 'old' ? 'LEFT' : 'RIGHT';
+    const position = line === undefined
+      ? { subjectType: 'FILE' }
+      : { subjectType: 'LINE', line, side: diffSide, startLine, startSide: startLine === undefined ? undefined : diffSide };
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($input: AddPullRequestReviewThreadInput!) { addPullRequestReviewThread(input: $input) { thread { id } } }',
+      { input: { pullRequestReviewId, path, body, ...position } },
+    );
+    if (!isProviderString(data?.addPullRequestReviewThread?.thread?.id)) throw invalidProviderPayload('GitHub returned an invalid review comment');
+    return {};
+  };
+  const updateReviewComment = async (octokit, commentId, body) => {
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($commentId: ID!, $body: String!) { updatePullRequestReviewComment(input: { pullRequestReviewCommentId: $commentId, body: $body }) { pullRequestReviewComment { id } } }',
+      { commentId, body },
+    );
+    if (data?.updatePullRequestReviewComment?.pullRequestReviewComment?.id !== commentId) throw invalidProviderPayload('GitHub returned an invalid review comment');
+    return {};
+  };
+  const deleteReviewComment = async (octokit, commentId) => {
+    await graphqlWrite(
+      octokit,
+      'mutation($commentId: ID!) { deletePullRequestReviewComment(input: { id: $commentId }) { clientMutationId } }',
+      { commentId },
+    );
+    return {};
+  };
+  const discardReview = async (octokit, pendingReviewId) => {
+    await graphqlWrite(
+      octokit,
+      'mutation($id: ID!) { deletePullRequestReview(input: { pullRequestReviewId: $id }) { clientMutationId } }',
+      { id: pendingReviewId },
+    );
+    return {};
+  };
+  const submitReview = async (octokit, pendingReviewId, event, body) => {
+    const data = await graphqlWrite(
+      octokit,
+      'mutation($id: ID!, $event: PullRequestReviewEvent!, $body: String) { submitPullRequestReview(input: { pullRequestReviewId: $id, event: $event, body: $body }) { pullRequestReview { state } } }',
+      { id: pendingReviewId, event, body: body ?? null },
+    );
+    return data?.submitPullRequestReview?.pullRequestReview?.state;
+  };
   const setReviewThreadResolved = async (octokit, threadId, resolved) => {
     const field = resolved ? 'resolveReviewThread' : 'unresolveReviewThread';
     let data;
@@ -646,6 +760,7 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     // A comment or a review leaves nothing that tells a lost write from one
     // never sent short of guessing from its text, so the outcome stays unknown.
     if (['comment', 'review', 'issue-comment', 'thread-reply', 'discussion-comment'].includes(operation)) return unknownOutcome();
+    if (REVIEW_DRAFT_OPERATIONS.has(operation)) return unknownOutcome();
     const project = target.project;
     if (operation === 'discussion-state') {
       const discussion = await readDiscussion(octokit, project, target.number);
@@ -781,6 +896,21 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
     if (operation === 'thread-reply' || operation === 'thread-resolve') {
       await readReviewThread(octokit, input.threadId, expectedProject, target.number);
     }
+    if (operation === 'review-comment-update' || operation === 'review-comment-delete') {
+      await requirePendingComment(octokit, input.commentId, expectedProject, target.number);
+    }
+    if (operation === 'review' || operation === 'review-comment' || operation === 'review-discard') {
+      const pending = await readPendingReview({ octokit, owner: expectedProject.owner, repo: expectedProject.name, number: target.number });
+      if (operation === 'review-discard' && !pending) {
+        throw mutationError('There is no review draft on this pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+      }
+      // A verdict is for the commit the user read, and a pending review keeps
+      // the commit it began on. As a comment it goes out whatever that was.
+      if (operation === 'review' && input.verdict !== 'comment' && pending && pending.commit !== pr.head.sha) {
+        throw mutationError('This review draft was started on an older commit. Send it as a comment, then give your verdict.', 'SOURCE_CONTROL_MUTATION_REJECTED', 409);
+      }
+      return { providerTarget: { pendingReviewId: pending?.id ?? null, pullRequestId: pr.node_id }, target };
+    }
     if (operation === 'ready') {
       const alreadyReady = pr.draft === false;
       const nodeId = optionalText(pr.node_id, 'pull request node id', true);
@@ -858,18 +988,38 @@ export function createGitHubMutations({ descriptor, octokitOf, resolveRepo, reso
         return setDiscussionAnswer(octokit, input.commentId, input.answer);
       case 'discussion-labels':
         return setDiscussionLabels(octokit, project, providerTarget.discussion, input.labels);
+      case 'review-comment':
+        return addReviewComment(octokit, providerTarget, target.headSha, input);
+      case 'review-comment-update':
+        return updateReviewComment(octokit, input.commentId, input.body);
+      case 'review-comment-delete':
+        return deleteReviewComment(octokit, input.commentId);
+      case 'review-discard':
+        return discardReview(octokit, providerTarget.pendingReviewId);
       case 'review': {
+        const { event, state } = REVIEW_EVENTS[input.verdict];
+        // A pending review goes out with the verdict: GitHub keeps one per
+        // person, and a second one beside it is refused.
+        if (providerTarget.pendingReviewId) {
+          if (await submitReview(octokit, providerTarget.pendingReviewId, event, input.body) !== state) {
+            throw invalidProviderPayload('GitHub returned an invalid review');
+          }
+          return { commented: input.body !== undefined };
+        }
+        if (input.verdict === 'comment' && input.body === undefined) {
+          throw mutationError('A review with no comments needs text', 'SOURCE_CONTROL_MUTATION_REJECTED', 422);
+        }
         const reviewInput = {
           owner: project.owner,
           repo: project.name,
           pull_number: target.number,
           // The verdict is for the commit the user read.
           commit_id: target.headSha,
-          event: input.verdict === 'approve' ? 'APPROVE' : 'REQUEST_CHANGES',
+          event,
         };
         if (input.body !== undefined) reviewInput.body = input.body;
         const response = await rejected(() => octokit.rest.pulls.createReview(reviewInput));
-        if (response?.data?.state !== (input.verdict === 'approve' ? 'APPROVED' : 'CHANGES_REQUESTED')) {
+        if (response?.data?.state !== state) {
           throw invalidProviderPayload('GitHub returned an invalid review');
         }
         // GitHub posts the verdict and its text as one review.

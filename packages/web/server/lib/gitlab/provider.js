@@ -3,6 +3,7 @@ import { getGlabToken } from './glab-credential.js';
 import { classifyGitLabFailure } from './network.js';
 import { createGitLabClient, createGitLabDownloader } from './client.js';
 import { createGitLabResourceService } from './resources.js';
+import { reviewDraftEntries } from '../source-control/review-position.js';
 import { verifyGitLabToken } from './verify.js';
 import { isString } from './validation.js';
 import { gitlabDescriptor } from './descriptor.js';
@@ -235,7 +236,7 @@ function mutationTable(descriptor) {
       kind: 'change-request-review',
       normalize: (input, context) => {
         // A verdict names the commit it is for; without one it would land on whatever was pushed last.
-        if (!context.target.number || !context.target.headSha || !['approve', 'request-changes'].includes(input.verdict)) {
+        if (!context.target.number || !context.target.headSha || !['approve', 'request-changes', 'comment'].includes(input.verdict)) {
           throw invalidMutationContext('target number, head SHA and review verdict are required');
         }
         const text = noteText(input.body, false);
@@ -251,6 +252,16 @@ function mutationTable(descriptor) {
       reconcile: unknownOutcome,
     },
   };
+  const reviewDrafts = reviewDraftEntries({ commentText: noteText, fail: (message) => { throw invalidMutationContext(message); } });
+  const reviewDraftOperations = {
+    '/pr/review/comment': (service, normalized, resolved) => service.addReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
+    '/pr/review/comment/update': (service, normalized, resolved) => service.updateReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
+    '/pr/review/comment/delete': (service, normalized, resolved) => service.deleteReviewComment({ providerTarget: resolved.providerTarget, ...normalized }),
+    '/pr/review/discard': (service, _normalized, resolved) => service.discardReview({ providerTarget: resolved.providerTarget }),
+  };
+  for (const [route, perform] of Object.entries(reviewDraftOperations)) {
+    entries[route] = { ...reviewDrafts[route], perform, reconcile: unknownOutcome };
+  }
   // Close or reopen: `state` is what the item should become.
   for (const [route, kind, method] of [
     ['/pr/state', 'change-request-state', 'setChangeRequestState'],
@@ -694,6 +705,7 @@ export function createProvider({
         .changeRequestStatus(directory, branch, remote),
       listChangeRequests: ({ session, directory, page, query, state, people, remote }) => serviceFor(session)
         .listChangeRequests(directory, { page, query, state, people, remote }),
+      reviewState: ({ session, directory, project, number, remote }) => serviceFor(session).reviewState(directory, number, project, remote),
       changeRequestContext: ({ session, directory, number, project, remote, includeDiff, includeCIDetails, includeTimeline }) => serviceFor(session)
         .changeRequestContext(directory, number, {
           includeDiff, includeCIDetails, includeTimeline, project, remote, constrainToPrimary: true,

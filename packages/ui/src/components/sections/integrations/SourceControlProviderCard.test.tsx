@@ -159,6 +159,8 @@ describe('SourceControlProviderCard', () => {
     changeRequestStatus: unexpected, changeRequestCreate: unexpected, changeRequestUpdate: unexpected,
     changeRequestMerge: unexpected, changeRequestReady: unexpected, changeRequestComment: unexpected,
     changeRequestStartThread: unexpected, changeRequestReplyToThread: unexpected, changeRequestResolveThread: unexpected,
+    changeRequestReviewState: unexpected, changeRequestReviewComment: unexpected, changeRequestReviewCommentUpdate: unexpected,
+    changeRequestReviewCommentDelete: unexpected, changeRequestReviewDiscard: unexpected,
     changeRequestReview: unexpected, issueComment: unexpected, changeRequestSetState: unexpected,
     issueSetState: unexpected, changeRequestSetLabels: unexpected, issueSetLabels: unexpected,
     discussionComment: unexpected, discussionSetState: unexpected, discussionSetAnswer: unexpected, discussionSetLabels: unexpected,

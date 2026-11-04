@@ -114,3 +114,7 @@ The `+gitea-` suffix was the whole edition signal, and Forgejo 16 dropped it fro
 ### Why the SSH address lives on the instance and not in each repository's `ssh_url`
 
 Recognition happens before any repository read, so the address cannot come from a payload fetched over a connection that recognition has not chosen yet. The user enters it once under Settings → Integrations (`POST /auth/ssh-url`), and the auth store writes version 5 only while an instance holds one, so a user who never adds an address can still go back to an older release.
+
+## Review drafts
+
+A review is a `PENDING` review; only its author reads it, and `/pr/review` submits it with the verdict. Comments sit on one line of one side (`new_position` or `old_position`): Gitea has no range and no comment on a whole file, so `reviewDraftFileComments` is off, and it has no replies or resolving, so threads read `canReply: false, canResolve: false`. Adding a comment is the same `POST /reviews` with `event: PENDING`, since the API has no route to add to a pending review, and a review comment is edited and removed through the issue comment routes; releases that answer those with an empty 204 and change nothing are reported as such. A verdict on a draft begun on an older commit is refused, and the draft still goes out as a comment. None of this has been run against a live instance yet.

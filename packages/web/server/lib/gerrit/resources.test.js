@@ -244,10 +244,52 @@ describe('Gerrit mutations', () => {
     await expect(service.resolveChangeRequestMutation(context, { ...expected, headSha: PS2 })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' });
   });
 
+  describe('review drafts', () => {
+    const draft = { id: 'd1', patch_set: 3, line: 7, message: 'Mine' };
+    const drafts = { [`GET ${CHANGE}/drafts`]: { 'src/a.ts': [draft] } };
+
+    it('writes a draft on the patchset that was read, on the parent for the old side', async () => {
+      const { service, calls } = setup({ [`PUT ${CHANGE}/revisions/${PS3}/drafts`]: { id: 'd2' } });
+
+      await service.addReviewComment({
+        providerTarget, position: { path: 'src/a.ts', side: 'old', startLine: 5, line: 7 }, body: 'Here', expectedTarget: { headSha: PS3 },
+      });
+
+      expect(calls.at(-1).body).toEqual({
+        path: 'src/a.ts', message: 'Here', side: 'PARENT', line: 7,
+        range: { start_line: 5, start_character: 0, end_line: 8, end_character: 0 },
+      });
+    });
+
+    it('changes only a draft of the viewer, and discards each one', async () => {
+      const { service, calls } = setup({
+        ...drafts,
+        [`PUT ${CHANGE}/revisions/3/drafts/d1`]: { id: 'd1' },
+        [`DELETE ${CHANGE}/revisions/3/drafts/d1`]: {},
+      });
+
+      await service.updateReviewComment({ providerTarget, commentId: 'd1', body: 'New' });
+      await service.discardReview({ providerTarget });
+      await expect(service.deleteReviewComment({ providerTarget, commentId: 'other' })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_INVALID' });
+
+      expect(calls.filter((call) => call.method === 'PUT').map((call) => call.body)).toEqual([{ message: 'New' }]);
+      expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1);
+    });
+
+    it('sends a review of drafts alone, and refuses one with nothing in it', async () => {
+      const withDrafts = setup({ ...drafts, [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult });
+      await withDrafts.service.vote({ providerTarget, votes: {}, expectedTarget: { headSha: PS3 } });
+      expect(withDrafts.calls.at(-1).body).toEqual({ labels: {}, drafts: 'PUBLISH_ALL_REVISIONS' });
+
+      const empty = setup({ [`GET ${CHANGE}/drafts`]: {} });
+      await expect(empty.service.vote({ providerTarget, votes: {}, expectedTarget: { headSha: PS3 } })).rejects.toMatchObject({ status: 422 });
+    });
+  });
+
   it('posts votes to the patchset that was read, and refuses once a newer one is current', async () => {
     const { service, calls } = setup({ [`POST ${CHANGE}/revisions/${PS3}/review`]: fixtures.reviewResult });
     await expect(service.vote({ providerTarget, votes: { 'Code-Review': 2 }, body: 'LGTM', expectedTarget: { headSha: PS3 } })).resolves.toEqual({ commented: true });
-    expect(calls.at(-1).body).toEqual({ labels: { 'Code-Review': 2 }, message: 'LGTM' });
+    expect(calls.at(-1).body).toEqual({ labels: { 'Code-Review': 2 }, drafts: 'PUBLISH_ALL_REVISIONS', message: 'LGTM' });
 
     await expect(service.vote({ providerTarget, votes: { 'Code-Review': 2 }, expectedTarget: { headSha: PS2 } })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH' });
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);

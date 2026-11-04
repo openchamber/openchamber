@@ -70,7 +70,7 @@ import { useSourceBoardChoice, useSourceBoardStore, type SourceBoardTab } from '
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
-import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems, type SourceBoardProject } from './SourceBoardActions';
+import { SourceBoardActions, SourceBoardPullLinks, SourceBoardReviewDraft, SourceBoardStateMenuItems, type SourceBoardProject } from './SourceBoardActions';
 import { SourceBoardTrackerStatus } from './SourceBoardTrackerStatus';
 import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
@@ -724,13 +724,27 @@ const SourceBoardBody: React.FC<{
                 <SourceBoardLabels key={referencePickerItemKey(previewItem)} reference={previewItem.reference} context={context} onChanged={refreshRepositoryItem} />
             ) : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
-                <SourceBoardReviewers
-                    key={referencePickerItemKey(previewItem)}
-                    pull={previewItem.reference}
-                    detail={browser.repositoryDetail}
-                    context={context}
-                    onChanged={refreshRepositoryItem}
-                />
+                <span className="inline-flex flex-wrap items-center gap-2">
+                    <SourceBoardReviewers
+                        key={referencePickerItemKey(previewItem)}
+                        pull={previewItem.reference}
+                        detail={browser.repositoryDetail}
+                        context={context}
+                        onChanged={refreshRepositoryItem}
+                    />
+                    {actionProject ? (
+                        <SourceBoardReviewDraft
+                            key={`draft-${referencePickerItemKey(previewItem)}`}
+                            pull={previewItem.reference}
+                            project={actionProject}
+                            repository={tab === 'repository' ? readFolder : null}
+                            context={context}
+                            projectOwnsDirectory={projectOwnsDirectory}
+                            currentDirectory={currentDirectory}
+                            onLeave={onLeave}
+                        />
+                    ) : null}
+                </span>
             ) : undefined}
             // Keyed by the item: a draft never carries over to another one.
             // A locked discussion takes no comment from someone who may not update it.

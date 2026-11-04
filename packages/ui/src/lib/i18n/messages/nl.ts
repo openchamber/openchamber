@@ -33,6 +33,7 @@ import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
 import { stacksI18n } from './stacks.i18n';
+import { prReviewI18n } from './pr-review.i18n';
 import { changeReviewI18n } from './change-review.i18n';
 import { projectActionsI18n } from './project-actions.i18n';
 import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
@@ -196,6 +197,7 @@ export const dict = {
   ...isolatedSpacesI18n.nl,
   ...sourceBoardI18n.nl,
   ...stacksI18n.nl,
+  ...prReviewI18n.nl,
   ...changeReviewI18n.nl,
   ...projectActionsI18n.nl,
   ...gitIdentityEditorI18n.nl,

@@ -39,6 +39,8 @@ import type { GitIdentityProfile } from '@/lib/api/types';
 import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
 import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
+import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
+import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { hasConfigChangedGrant } from '@/lib/source-control/types';
@@ -399,6 +401,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
     [comparisonSource, prComparison.provider, selectedPrHead],
   );
+  const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, currentDirectory, visible && mode === 'pr');
   const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision, prComparison.readContext, prComparison.provider);
   const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
   const comparisonFiles = React.useMemo(() => comparison.files ? [...comparison.files].sort((a, b) => a.path.localeCompare(b.path)) : null, [comparison.files]);
@@ -1148,6 +1151,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     : mode === 'commit' ? selectedCommitHash?.slice(0, 8) : mode === 'pr' && selectedPr ? `#${selectedPr.number}` : null;
   if (route.type === 'walkthrough' && walkthroughTarget && currentDirectory) {
     return (
+      <ChangeRequestReviewContext.Provider value={changeRequestReview}>
       <MobileWalkthroughScreen
         directory={currentDirectory}
         target={walkthroughTarget}
@@ -1156,10 +1160,12 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         visible={visible}
         onBack={() => setRoute(LIST_ROUTE)}
       />
+      </ChangeRequestReviewContext.Provider>
     );
   }
   if (activeComparisonPath && activeComparisonDiff) {
     return (
+      <ChangeRequestReviewContext.Provider value={changeRequestReview}>
       <MobileDiffDetail
         path={activeComparisonPath}
         subtitle={[modeLabel, sourceLabel].filter(Boolean).join(' · ')}
@@ -1178,6 +1184,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         pendingContextExpansion={pendingContextExpansion}
         contextLoading={pendingContextExpansion !== null && !activeFullComparisonDiff}
       />
+      </ChangeRequestReviewContext.Provider>
     );
   }
 
@@ -1289,6 +1296,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           <PullRequestComparisonSelector mobile key={JSON.stringify([ownerKey, currentBranch])} comparison={prComparison} />
           {selectedPr && <Button variant="ghost" size="sm" disabled={comparison.loading} aria-label={t('session.githubIssuePicker.actions.refresh')}
             onClick={() => void comparison.refresh()}><Icon name="refresh" className="size-4" /></Button>}
+          {changeRequestReview && reviewProvider ? <ReviewSubmitButton review={changeRequestReview} provider={reviewProvider} className="h-8" /> : null}
         </>}
         {walkthroughTarget && (
           <Button
