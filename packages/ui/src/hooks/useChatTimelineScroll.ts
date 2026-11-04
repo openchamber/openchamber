@@ -14,6 +14,12 @@ import {
 } from '@/components/chat/lib/scroll/messageViewportAnchor';
 import { readSessionScrollPosition, rememberOutgoingSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
 import {
+    isWaitingPageRevealPending,
+    releaseWaitingPageRevealOutside,
+    subscribeRequestReveal,
+    takeWaitingPageReveal,
+} from '@/sync/request-reveal';
+import {
     peekMessageFocus,
     releaseMessageFocusOutside,
     settleMessageFocus,
@@ -43,6 +49,7 @@ import {
     isMiddleButtonPan,
     nestedScrollableConsumesWheelUp,
     onFrameScroll,
+    dispatchPageWaiting,
     onPageWaiting,
     onRowExpand,
 } from '@/components/chat/lib/scroll/timelineScrollIntent';
@@ -121,6 +128,9 @@ interface UseChatTimelineScrollOptions {
     // the end instantly: an animated catch-up scrolls visibly through the
     // conversation and gets cut short by the next measurement.
     sessionIsWorking: boolean;
+    // A chat column pinned to its session: a toast opens the session in the
+    // main chat, so its request to show a waiting page is not for this list.
+    pinned?: boolean;
     // Reveal gate of the session being opened. Held until the viewport is
     // pinned to the end, so the session is never shown scrolled to the top.
     revealGate?: TimelineRevealGate | null;
@@ -330,6 +340,7 @@ export const useChatTimelineScroll = ({
     checkLinkedMessage,
     onLinkedMessageMissing,
     sessionIsWorking,
+    pinned = false,
     revealGate = null,
     onActiveTurnChange,
 }: UseChatTimelineScrollOptions): UseChatTimelineScrollResult => {
@@ -1494,6 +1505,7 @@ export const useChatTimelineScroll = ({
         // Entering another session drops a link request for this one; the
         // same session re-selected under its real directory keeps it.
         releaseMessageFocusOutside(currentSessionId);
+        if (!pinned) releaseWaitingPageRevealOutside(currentSessionId);
         linkServedRef.current = null;
         isAtEndRef.current = true;
         setUserOwnsScroll(false);
@@ -1506,7 +1518,7 @@ export const useChatTimelineScroll = ({
         // reopened.
         followStoppedAtGenerationRef.current = null;
         hideScrollButton();
-    }, [currentSessionId, currentSessionKey, hideScrollButton]);
+    }, [currentSessionId, currentSessionKey, hideScrollButton, pinned]);
 
     // ── entry pin ───────────────────────────────────────────────────────────
     // An opened session is shown once, already in place: the reveal gate is
@@ -1524,7 +1536,9 @@ export const useChatTimelineScroll = ({
         if (scrollRef.current === scrollNode && handledEntryKeyRef.current !== currentSessionKey) {
             handledEntryKeyRef.current = currentSessionKey;
             const linkRequest = peekMessageFocus(currentSessionIdRef.current);
-            const remembered = readSessionScrollPosition(currentSessionKey);
+            const remembered = !pinned && isWaitingPageRevealPending(currentSessionIdRef.current)
+                ? null
+                : readSessionScrollPosition(currentSessionKey);
             const target: PositionTarget | null = linkRequest
                 ? linkTarget(linkRequest, scrollNode)
                 : remembered ? { kind: 'remembered', anchor: remembered } : null;
@@ -1547,7 +1561,7 @@ export const useChatTimelineScroll = ({
             if (frame !== null) cancelAnimationFrame(frame);
             releaseReveal?.();
         };
-    }, [currentSessionKey, revealGate, scrollNode, showPositionTarget]);
+    }, [currentSessionKey, pinned, revealGate, scrollNode, showPositionTarget]);
 
     // ── message link in the open session ────────────────────────────────────
     // A link to a message of the session already on screen does not switch
@@ -1565,6 +1579,24 @@ export const useChatTimelineScroll = ({
         showRequested();
         return subscribeMessageFocus(showRequested);
     }, [currentSessionKey, scrollNode, showPositionTarget]);
+
+    // ── waiting page's toast ────────────────────────────────────────────────
+    // The click asks for the page, so it counts as a return to the end, where
+    // a waiting page lies, and the page comes again even if it came before. A
+    // page not mounted yet raises its own event once the end brings it in.
+    React.useEffect(() => {
+        if (pinned || !scrollNode || !currentSessionKey) return;
+        const showRequested = () => {
+            if (scrollRef.current !== scrollNode || handledEntryKeyRef.current !== currentSessionKey) return;
+            if (!takeWaitingPageReveal(currentSessionIdRef.current)) return;
+            restoreRef.current?.cancel();
+            jumpToEnd('instant', true);
+            revealedPagesRef.current.clear();
+            dispatchPageWaiting(scrollNode.querySelector<HTMLElement>('[data-waiting-page]'));
+        };
+        showRequested();
+        return subscribeRequestReveal(showRequested);
+    }, [currentSessionKey, jumpToEnd, pinned, scrollNode]);
 
     // ── keyboard follow glide ───────────────────────────────────────────────
     // On mobile the keyboard and the composer morph change the transcript's

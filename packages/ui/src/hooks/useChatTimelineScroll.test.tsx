@@ -5,6 +5,7 @@ import { Window } from 'happy-dom';
 import { useChatTimelineScroll, type TimelineListHandle } from './useChatTimelineScroll';
 import { requestMessageFocus, releaseMessageFocusOutside } from '@/lib/router/messageFocus';
 import { dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { isWaitingPageRevealPending, releaseWaitingPageRevealOutside, revealWaitingPage } from '@/sync/request-reveal';
 import { useUIStore } from '@/stores/useUIStore';
 import { KeepAlive } from '@/components/ui/KeepAlive';
 import { readSessionScrollPosition, rememberSessionScrollPosition } from '@/components/chat/lib/scroll/sessionScrollMemory';
@@ -282,6 +283,35 @@ test('a return to the end ends the reveal of a page taller than the screen', asy
     act(() => dispatchPageWaiting(block));
     await frame();
     expect(targets.length).toBe(1);
+});
+
+test('the toast of a waiting page brings it to a reader who scrolled away, even if it came before', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 300;
+    const { block, targets } = waitingPage();
+    act(() => dispatchPageWaiting(block));
+    await frame();
+    expect(targets).toEqual([1300]);
+    node.scrollTop = 300;
+    act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+    await frame();
+
+    act(() => revealWaitingPage('session'));
+    await frame();
+
+    expect(targets).toEqual([1300, 1300]);
+});
+
+test('the toast of a waiting page is not served to another session, and a later entry drops it', async () => {
+    await render('visible'); await frame();
+    node.scrollTop = 300;
+    const { targets } = waitingPage();
+    act(() => revealWaitingPage('other'));
+    await frame();
+    expect(targets).toEqual([]);
+    expect(isWaitingPageRevealPending('other')).toBe(true);
+    releaseWaitingPageRevealOutside('session');
+    expect(isWaitingPageRevealPending('other')).toBe(false);
 });
 
 test('leaves a reader with auto-follow off where they are when a page waits for an answer', async () => {
