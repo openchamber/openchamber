@@ -44,7 +44,7 @@ import { retry } from "./retry"
 import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
-import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
+import { recordDirectoryRecoveryEvent, selectHeldSessionStatuses } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
 import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
@@ -944,7 +944,7 @@ async function resyncDirectorySessionStatuses(
     const state = store.getState()
     applyGlobalSessionStatusSnapshot(
       directory,
-      withPromptsInFlight(nextStatuses, state.session_status),
+      withPromptsInFlight(selectHeldSessionStatuses(nextStatuses, state.session), state.session_status),
       getDirectoryOwnedSessionIds(directory, state.session),
     )
   }
