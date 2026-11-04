@@ -325,6 +325,8 @@ in it still gets the edits), or a step took no snapshot. Each click therefore
 asks once (`pendingTurnDiffFile`, dropped when another session is on screen)
 whether the file is in the turn's diff. Until the list answers the session's
 current state the view shows loading; a failed read keeps its error and retry.
+A file that is there is expanded and scrolled to, on every click, since the
+chip's absolute path only matches the relative list through this request.
 A file that is not there opens Changed instead, in the repository holding the
 file, read afresh, expanded. A repository the picker drops again ends the
 attempt on the repository left on screen. Picking Last turn by hand asks

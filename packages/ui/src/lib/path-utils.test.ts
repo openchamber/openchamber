@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  findRepoFile,
   getDirectoryForFilePath,
   getDisambiguatingFolders,
   getRelativeFilePath,
@@ -24,6 +25,18 @@ describe('path-utils', () => {
     expect(isSameRepoFile('/repo/top.md', '/repo/sub', 'top.md')).toBe(true);
     expect(isSameRepoFile('/repo/top.md', '/repo/sub', 'other.md')).toBe(false);
     expect(isSameRepoFile('/repo/a.md', '/repo', undefined)).toBe(false);
+  });
+
+  test('finds the listing entry of an absolute file, picking the exact one among same names', () => {
+    const listing = ['docs/a.md', 'a.md', 'sub/in-sub.md'];
+    expect(findRepoFile('/repo/a.md', '/repo', listing)).toBe('a.md');
+    expect(findRepoFile('/repo/docs/a.md', '/repo', listing)).toBe('docs/a.md');
+    expect(findRepoFile('/repo/sub/in-sub.md', '/repo/sub', listing)).toBe('sub/in-sub.md');
+    expect(findRepoFile('/repo/missing.md', '/repo', listing)).toBeUndefined();
+    // Project in a subfolder, the same name elsewhere in the repository.
+    expect(findRepoFile('/repo/pkg/a.md', '/repo/pkg', ['b/a.md', 'pkg/a.md'])).toBe('pkg/a.md');
+    // The listing does not end the file's path, as through a symlink.
+    expect(findRepoFile('/link/a.md', '/link', ['z/a.md', 'y/x/a.md'])).toBe('z/a.md');
   });
 
   test('Windows paths compare in any case, Unix paths do not', () => {

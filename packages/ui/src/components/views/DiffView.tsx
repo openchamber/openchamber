@@ -68,7 +68,7 @@ import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
 import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { StatusImage } from '@/components/ui/status-image';
-import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
+import { findRepoFile, isAbsoluteFilePath, toAbsoluteFilePath } from '@/lib/path-utils';
 import { findFileRepository } from '@/lib/nestedRepositories';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { findDiffScrollAnchor, getRestoredDiffScrollTop, type DiffScrollAnchor } from './diffScrollAnchor';
@@ -2248,7 +2248,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
         }
 
         const normalizedTarget = targetFilePath?.trim();
-        if (!normalizedTarget) {
+        // Listings are relative, so a chip's absolute path names no row here.
+        // Its click resolves the row through pendingTurnDiffFile below.
+        if (!normalizedTarget || isAbsoluteFilePath(normalizedTarget)) {
             return;
         }
 
@@ -2261,6 +2263,15 @@ export const DiffView: React.FC<DiffViewProps> = ({
         setScrollRequestNonce((value) => value + 1);
     }, [activeDiffScope, expandStackedFile, targetFilePath]);
 
+    const revealListedFile = React.useCallback((path: string) => {
+        setDisplayFile(path);
+        setDisplayFileStaged(false);
+        shouldPinAfterAlignRef.current = true;
+        pendingScrollTargetRef.current = path;
+        expandStackedFile(path);
+        setScrollRequestNonce((value) => value + 1);
+    }, [expandStackedFile]);
+
     // A click asked for a file in the last turn's diff. Only an answer to the
     // session's current state decides: a list kept from an earlier turn would
     // send a file this turn did change to Changed, and a failed read keeps its
@@ -2271,15 +2282,20 @@ export const DiffView: React.FC<DiffViewProps> = ({
             setPendingTurnDiffFile(null);
             return;
         }
-        if (!turnDiffSettled) return;
+        // Entering the scope resets what is expanded, so wait for that first.
+        if (!turnDiffSettled || activeDiffScope !== 'turn') return;
         setPendingTurnDiffFile(null);
         const file = toAbsoluteFilePath(rootDirectory, pendingTurnDiffFile.file);
-        if (lastTurnDiffs.some((diff) => isSameRepoFile(file, rootDirectory, diff.file))) return;
+        const listed = findRepoFile(file, rootDirectory, lastTurnDiffs.flatMap((diff) => diff.file ?? []));
+        if (listed) {
+            revealListedFile(listed);
+            return;
+        }
         fallbackStatusRequestRef.current = null;
         setChangedFallback({ file, picked: false, statusReadFor: null });
         setActiveDiffScope('working');
         onDiffScopeChange?.('working');
-    }, [currentSessionId, diffScope, lastTurnDiffs, onDiffScopeChange, pendingTurnDiffFile, rootDirectory, setPendingTurnDiffFile, turnDiffSettled, visible]);
+    }, [activeDiffScope, currentSessionId, diffScope, lastTurnDiffs, onDiffScopeChange, pendingTurnDiffFile, revealListedFile, rootDirectory, setPendingTurnDiffFile, turnDiffSettled, visible]);
 
     // Changed reads one repository, and the status on hand may predate the
     // turn, so the file is looked for in its own repository's fresh status. A
@@ -2313,18 +2329,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return;
         }
         setChangedFallback(null);
-        // The shortest match is the exact one when the listing is relative to the repository.
-        const [entry] = changedFiles
-            .filter((file) => isSameRepoFile(changedFallback.file, effectiveDirectory, file.path))
-            .sort((a, b) => a.path.length - b.path.length);
-        if (!entry) return;
-        setDisplayFile(entry.path);
-        setDisplayFileStaged(false);
-        shouldPinAfterAlignRef.current = true;
-        pendingScrollTargetRef.current = entry.path;
-        expandStackedFile(entry.path);
-        setScrollRequestNonce((value) => value + 1);
-    }, [activeDiffScope, changedFallback, changedFiles, effectiveDirectory, expandStackedFile, fetchStatus, git, repositoriesKnown, repositoryOptions, rootDirectory, rootIsGitRepo, selectNestedRepo, visible]);
+        const listed = findRepoFile(changedFallback.file, effectiveDirectory, changedFiles.map((file) => file.path));
+        if (listed) revealListedFile(listed);
+    }, [activeDiffScope, changedFallback, changedFiles, effectiveDirectory, fetchStatus, git, repositoriesKnown, repositoryOptions, revealListedFile, rootDirectory, rootIsGitRepo, selectNestedRepo, visible]);
 
     React.useEffect(() => {
         if (!displayFile) {
