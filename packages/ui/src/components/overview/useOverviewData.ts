@@ -45,6 +45,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import type { IssueLiveSummary, ProjectEntry, RepositoryReferenceFilter, TrackerLiveSummary } from '@/lib/api/types';
 import { useRepositoryAcrossReferenceList } from '@/components/references/referenceSources';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { usePrWatchStore } from '@/sync/pr-watch';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -240,6 +241,7 @@ export function useOverviewData(): OverviewData {
   const hasLoaded = useGlobalSessionsStore((state) => state.hasLoaded);
   const activeSessionIds = useGlobalSessionStatusStore((state) => state.activeSessionIds);
   const shellSessionIds = useBackgroundShellsStore((state) => state.sessionIds);
+  const prWatches = usePrWatchStore((state) => state.bySession);
   const blockingBySession = useGlobalBlockingRequestsStore((state) => state.bySession);
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -309,8 +311,12 @@ export function useOverviewData(): OverviewData {
       const root = rootOf(id, entityById);
       if (!map.has(root)) map.set(root, 'shell');
     }
+    for (const id of prWatches.keys()) {
+      const root = rootOf(id, entityById);
+      if (!map.has(root)) map.set(root, 'pullRequest');
+    }
     return map;
-  }, [activeSessionIds, entityById, shellSessionIds]);
+  }, [activeSessionIds, entityById, prWatches, shellSessionIds]);
 
   const blockingByRoot = React.useMemo(() => {
     const map = new Map<string, OverviewBlocking>();

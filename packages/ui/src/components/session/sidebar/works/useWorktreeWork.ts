@@ -9,7 +9,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useFirstSessionWithOpenTurn } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionUnread } from '@/sync/session-unread';
 import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
@@ -205,12 +205,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   // turn's duration at the end.
   const activityState = useCollapsedSessionActivityState({ nodes: group.sessions });
   const workSessionIds = React.useMemo(() => sessions.flatMap((session) => (session.parentID ? [] : [session.id])), [sessions]);
-  const runningSessionId = useGlobalSessionStatusStore(React.useCallback((state) => (
-    workSessionIds.find((id) => {
-      const status = state.statusById.get(id)?.status.type;
-      return status === 'busy' || status === 'retry';
-    }) ?? null
-  ), [workSessionIds]));
+  const runningSessionId = useFirstSessionWithOpenTurn(workSessionIds);
   const unreadSessionId = useGlobalSessionsStore(React.useCallback((state) => (
     workSessionIds.find((id) => isSessionUnread(state.entityById.get(id))) ?? null
   ), [workSessionIds]));

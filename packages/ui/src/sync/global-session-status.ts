@@ -121,7 +121,8 @@ export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlyS
 
 /**
  * Active sessions plus every session whose turn they keep open: ancestors of
- * running subagents, and sessions waiting on a background command.
+ * running subagents, and sessions waiting on a background command or a pull
+ * request.
  */
 const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<string> => {
   let extended: Set<string> | null = null;
@@ -132,19 +133,22 @@ const withBackgroundWork = (activeSessionIds: ReadonlySet<string>): ReadonlySet<
   };
   for (const activeId of activeSessionIds) forEachAncestorId(activeId, add);
   for (const sessionId of useBackgroundShellsStore.getState().sessionIds) add(sessionId);
+  for (const sessionId of usePrWatchStore.getState().bySession.keys()) add(sessionId);
   return extended ?? activeSessionIds;
 };
 
-/** True when the session idles only while its background work runs. */
-const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlySet<string>): boolean => (
-  hasActiveSubagent(sessionId, activeSessionIds) || hasRunningShell(sessionId)
+/** True when something the session waits on keeps its turn open and will hand it back. */
+export const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlySet<string>): boolean => (
+  hasActiveSubagent(sessionId, activeSessionIds)
+  || hasRunningShell(sessionId)
+  || usePrWatchStore.getState().bySession.has(sessionId)
 );
 
 /**
  * What keeps the session's turn open, or null when nothing does: the session
  * runs itself, or it idles while a workflow run it proposed runs, or while a
  * subagent below it runs, or while a command it started in the background
- * runs. The session's own run wins; a workflow comes next, because its agents
+ * runs, or while it waits on its pull request. The session's own run wins; a workflow comes next, because its agents
  * are subagents too and the run says what they are doing; then a subagent.
  * The workflow state is the run's own (the OpenChamber server's runs, kept by
  * its events, see `workflow-activity.ts`), so it holds between phases when no
@@ -154,8 +158,8 @@ type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell' | 'pull
 
 /**
  * The order above: the session's own run, a workflow, a subagent, a command,
- * and last an agent that ended its turn to wait on its pull request
- * (`pr-watch.ts`): the work is not done, the server wakes it.
+ * and last an agent waiting on its pull request (`pr-watch.ts`): the server
+ * wakes it, as a background subagent's result does.
  */
 export const resolveSessionTurnActivity = (
   status: 'running' | 'subagent' | null,
@@ -181,6 +185,17 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
   return resolveSessionTurnActivity(status, workflowRunning, waitingOnShell, waitingOnPullRequest);
 };
 
+/** The first of the sessions `useSessionTurnActivity` reads as working, or null. */
+export const useFirstSessionWithOpenTurn = (sessionIds: readonly string[]): string | null => {
+  const inTurn = useGlobalSessionStatusStore((state) => (
+    sessionIds.find((id) => state.activeSessionIds.has(id) || hasActiveSubagent(id, state.activeSessionIds)) ?? null
+  ));
+  const inWorkflow = useWorkflowActivityStore((state) => sessionIds.find((id) => state.runningSessionIds.has(id)) ?? null);
+  const onShell = useBackgroundShellsStore((state) => sessionIds.find((id) => state.sessionIds.has(id)) ?? null);
+  const onPullRequest = usePrWatchStore((state) => sessionIds.find((id) => state.bySession.has(id)) ?? null);
+  return inTurn ?? inWorkflow ?? onShell ?? onPullRequest;
+};
+
 /**
  * Every session `useSessionTurnActivity` reads as working, for a consumer that
  * asks about many at once: the running ones, their ancestors, and the sessions
@@ -198,18 +213,28 @@ export const collectOpenTurnSessionIds = (
   return open;
 };
 
-// The last background command of an idle session ending closes its turn,
-// the way the last subagent finishing does below.
-useBackgroundShellsStore.subscribe((state, previous) => {
-  if (state.sessionIds === previous.sessionIds) return;
+// The last thing an idle session waited on ending closes its turn, the way the
+// last subagent finishing does below. A wake reaches the session before its
+// watch ends, so the session then runs on inside the same turn.
+const settleSessionsWithoutBackgroundWork = (sessionIds: Iterable<string>, stillWaiting: (sessionId: string) => boolean): void => {
   const { activeSessionIds } = useGlobalSessionStatusStore.getState();
   const timingMutations: SessionActivityTimingMutation[] = [];
-  for (const sessionId of previous.sessionIds) {
-    if (state.sessionIds.has(sessionId)) continue;
-    if (activeSessionIds.has(sessionId) || hasActiveSubagent(sessionId, activeSessionIds)) continue;
+  for (const sessionId of sessionIds) {
+    if (stillWaiting(sessionId)) continue;
+    if (activeSessionIds.has(sessionId) || hasBackgroundWork(sessionId, activeSessionIds)) continue;
     timingMutations.push({ type: 'observe', sessionId, phase: 'settled' });
   }
   applySessionActivityTimingMutations(timingMutations);
+};
+
+useBackgroundShellsStore.subscribe((state, previous) => {
+  if (state.sessionIds === previous.sessionIds) return;
+  settleSessionsWithoutBackgroundWork(previous.sessionIds, (sessionId) => state.sessionIds.has(sessionId));
+});
+
+usePrWatchStore.subscribe((state, previous) => {
+  if (state.bySession === previous.bySession) return;
+  settleSessionsWithoutBackgroundWork(previous.bySession.keys(), (sessionId) => state.bySession.has(sessionId));
 });
 
 const normalizeStatusType = (type: string | undefined): ActiveStatusType | 'idle' => {
