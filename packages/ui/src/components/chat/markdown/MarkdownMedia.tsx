@@ -218,8 +218,9 @@ function OwnedImage({
   React.useEffect(() => {
     const element = ref.current;
     if (!owner || !drawn || !element || !gallery) return;
-    return owner.addGallery({ source, filename: name, element, resolve: () => owner.resolve(source, false, true), load: () => owner.load(source) });
-  }, [owner, drawn, source, name, ref, gallery]);
+    // A data URL holds its bytes and never expires, so the viewer needs no second read.
+    return owner.addGallery({ source, filename: name, element, resolve: () => url?.startsWith('data:') ? Promise.resolve(url) : owner.resolve(source, false, true), load: () => owner.load(source) });
+  }, [owner, drawn, source, name, ref, gallery, url]);
 
   const image = url || documentMode ? (
     <img

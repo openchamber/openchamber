@@ -264,8 +264,10 @@ through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
 
-On Capacitor with active proxy headers, `useRawAssetUrl` reads PDF, audio,
-video and fonts through `runtimeFetch` into an object URL. Reads retain at
+On Capacitor with active proxy headers and on any runtime in relay mode,
+`useRawAssetUrl` reads PDF, audio, video and fonts through `runtimeFetch` into
+an object URL: the browser cannot attach those headers to a URL it loads, and
+such a URL never enters the relay tunnel. Reads retain at
 most the existing 10 MiB file-open limit and have a 30-second deadline. A
 file, revision or runtime change aborts the old read and revokes its URL;
 unmount does the same. Failed reads show the existing error without falling
