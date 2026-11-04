@@ -2610,6 +2610,17 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   outline: none !important;
 }
 
+/* What the IME is composing, drawn over the cursor. The hidden textarea holds
+   the same text but cannot show it. Font and colors come from the surface. */
+.terminal-viewport-container .oc-terminal-preedit {
+  position: absolute;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  white-space: pre;
+  text-decoration: underline;
+  pointer-events: none;
+}
+
 .terminal-viewport-container .oc-terminal-scrollbar {
   position: absolute;
   top: 4px;
