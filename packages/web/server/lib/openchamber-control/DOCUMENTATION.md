@@ -91,6 +91,10 @@ other.
   (`trackWaitingPage` in `../opencode/session-runtime.js`), broadcasts
   `openchamber:page-waiting` / `openchamber:page-settled` to the clients, and
   sends the same "Input needed" notification a form gets.
+  A turn that ends (`session.idle`, `session.error` in `index.js`) releases
+  the session's waits through `releaseAnswerWaits`: they leave the pending
+  list, and a late answer is a `404`. See *Why a released page keeps its
+  request open*.
   `renderPageImageSources` lists the local images a page names by absolute
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP), every one of them.
   The image grant route (`../markdown-image-grants/`) allows exactly those, and
@@ -398,6 +402,24 @@ user was reading. A message the user writes in the chat still ends the wait, and
 transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
 through `SyntheticMessage.pending`): drawn as a new turn, it took the question
 out of the chat.
+
+### Why a released page keeps its request open
+
+In one OpenCode no call outlives its turn, so `releaseAnswerWaits` finds
+nothing there. It exists for a second OpenCode on the same database. An
+`opencode` CLI command, an agent's shell included, can start
+`opencode serve --service`. At start it takes over every turn with an open
+execution claim, also one alive in the OpenCode this server runs, and it
+inherits the callback URL and token through the shell's environment. Its page
+call reaches this server, but a chat message goes to this server's OpenCode,
+whose prompt hook has no such call. That turn runs and ends, and the page stayed
+listed until the server restarted: the question mark in the sidebar, background
+messages held out of the chat. Aborting the request cleared that too, but the
+other OpenCode's turn then woke up and answered the same message, so the chat
+had two replies and, with a real model, two agents in one session. The release
+takes the page off the list and leaves that call parked until its request
+ends: that OpenCode exits, this server restarts, or the user stops a turn in
+the session (`abortSession`).
 
 ### Why work.name leaves session titles alone
 

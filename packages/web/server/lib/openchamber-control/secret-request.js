@@ -167,5 +167,5 @@ export const createSecretRequests = ({ isEnabled, files, onWaitChange, hasUnread
     return { status: 'saved' };
   };
 
-  return { request, answer };
+  return { request, answer, release: waits.release };
 };

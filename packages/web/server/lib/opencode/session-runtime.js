@@ -88,7 +88,7 @@ export const createSessionRuntime = ({
   // turn without announcing it.
   // Pages an agent shows that wait for the user's answer sit beside them; they
   // come from this server's own render.page calls, not from OpenCode, and
-  // leave when the call stops waiting (`trackWaitingPage`).
+  // leave when the call stops waiting or the turn ends (`trackWaitingPage`).
   const pendingRequestsBySession = new Map();
   let activeSessionCount = 0;
 
