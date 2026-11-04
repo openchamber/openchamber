@@ -1124,12 +1124,15 @@ export const createSettingsRuntime = (deps) => {
     return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
   };
 
-  const persistSettings = async (changes, { surface = null } = {}) => {
+  // For a caller whose change depends on the settings on disk: `resolveChanges`
+  // runs inside the queue, so no other save lands between that read and this write.
+  const persistResolvedSettings = async (resolveChanges, { surface = null } = {}) => {
     const result = persistSettingsLock.then(async () => {
+      const current = await readSettingsFromDisk({ surface });
+      const changes = resolveChanges(current);
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
       console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
-      const current = await readSettingsFromDisk({ surface });
       const sanitized = sanitizeSettingsUpdate(changes);
       for (const key of Object.keys(sanitized)) {
         // Device state belongs to the install in front of the user, never to
@@ -1235,6 +1238,8 @@ export const createSettingsRuntime = (deps) => {
     return result;
   };
 
+  const persistSettings = (changes, options) => persistResolvedSettings(() => changes, options);
+
   // A background session may discover a project while another window saves
   // settings. Resolve the append inside the settings queue, without activation.
   const registerSessionProject = (resolveProject) => {
@@ -1260,6 +1265,7 @@ export const createSettingsRuntime = (deps) => {
     readSettingsFromDiskMigrated,
     writeSettingsToDisk,
     persistSettings,
+    persistResolvedSettings,
     registerSessionProject,
   };
 };

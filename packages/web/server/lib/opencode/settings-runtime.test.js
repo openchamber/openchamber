@@ -64,6 +64,19 @@ describe('settings runtime', () => {
     } finally { await cleanup(); }
   });
 
+  it('resolves changes against the settings left by the save queued before them', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ lightThemeId: 'old' }));
+      await Promise.all([
+        runtime.persistSettings({ lightThemeId: 'queued-first' }),
+        runtime.persistResolvedSettings((current) => ({ darkThemeId: `after-${current.lightThemeId}` })),
+      ]);
+      const stored = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(stored).toMatchObject({ lightThemeId: 'queued-first', darkThemeId: 'after-queued-first' });
+    } finally { await cleanup(); }
+  });
+
   it('does not overwrite a malformed registry and allows registration after repair', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime();
     try {

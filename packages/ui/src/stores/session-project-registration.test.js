@@ -96,6 +96,64 @@ afterAll(() => {
   else Reflect.deleteProperty(globalThis, 'window');
 });
 
+describe('icon discovery for an added project', () => {
+  const savedPaths = async () => JSON.parse(await fs.readFile(settingsFilePath, 'utf8')).projects.map((entry) => entry.path);
+
+  test('starts once the server has the project, one project at a time', async () => {
+    const asked = [];
+    let finish;
+    const finished = new Promise((resolve) => { finish = resolve; });
+    useProjectsStore.setState({
+      discoverProjectIcon: async (id) => {
+        asked.push({ id, saved: await savedPaths() });
+        if (asked.length === 2) finish();
+        return { ok: true };
+      },
+    });
+    const added = await useProjectsStore.getState().addProjects([automatic.path, manual]);
+    expect(asked).toEqual([]);
+    jest.advanceTimersByTime(200);
+    await finished;
+    expect(asked).toEqual(added.map((entry) => ({ id: entry.id, saved: [automatic.path, manual] })));
+  });
+
+  test('takes only the icon from the answer and writes it over an older queued list', async () => {
+    const iconImage = { mime: 'image/svg+xml', updatedAt: 5, source: 'auto' };
+    await useProjectsStore.getState().addProject(automatic.path);
+    const [first] = useProjectsStore.getState().projects;
+    const answer = { project: { ...first, iconImage }, settings: { projects: [] } };
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      return url.pathname.endsWith('/icon/discover') ? Response.json(answer) : previousFetch(input, init);
+    };
+    // Added while the first project's search runs; its full-list write is still queued.
+    await useProjectsStore.getState().addProject(manual);
+    await originalProjects.discoverProjectIcon(first.id);
+    const { projects, activeProjectId } = useProjectsStore.getState();
+    expect(projects.map((entry) => entry.path)).toEqual([automatic.path, manual]);
+    expect(projects[0].iconImage).toEqual(iconImage);
+    expect(activeProjectId).toBe(projects[1].id);
+    const flushed = updateDesktopSettings({ lightThemeId: root });
+    jest.advanceTimersByTime(200);
+    expect(await flushed).toEqual({ ok: true });
+    const persisted = JSON.parse(await fs.readFile(settingsFilePath, 'utf8'));
+    expect(persisted.projects.map((entry) => entry.path)).toEqual([automatic.path, manual]);
+    expect(persisted.projects[0].iconImage).toEqual(iconImage);
+  });
+
+  test('does not start when saving the project failed', async () => {
+    let asked = false;
+    useProjectsStore.setState({ discoverProjectIcon: async () => { asked = true; return { ok: true }; } });
+    globalThis.fetch = async () => new Response(null, { status: 503 });
+    await useProjectsStore.getState().addProject(manual);
+    const flushed = updateDesktopSettings({ lightThemeId: root });
+    jest.advanceTimersByTime(200);
+    expect(await flushed).toEqual({ ok: false });
+    expect(asked).toBe(false);
+  });
+});
+
 describe('manual and automatic project registration', () => {
   for (const inFlight of [false, true]) {
     test(`keeps both disk entries when the older manual snapshot is ${inFlight ? 'in flight' : 'debounced'}`, async () => {
