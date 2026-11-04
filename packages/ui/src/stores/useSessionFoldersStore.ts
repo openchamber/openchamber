@@ -77,6 +77,9 @@ const MAX_RETRY_DELAY_MS = 30_000;
 // A request that never settles, such as one on a connection that went half-open
 // across sleep, must not hold the folder sync of this window until a reload.
 const FOLDER_REQUEST_TIMEOUT_MS = 15_000;
+// A device's whole copy is the largest body sent here (up to 4 MB). On a slow
+// link 15 s would abort it every time, and each retry starts the upload over.
+const WHOLE_COPY_TIMEOUT_MS = 120_000;
 
 const safeStorage = getDeferredSafeStorage();
 const immediateSafeStorage = getSafeStorage();
@@ -365,9 +368,9 @@ type ServerResult =
   | { kind: 'rejected' }
   | { kind: 'failed' };
 
-const folderRequest = (init?: RequestInit): Promise<Response> => runtimeFetch(SESSION_FOLDERS_API_PATH, {
+const folderRequest = (init?: RequestInit, timeoutMs = FOLDER_REQUEST_TIMEOUT_MS): Promise<Response> => runtimeFetch(SESSION_FOLDERS_API_PATH, {
   ...init,
-  signal: AbortSignal.timeout(FOLDER_REQUEST_TIMEOUT_MS),
+  signal: AbortSignal.timeout(timeoutMs),
 });
 
 // A write on its way holds the browser's cache entry for this URL; a read that
@@ -385,11 +388,11 @@ const readServerResult = async (request: Promise<Response>): Promise<ServerResul
   return parsed.success ? { kind: 'snapshot', snapshot: parsed.data } : { kind: 'failed' };
 };
 
-const sendChanges = (changes: readonly unknown[]): Promise<ServerResult> => readServerResult(folderRequest({
+const sendChanges = (changes: readonly unknown[], timeoutMs?: number): Promise<ServerResult> => readServerResult(folderRequest({
   method: 'PATCH',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ changes }),
-}));
+}, timeoutMs));
 
 /** The whole-copy write a server from before shared folders understands; it merges the copy in. */
 const sendLegacySnapshot = async (foldersMap: SessionFoldersMap, deletedFolderIds: FolderTombstones): Promise<boolean> => {
@@ -403,7 +406,7 @@ const sendLegacySnapshot = async (foldersMap: SessionFoldersMap, deletedFolderId
       deletedFolderIds,
       updatedAt: Date.now(),
     }),
-  }).catch(() => null);
+  }, WHOLE_COPY_TIMEOUT_MS).catch(() => null);
   return Boolean(response?.ok);
 };
 
@@ -600,7 +603,7 @@ const hydrateFromServer = async (): Promise<void> => {
         writePendingChanges(runtimeKey, pendingChanges);
       };
       if (hasLocal) {
-        const result = await sendChanges([{ type: 'import', foldersMap: localFolders, deletedFolderIds: localDeletions }]);
+        const result = await sendChanges([{ type: 'import', foldersMap: localFolders, deletedFolderIds: localDeletions }], WHOLE_COPY_TIMEOUT_MS);
         if (!isCurrent(runtimeKey, generation)) return;
         if (result.kind === 'legacy') {
           legacyServer = true;

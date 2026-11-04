@@ -394,6 +394,34 @@ describe('useSessionFoldersStore folder assignments', () => {
     }
   };
 
+  test('the hand-over and the whole-copy write get longer than other requests', withWindow(async () => {
+    const original = AbortSignal.timeout;
+    const timeouts: Array<{ method: string; ms: number }> = [];
+    let timeoutMs = 0;
+    AbortSignal.timeout = (ms) => {
+      timeoutMs = ms;
+      return original(ms);
+    };
+    try {
+      respond = (request) => {
+        timeouts.push({ method: request.method, ms: timeoutMs });
+        if (request.method === 'PATCH') return json({ error: 'not found' }, 404);
+        if (request.method === 'POST') return json({ success: true });
+        return json({ exists: true, foldersMap: { '/repo': [folder('l', 'Local')] }, updatedAt: 10 });
+      };
+      await connect({ '/repo': [folder('l', 'Local')] }, false);
+      await settle();
+    } finally {
+      AbortSignal.timeout = original;
+    }
+
+    expect(timeouts).toEqual([
+      { method: 'PATCH', ms: 120_000 },
+      { method: 'POST', ms: 120_000 },
+      { method: 'GET', ms: 15_000 },
+    ]);
+  }));
+
   test('a read that never answers does not stop later reads', withWindow(withShortTimeout(async () => {
     respond = () => json({ exists: true, foldersMap: { '/repo': [folder('a', 'A')] }, updatedAt: 10 });
     await connect(null, true);
