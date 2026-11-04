@@ -1,3 +1,26 @@
+## [2.6.1] - 2026-11-04
+
+### New
+
+- Sessions: a session whose folder was renamed or deleted offers Move session above the composer and keeps what you typed (thanks to @yulia-ivashko).
+
+### Improvements
+
+- Performance: the extension asks for less in the background. It refreshes only recent sessions while idle, and usage limits only while they are on screen.
+- Settings/MCP: servers OpenCode adds on its own show as read-only rows with their status (thanks to @DeryFerd).
+- Chat: wrap toggles on tables and code blocks show when they are on (thanks to @DeryFerd).
+
+### Fixes
+
+- Shortcuts: Cmd/Ctrl+P, Cmd/Ctrl+J and Cmd/Ctrl+Shift+F stay with VS Code (thanks to @AlexKutas).
+- Chat: going back to a session restores your place more reliably (thanks to @DeryFerd).
+- Chat: the actions under your message show on machines with no hover, such as a touch screen (thanks to @DeryFerd).
+- Composer: a model you picked holds when you then pick an agent (thanks to @DeryFerd), and a send always switches to the agent shown in the composer (thanks to @IbrahimKhan12).
+- Composer: a long message reference no longer pushes your text past the edge (thanks to @ChangeHow).
+- Multi-run: an armed goal runs in every lane and no longer leaks into your next prompt, and the agent picker stays in parallel mode.
+- MCP: a connected remote server that still needs consent offers sign-in (thanks to @DeryFerd).
+- Settings/Providers: a provider you're signed in to with no models, such as a free Copilot account, keeps its card, so you can remove the account or add another (thanks to @yulia-ivashko).
+
 ## [2.6.0] - 2026-11-02
 
 ### New
