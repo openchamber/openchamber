@@ -1,4 +1,5 @@
 import React from 'react';
+import { CollapsedSessionActivityIndicator } from '../sessions/collapsedActivityIndicator';
 import {
   DndContext,
   DragOverlay,
@@ -519,8 +520,9 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     if (row.kind === 'show-control') {
       // Small and short, so it reads as a control under the list, not a row of it.
       const control = (kind: 'more' | 'fewer') => (
-        <button type="button" className="rounded-md py-0.5 typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline" onClick={() => applyShowControl(row, kind, { model, actions })}>
+        <button type="button" className="inline-flex items-center gap-1.5 rounded-md py-0.5 typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline" onClick={() => applyShowControl(row, kind, { model, actions })}>
           {t(kind === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}
+          {kind === 'more' ? <CollapsedSessionActivityIndicator nodes={row.hiddenNodes} /> : null}
         </button>
       );
       return (

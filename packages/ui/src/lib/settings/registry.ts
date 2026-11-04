@@ -352,7 +352,6 @@ export const SETTINGS_REGISTRY = {
     ui: uiStore('routingFeatureAvailable', (v) => useUIStore.getState().setRoutingFeatureAvailable(v), { autoSave: false }),
   }),
   openCodeUpdateToastDismissedVersion: field({ scope: 'instance', parse: parseTrimmedStringUpTo(128) }),
-  openCodeProjectImportCompleted: field({ scope: 'instance', parse: parseBoolean }),
   autoDeleteEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('autoDeleteEnabled', (v) => useUIStore.getState().setAutoDeleteEnabled(v)) }),
   autoDeleteAfterDays: field({ scope: 'instance', parse: parseIntegerInRange(1, 365), ui: uiStore('autoDeleteAfterDays', (v) => useUIStore.getState().setAutoDeleteAfterDays(v)) }),
   // Apply scope before action so leaving archived-only mode can restore an incoming archive choice.
@@ -619,6 +618,7 @@ export const SETTINGS_REGISTRY = {
   notificationMode: field({ scope: 'profile', parse: parseOneOf(['always', 'hidden-only']), ui: uiStore('notificationMode', (v) => useUIStore.getState().setNotificationMode(v)) }),
   notifyOnSubtasks: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnSubtasks', (v) => useUIStore.getState().setNotifyOnSubtasks(v)) }),
   notifyOnCompletion: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnCompletion', (v) => useUIStore.getState().setNotifyOnCompletion(v)) }),
+  notifyOnPullRequests: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnPullRequests', (v) => useUIStore.getState().setNotifyOnPullRequests(v)) }),
   notifyOnError: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnError', (v) => useUIStore.getState().setNotifyOnError(v)) }),
   notifyOnQuestion: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnQuestion', (v) => useUIStore.getState().setNotifyOnQuestion(v)) }),
   notificationTemplates: field<NotificationTemplates>({

@@ -52,6 +52,7 @@ import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 import { CLOSED_ZONE_VIEW, CONTEXT_ZONE_DEFAULT_WIDTH, getZoneView, isZoneShown, resolveZoneActiveTab, sideZoneWidth, type ContextZone } from '@/lib/workspace/zones';
 import { registerCloseTabTarget } from '@/lib/closeTabTarget';
+import { useClosingZoneTab } from './useClosingZoneTab';
 import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { beginZoneDrag, cancelZoneDrag, finishZoneDrag, startZoneDragGesture, updateZoneDrag } from './zoneDrag';
 import { setZoneBody, setZoneHeaderSlot } from './zoneHosts';
@@ -449,7 +450,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   // This zone's tab: one of its own surfaces, never one placed elsewhere.
-  const activeTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
+  const storedActiveTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
   const zoneView = panelState ? getZoneView(panelState, zone) : CLOSED_ZONE_VIEW;
   const workStatusReserved = useRightSlotStore((state) => state.workStatusReserved);
   const workStatusBesidePanel = useRightSlotStore((state) => state.workStatusBesidePanel);
@@ -457,7 +458,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // The bottom zone belongs to the chat column: a page covering the chat
   // covers it too.
   const coveredByPage = zone === 'bottom' && chatCovered;
-  const isOpen = Boolean(zoneView.isOpen && activeTab) && !coveredByPage;
+  const isOpen = Boolean(zoneView.isOpen && storedActiveTab) && !coveredByPage;
+  const activeTab = useClosingZoneTab(storedActiveTab, isOpen);
   const hasOpenEditorFile = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
     [tabs],

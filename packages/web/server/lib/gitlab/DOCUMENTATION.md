@@ -73,3 +73,7 @@ GitLab has no stack object. A merge request's chain is read with its context (`c
 ### Why the SSH clone URL may name another host and the web URLs may not
 
 A self-managed GitLab sets its SSH host separately (`gitlab_ssh_host`), often a different name behind a reverse proxy, so requiring the instance host there rejected every project on such instances. The web and HTTP clone URLs stay bound to the instance because the server and UI may open them; the SSH URL is only passed through as `sshUrl` and nothing connects to it, so its project path is the check that still catches a mismatched payload.
+
+## Review drafts
+
+A review is the viewer's draft notes (`MergeRequestDraftNotes`). `/pr/review` publishes them first, then gives the verdict, so what it answers is on the merge request when it lands. GitLab refuses an unchanged line named by one side, so `/pr/review/comment` reads the file's hunks for both numbers (`pairedDiffLine`), and a range goes as its two ends with GitLab's `line_code`. A thread whose position has another `head_sha` belongs to an older push: it stays on the board. Discarding removes notes one by one, because GitLab has no call for the whole draft.

@@ -1600,6 +1600,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['completion', 'subtasks', 'errors', 'questions'],
   },
   {
+    id: 'notifications.pullRequests',
+    page: 'notifications',
+    titleKey: 'settings.notifications.pullRequests.label',
+    descriptionKey: 'settings.notifications.pullRequests.info',
+    keywords: ['pull requests', 'merge queue', 'auto-merge', 'checks', 'github'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'notifications.push',
     page: 'notifications',
     titleKey: 'settings.notifications.page.push.title',

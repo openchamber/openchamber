@@ -78,9 +78,13 @@ The guidance asks for one `value` per item, but in the triage benchmark four of 
 
 A triage of five cards was a wall of buttons in which the undecided cards were hard to find. A card folds once answered, so what is left to decide stays open and what is decided reads as one line: the title, the answer, "Change". The recommended button is tinted rather than marked by its text colour, which did not read as a recommendation; with the chosen card folded, a tint no longer looks like a choice already made.
 
-### Why an `<openui-lang>` tag draws as a block
+### Why an `<openui-lang>` tag and an `openui` fence draw as a block
 
-The guidance reaches the agent inside XML context tags, and weaker models (GLM Flash) answered with the block wrapped in `<openui-lang>…</openui-lang>`: the program was valid, but the chat showed it as one paragraph. The guidance now spells the fence out, and `taggedBlocks.ts` turns such a tag into a fence before an assistant reply renders, so replies already written that way draw too. Only a tag at the start of a line outside code fences counts. Rejecting the tag as a model error was the alternative; the program inside is correct, and the user loses the reply over a wrapper.
+The guidance reaches the agent inside XML context tags, and weaker models (GLM Flash) answered with the block wrapped in `<openui-lang>…</openui-lang>`: the program was valid, but the chat showed it as one paragraph. Other models open the fence as `openui`, the library's name, and the chat showed the program as code. The guidance spells the fence out, and `taggedBlocks.ts` turns both into an `openui-lang` fence before an assistant reply renders, so replies already written that way draw too. Only a tag or fence at the start of a line outside other code fences counts. Rejecting them as model errors was the alternative; the program inside is correct, and the user loses the reply over a label.
+
+### Why a block that cannot be drawn shows its reasons and folds its source
+
+A block with an error shows the parser's reasons and a folded "Source". The source used to show in full under "Its source:": a form of several options filled the reply, and the reasons were nowhere, so users read it as a crash of the whole feature. On a page the chat sends those reasons to the agent, which usually draws the page again at once; the failed page's status line says it went back to the agent, so the two pages in a row read as a retry.
 
 ### Why OpenUI's state, bindings and actions are left out
 

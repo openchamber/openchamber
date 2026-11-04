@@ -25,9 +25,12 @@ declare module "bun:test" {
     toBeLessThanOrEqual(expected: number): void;
     toBeCloseTo(expected: number, numDigits?: number): void;
     toHaveLength(expected: number): void;
+    toHaveBeenCalled(): void;
+    toHaveBeenCalledTimes(expected: number): void;
     toBeInstanceOf(expected: unknown): void;
     toHaveProperty(path: string): void;
     not: {
+      toHaveBeenCalled(): void;
       toEqual(expected: unknown): void;
       toBe(expected: unknown): void;
       toContain(expected: unknown): void;
@@ -54,6 +57,7 @@ declare module "bun:test" {
     mockImplementation(fn: T): Spy<T>;
     mockImplementationOnce(fn: T): Spy<T>;
     mockResolvedValue(value: Awaited<ReturnType<T>>): Spy<T>;
+    mockResolvedValueOnce(value: Awaited<ReturnType<T>>): Spy<T>;
     mockRejectedValue(value: Error): Spy<T>;
     mockRejectedValueOnce(value: Error): Spy<T>;
     mockRestore(): void;

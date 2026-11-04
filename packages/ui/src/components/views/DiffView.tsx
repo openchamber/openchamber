@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { statusToGitCode, type TurnSnapshotDiff } from './turnSnapshotDiff';
+import { statusToGitCode } from './turnSnapshotDiff';
 import { toast } from '@/components/ui';
 
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -63,6 +63,9 @@ import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { ToolbarButton, ToolbarTooltipButton } from '@/components/ui/action-toolbar';
+import { ReviewFileMark } from '@/components/review/ReviewFileMark';
+import { ReviewSubmitButton } from '@/components/review/ReviewSubmitButton';
+import { ChangeRequestReviewContext, useComparisonReview } from '@/components/review/useChangeRequestReview';
 import { toastContextFileOpenFailure, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { StatusImage } from '@/components/ui/status-image';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
@@ -81,8 +84,7 @@ import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionMessages } from '@/sync/sync-context';
-import { opencodeClient } from '@/lib/opencode/client';
+import { useLastTurnDiff } from './useLastTurnDiff';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
@@ -420,6 +422,7 @@ const FileTree = React.memo<FileListProps>(({
                                 <FileTypeIcon filePath={row.file.path} className="ms-0.5 size-3.5 flex-shrink-0" />
                                 <span className="oc-file-tree-row-name typography-meta">{row.name}</span>
                                 <FileTreeRowEnd className="pe-2">
+                                    <ReviewFileMark path={row.file.path} />
                                     <FileTreeStatusLetter
                                         code={descriptor.code}
                                         color={descriptor.color}
@@ -646,18 +649,20 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
     React.useEffect(() => {
         let cancelled = false;
         const runtimeKey = getRuntimeKey();
-        const request: Promise<DiffData> = isImageFile(file.path)
-            ? git.getGitFileDiff(directory, { path: file.path, staged }).then((response) => ({
-                original: response.original ?? '',
-                modified: response.modified ?? '',
-                isBinary: response.isBinary,
-                submodule: response.submodule,
-                contextMode: 'full',
-            }))
-            : git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => ({
-                ...createTextDiffDataFromPatch(file.path, response.diff, 'patch'),
-                submodule: response.submodule,
-            }));
+        const request: Promise<DiffData> = !git.getGitFileDiff || !git.getGitDiff
+            ? Promise.reject(new Error(t('diffView.unavailable.missingTitle')))
+            : isImageFile(file.path)
+                ? git.getGitFileDiff(directory, { path: file.path, staged }).then((response) => ({
+                    original: response.original ?? '',
+                    modified: response.modified ?? '',
+                    isBinary: response.isBinary,
+                    submodule: response.submodule,
+                    contextMode: 'full',
+                }))
+                : git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => ({
+                    ...createTextDiffDataFromPatch(file.path, response.diff, 'patch'),
+                    submodule: response.submodule,
+                }));
         // A refetch keeps the diff on screen until its replacement arrives.
         void request.then(
             (data) => {
@@ -1135,12 +1140,14 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         let cancelled = false;
         const runtimeKey = getRuntimeKey();
         const contextLines = loadFullFiles ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
-        const displayRequest = isImageFile(file.path)
-            ? git.getGitFileDiff(directory, { path: file.path, staged })
-            : !loadFullFiles && actionPatch !== null
-                ? Promise.resolve({ diff: actionPatch, submodule: actionSubmodule })
+        const displayRequest = !git.getGitFileDiff || !git.getGitDiff
+            ? Promise.reject(new Error(t('diffView.unavailable.missingTitle')))
+            : isImageFile(file.path)
+                ? git.getGitFileDiff(directory, { path: file.path, staged })
+                : !loadFullFiles && actionPatch !== null
+                    ? Promise.resolve({ diff: actionPatch, submodule: actionSubmodule })
             : git.getGitDiff(directory, { path: file.path, staged, contextLines });
-        const canonicalRequest = hunkEligible && loadFullFiles && actionPatch === null
+        const canonicalRequest = hunkEligible && loadFullFiles && actionPatch === null && git.getGitDiff
             ? git.getGitDiff(directory, { path: file.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES }).then((response) => response.diff)
             : Promise.resolve(actionPatch);
         const fetchPromise = Promise.all([displayRequest, canonicalRequest]);
@@ -1363,6 +1370,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                         </span>
                     </div>
                     <div className="relative flex shrink-0 items-center justify-self-end gap-2">
+                        <ReviewFileMark path={file.path} />
                         {formatDiffTotals(file.insertions, file.deletions)}
                         {showOpenInEditorAction && onOpenInEditor ? (
                             <ToolbarTooltipButton
@@ -1618,7 +1626,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
     // Another project's PR has nothing to do with the session on screen.
     const panelSessionId = useSessionUIStore((state) => state.currentSessionId);
     const currentSessionId = foreign ? null : panelSessionId;
-    const sessionMessages = useSessionMessages(activeDiffScope === 'turn' ? currentSessionId ?? '' : '', rootDirectory ?? undefined);
     const diffWrapLines = diffWrapLinesStore;
     const forcedStaged = activeDiffScope === 'staged' ? true : activeDiffScope === 'working' ? false : null;
     const activeDiffStaged = forcedStaged ?? displayFileStaged;
@@ -1673,46 +1680,17 @@ export const DiffView: React.FC<DiffViewProps> = ({
         });
     }, []);
 
-    // v1 read the last turn's diffs off a working-tree snapshot on the user
-    // message. v2 computes them on request from the turn's snapshots
-    // (`GET /api/session/:id/diff`), merged per file, so a file edited three
-    // times in one turn is one diff. Refetched whenever the transcript moves
-    // (a turn ending is what changes the answer).
-    const [lastTurnDiffs, setLastTurnDiffs] = React.useState<TurnSnapshotDiff[]>([]);
-    // A failed read is not "this turn changed nothing": it keeps its own state
-    // and a retry, and the last good list stays until a read replaces it.
-    const [turnDiffError, setTurnDiffError] = React.useState<string | null>(null);
-    const [turnDiffAttempt, retryTurnDiff] = React.useReducer((value: number) => value + 1, 0);
-    // Another session's turn is never shown while this one's loads.
-    React.useEffect(() => {
-        setLastTurnDiffs([]);
-        setTurnDiffError(null);
-    }, [currentSessionId]);
-    const lastMessageId = sessionMessages.length > 0 ? sessionMessages[sessionMessages.length - 1].id : '';
-    React.useEffect(() => {
-        if (activeDiffScope !== 'turn' || !currentSessionId || !visible) return;
-        let cancelled = false;
-        void opencodeClient.getSessionTurnDiff(currentSessionId, { directory: rootDirectory ?? undefined })
-            .then((files) => {
-                if (cancelled) return;
-                setLastTurnDiffs(files.map((entry) => ({
-                    file: entry.file,
-                    patch: entry.patch,
-                    status: entry.status,
-                    additions: entry.additions,
-                    deletions: entry.deletions,
-                })));
-                setTurnDiffError(null);
-            })
-            .catch((error) => {
-                if (cancelled) return;
-                console.warn('[diff-view] turn diff unavailable:', error instanceof Error ? error.message : error);
-                setTurnDiffError(error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff'));
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [activeDiffScope, currentSessionId, lastMessageId, rootDirectory, t, turnDiffAttempt, visible]);
+    // The last turn's diffs, merged per file by OpenCode from the turn's
+    // snapshots, so a file edited three times in one turn is one diff. Read
+    // in every scope while the view is shown, so the scope picker's count is
+    // current before the user switches to it.
+    const {
+        diffs: lastTurnDiffs,
+        count: turnFileCount,
+        loaded: turnDiffLoaded,
+        error: turnDiffError,
+        retry: retryTurnDiff,
+    } = useLastTurnDiff(currentSessionId, rootDirectory ?? undefined, { enabled: visible, live: activeDiffScope === 'turn' });
 
     const lastTurnDiffData = React.useMemo(() => {
         const map = new Map<string, DiffData>();
@@ -1740,8 +1718,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (!status?.files) return 0;
         return status.files.filter(isStagedStatusFile).length;
     }, [status]);
-
-    const turnFileCount = lastTurnDiffs.length;
 
     // ----- Branch scope (all changes on this branch vs its base) -----
     const currentBranch = status?.current ?? null;
@@ -1872,6 +1848,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         () => diffCommentOriginFromSource(comparisonSource, { provider: prComparison.provider, revision: selectedPrHead }),
         [comparisonSource, prComparison.provider, selectedPrHead],
     );
+    const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, effectiveDirectory, visible && activeDiffScope === 'pr' && !isVSCodeRuntime());
     const comparison = useGitComparison(effectiveDirectory ?? null, comparisonSource, visible && !isVSCodeRuntime(), activeDiffScope === 'branch' ? branchRevision : '', prComparison.readContext, prComparison.provider);
     const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
     const commitFiles = activeDiffScope === 'commit' ? comparison.files : null;
@@ -2588,6 +2565,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 revision,
                 load: async () => {
                     if (isImageFile(nestedFile.path)) return null;
+                    if (!git.getGitDiff) return null;
                     const staged = isStagedStatusFile(nestedFile) && !isWorkingStatusFile(nestedFile);
                     const response = await git.getGitDiff(nestedDirectory, { path: nestedFile.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES });
                     const data = { ...createTextDiffDataFromPatch(nestedFile.path, response.diff, 'patch'), submodule: response.submodule };
@@ -2650,6 +2628,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return resolveFindDiff(diffDataToFileDiff(filePath, result.data), diffHideWhitespace);
         }
         if (!effectiveDirectory || isImageFile(filePath)) return null;
+        if (!git.getGitDiff) return null;
+        const getGitDiff = git.getGitDiff;
         // Search exactly the side the viewer renders. `getGitDiff` reads the
         // unstaged (index -> working tree) side when `staged` is false and the
         // staged (HEAD -> index) side when it is true, the same read the viewer
@@ -2659,13 +2639,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
         // output for the viewer's fallback and the prefetcher.
         const staged = getFileStaged(filePath);
         const contextLines = fullContext ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
-        let response: Awaited<ReturnType<typeof git.getGitDiff>>;
+        let response: Awaited<ReturnType<typeof getGitDiff>>;
         try {
             const batched = await readBatchedDiffForFind(effectiveDirectory, filePath, revision, staged, fullContext);
             if (batched && !batched.ok && batched.reason) throw new GitPathUnavailableError(batched.error, batched.reason);
             response = batched?.ok
                 ? batched.diff
-                : await git.getGitDiff(effectiveDirectory, { path: filePath, staged, contextLines });
+                : await getGitDiff(effectiveDirectory, { path: filePath, staged, contextLines });
         } catch (error) {
             if (!(error instanceof GitPathUnavailableError)) throw error;
             if (error.reason === 'nested_repository') return readNestedRepositoryForFind(filePath, getLayoutForFile(file), revision);
@@ -2771,7 +2751,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 targetLine = getFirstChangedModifiedLine(cachedDiffData.original, cachedDiffData.modified);
             }
 
-            if (targetLine === null) {
+            if (targetLine === null && git.getGitDiff) {
                 try {
                     const patchResponse = await git.getGitDiff(effectiveDirectory, {
                         path: filePath,
@@ -2785,7 +2765,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             }
 
             let diffForNavigation = cachedDiffData;
-            if (targetLine === null || !diffForNavigation) {
+            if ((targetLine === null || !diffForNavigation) && git.getGitFileDiff) {
                 const response = await git.getGitFileDiff(effectiveDirectory, { path: filePath, staged: activeDiffStaged });
                 const fetchedDiff = {
                     original: response.original ?? '',
@@ -2799,9 +2779,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 }
             }
 
-            const resolvedTargetLine = targetLine ?? ((diffForNavigation.isBinary || isImageFile(filePath))
-                ? 1
-                : getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified));
+            const resolvedTargetLine = targetLine
+            ?? (diffForNavigation && !diffForNavigation.isBinary && !isImageFile(filePath)
+              ? getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified)
+              : 1);
 
             const absolutePath = toAbsolutePath(effectiveDirectory, filePath);
             const openValidation = await validateContextFileOpen(files, absolutePath, { directory: effectiveDirectory });
@@ -2853,7 +2834,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 onFindWordRequest={handleFindWordRequest}
                 onFullContextChange={handleFullContextChange}
                 findReveal={findReveal && isFindRevealFor(file.path, findReveal.key) ? findReveal : null}
-                showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn' && !foreign}
+                showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn' && !foreign && !(activeDiffScope === 'pr' && selectedPr?.linked)}
                 isOpeningInEditor={openingEditorFilePath === file.path}
                 onOpenInEditor={handleOpenInEditor}
                 staged={getFileStaged(file.path)}
@@ -3075,9 +3056,18 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-sm text-muted-foreground">
                     <div className="typography-ui-label font-semibold text-foreground">{t('diffView.state.failedToLoadDiff')}</div>
                     <div className="typography-meta max-w-[32rem] text-center">{turnDiffError}</div>
-                    <button type="button" className="typography-ui-label text-primary hover:underline" onClick={() => { setTurnDiffError(null); retryTurnDiff(); }}>
+                    <button type="button" className="typography-ui-label text-primary hover:underline" onClick={retryTurnDiff}>
                         {t('diffView.actions.retry')}
                     </button>
+                </div>
+            );
+        }
+
+        if (activeDiffScope === 'turn' && !turnDiffLoaded && currentSessionId) {
+            return (
+                <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Icon name="loader-4" className="size-4 animate-spin" />
+                    {t('diffView.state.loadingChanges')}
                 </div>
             );
         }
@@ -3161,6 +3151,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     };
 
     return (
+        <ChangeRequestReviewContext.Provider value={changeRequestReview}>
         <div ref={diffRootRef} data-find-surface="" className="flex h-full flex-col overflow-hidden bg-background">
             <ContextPanelHeaderToolbar>
             <div ref={toolbarRef} className={cn('flex min-w-0 items-center gap-2', inPanelHeader ? 'flex-1 py-1 pe-1' : 'px-3 py-2 bg-background')}>
@@ -3256,6 +3247,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         </span>
                     </Button>
                 )}
+                {changeRequestReview && reviewProvider ? (
+                    <ReviewSubmitButton
+                        review={changeRequestReview}
+                        provider={reviewProvider}
+                        className="diff-toolbar__review-button"
+                        labelClassName="diff-toolbar__review-label"
+                    />
+                ) : null}
                 {changedFiles.length > 0 && showReviewAction && (
                     <Button
                         variant="default"
@@ -3367,5 +3366,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
             {renderContent()}
         </div>
+        </ChangeRequestReviewContext.Provider>
     );
 };

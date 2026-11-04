@@ -44,6 +44,26 @@ const useSessions = (sessions: Session[]): void => {
 };
 
 describe('openSessionFromRoute', () => {
+  test('native jump-list entries ignore unknown sessions and open known sessions', async () => {
+    useSessions([buildSession(SESSION_ID, PROJECT_DIR)]);
+    useSessionUIStore.getState().setCurrentSession(SESSION_ID, PROJECT_DIR);
+    await openSession('ses_unknown', { requireKnownSession: true });
+    expect(useSessionUIStore.getState().currentSessionId).toBe(SESSION_ID);
+    useSessionUIStore.getState().setCurrentSession(null);
+    await openSession(SESSION_ID, { requireKnownSession: true });
+    expect(useSessionUIStore.getState().currentSessionId).toBe(SESSION_ID);
+  });
+
+  test('a jump-list lookup does not override a session selected while it waits', async () => {
+    const otherId = 'ses_selected_after_jump';
+    useSessions([buildSession(SESSION_ID, PROJECT_DIR), buildSession(otherId, OTHER_DIR)]);
+    useSessionUIStore.getState().setCurrentSession(null);
+    const opening = openSession(SESSION_ID, { requireKnownSession: true });
+    useSessionUIStore.getState().setCurrentSession(otherId, OTHER_DIR);
+    await opening;
+    expect(useSessionUIStore.getState().currentSessionId).toBe(otherId);
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(OTHER_DIR);
+  });
   beforeEach(() => {
     useProjectsStore.setState({ projects: [PROJECT_DIR, OTHER_DIR, WORKTREE_DIR].map((path) => ({ id: path, path })) });
     useSessionUIStore.getState().setCurrentSession(null);

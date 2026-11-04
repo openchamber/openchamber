@@ -32,9 +32,11 @@ import {
   readReferencePeople,
   readReferenceState,
   readReferencesAcrossRequest,
+  parseReferenceLink,
   searchGitHubReferences,
   searchGitHubReferencesAcross,
 } from './reference-search.js';
+import { fetchReviewState } from './review-draft.js';
 
 /**
  * GitHub's bound reads behind the shared route shell: change request status,
@@ -134,10 +136,12 @@ export function createGitHubResources({
   /**
    * The repository a read names, inside the primary remote's fork network,
    * or null for one outside it. Without a selector, the primary repository.
+   * A `linked` read names its repository wherever it is.
    */
-  const resolveRepoForRequest = async (octokit, directory, requestedRepo, remoteName) => {
+  const resolveRepoForRequest = async (octokit, directory, requestedRepo, remoteName, { linked = false } = {}) => {
     const { repo } = await resolveRepo(directory, remoteName);
     if (!repo) throw new Error(`Unable to resolve GitHub repo from git remote "${remoteName}"`);
+    if (linked && requestedRepo) return requestedRepo;
     const network = requireGitHubRepoNetwork(await resolveNetwork(octokit, directory, remoteName, { strictErrors: true }), repo);
     if (!requestedRepo) return repo;
     if (repo.owner === requestedRepo.owner && repo.repo === requestedRepo.repo) return requestedRepo;
@@ -461,12 +465,12 @@ export function createGitHubResources({
         primaryRemote: remote,
         number,
       };
-      const cacheKey = JSON.stringify([directory, number, includeDiff, requestedRepo ? `${requestedRepo.owner}/${requestedRepo.repo}` : null, scope]);
+      const cacheKey = JSON.stringify([directory, number, includeDiff, requestedRepo ? `${requestedRepo.owner}/${requestedRepo.repo}` : null, scope, context?.linked === true]);
       const cached = contextCache.read(cacheKey, includeCIDetails);
       if (cached) return cached;
       const started = contextCache.begin();
 
-      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo, remote);
+      const repo = await resolveRepoForRequest(octokit, directory, requestedRepo, remote, { linked: context?.linked });
       if (!repo) return emptyContext(identity);
       const route = { owner: repo.owner, repo: repo.repo };
       const projectDTO = mapProject(repo, identity);
@@ -587,20 +591,20 @@ export function createGitHubResources({
     },
 
     /** The issue, null for a selector outside the bound network; a pull request number is refused. */
-    getIssue: async ({ session, directory, number, project, remote }) => {
+    getIssue: async ({ session, context, directory, number, project, remote }) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
-      const repo = await resolveRepoForRequest(octokit, directory, project ? { owner: project.owner, repo: project.name } : null, remote);
+      const repo = await resolveRepoForRequest(octokit, directory, project ? { owner: project.owner, repo: project.name } : null, remote, { linked: context?.linked });
       if (!repo) return null;
       const issue = requireGitHubIssue((await octokit.rest.issues.get({ owner: repo.owner, repo: repo.repo, issue_number: number }))?.data, 'GitHub returned an invalid issue');
       if (issue.pull_request) throw responseError(400, { error: 'Not a GitHub issue' });
       return mapIssue(issue, mapProject(repo, identity), identity);
     },
 
-    issueComments: async ({ session, directory, number, project, remote }) => {
+    issueComments: async ({ session, context, directory, number, project, remote }) => {
       const { octokit } = accountOf(session);
       const identity = identityOf(session);
-      const repo = await resolveRepoForRequest(octokit, directory, project ? { owner: project.owner, repo: project.name } : null, remote);
+      const repo = await resolveRepoForRequest(octokit, directory, project ? { owner: project.owner, repo: project.name } : null, remote, { linked: context?.linked });
       if (!repo) return [];
       const response = await octokit.rest.issues.listComments({ owner: repo.owner, repo: repo.repo, issue_number: number, per_page: 100 });
       return requireProviderArray(response?.data, 'GitHub returned an invalid issue comment list')
@@ -689,15 +693,29 @@ export function createGitHubResources({
 
     /**
      * One page of issues or PRs for the reference picker, or the item a
-     * pasted link or number names, across the repository network.
+     * pasted link or number names, across the repository network. A `linked`
+     * read answers the one item its link names, wherever the repository is.
      */
-    references: ({ session, directory, remote, kind, state, people, query, cursor }) => pickerRead(async () => {
+    references: ({ session, context, directory, remote, kind, state, people, query, cursor }) => pickerRead(async () => {
       const { octokit } = accountOf(session);
       const { rateLimit } = await load();
       const { repo } = await resolveRepo(directory, remote);
       // The gate short-circuits only this host.
       if (rateLimit.isGitHubRateLimited(repo?.host)) throw responseError(503, { error: 'GitHub rate limited' });
       if (!repo) return { connected: true, repo: null, items: [], cursor: null, hasMore: false, total: 0 };
+      if (context?.linked) {
+        const link = parseReferenceLink(query ?? '', repo.host || GITHUB_COM);
+        if (!link) return { connected: true, repo, items: [], cursor: null, hasMore: false, total: 0 };
+        return { connected: true, repo, ...(await searchGitHubReferences({
+          octokit,
+          repos: [{ owner: link.owner, repo: link.repo, source: 'origin' }],
+          kind,
+          state: readReferenceState(state),
+          people: readReferencePeople(people),
+          text: `#${link.number}`,
+          cursor: null,
+        })) };
+      }
       const network = requireGitHubRepoNetwork(await resolveNetwork(octokit, directory, remote, { strictErrors: true }), repo);
       const page = await searchGitHubReferences({
         octokit,
@@ -802,7 +820,7 @@ export function createGitHubResources({
      * discussion's comment threads. A named enterprise `host` reads with that
      * host's Octokit; its repository must still be in the bound network.
      */
-    referenceDetail: ({ session, directory, remote, project, number, host, kind }) => pickerRead(async () => {
+    referenceDetail: ({ session, context, directory, remote, project, number, host, kind }) => pickerRead(async () => {
       const { octokit: github, rateLimit } = await load();
       const requestedHost = String(host ?? '').trim().toLowerCase();
       const octokit = requestedHost ? await github.getOctokitOrNull(requestedHost) : accountOf(session).octokit;
@@ -819,20 +837,29 @@ export function createGitHubResources({
         if (!network.some((entry) => sameRepository(entry, { owner: project.owner, repo: project.name }))) throw notInProject();
         repo = { owner: project.owner, repo: project.name };
       } else {
-        repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
+        repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote, { linked: context?.linked });
         if (!repo) throw notInProject();
       }
       const read = kind === 'discussion' ? fetchDiscussionDetail : fetchReferenceDetail;
       return { connected: true, detail: await read({ octokit, owner: repo.owner, repo: repo.repo, number }) };
     }),
 
+    /** The viewer's review draft and the open threads of one PR, read with the bound account. */
+    reviewState: ({ session, directory, remote, project, number }) => pickerRead(async () => {
+      const { octokit } = accountOf(session);
+      const repo = await resolveRepoForRequest(octokit, directory, { owner: project.owner, repo: project.name }, remote);
+      if (!repo) throw notInProject();
+      return fetchReviewState({ octokit, owner: repo.owner, repo: repo.repo, number });
+    }),
+
     /**
      * What colours the PRs a picker page shows, from the sidebar's summaries.
      * Refs group by host (missing means github.com), each on its own Octokit;
      * an untrusted, cooling or failed enterprise host drops only its refs.
-     * Every PR on the checkout's own host must be in the bound network.
+     * Every PR on the checkout's own host must be in the bound network, unless
+     * a link named it (`linked`).
      */
-    referenceStatuses: ({ directory, remote, pulls }) => pickerRead(async () => {
+    referenceStatuses: ({ context, directory, remote, pulls }) => pickerRead(async () => {
       const { octokit: github, rateLimit, summaries: summaryReads } = await load();
       const refs = readPullStatusRefs(pulls);
       if (!refs) throw responseError(400, { error: 'directory and pulls (owner/repo#number, comma separated) are required' });
@@ -850,7 +877,7 @@ export function createGitHubResources({
       if (!checkoutOctokit) return { connected: false };
       const network = requireGitHubRepoNetwork(await resolveNetwork(checkoutOctokit, directory, remote, { strictErrors: true }), repo)
         ?? [{ ...repo, source: 'origin' }];
-      if (!(refsByHost.get(checkoutHost) ?? []).every((ref) => network.some((entry) => sameRepository(entry, ref)))) throw notInProject();
+      if (!context?.linked && !(refsByHost.get(checkoutHost) ?? []).every((ref) => network.some((entry) => sameRepository(entry, ref)))) throw notInProject();
       const statuses = [];
       for (const [refHost, hostRefs] of refsByHost) {
         if (rateLimit.isGitHubRateLimited(refHost)) continue;

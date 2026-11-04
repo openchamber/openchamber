@@ -264,8 +264,10 @@ through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with
 the scoped URL token; the server streams byte ranges so playback can seek.
 Images keep the object-URL/data-URL path.
 
-On Capacitor with active proxy headers, `useRawAssetUrl` reads PDF, audio,
-video and fonts through `runtimeFetch` into an object URL. Reads retain at
+On Capacitor with active proxy headers and on any runtime in relay mode,
+`useRawAssetUrl` reads PDF, audio, video and fonts through `runtimeFetch` into
+an object URL: the browser cannot attach those headers to a URL it loads, and
+such a URL never enters the relay tunnel. Reads retain at
 most the existing 10 MiB file-open limit and have a 30-second deadline. A
 file, revision or runtime change aborts the old read and revokes its URL;
 unmount does the same. Failed reads show the existing error without falling
@@ -331,6 +333,12 @@ asks for its grant with `allowOutsideWorkspace`, and the server scopes it to
 the page's folder. VS Code renders `srcDoc` in the same sandbox. The server
 side (read root, CORS, CSP) is described in
 `packages/web/server/lib/fs/DOCUMENTATION.md`.
+
+On a relay connection the panel says the preview is unavailable and offers the
+code, asks for no grant, and the toolbar has no "Annotate page". The browser loads the page and its files itself,
+and a URL it loads never enters the tunnel. Reading the page through the tunnel
+into `srcDoc` was rejected: its neighbouring files would be lost, and a relative
+URL in a `srcDoc` frame resolves against the app's own address.
 
 The preview toolbar has the browser panel's "Annotate page" toggle
 (`useHtmlPreviewAnnotation`, a thin use of `components/browser/useFrameAnnotation.ts`,

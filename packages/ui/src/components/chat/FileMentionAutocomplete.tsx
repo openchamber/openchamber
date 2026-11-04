@@ -23,6 +23,7 @@ import {
   mentionSearchKey,
   mentionServerQuery,
   rankFileMentionResults,
+  type FileMentionHit,
 } from './fileMentionResults';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { AutocompleteLoadingRow, AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
@@ -42,6 +43,23 @@ type AgentInfo = {
   description?: string;
   mode?: string | null;
 };
+
+/** The rows the list shows, top to bottom, and the search they answer. */
+type MentionRows = {
+  key: string | null;
+  agents: AgentInfo[];
+  moreAgents: boolean;
+  recentFiles: FileInfo[];
+  results: FileMentionHit[];
+  sessions: Session[];
+};
+
+const mentionRowIds = ({ agents, recentFiles, results, sessions }: MentionRows): string[] => [
+  ...agents.map((agent) => `agent:${agent.name}`),
+  ...recentFiles.map((file) => `file:${file.path}`),
+  ...results.map((file) => `file:${file.path}`),
+  ...sessions.map((session) => `session:${session.id}`),
+];
 
 export interface FileMentionHandle {
   handleKeyDown: (key: string) => void;
@@ -125,6 +143,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const searchPending = wantedSearchKey !== null && search?.key !== wantedSearchKey;
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
+  const previousViewRef = React.useRef<MentionRows | null>(null);
   const [marqueeWidth, setMarqueeWidth] = React.useState(360);
   // Only the selected row scrolls an overflowing path, so only it is measured.
   const [selectedOverflow, setSelectedOverflow] = React.useState<{ index: number; duration: number } | null>(null);
@@ -270,13 +289,15 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     const files = settledSearch.files.filter((hit) => !recentSet.has(hit.path));
     return rankFileMentionResults(files, settledSearch.directories, normalizedSearchQuery, 20);
   }, [settledSearch, visibleRecentFiles, normalizedSearchQuery]);
-  const liveView = React.useMemo(() => ({
+  const settledSearchKey = settledSearch?.key ?? null;
+  const liveView = React.useMemo<MentionRows>(() => ({
+    key: settledSearchKey,
     agents: visibleAgents,
     moreAgents: visibleAgents.length < agents.length,
     recentFiles: visibleRecentFiles,
     results: visibleResults,
     sessions: visibleSessions,
-  }), [agents.length, visibleAgents, visibleRecentFiles, visibleResults, visibleSessions]);
+  }), [agents.length, settledSearchKey, visibleAgents, visibleRecentFiles, visibleResults, visibleSessions]);
   // While a query searches, the popup keeps the last settled rows, so it does
   // not collapse and regrow on every keystroke: its height changes once per
   // answer, by what the answer changed.
@@ -312,14 +333,27 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     }
 
     let cancelled = false;
+    let answered = false;
     const serverQuery = mentionServerQuery(debouncedQuery ?? '');
     const options = { includeHidden: showHidden, respectGitignore: !showGitignored };
-    // One answer for both kinds, so the rows change once; a failed kind
-    // lists nothing without taking the other kind's hits with it.
+    // A failed kind lists nothing without taking the other kind's hits with it.
+    const directorySearch = searchFiles(currentDirectory, serverQuery, 20, { ...options, type: 'directory' }).catch((): FileInfo[] => []);
+    // OpenCode's index answers at once; the search behind the hidden and
+    // gitignored toggles can walk the project for seconds. Its hits are shown
+    // as soon as there are any, and the toggles' extra rows join them later.
+    void Promise.all([
+      searchFiles(currentDirectory, serverQuery, 80, { type: 'file' }).catch((): FileInfo[] => []),
+      directorySearch,
+    ]).then(([files, directories]) => {
+      if (!cancelled && !answered && files.length + directories.length > 0) {
+        setSearch({ key: debouncedSearchKey, files, directories });
+      }
+    });
     void Promise.all([
       searchFiles(currentDirectory, serverQuery, 80, { ...options, type: 'file' }).catch((): FileInfo[] => []),
-      searchFiles(currentDirectory, serverQuery, 20, { ...options, type: 'directory' }).catch((): FileInfo[] => []),
+      directorySearch,
     ]).then(([files, directories]) => {
+      answered = true;
       if (!cancelled) {
         setSearch({ key: debouncedSearchKey, files, directories });
       }
@@ -330,14 +364,21 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     };
   }, [currentDirectory, debouncedQuery, debouncedSearchKey, searchFiles, showHidden, showGitignored]);
 
-  // A new answer starts at its best match; rows held while a query searches
-  // keep the selection where the keyboard put it.
-  React.useEffect(() => {
-    setSelectedIndex(0);
+  // A new query's answer starts at its best match; rows held while a query
+  // searches keep the selection where the keyboard put it, and new rows for
+  // the same query leave it on the row the user is on. Before paint and the
+  // next key, so Enter never reads the old position in the new rows.
+  React.useLayoutEffect(() => {
+    const previous = previousViewRef.current;
+    previousViewRef.current = view;
+    const selected = previous && view.key !== null && previous.key === view.key
+      ? mentionRowIds(previous)[selectedIndexRef.current]
+      : undefined;
+    setSelectedIndex(selected === undefined ? 0 : Math.max(mentionRowIds(view).indexOf(selected), 0));
     setSelectedOverflow(null);
   }, [view]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
 

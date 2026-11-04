@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
+import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session } from '@/lib/opencode/model';
 import { CHAT_DRAFT_PROJECT_ID, ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -14,6 +15,8 @@ import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
+import { applyBackgroundShellEvents } from '@/sync/background-shells';
+import { replaceGlobalSessionStatusById, setSessionParentResolver } from '@/sync/global-session-status';
 import {
   applyGlobalBlockingRequestEvents,
   applyWaitingPageEvent,
@@ -40,11 +43,14 @@ describe('Dock badge with the macOS menu bar disabled', () => {
   let dom: Window;
   let root: Root;
   const counts: number[] = [];
+  const unreadLists: { id: string; title: string; directory: string }[][] = [];
   let listenerCount = 0;
   let intervalCount = 0;
-  const invoke = async (command: string, args?: { dockBadgeCount?: number }) => {
+  const invoke = async (command: string, args?: { dockBadgeCount?: number; dockUnreadSessions?: { id: string; title: string; directory: string }[] }) => {
+    if (command === 'desktop_tray_actions_ready') return null;
     expect(command).toBe('desktop_tray_update');
     if (args?.dockBadgeCount !== undefined) counts.push(args.dockBadgeCount);
+    if (args?.dockUnreadSessions) unreadLists.push(args.dockUnreadSessions);
     return null;
   };
   const listen = async () => { listenerCount += 1; return () => {}; };
@@ -77,6 +83,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useUIStore.setState({ dockBadgeEnabled: true, notifyOnSubtasks: false, sessionWorkEnabled: true });
     useSessionDisplayStore.setState({ showChatsSection: true, showPinnedSection: true, showWorkSection: true });
     counts.length = 0;
+    unreadLists.length = 0;
     listenerCount = 0;
     intervalCount = 0;
     root = createRoot(document.createElement('div'));
@@ -100,6 +107,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     for (const id of ['root', 'elsewhere', 'btw-fork', 'archived']) finishTurn(id);
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([1]);
+    expect(unreadLists.at(-1)).toEqual([{ id: 'root', title: 'root', directory: '/project' }]);
     // Removing the project takes its sessions out of the sidebar and the count.
     useProjectsStore.setState({ projects: [] });
     await flush();
@@ -148,7 +156,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     expect(counts).toEqual([0]);
   });
 
-  test('publishes unread chats, clears viewed chats, and respects the badge toggle without tray timers or listeners', async () => {
+  test('publishes unread chats and respects the badge toggle without tray timers', async () => {
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([0]);
     finishTurn('root');
@@ -157,6 +165,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useUIStore.setState({ dockBadgeEnabled: false });
     await flush();
     expect(counts).toEqual([0, 1, 0]);
+    expect(unreadLists.at(-1)).toEqual([]);
     useUIStore.setState({ dockBadgeEnabled: true });
     await flush();
     expect(counts).toEqual([0, 1, 0, 1]);
@@ -164,7 +173,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     await flush();
     expect(counts).toEqual([0, 1, 0, 1, 0]);
     expect(intervalCount).toBe(0);
-    expect(listenerCount).toBe(0);
+    expect(listenerCount).toBe(1);
   });
 
   test('never counts a subtask and reconciles global session membership', async () => {
@@ -178,6 +187,35 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     useGlobalSessionsStore.setState({ activeSessions: [] });
     await flush();
     expect(counts).toEqual([0, 1, 0]);
+  });
+
+  test('counts a session idling on background work only when that work ends', async () => {
+    const started: SyncEvent = {
+      type: 'shell.started',
+      properties: { shell: { id: 'sh_1', sessionID: 'root', command: 'sleep 300', file: '/tmp/sh_1.out', startedAt: 1 } },
+    };
+    const ended: SyncEvent = { type: 'shell.ended', properties: { shellID: 'sh_1', end: { kind: 'exited', status: 'exited', exit: 0 }, endedAt: 2 } };
+    await act(async () => root.render(<Harness />));
+
+    applyBackgroundShellEvents('/project', [started]);
+    finishTurn('root');
+    await flush();
+    expect(counts).toEqual([0]);
+    applyBackgroundShellEvents('/project', [ended]);
+    await flush();
+    expect(counts).toEqual([0, 1]);
+
+    view('root');
+    await flush();
+    setSessionParentResolver((id) => (id === 'child' ? 'root' : undefined));
+    replaceGlobalSessionStatusById(new Map([['child', { directory: '/project', status: { type: 'busy' } }]]));
+    finishTurn('root');
+    await flush();
+    expect(counts).toEqual([0, 1, 0]);
+    replaceGlobalSessionStatusById(new Map());
+    await flush();
+    expect(counts).toEqual([0, 1, 0, 1]);
+    setSessionParentResolver(() => undefined);
   });
 
   test('coalesces unread updates and cancels pending updates on unmount', async () => {
@@ -204,6 +242,17 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     for (const item of sessions) finishTurn(item.id);
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([25]);
+    expect(unreadLists.at(-1)?.map((item) => item.id)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `root-${24 - index}`),
+    );
+  });
+
+  test('keeps the dock unread list in snapshots with the tray enabled too', async () => {
+    Object.assign(dom, { __OPENCHAMBER_ELECTRON__: { runtime: 'electron', trayEnabled: true } });
+    finishTurn('root');
+    await act(async () => root.render(<Harness />));
+    expect(unreadLists.at(-1)).toEqual([{ id: 'root', title: 'root', directory: '/project' }]);
+    expect(counts.at(-1)).toBe(1);
   });
 
   test('starts with a cleared badge when both controls are disabled', async () => {
@@ -212,7 +261,7 @@ describe('Dock badge with the macOS menu bar disabled', () => {
     await act(async () => root.render(<Harness />));
     expect(counts).toEqual([0]);
     expect(intervalCount).toBe(0);
-    expect(listenerCount).toBe(0);
+    expect(listenerCount).toBe(1);
   });
 
   test('does not publish desktop state outside Electron', async () => {

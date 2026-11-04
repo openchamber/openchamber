@@ -757,17 +757,22 @@ describe('terminal runtime', () => {
   });
 
   it('retains exited sessions until explicit close', async () => {
-    const harness = createHarness();
+    const broadcastUiEvent = vi.fn();
+    const harness = createHarness({ broadcastUiEvent });
     try {
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-1', cwd: '/repo' } }, createResponse());
+      expect(broadcastUiEvent.mock.calls).toEqual([[{ type: 'openchamber:terminal-sessions-changed', properties: {} }]]);
       harness.processes[0].emitData('last output');
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(1);
       harness.processes[0].emitExit(7, 0);
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(2);
       const resize = createResponse();
       harness.routes.post.get('/api/terminal/:sessionId/resize')({ params: { sessionId: 'term-1' }, body: { cols: 80, rows: 24 } }, resize);
       expect(resize.statusCode).toBe(200);
       const closed = createResponse();
       await harness.routes.delete.get('/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, closed);
       expect(closed.body).toEqual({ success: true });
+      expect(broadcastUiEvent).toHaveBeenCalledTimes(3);
     } finally { await harness.runtime.shutdown(); }
   });
 

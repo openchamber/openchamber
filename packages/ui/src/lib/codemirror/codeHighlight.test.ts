@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import { codeToTokens } from '@pierre/highlights';
 
-import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
+import { getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
 import { themes } from '@/lib/theme/themes';
 
 // Bun does not implement Vite's worker asset-query imports.
@@ -67,7 +67,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 test('incremental colors match a full pass after typing and multi-range edits', async () => {
   const view = new EditorView({
     doc: 'const a = 1;\nlet b = "x";\n',
-    extensions: [codeHighlightExtension({ language: 'typescript', themeName: themes[0].metadata.id, theme })],
+    extensions: [codeHighlightExtension({ language: 'typescript', themeName: getThemeRenderName(themes[0]), theme })],
     parent: document.body,
   });
   views.push(view);

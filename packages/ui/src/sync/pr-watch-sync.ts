@@ -2,6 +2,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { seedGlobalSessionStatusFromHost } from './host-session-status-seed';
 import { applyPrWatch, applyPrWatchSnapshot, prWatchSnapshotSchema, restorePrWatch, takePrWatch } from './pr-watch';
 
 /** VS Code has no OpenChamber server, so no agent there waits on a pull request. */
@@ -16,6 +17,8 @@ const hydratePrWatches = async (): Promise<void> => {
   if (!parsed.success) throw new Error('Invalid pull request watch response');
   if (runtimeKey !== getRuntimeKey()) return;
   applyPrWatchSnapshot(parsed.data);
+  // A wait this device only learned of now keeps a turn it never counted: the host knows its start.
+  if (parsed.data.watches.length > 0) void seedGlobalSessionStatusFromHost().catch(() => undefined);
 };
 
 /**

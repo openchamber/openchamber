@@ -10,9 +10,9 @@ import type { SidebarWorkRef } from '../works/sidebarWorks';
 
 /**
  * What the user's sections ask of the live state, read only while a shown
- * section filters on it: sessions running, sessions with a permission, a
- * question or a page waiting on the user, and top-level sessions whose last
- * turn is unread or failed.
+ * section filters on it: sessions with an open turn, background work included,
+ * sessions with a permission, a question or a page waiting on the user, and
+ * top-level sessions whose ended turn is unread or whose last turn failed.
  */
 export type SidebarLiveFacts = {
   activeIds: ReadonlySet<string>;

@@ -28,18 +28,22 @@ describe('standard mutations', () => {
     const mutations = createStandardMutations(descriptor);
     const prepare = prepareWith(mutations);
     expect(mutations.routes).toEqual([
-      '/pr/create', '/pr/update', '/pr/merge', '/pr/ready', '/pr/review', '/pr/comment', '/issues/comment',
+      '/pr/create', '/pr/update', '/pr/merge', '/pr/ready', '/pr/review', '/pr/review/comment', '/pr/review/comment/update',
+      '/pr/review/comment/delete', '/pr/review/discard', '/pr/comment', '/issues/comment',
       '/pr/state', '/issues/state', '/pr/labels', '/issues/labels', '/pr/reviewers',
     ]);
     const inputs = {
       '/pr/create': { title: 'T' }, '/pr/update': { title: 'T' }, '/pr/merge': { method: 'merge' }, '/pr/ready': {},
-      '/pr/review': { verdict: 'approve' }, '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' },
+      '/pr/review': { verdict: 'approve' }, '/pr/review/comment': { path: 'a.ts', side: 'new', line: 1, body: 'hi' },
+      '/pr/review/comment/update': { commentId: '1', body: 'hi' }, '/pr/review/comment/delete': { commentId: '1' }, '/pr/review/discard': {},
+      '/pr/comment': { body: 'hi' }, '/issues/comment': { body: 'hi' },
       '/pr/state': { state: 'closed' }, '/issues/state': { state: 'open' }, '/pr/labels': { labels: ['a'] },
       '/issues/labels': { labels: ['a'] }, '/pr/reviewers': { reviewers: ['1'] },
     };
     const kinds = mutations.routes.map((route) => prepare(route, inputs[route], { ...numbered, headSha: 'a'.repeat(40) }).kind);
     expect(kinds).toEqual([
       'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready', 'change-request-review',
+      'change-request-review-comment', 'change-request-review-comment-update', 'change-request-review-comment-delete', 'change-request-review-discard',
       'change-request-comment', 'issue-comment', 'change-request-state', 'issue-state', 'change-request-labels', 'issue-labels',
       'change-request-reviewers',
     ]);

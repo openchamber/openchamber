@@ -229,9 +229,6 @@
     "openCodeUpdateToastDismissedVersion": {
       "scope": "instance"
     },
-    "openCodeProjectImportCompleted": {
-      "scope": "instance"
-    },
     "autoDeleteEnabled": {
       "scope": "instance"
     },
@@ -782,6 +779,9 @@
       "scope": "profile"
     },
     "notifyOnCompletion": {
+      "scope": "profile"
+    },
+    "notifyOnPullRequests": {
       "scope": "profile"
     },
     "notifyOnError": {

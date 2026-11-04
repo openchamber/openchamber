@@ -56,6 +56,8 @@ export async function listGlobalSessionPages(
         parentID?: string;
         pageSize: number;
         onPage?: (sessions: GlobalSessionRecord[]) => void;
+        /** Stop after accepting this page, while retaining every record it returned. */
+        stopAfterPage?: (sessions: GlobalSessionRecord[]) => boolean;
         /** The first page's isolated-space marks: `null` when the page carried none. */
         onSpaces?: (spaces: SpaceMark[] | null) => void;
     },
@@ -113,7 +115,7 @@ export async function listGlobalSessionPages(
 
         const next = page.cursor.next;
         // No next cursor, or a page that added nothing new: stop rather than spin.
-        if (!next || next === cursor || accepted.length === 0) break;
+        if (!next || next === cursor || accepted.length === 0 || options.stopAfterPage?.(accepted)) break;
         cursor = next;
     }
 

@@ -41,7 +41,7 @@ import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/l
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { codeHighlightExtension } from '@/lib/codemirror/codeHighlight';
 import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
-import { getCodeTokenTheme } from '@/lib/shiki/appThemeRegistry';
+import { ensurePierreThemeRegistered, getCodeTokenTheme, getThemeRenderName } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
 import { useFileViewVirtualizer, type FileViewVirtualizer } from './useFileViewVirtualizer';
@@ -63,6 +63,7 @@ import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/file
 import { MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
 import { isFilePathMoveInFlight, rebaseMovedPath, rebaseMovedPathKeys, subscribeToFilePathMoves } from '@/lib/filePathMoves';
 import { DiagramEditor } from '@/components/diagram';
@@ -130,7 +131,6 @@ import {
 import { useFileTreeDisclosure } from './files/useFileTreeDisclosure';
 import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
-import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { DIFFS_HIGHLIGHTER, toDiffsLanguage } from '@/lib/shiki/diffsHighlighter';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
@@ -875,11 +875,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     () => availableThemes.find((theme) => theme.metadata.id === darkThemeId) ?? getDefaultTheme(true),
     [availableThemes, darkThemeId],
   );
-
-  React.useEffect(() => {
-    ensurePierreThemeRegistered(lightTheme);
-    ensurePierreThemeRegistered(darkTheme);
-  }, [lightTheme, darkTheme]);
 
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
   const openPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.openPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
@@ -3567,6 +3562,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
     let cancelled = false;
+    if (!git.getGitFileDiff) {
+      setGitBaseline(null);
+      return;
+    }
     git.getGitFileDiff(root, { path: selectedRelativePath })
       .then((diff) => {
         if (cancelled) return;
@@ -3660,7 +3659,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (shikiLanguage) {
       extensions.push(codeHighlightExtension({
         language: shikiLanguage,
-        themeName: currentTheme.metadata.id,
+        themeName: getThemeRenderName(currentTheme),
         theme: getCodeTokenTheme(currentTheme),
       }));
     }
@@ -3712,8 +3711,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap, t, importLinksExtension]);
 
   const pierreTheme = React.useMemo(
-    () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
-    [lightTheme.metadata.id, darkTheme.metadata.id],
+    () => ({ light: ensurePierreThemeRegistered(lightTheme), dark: ensurePierreThemeRegistered(darkTheme) }),
+    [lightTheme, darkTheme],
   );
 
   // PDFs, audio, video and fonts are handed to the browser as a URL it owns
@@ -3732,8 +3731,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     [runtimeKey, selectedFile?.path, usesRawAssetUrl, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
+  // The browser loads an HTML preview and its neighbouring files itself, and a
+  // URL it loads never enters the relay tunnel.
+  const htmlPreviewUnreachable = isRelayModeActive();
   const htmlPreviewRequest = React.useMemo(
-    () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode
+    () => (selectedFile?.path && isHtml && htmlViewMode === 'preview' && !runtime.isVSCode && !htmlPreviewUnreachable
       ? {
         path: selectedFile.path,
         directory: root || '',
@@ -3741,7 +3743,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         outsideWorkspace: selectedFileReadOptions.allowOutsideWorkspace,
       }
       : null),
-    [selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
+    [selectedFile?.path, isHtml, htmlViewMode, runtime.isVSCode, htmlPreviewUnreachable, root, fileContentRevision, selectedFileReadOptions.allowOutsideWorkspace],
   );
 
   const assetAuthErrorFallback = t('filesView.error.readFileFailed');
@@ -4269,7 +4271,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
     // Annotation needs the rendered page: from the source it switches to the
     // preview and starts once the page has loaded.
-    const annotateAction: ToolbarAction | null = isHtml && !isMobile && !runtime.isVSCode ? {
+    const annotateAction: ToolbarAction | null = isHtml && !isMobile && !runtime.isVSCode && !htmlPreviewUnreachable ? {
       id: 'annotate',
       label: t('contextPanel.browser.annotate.toggle'),
       icon: 'markup',
@@ -4886,6 +4888,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                 />
               )}
             </div>
+          ) : selectedFile && isHtml && htmlViewMode === 'preview' && htmlPreviewUnreachable ? (
+            <ContentState
+              icon={<FileTypeIcon filePath={selectedFile.path} className="size-10" />}
+              title={t('filesView.editor.htmlPreviewRelayUnavailable')}
+              actions={(
+                // For this file only: leaving this message is not choosing code
+                // as the default, which would follow the user to a direct host.
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    htmlViewModeByPathRef.current[selectedFile.path] = 'edit';
+                    setHtmlViewMode('edit');
+                  }}
+                >
+                  {t('filesView.editor.htmlPreviewShowCode')}
+                </Button>
+              )}
+            />
           ) : selectedFile && isHtml && htmlViewMode === 'preview' ? (
             !runtime.isVSCode && htmlPreview.status === 'loading' ? (
               <div className="flex h-full items-center justify-center text-muted-foreground typography-ui-label">

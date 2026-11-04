@@ -60,17 +60,27 @@ before the local server is imported, and the renderer parses, fetches and
 compiles the application while the server starts. The runtime values the
 application needs before any request (local origin, API base, client token)
 do not exist yet, so that document ends with a parser-blocking
-`<script src="/__runtime-config.js">` instead of the inline values; main
-answers it once `activateMainWindow` has the resolved runtime
-(`packaged-runtime-config.mjs`). The script carries the client token, and a
-classic `<script src>` ignores CORS, so each pending document gets its own
-single-use nonce in the script URL; a request without an issued, unclaimed
-nonce, or whose fetch metadata is not a same-origin script load, gets 404. A
-sandboxed preview or plugin frame cannot read the document, so it cannot
-learn the nonce. Module scripts run only after parsing ends,
-so no application code runs before the values are set. Remote, SSH,
-environment-target, HMR and background launches keep the previous order:
-resolve, then navigate, with the splash reporting the connection attempt.
+`<script src="/__runtime-config.js">`; main answers it once `activateMainWindow`
+has the resolved runtime (`packaged-runtime-config.mjs`). Module scripts run only
+after parsing ends, so no application code runs before the values are set.
+Remote, SSH, environment-target, HMR and background launches keep the previous
+order: resolve, then navigate, with the splash reporting the connection attempt.
+
+Packaged documents and that script hold no runtime values. They ask for them
+through the preload bridge, and main answers only the top frame of a window on
+the packaged origin. The scheme answers every frame in the session, including
+sandboxed ones, and a request to it carries nothing that says who is asking, so
+main decides by the IPC sender's frame.
+
+A launch runs one startup. The tray, a second launch, a deep link, a shortcut or
+macOS `activate` can ask for a window while that startup still runs, and
+`openMainWindow` then waits for it. Resolving next to it would call `main()` of
+the server module a second time in the same process: depending on the timing,
+that run fails to listen on the port, replaces the first run's listener handle
+so the managed OpenCode cannot start, or binds a second port, and the failure
+can reject the startup itself and exit the app. A background launch without a
+local server still probes its remote again when the window opens, because
+reachability from login time says little about later.
 
 `bun run profile:startup` measures a packaged build's launch in an isolated
 profile; see `scripts/perf/DOCUMENTATION.md`.
@@ -179,13 +189,14 @@ IPC results if its endpoint changes while the read is pending.
 |------|---------|
 | `entry.mjs` | What Electron loads: pre-`ready` configuration, single-instance lock, the first window, then a dynamic import of `main.mjs` |
 | `compile-cache.mjs` | Node's V8 code cache for the packaged main process: enabling it under userData, keeping it out of child environments, flushing and pruning after startup |
-| `packaged-runtime-config.mjs` | Runtime values for packaged application documents: inline injection, and the blocking script and gate used while the first navigation runs ahead of the local server |
+| `packaged-runtime-config.mjs` | Runtime values for packaged application documents: the script that asks main for them, the check on the asking frame, and the blocking script and gate used while the first navigation runs ahead of the local server |
 | `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles. Its window icon in an unpackaged Windows run is `dev-icon.ico`, the Windows icon behind construction tape (source `resources/icons/dev-icon-win.svg`), so the taskbar tells a dev copy apart; Linux keeps the usual icon, because GNOME takes the dock icon from the installed app's `.desktop` entry |
 | `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
 | `host-probe-policy.mjs` | Selector fast attempt and unreachable-only retry policy |
 | `startup-url-selection.mjs` | Pure bundled/HMR startup probe and loopback connection-limit policy |
 | `app-cache.mjs` | Help > Clear Cache: drops the HTTP cache only, keeps site storage (device settings, pinned sessions, login cookies), reloads windows |
+| `session-link-gate.mjs` | Whether the main window's current document listens for session links: it does once it asks for its pending links, or after a fallback delay for a remote page that never asks. Until then links wait in the queue |
 | `pairing-deep-link.mjs` | Validates an `openchamber://connect` pairing link for the confirmation prompt. After the user confirms, the main window's renderer redeems it (`desktop_take_pending_host_actions`) with the same code as Import Link, so relay-only links pair over the E2EE tunnel. `openchamber://host/<id>` for a host with a relay leg goes through the same queue |
 | `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: splash colour parsing, host list without credentials |
 | `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |
@@ -384,6 +395,31 @@ An exit requested during entry remains queued in Electron even after an explicit
 
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart. While disabled, Desktop skips the native tray controller, tray-specific subscriptions, polling, and quota refresh. Dock badges remain independent: unread activity, session membership, and badge preferences still update the Dock through the shared IPC command. Turning off the Dock badge clears its count without enabling the menu bar item.
 
+The Dock's context menu lists up to 10 unread sessions, newest completed turn
+first, from the same sidebar-visible set as its badge. A session opens through
+the tray's session action route. Mark all as read reaches the renderer even
+with the menu bar disabled. Turning off the Dock badge also clears this menu;
+an empty unread list offers no actions. Native labels follow the preferred UI locale.
+
+Packaged Windows exposes the same unread set in a custom taskbar jump-list
+category and a Mark all as read task. Session items launch the executable with
+the existing session deep link, strictly validating its ID and checking global
+session membership before selection. Mark-all launches with `--mark-all-read`;
+main queues it until the renderer has registered its action listener, and the
+renderer waits for the global list. Unchanged lists are not rewritten. Empty
+lists clear the custom jump list. Windows-removed items are excluded by their
+launch arguments before deduplication, so re-adding one cannot drop the category.
+Development skips jump lists because Electron's
+executable needs a separate app-path argument to relaunch this checkout.
+
+An enabled tray loads the dropdown providers' quota once after renderer runtime
+initialization when no sample has loaded. The native Menu `menu-will-show` event
+requests a quota refresh through `openchamber:tray-action` before or as the menu
+opens on macOS, Windows and Linux. It shares the readouts' 15-second freshness
+window and works while the main window is hidden or minimized without revealing
+it. The menu can open with cached usage; the renderer pushes a new tray snapshot
+when the fetch lands. No quota timer runs for the tray.
+
 ## Bundled OpenCode CLI
 
 Packaged Desktop builds include the official OpenCode CLI release pinned by `opencodeCli.version` in `packages/electron/package.json` (OpenChamber requires OpenCode 2.x). OpenCode 2.x ships on npm rather than as GitHub release assets, so `prepare:opencode-cli` downloads the platform package tarball (`@opencode/cli-<os>-<arch>`, the same one OpenCode's own installer uses), caches it under `packages/electron/.cache/opencode-cli`, stages `opencode` or `opencode.exe` into `resources/opencode-cli`, and verifies `opencode --version` before packaging. Re-running the step is fast when the staged binary already matches the pinned version. The target architecture comes from `OPENCHAMBER_TARGET_ARCH` or `ELECTRON_BUILDER_ARCH`, falling back to the build host. A Windows build for another architecture does not run the binary, because the arm64 release job runs on an x64 runner that cannot start it; there the step checks the version in the package's `package.json` instead; on Windows `verify:opencode-cli` and `verify:opencode-cli:packaged` also read the binary's PE header (`scripts/windows-executable.mjs`) and fail when it was built for another architecture.
@@ -507,6 +543,13 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   when closing the last one hides the app on macOS.
 
 ## IPC Pattern
+
+`desktop_get_current_window_state` includes the native `visible` boolean, true
+only for a shown, non-minimized window. The read-only
+`openchamber:window-visibility` event carries that same boolean on show, hide,
+minimize and restore. Shared quota readouts use it to stop provider refresh in
+hidden windows. Focus changes do not change visibility. Chromium's document
+visibility is insufficient here because desktop disables background throttling.
 
 Renderer code should call the desktop bridge exposed by `preload.mjs`. Do not import Electron from shared UI code.
 

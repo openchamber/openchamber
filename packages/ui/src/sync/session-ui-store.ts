@@ -100,8 +100,7 @@ import {
 import { useInputStore, type SyntheticContextPart } from "./input-store"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import type { QueuedMessageGoal } from "@/stores/messageQueueStore"
-import { setSessionGoal } from "@/lib/sessionGoalActions"
-import { wrapSystemReminder } from "@/lib/systemReminder"
+import { sessionGoalIntro, setSessionGoal } from "@/lib/sessionGoalActions"
 import { useUIStore } from "@/stores/useUIStore"
 import { useSelectionStore } from "./selection-store"
 import { getViewportSessionMemory, useViewportStore, viewportSessionKey } from "./viewport-store"
@@ -148,6 +147,17 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
   return argumentsText ? `${command.template}\n\n${argumentsText}` : command.template
 }
 
+/**
+ * The goal objective a prompt stands for. Same directory-scoped resolution as
+ * routeMessage: the objective must come from this directory's command, not a
+ * same-named one elsewhere. OpenCode 2.x serves commands without their
+ * templates, so an unknown command's raw invocation stays the objective.
+ */
+export function resolveGoalObjective(content: string, directory: string | null | undefined): string {
+  if (!content.startsWith("/")) return content
+  return expandSlashCommandGoalObjective(content, selectCommandsForDirectory(useCommandsStore.getState(), directory))
+}
+
 // ---------------------------------------------------------------------------
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
@@ -192,8 +202,9 @@ export async function routeMessage(params: {
   const requestDirectory = params.directory ?? undefined
   // The request goes to the directory the session lives in when it leaves:
   // a session created from a draft can end up elsewhere than where its first
-  // message was shown, and its record is there.
-  const sendDirectory = () => getSyncSessionDirectory(params.sessionId) ?? requestDirectory
+  // message was shown, and its record is there. The record decides, since a
+  // store holding the session proves containment only.
+  const sendDirectory = () => getAuthoritativeSessionDirectory(params.sessionId) ?? requestDirectory
   // The session carries its own model and agent server-side. Sending them on
   // every turn would switch the session to whatever the composer happens to
   // show, so only a genuine change travels with the prompt. Resolved when the
@@ -2204,38 +2215,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? queuedGoal.tokenBudget
         : (goalUiState.sessionGoalDefaultBudgetEnabled ? goalUiState.sessionGoalDefaultBudget : null)
       if (goalArmed) {
-        // Teach the agent the goal protocol from turn one — without this it
-        // only learns about goal mode from the first server continuation.
-        const budgetLine = goalTokenBudget
-          ? ` A token budget of ${goalTokenBudget} tokens applies to this goal.`
-          : ""
-        const goalIntro = wrapSystemReminder(
-          "Goal mode is active for this session. The user message above defines the goal objective. "
-          + "Work toward it across turns; whenever you stop before the objective is verifiably complete, the system will automatically prompt you to continue."
-          + budgetLine
-          // Same text as GOAL_REPORT_INSTRUCTIONS in the server's session-goal/audit.js.
-          + "\n\nBefore you end a turn, stop every background command you started that does not finish on its own, such as a dev server or a watcher. Start it again in a later turn if you need it.\n"
-          + "\nProgress is checked independently after each turn, from your final message only. End every turn with a short status block, in the language of your reply, with exactly these four lines:\n"
-          + "- Done: what is finished.\n"
-          + "- Verified: how you checked it (the command, test or file), or \"not verified\".\n"
-          + "- Remaining: the parts of the objective you still have to do yourself, or \"nothing\".\n"
-          + "- Needs from the user: what only the user can provide before you can go on (a decision, credentials, access), or \"nothing\".\n"
-          + "Testing in the app, review and committing are the user's steps after the work, not remaining work and not blockers.",
-        )
-        additionalParts = [...(additionalParts ?? []), { text: goalIntro, synthetic: true }]
+        additionalParts = [...(additionalParts ?? []), { text: sessionGoalIntro(goalTokenBudget), synthetic: true }]
       }
       const applyArmedGoal = async (goalSessionId: string, goalDirectory: string | null | undefined) => {
         if (!goalArmed) return
         const tokenBudget = goalTokenBudget
-        let objective = goalArm.objectiveOverride?.trim() || content
-        if (!goalArm.objectiveOverride && content.startsWith("/")) {
-          // Same directory-scoped resolution as routeMessage: the objective must
-          // come from this directory's command, not a same-named one elsewhere.
-          // OpenCode 2.x serves commands without their templates, so an unknown
-          // command's raw invocation stays the objective.
-          const knownCommands = selectCommandsForDirectory(useCommandsStore.getState(), goalDirectory)
-          objective = expandSlashCommandGoalObjective(content, knownCommands)
-        }
+        const objective = goalArm.objectiveOverride?.trim() || resolveGoalObjective(content, goalDirectory)
         try {
           await setSessionGoal(goalSessionId, goalDirectory ?? undefined, { objective, tokenBudget }, null, capturedRuntimeKey)
         } catch (error) {

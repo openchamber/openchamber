@@ -80,7 +80,7 @@ import { isRowBoxClick } from './rowBoxClick';
 import { setSessionWorkState } from '@/sync/session-actions';
 import { useSessionWarmingStore, useSessionWarmUntil } from '@/stores/useSessionWarmingStore';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
-import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
+import { sessionGoalMarkLabelKey, sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import { getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
 import { getMultiRunIdentity, sameMultiRunIdentity } from '@/lib/multirun/identity';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
@@ -578,8 +578,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       toast.error(t('sessions.warming.toggleFailed'));
     }
   };
-  // SAFETY: sessionGoalStatusLabelKey contains an i18n key for every SessionGoalStatus.
-  const sessionGoalLabel = sessionGoal ? t(sessionGoalStatusLabelKey[sessionGoal.status] as never) : '';
+  const sessionGoalLabel = sessionGoal ? t(sessionGoalMarkLabelKey[sessionGoal.status]) : '';
   const sessionGoalGlyph = sessionGoal ? (
     <RowMarkTooltip label={sessionGoalLabel}>
       <span className="inline-flex flex-shrink-0 items-center" aria-label={sessionGoalLabel}>

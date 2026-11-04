@@ -1,38 +1,38 @@
-# OpenCode project import
+# OpenCode projects in Add project
 
 ## Ownership
 
-The Add project dialog owns the one-time import suggestion. OpenCode supplies
-canonical project folders; the projects store adds them and settings persistence
-saves the list. The instance-scoped `openCodeProjectImportCompleted` flag retires
-the suggestion after import or explicit dismissal on any client of that server.
-VS Code uses workspace folders and does not mount the suggestion.
+The Add project dialog owns the "From OpenCode" entry. OpenCode supplies its
+project list; this module turns it into repositories worth offering. Adding them
+is the dialog's ordinary batch add. VS Code uses workspace folders and does not
+show the entry, and neither does the folder choice of Move session.
 
 ## Invariants
 
-- Only an open Add project dialog reads import candidates. Startup, sidebar
-  updates, and a retired suggestion perform no import discovery.
-- Existing projects, filesystem roots, managed chats, duplicate paths and folders
-  whose availability cannot be confirmed are not offered. Worktrees remain with
-  their canonical project. Existing names and order remain intact.
-- Closing the dialog does not dismiss the suggestion. Empty or failed reads do
-  not retire it. Reopening retries reads; a failed save keeps the actions available.
-- The project list and import completion flag use one settings write. A failed
-  write does not add optimistic projects. Runtime changes reject late results.
-- Quick add is blocked while the import saves, so an ordinary folder addition
-  cannot replace the pending imported project list in the settings queue. The
-  runtime-scoped guard survives closing and reopening until the write settles,
-  including failure. A previous runtime's completion cannot release a new import.
+- Only an open Add project dialog reads the list. Startup, sidebar updates and a
+  closed dialog perform no discovery.
+- Only git repositories are offered. Configured projects, filesystem roots,
+  managed chats, duplicates, anything under a hidden, temporary or system folder
+  and folders whose availability cannot be confirmed are left out.
+- Nothing is added without the person selecting it, and the entry shows only
+  while there is something to offer. An empty or failed read hides it; the next
+  opening reads again.
+- Runtime changes reject late results.
 
 ## Decisions
 
-### Why the suggestion belongs to Add project and not startup
+### Why a filtered list and not everything OpenCode knows
 
-The accepted feature is an explicit one-time import. Opening Add project provides
-that intent and avoids a permanent sidebar dependency on OpenCode's project list.
+`project.list` holds every folder OpenCode ever started in: one machine carried
+804 records, of which 45 still existed, including home, OpenCode's own config,
+VS Code storage and archived isolated spaces. OpenCode's own app shows only the
+projects a client used and keeps that list on the client, so the server's list
+says where OpenCode ran, not what the person works on. Requiring a repository
+outside machine folders leaves the real projects.
 
-### Why pending import state belongs to the dialog owner
+### Why a place in the dialog and not a one-time import
 
-The suggestion unmounts when the dialog closes, while its settings write continues.
-Keeping its guard in the mounted dialog owner prevents reopening from allowing a
-conflicting addition. Ordinary confirmation state still resets on opening.
+Adding everything in one click put that whole list in the sidebar, and a banner
+inside the folder list pushed the folders down until dismissed for good. A
+selectable list costs nothing while unused, so it needs no dismissal, no
+completion flag and no special saving path.

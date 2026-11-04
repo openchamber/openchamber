@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import type { Session } from '@/lib/opencode/model';
-import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
+import { resolveGoalObjective, routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
-import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
+import type { CreateMultiRunParams, CreateMultiRunResult, MultiRunGoal } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
+import { clearSessionGoal, sessionGoalIntro, setSessionGoal } from '@/lib/sessionGoalActions';
 import { syncSessionKnowledge } from '@/lib/sessionKnowledgeApi';
 import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
@@ -96,24 +97,45 @@ export async function dispatchRunPrompt(input: {
   variant?: string;
   agent?: string;
   files?: Array<{ type: 'file'; mime: string; filename: string; url: string }>;
+  goal?: MultiRunGoal;
 }): Promise<void> {
   input.assertCurrent();
   const expandText = useSnippetsStore.getState().expandText;
   const knowledgeSync = syncSessionKnowledge(input.directory, input.sessionId, null, input.runtimeKey);
   const text = await expandText(input.prompt).catch(() => input.prompt);
   input.assertCurrent();
-  await routeMessage({
-    runtimeKey: input.runtimeKey,
-    sessionId: input.sessionId,
-    directory: input.directory,
-    content: text,
-    providerID: input.providerID,
-    modelID: input.modelID,
-    variant: input.variant,
-    agent: input.agent,
-    files: input.files,
-    ready: knowledgeSync,
-  });
+  if (input.goal) {
+    // Before the prompt, as on an ordinary send: a lane that cannot get its
+    // goal stays unstarted instead of running as a plain session.
+    await setSessionGoal(
+      input.sessionId,
+      input.directory,
+      { objective: resolveGoalObjective(text, input.directory), tokenBudget: input.goal.tokenBudget },
+      null,
+      input.runtimeKey,
+    );
+    input.assertCurrent();
+  }
+  try {
+    await routeMessage({
+      runtimeKey: input.runtimeKey,
+      sessionId: input.sessionId,
+      directory: input.directory,
+      content: text,
+      providerID: input.providerID,
+      modelID: input.modelID,
+      variant: input.variant,
+      agent: input.agent,
+      files: input.files,
+      additionalParts: input.goal ? [{ text: sessionGoalIntro(input.goal.tokenBudget), synthetic: true }] : undefined,
+      ready: knowledgeSync,
+    });
+  } catch (error) {
+    // With no turn the server never settles the goal, and an active goal
+    // keeps the lane working and holds auto-fusion for good.
+    if (input.goal) await clearSessionGoal(input.sessionId, input.directory).catch(() => undefined);
+    throw error;
+  }
 }
 
 const resolveActiveProject = (): ProjectRef | null => {
@@ -364,6 +386,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 variant: run.variant,
                 agent,
                 files: [...(filesForMessage ?? []), ...(run.files ?? []).map((f) => ({ type: 'file' as const, mime: f.mime, filename: f.filename, url: f.url }))],
+                goal: params.goal,
               });
             } catch (err) {
               console.warn('[MultiRun] Failed to start run:', err);

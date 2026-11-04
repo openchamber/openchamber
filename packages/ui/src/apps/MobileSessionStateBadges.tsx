@@ -4,7 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import type { Session } from '@/lib/opencode/model';
 import { getSessionGoal } from '@/lib/sessionGoalMetadata';
-import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
+import { sessionGoalMarkLabelKey, sessionGoalStatusColor } from '@/lib/sessionGoalPresentation';
 import type { PendingRequests } from './usePendingRequests';
 
 /** The goal glyph the desktop sidebar shows, tinted by the goal's status. */
@@ -12,8 +12,7 @@ export const MobileSessionGoalGlyph: React.FC<{ session: Session }> = ({ session
   const { t } = useI18n();
   const goal = getSessionGoal(session);
   if (!goal) return null;
-  // SAFETY: sessionGoalStatusLabelKey contains an i18n key for every SessionGoalStatus.
-  const label = t(sessionGoalStatusLabelKey[goal.status] as never);
+  const label = t(sessionGoalMarkLabelKey[goal.status]);
   return (
     <Icon
       name="target"

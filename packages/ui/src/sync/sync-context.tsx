@@ -44,7 +44,7 @@ import { retry } from "./retry"
 import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
-import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
+import { recordDirectoryRecoveryEvent, selectHeldSessionStatuses } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
 import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
@@ -90,7 +90,7 @@ import {
   processVSCodeReconciledPermissionAutoAccept,
 } from "./vscode-permission-auto-accept"
 import { markConfigCatalogStale, useConfigStore } from "@/stores/useConfigStore"
-import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
+import { refreshStoresForCatalogKinds } from "@/stores/catalogRefresh"
 import { useMcpStore } from "@/stores/useMcpStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
@@ -944,7 +944,7 @@ async function resyncDirectorySessionStatuses(
     const state = store.getState()
     applyGlobalSessionStatusSnapshot(
       directory,
-      withPromptsInFlight(nextStatuses, state.session_status),
+      withPromptsInFlight(selectHeldSessionStatuses(nextStatuses, state.session), state.session_status),
       getDirectoryOwnedSessionIds(directory, state.session),
     )
   }
@@ -1738,8 +1738,8 @@ const isCatalogRuntimeCurrent = (runtime: CatalogRuntime): boolean =>
  * its catalog. A directory OpenCode names in an event is already running.
  *
  * The sync stores only hold what chat needs; the Settings lists and the
- * composer read their own stores, which `refreshStoresForCatalogKind` re-reads
- * for the same kind.
+ * composer read their own stores, which `refreshStoresForCatalogKinds` refreshes
+ * once for the entire burst.
  */
 async function reloadCatalog(
   kind: CatalogKind,
@@ -1752,8 +1752,6 @@ async function reloadCatalog(
   // client cached seconds ago.
   if (kind === "config") opencodeClient.clearConfigCache()
 
-  void refreshStoresForCatalogKind(kind, eventDirectories)
-
   if (kind === "project") {
     const projects = await opencodeClient.listProjects().catch(() => null)
     if (isCatalogRuntimeCurrent(runtime) && projects) {
@@ -1763,7 +1761,7 @@ async function reloadCatalog(
   }
   // Config is the only catalog the directory stores hold. Agents, commands,
   // providers and the rest live in the stores their consumers read, which
-  // `refreshStoresForCatalogKind` re-reads for the same kind.
+  // `refreshStoresForCatalogKinds` refreshes once for the entire burst.
   if (kind !== "config") return
 
   await Promise.all(eventDirectories.map(async (directory) => {
@@ -1828,6 +1826,7 @@ function scheduleCatalogReload(
       if (currentKinds.has(pendingKind) && currentDirectory) pendingDirectories.add(currentDirectory)
       void reloadCatalog(pendingKind, childStores, [...pendingDirectories], scheduledRuntime)
     }
+    void refreshStoresForCatalogKinds(new Map([...reloads].map(([kind, directories]) => [kind, [...directories]])))
   }, CATALOG_RELOAD_DEBOUNCE_MS)
 }
 
@@ -3334,6 +3333,10 @@ export function SyncProvider(props: {
         if (known && progress.step !== "ready" && progress.step !== "failed") return
         void refreshSpacesJourney().catch(() => undefined)
       },
+      onSpaceTaskTitle: (spaceId, taskTitle) => {
+        if (runtimeKey !== getRuntimeKey()) return
+        if (!useSpacesStore.getState().noteTaskTitle(spaceId, taskTitle)) void refreshSpacesJourney().catch(() => undefined)
+      },
       onSpaceSetup: () => {
         // The setup commands of a space moved on; what they do now is in the list.
         void refreshSpacesJourney().catch(() => undefined)
@@ -4513,6 +4516,41 @@ export function buildSessionMessageRecordsSnapshot(
   }
 }
 
+export function readSessionMessageRecordsSnapshot(
+  store: StoreApi<DirectoryStore>,
+  sessionID: string,
+  current: SessionMessageRecordsSnapshot,
+  suspendPartUpdates: boolean,
+  suspendedPartUpdatesMessageID?: string,
+): SessionMessageRecordsSnapshot {
+  const state = store.getState()
+  const sameSession = current.sessionID === sessionID
+  // A suspension that changes within a session continues from what the chat
+  // shows now. A snapshot cached under the other suspension can hold older
+  // parts of the message it suspended, and its parts check skips that message.
+  const suspensionChanged = sameSession && (
+    current.suspendPartUpdates !== suspendPartUpdates
+    || current.suspendedPartUpdatesMessageID !== suspendedPartUpdatesMessageID
+  )
+  const reusableSnapshot = suspensionChanged
+    ? undefined
+    : getReusableSessionMessageRecordsSnapshot(store, state, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
+  if (reusableSnapshot) return reusableSnapshot
+
+  const previousSnapshot = sameSession
+    ? current
+    : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
+  const nextSnapshot = buildSessionMessageRecordsSnapshot(
+    state,
+    sessionID,
+    previousSnapshot,
+    suspendPartUpdates,
+    suspendedPartUpdatesMessageID,
+  )
+  rememberSessionMessageRecordsSnapshot(store, nextSnapshot)
+  return nextSnapshot
+}
+
 export function useSessionRenderable(sessionID: string, directory?: string): boolean {
   const store = useDirectoryStore(directory)
   const renderableRef = useRef(false)
@@ -4634,35 +4672,14 @@ export function useSessionMessageRecords(
       return snapshotRef.current.sessionID === sessionID ? snapshotRef.current.list : EMPTY_SESSION_MESSAGE_RECORDS
     }
 
-    const state = store.getState()
-    const suspendPartUpdates = Boolean(options?.suspendPartUpdates)
-    const suspendedPartUpdatesMessageID = options?.suspendPartUpdatesForMessageId ?? undefined
-    const reusableSnapshot = getReusableSessionMessageRecordsSnapshot(
+    snapshotRef.current = readSessionMessageRecordsSnapshot(
       store,
-      state,
       sessionID,
-      suspendPartUpdates,
-      suspendedPartUpdatesMessageID,
+      snapshotRef.current,
+      Boolean(options?.suspendPartUpdates),
+      options?.suspendPartUpdatesForMessageId ?? undefined,
     )
-    if (reusableSnapshot) {
-      snapshotRef.current = reusableSnapshot
-      return reusableSnapshot.list
-    }
-
-    const previousSnapshot = snapshotRef.current.sessionID === sessionID
-      ? snapshotRef.current
-      : readCachedSessionMessageRecordsSnapshot(store, sessionID, suspendPartUpdates, suspendedPartUpdatesMessageID)
-
-    const nextSnapshot = buildSessionMessageRecordsSnapshot(
-      state,
-      sessionID,
-      previousSnapshot,
-      suspendPartUpdates,
-      suspendedPartUpdatesMessageID,
-    )
-    snapshotRef.current = nextSnapshot
-    rememberSessionMessageRecordsSnapshot(store, nextSnapshot)
-    return nextSnapshot.list
+    return snapshotRef.current.list
   }, [options?.enabled, options?.suspendPartUpdates, options?.suspendPartUpdatesForMessageId, sessionID, store])
 
   const subscribe = useCallback((notify: () => void) => {

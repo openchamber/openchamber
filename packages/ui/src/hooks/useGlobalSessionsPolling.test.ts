@@ -9,6 +9,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { SessionPage } from '@/lib/opencode/client';
 import {
   GLOBAL_SESSIONS_REFRESH_INTERVAL_MS,
+  GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS,
   startGlobalSessionsPolling,
   useGlobalSessionsPolling,
 } from './useGlobalSessionsPolling';
@@ -191,18 +192,61 @@ describe('global sessions polling lifecycle', () => {
     await flush();
     expect(refreshes).toBe(1);
     expect(clock.delay()).toBe(GLOBAL_SESSIONS_REFRESH_INTERVAL_MS);
-    notifyVisible();
-    await flush();
-    expect(refreshes).toBe(1);
-
-    // Visible again before anything came due: nothing extra.
+    // Returning before another poll comes due still takes a full snapshot.
     await clock.fire();
     expect(refreshes).toBe(2);
     notifyVisible();
     await flush();
-    expect(refreshes).toBe(2);
+    expect(refreshes).toBe(3);
     dispose();
     expect(listening).toBe(false);
+  });
+
+  test('checks the head between full snapshots and takes a full snapshot by ten minutes', async () => {
+    const clock = timers();
+    let now = 0;
+    let fullLoads = 0;
+    let headChecks = 0;
+    const full = async () => { fullLoads += 1; return true; };
+    const dispose = startGlobalSessionsPolling(full, full, clock.schedule, clock.clear,
+      undefined, undefined, async () => { headChecks += 1; return true; }, () => now);
+    await flush();
+    expect(fullLoads).toBe(1);
+    for (let index = 0; index < 13; index += 1) {
+      now += clock.delay() ?? 0;
+      await clock.fire();
+    }
+    expect(headChecks).toBe(13);
+    expect(fullLoads).toBe(1);
+    expect(clock.delay()).toBe(15_000);
+    now += clock.delay() ?? 0;
+    expect(now).toBe(GLOBAL_SESSIONS_FULL_REFRESH_INTERVAL_MS);
+    await clock.fire();
+    expect(fullLoads).toBe(2);
+    expect(headChecks).toBe(13);
+    dispose();
+  });
+
+  test('returning from hidden before a poll is due takes a complete snapshot, then resumes head checks', async () => {
+    const clock = timers();
+    let visible: () => void = () => undefined;
+    let fullLoads = 0;
+    let headChecks = 0;
+    const full = async () => { fullLoads += 1; return true; };
+    const dispose = startGlobalSessionsPolling(full, full, clock.schedule, clock.clear, {
+      isHidden: () => false,
+      onVisible: (listener) => { visible = listener; return () => undefined; },
+    }, undefined, async () => { headChecks += 1; return true; });
+    await flush();
+    visible();
+    await flush();
+    expect(fullLoads).toBe(2);
+    expect(headChecks).toBe(0);
+    expect(clock.pending.size).toBe(1);
+    await clock.fire();
+    expect(fullLoads).toBe(2);
+    expect(headChecks).toBe(1);
+    dispose();
   });
 
   test('disposal during a load prevents a late completion from scheduling more work', async () => {
@@ -272,11 +316,15 @@ test('the mounted poller recovers real store failure and starts a fresh load on 
     expect(useGlobalSessionsStore.getState().status).toBe('ready');
     expect(clock.delay()).toBe(GLOBAL_SESSIONS_REFRESH_INTERVAL_MS);
     expect(list.mock.calls.every(([options]) => options?.global === true)).toBe(true);
+    const seedsBeforeHeadCheck = host.mock.calls.length;
+    await act(async () => clock.fire());
+    expect(list.mock.calls.at(-1)?.[0]?.limit).toBe(20);
+    expect(host.mock.calls.length).toBe(seedsBeforeHeadCheck);
 
     const oldPage = new Promise<SessionPage>((resolve) => { resolveOldPage = resolve; });
     list.mockImplementationOnce(() => oldPage);
     await act(async () => clock.fire());
-    expect(useGlobalSessionsStore.getState().status).toBe('loading');
+    expect(useGlobalSessionsStore.getState().status).toBe('ready');
     expect(useGlobalSessionsStore.getState().hasLoaded).toBe(true);
     expect(clock.pending.size).toBe(0);
     list.mockResolvedValue(session('new-runtime'));

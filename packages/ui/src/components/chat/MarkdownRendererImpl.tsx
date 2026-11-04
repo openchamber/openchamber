@@ -28,7 +28,7 @@ import type { ToolPopupContent } from './message/types';
 import { getMarkdownCjk, getMarkdownProcessingOptions, markdownMath } from './markdown/streamdownPlugins';
 import { remarkEmojiShortcodes } from './markdown/remarkEmojiShortcodes';
 import { remarkRepositoryReferences } from './markdown/remarkRepositoryReferences';
-import { fenceTaggedUiBlocks } from './uiBlocks/taggedBlocks';
+import { fenceUiBlocks } from './uiBlocks/taggedBlocks';
 import type { EmojiShortcodes } from '@/lib/emoji/shortcodes';
 import type { RepositoryLinkContext } from '@/lib/source-control/repositoryLinks';
 import { MarkdownMediaProvider, type MarkdownDocumentAssets } from './markdown/MarkdownMediaContext';
@@ -556,7 +556,7 @@ export const MarkdownRenderer = React.memo(function MarkdownRenderer({
   const body = (
     <MarkdownContent
       key={identity}
-      content={variant === 'assistant' ? fenceTaggedUiBlocks(content) : content}
+      content={variant === 'assistant' ? fenceUiBlocks(content) : content}
       singleTilde={false}
       mode={mode}
       mediaMode={variant === 'assistant' ? 'assistant' : 'local'}

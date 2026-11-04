@@ -925,16 +925,17 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         <button
           type="button"
           onClick={() => showMoreGroupSessions(groupKey, visibleSessions.length, sessionBatchSize ?? 7)}
-          className="mt-0.5 flex items-center justify-start rounded-md ps-[26px] pe-1.5 py-0.5 text-start text-xs text-muted-foreground leading-tight hover:text-foreground hover:underline"
+          className="mt-0.5 flex items-center justify-start gap-1.5 rounded-md ps-[26px] pe-1.5 py-0.5 text-start typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline"
         >
           {t('sessions.sidebar.group.showMore')}
+          <CollapsedSessionActivityIndicator nodes={ungroupedSessions.slice(visibleSessions.length)} />
         </button>
       ) : null}
       {canShowLess ? (
         <button
           type="button"
           onClick={() => resetGroupSessionLimit(groupKey)}
-          className="mt-0.5 flex items-center justify-start rounded-md ps-[26px] pe-1.5 py-0.5 text-start text-xs text-muted-foreground leading-tight hover:text-foreground hover:underline"
+          className="mt-0.5 flex items-center justify-start rounded-md ps-[26px] pe-1.5 py-0.5 text-start typography-micro text-muted-foreground leading-tight hover:text-foreground hover:underline"
         >
           {t('sessions.sidebar.group.showFewer')}
         </button>

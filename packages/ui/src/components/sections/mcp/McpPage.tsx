@@ -287,7 +287,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
   onCommit,
   keyTransform = normalizeEnvKey,
   keyPlaceholder = 'API_KEY',
-  keyInputClassName = 'w-36 shrink-0 font-mono typography-meta uppercase',
+  keyInputClassName = 'font-mono typography-meta uppercase',
   pasteLabel = 'Paste .env',
   pasteTitle = 'Paste KEY=VALUE lines from clipboard',
   noPairsFoundError,
@@ -369,44 +369,46 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
 
   const hasSensitiveValues = value.some((e) => e.value.length > 0);
 
+  // Keys share a prefix (PLAYWRIGHT_MCP_…), so the key column grows to the
+  // longest key, in monospace `ch`, up to half the editor; a longer key
+  // scrolls in its field and shows whole in the tooltip.
+  const longestKey = value.reduce((max, e) => Math.max(max, e.key.length), keyPlaceholder.length);
+  const keyWidth = `min(max(9rem, calc(${longestKey + 1}ch + 1.25rem)), 50cqw)`;
+
   return (
     <div className="space-y-2">
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <span className="typography-micro text-muted-foreground w-32 shrink-0">{keyLabel}</span>
+      <div className="@container grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5">
+        <span className="typography-micro text-muted-foreground mb-0.5">{keyLabel}</span>
+        <div className="col-span-2 mb-0.5 flex min-w-0 flex-wrap items-center justify-between gap-x-2">
           <span className="typography-micro text-muted-foreground">{valueLabel}</span>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="!font-normal gap-1 text-muted-foreground"
+            onClick={handlePasteDotEnv}
+            type="button"
+            title={pasteTitle}
+          >
+            <Icon name="clipboard" className="h-3 w-3" />
+            {pasteLabel}
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="xs"
-          className="!font-normal gap-1 text-muted-foreground"
-          onClick={handlePasteDotEnv}
-          type="button"
-          title={pasteTitle}
-        >
-          <Icon name="clipboard" className="h-3 w-3" />
-          {pasteLabel}
-        </Button>
-      </div>
 
-      {/* Rows */}
-      <div className="space-y-1.5">
         {value.map((entry, idx) => (
-          <div key={idx} className="flex items-center gap-2">
-            {/* KEY — fixed narrow width */}
+          <React.Fragment key={idx}>
             <Input
               value={entry.key}
               onChange={(e) => updateRow(idx, 'key', keyTransform(e.target.value))}
               placeholder={keyPlaceholder}
               className={keyInputClassName}
+              style={{ width: keyWidth }}
+              title={entry.key || undefined}
               data-bwignore="true"
               data-1p-ignore="true"
               data-lpignore="true"
               spellCheck={false}
             />
-            {/* VALUE — takes remaining space */}
-            <div className="relative flex-1 flex items-center">
+            <div className="relative flex items-center">
               <Input
                 type={revealedKeys.has(idx) ? 'text' : 'password'}
                 value={entry.value}
@@ -430,16 +432,15 @@ const EnvEditor: React.FC<EnvEditorProps> = ({
                   : <Icon name="eye" className="h-3.5 w-3.5" />}
               </button>
             </div>
-            {/* Remove */}
             <Button size="sm"
               variant="ghost"
-              className="h-7 w-7 px-0 shrink-0 text-muted-foreground hover:text-[var(--status-error)]"
+              className="h-7 w-7 px-0 text-muted-foreground hover:text-[var(--status-error)]"
               onClick={() => removeRow(idx)}
               aria-label={removeVariableAria}
             >
               <Icon name="delete-bin" className="h-3.5 w-3.5" />
             </Button>
-          </div>
+          </React.Fragment>
         ))}
       </div>
 
@@ -1606,7 +1607,7 @@ export const McpPage: React.FC = () => {
                         onCommit={requestSave}
                         keyTransform={(value) => value.trimStart()}
                         keyPlaceholder={t('settings.mcp.page.advanced.headerNamePlaceholder')}
-                        keyInputClassName="w-36 shrink-0 font-mono typography-meta"
+                        keyInputClassName="font-mono typography-meta"
                         pasteLabel={t('settings.mcp.page.advanced.pasteHeaders')}
                         pasteTitle={t('settings.mcp.page.advanced.pasteHeadersTitle')}
                         noPairsFoundError={t('settings.mcp.page.toast.noKeyValuePairsFound')}

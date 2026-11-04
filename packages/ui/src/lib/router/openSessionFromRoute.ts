@@ -15,6 +15,8 @@ export type SessionOpenOptions = {
   directory?: string | null;
   /** The message a link names. */
   messageId?: string | null;
+  /** Native jump-list entries may outlive their session. Unknown IDs do not select anything. */
+  requireKnownSession?: boolean;
 };
 
 type SessionOpenTarget = {
@@ -67,6 +69,12 @@ const selectTarget = (target: SessionOpenTarget, directoryHint: string | null): 
 export async function openSession(sessionId: string, options: SessionOpenOptions = {}): Promise<void> {
   const requestedId = sessionId.trim();
   if (!requestedId) return;
+  if (options.requireKnownSession) {
+    const selectedBeforeLoad = useSessionUIStore.getState().currentSessionId;
+    const snapshot = await ensureGlobalSessionsLoaded().catch(() => null);
+    if (useSessionUIStore.getState().currentSessionId !== selectedBeforeLoad) return;
+    if (!snapshot || ![...snapshot.activeSessions, ...snapshot.archivedSessions].some((session) => session.id === requestedId)) return;
+  }
 
   const messageId = options.messageId?.trim() || null;
   if (messageId) requestMessageFocus(requestedId, messageId);

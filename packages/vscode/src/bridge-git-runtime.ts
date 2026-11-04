@@ -66,10 +66,6 @@ const requireDirectory = (id: string, type: string, directory?: string): BridgeR
   return null;
 };
 
-const isValidCommitHash = (hash: string | undefined): hash is string => (
-  typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
-);
-
 export async function handleStandardGitBridgeMessage(message: BridgeMessageInput, ctx?: BridgeContext): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
@@ -155,15 +151,6 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         return { id, type, success: false, error: 'Directory and branch are required' };
       }
       const result = await gitService.deleteRemoteBranch(directory, branch, remote);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/checkout': {
-      const { directory, branch } = (payload || {}) as { directory?: string; branch?: string };
-      if (!directory || !branch) {
-        return { id, type, success: false, error: 'Directory and branch are required' };
-      }
-      const result = await gitService.checkoutBranch(directory, branch);
       return { id, type, success: true, data: result };
     }
 
@@ -273,33 +260,6 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
-    case 'api:git/diff': {
-      const { directory, path: filePath, staged, contextLines } = (payload || {}) as {
-        directory?: string;
-        path?: string;
-        staged?: boolean;
-        contextLines?: number;
-      };
-      if (!directory || !filePath) {
-        return { id, type, success: false, error: 'Directory and path are required' };
-      }
-      const result = await gitService.getGitDiff(directory, filePath, staged, contextLines);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/file-diff': {
-      const { directory, path: filePath, staged } = (payload || {}) as {
-        directory?: string;
-        path?: string;
-        staged?: boolean;
-      };
-      if (!directory || !filePath) {
-        return { id, type, success: false, error: 'Directory and path are required' };
-      }
-      const result = await gitService.getGitFileDiff(directory, filePath, staged);
-      return { id, type, success: true, data: result };
-    }
-
     case 'api:git/revert': {
       const { directory, path: filePath, scope } = (payload || {}) as { directory?: string; path?: string; scope?: 'all' | 'working' };
       if (!directory || !filePath) {
@@ -346,59 +306,6 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       }
       await gitService.applyGitHunk(directory, filePath, patch, action);
       return { id, type, success: true, data: { success: true } };
-    }
-
-    case 'api:git/commit': {
-      const { directory, message, addAll, files, stageFiles } = (payload || {}) as {
-        directory?: string;
-        message?: string;
-        addAll?: boolean;
-        files?: string[];
-        stageFiles?: string[];
-      };
-      if (!directory || !message) {
-        return { id, type, success: false, error: 'Directory and message are required' };
-      }
-      const result = await gitService.createGitCommit(directory, message, { addAll, files, stageFiles });
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/push': {
-      const { directory, remote, branch, options } = (payload || {}) as {
-        directory?: string;
-        remote?: string;
-        branch?: string;
-        options?: string[] | Record<string, unknown>;
-      };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.gitPush(directory!, { remote, branch, options });
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/pull': {
-      const { directory, remote, branch, rebase } = (payload || {}) as {
-        directory?: string;
-        remote?: string;
-        branch?: string;
-        rebase?: boolean;
-      };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.gitPull(directory!, { remote, branch, rebase });
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/fetch': {
-      const { directory, remote, branch } = (payload || {}) as {
-        directory?: string;
-        remote?: string;
-        branch?: string;
-      };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.gitFetch(directory!, { remote, branch });
-      return { id, type, success: true, data: result };
     }
 
     case 'api:git/stashes': {
@@ -463,196 +370,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
     }
 
-    case 'api:git/rebase': {
-      const { directory, onto } = (payload || {}) as { directory?: string; onto?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      if (!onto) {
-        return { id, type, success: false, error: 'onto is required' };
-      }
-      const result = await gitService.rebase(directory!, { onto });
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/rebase/abort': {
-      const { directory } = (payload || {}) as { directory?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.abortRebase(directory!);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/merge': {
-      const { directory, branch } = (payload || {}) as { directory?: string; branch?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      if (!branch) {
-        return { id, type, success: false, error: 'branch is required' };
-      }
-      const result = await gitService.merge(directory!, { branch });
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/merge/abort': {
-      const { directory } = (payload || {}) as { directory?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.abortMerge(directory!);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/rebase/continue': {
-      const { directory } = (payload || {}) as { directory?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.continueRebase(directory!);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/merge/continue': {
-      const { directory } = (payload || {}) as { directory?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.continueMerge(directory!);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/checkout-commit': {
-      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      if (!isValidCommitHash(hash)) {
-        return { id, type, success: false, error: 'Invalid commit hash' };
-      }
-      const result = await gitService.checkoutCommit(directory!, hash);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/cherry-pick': {
-      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      if (!isValidCommitHash(hash)) {
-        return { id, type, success: false, error: 'Invalid commit hash' };
-      }
-      const result = await gitService.cherryPick(directory!, hash);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/revert-commit': {
-      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      if (!isValidCommitHash(hash)) {
-        return { id, type, success: false, error: 'Invalid commit hash' };
-      }
-      const result = await gitService.revertCommit(directory!, hash);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/reset-to-commit': {
-      const { directory, hash, mode, force } = (payload || {}) as {
-        directory?: string;
-        hash?: string;
-        mode?: 'soft' | 'mixed' | 'hard';
-        force?: boolean;
-      };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      if (!isValidCommitHash(hash)) {
-        return { id, type, success: false, error: 'Invalid commit hash' };
-      }
-      if (!mode || !['soft', 'mixed', 'hard'].includes(mode)) {
-        return { id, type, success: false, error: 'mode must be soft, mixed, or hard' };
-      }
-      const result = await gitService.resetToCommit(directory!, hash, mode, force);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/log': {
-      const { directory, maxCount, from, to, file, all } = (payload || {}) as {
-        directory?: string;
-        maxCount?: number;
-        from?: string;
-        to?: string;
-        file?: string;
-        all?: boolean;
-      };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-      const result = await gitService.getGitLog(directory!, { maxCount, from, to, file, all });
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/commit-files': {
-      const { directory, hash } = (payload || {}) as { directory?: string; hash?: string };
-      if (!directory || !hash) {
-        return { id, type, success: false, error: 'Directory and hash are required' };
-      }
-      const result = await gitService.getCommitFiles(directory, hash);
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/commit-file-diff': {
-      const { directory, hash, path: filePath, binary } = (payload || {}) as {
-        directory?: string;
-        hash?: string;
-        path?: string;
-        binary?: boolean;
-      };
-      if (!directory || !hash || !filePath) {
-        return { id, type, success: false, error: 'Directory, hash, and path are required' };
-      }
-      if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
-        return { id, type, success: false, error: 'hash must be a valid commit SHA' };
-      }
-      const result = await gitService.getCommitFileDiff(directory, hash, filePath, Boolean(binary));
-      return { id, type, success: true, data: result };
-    }
-
-    case 'api:git/identity': {
-      const { directory, method, userName, userEmail, sshKey, signCommits, signingKey } = (payload || {}) as {
-        directory?: string;
-        method?: string;
-        userName?: string;
-        userEmail?: string;
-        sshKey?: string | null;
-        signCommits?: boolean;
-        signingKey?: string | null;
-      };
-      const dirError = requireDirectory(id, type, directory);
-      if (dirError) return dirError;
-
-      const normalizedMethod = typeof method === 'string' ? method.toUpperCase() : 'GET';
-
-      if (normalizedMethod === 'GET') {
-        const identity = await gitService.getCurrentGitIdentity(directory!);
-        return { id, type, success: true, data: identity };
-      }
-
-      if (normalizedMethod === 'POST') {
-        if (!userName || !userEmail) {
-          return { id, type, success: false, error: 'userName and userEmail are required' };
-        }
-        const result = await gitService.setGitIdentity(
-          directory!,
-          userName,
-          userEmail,
-          sshKey,
-          signCommits === true,
-          signingKey ?? null
-        );
-        return { id, type, success: true, data: result };
-      }
-
-      return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
-    }
-
-    case 'api:git/ignore-openchamber': {
-      return { id, type, success: true, data: { success: true } };
-    }
-
     default:
-      return null;
+    return null;
   }
 }

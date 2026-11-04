@@ -20,6 +20,7 @@ import type {
   RepositoryReferencesAcrossResult,
   SourceControlReadContext,
 } from '@openchamber/ui/lib/api/types';
+import type { ChangeRequestReviewStateResult } from '@openchamber/ui/lib/source-control/types';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { z } from 'zod';
 import { providerPath } from './source-control-providers';
@@ -197,14 +198,18 @@ const pullStatusesResultSchema = z.discriminatedUnion('connected', [
 
 const errorSchema = z.object({ error: z.string() });
 
-const readContextQuery = (context: SourceControlReadContext): URLSearchParams => new URLSearchParams({
-  directory: context.directory,
-  instance: context.instance,
-  repositoryId: context.repositoryId,
-  accountId: context.accountId,
-  bindingRevision: String(context.bindingRevision),
-  primaryRemote: context.primaryRemote,
-});
+const readContextQuery = (context: SourceControlReadContext): URLSearchParams => {
+  const query = new URLSearchParams({
+    directory: context.directory,
+    instance: context.instance,
+    repositoryId: context.repositoryId,
+    accountId: context.accountId,
+    bindingRevision: String(context.bindingRevision),
+    primaryRemote: context.primaryRemote,
+  });
+  if (context.linked) query.set('linked', '1');
+  return query;
+};
 
 /** The parsed answer, or the server's own reason when the request failed. */
 const readPayload = async <TSchema extends z.ZodType>(
@@ -254,6 +259,49 @@ export const fetchRepositoryReferenceDetail = async (
   }
   const response = await fetch(providerPath(context, '/references/detail'), { query, headers: { Accept: 'application/json' } });
   return readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
+};
+
+const reviewPersonSchema = z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable();
+const reviewSideSchema = z.enum(['old', 'new']);
+const reviewStateResultSchema = z.discriminatedUnion('connected', [
+  z.object({ connected: z.literal(false) }),
+  z.object({
+    connected: z.literal(true),
+    viewerIsAuthor: z.boolean(),
+    headSha: z.string(),
+    draft: z.object({
+      id: z.string(),
+      body: z.string(),
+      comments: z.array(z.object({
+        id: z.string(), path: z.string(), side: reviewSideSchema,
+        line: z.number().int().nullable(), startLine: z.number().int().nullable(),
+        body: z.string(), author: reviewPersonSchema,
+      })),
+    }).nullable(),
+    threads: z.array(z.object({
+      id: z.string(), path: z.string(), side: reviewSideSchema,
+      line: z.number().int().nullable(), startLine: z.number().int().nullable(),
+      resolved: z.boolean(), canReply: z.boolean(), canResolve: z.boolean(),
+      comments: z.array(z.object({
+        id: z.string(), body: z.string(), createdAt: z.string(), url: z.string(), author: reviewPersonSchema,
+      })),
+    })),
+    truncated: z.boolean(),
+  }),
+]);
+
+/** A change request's review as the diff draws it, read with the repository's bound account. */
+export const fetchChangeRequestReviewState = async (
+  fetch: ReferencesFetch,
+  context: SourceControlReadContext,
+  ref: { owner: string; repo: string; number: number },
+): Promise<ChangeRequestReviewStateResult> => {
+  const query = readContextQuery(context);
+  query.set('owner', ref.owner);
+  query.set('repo', ref.repo);
+  query.set('number', String(ref.number));
+  const response = await fetch(providerPath(context, '/pr/review/state'), { query, headers: { Accept: 'application/json' } });
+  return readPayload(response, reviewStateResultSchema, 'Failed to load the review');
 };
 
 /** One provider per page: every context must name the same provider, whose route serves the search. */

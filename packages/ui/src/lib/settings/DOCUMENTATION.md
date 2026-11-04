@@ -29,6 +29,8 @@
 
 ## Adding a setting
 
+`notifyOnPullRequests` is a profile preference, default on in `useUIStore` and the server defaults. The Notifications page exposes it on clients of an OpenChamber server; VS Code does not run that server follower. The server checks the preference at delivery time, including when no UI is connected.
+
 1. Add one entry to `SETTINGS_REGISTRY` with `scope`, a parser from `parsers.ts`, and a `ui` binding when a store holds the live value. Use an existing setter so its side effects run.
 2. Run `bun run settings-registry:generate` and commit both JSON snapshots.
 3. If the server must validate the value beyond the registry gate, add its branch to `sanitizeSettingsUpdate` in `packages/web/server/lib/opencode/settings-helpers.js`; the drift test in `settings-helpers.test.js` needs a valid sample value for the new key.

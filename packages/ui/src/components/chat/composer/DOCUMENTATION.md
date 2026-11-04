@@ -941,7 +941,16 @@ spinner row shows only when there are no rows yet, and "no matches" only
 once the current query's search has answered; the two rows share one height.
 Server hits carry the key of the search they answer (`mentionSearchKey`), so
 an older query's hits never show as the current one's. Enter picks the row on
-screen, held or not; a new answer selects its first row.
+screen, held or not; a new query's answer selects its first row.
+
+A query has up to two answers. OpenCode's index answers at once and its hits
+show as soon as there are any; the search behind the hidden and gitignored
+toggles may walk the project for seconds, and the list does not wait for it, or
+a large project shows only agents until it ends. Its extra rows join when it
+answers, and new rows for the same query leave the selection on the row it was
+on. Only a row pushed out of the list sends the selection back to the first
+row. An index answer of nothing keeps the query searching until the second
+answer, so "no matches" still means both finished.
 `../FileMentionAutocomplete.test.tsx` covers these states.
 
 ## Other sessions as context
@@ -1315,11 +1324,16 @@ the dialog keeps its size. Lanes share the project directory by default;
 worktrees are opt-in, and a tab row only
 once there are two or more variants. Model pickers there render through a
 portal because the box clips its content; the footer drops the model button
-and keeps the ordinary send button (`ComposerActionButtons` with a
-`sendLabel` naming the run count), disabled below two runs or while
-launching. Enter and the send button launch instead of sending. Launching goes through `useMultiRunStore.createMultiRun`, clears the
+but keeps the agent picker (`ModelControls` with `agentOnly`), because every
+lane starts on that agent, and the ordinary send button
+(`ComposerActionButtons` with a `sendLabel` naming the run count), disabled
+below two runs or while launching. Enter and the send button launch instead of
+sending. Launching goes through `useMultiRunStore.createMultiRun`, clears the
 draft text and attachments, and opens the run overview. Attachments go to every
-variant; prompt text is sent as typed, the way the old launcher sent it.
+variant; prompt text is sent as typed, the way the old launcher sent it. An
+armed goal button makes each lane a goal of its own, with its variant's prompt
+as the objective and the default token budget per lane; a launch that created
+sessions disarms the button.
 
 ## Chat quote highlights
 

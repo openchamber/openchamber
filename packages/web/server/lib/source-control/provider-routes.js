@@ -243,6 +243,10 @@ const MUTATION_ROUTES = [
   ['/issues/labels', 'labels'],
   ['/pr/reviewers', 'reviewers'],
   ['/pr/review', 'reviews'],
+  ['/pr/review/comment', 'reviewDrafts'],
+  ['/pr/review/comment/update', 'reviewDrafts'],
+  ['/pr/review/comment/delete', 'reviewDrafts'],
+  ['/pr/review/discard', 'reviewDrafts'],
   ['/discussions/comment', 'discussions'],
   ['/discussions/state', 'discussions'],
   ['/discussions/answer', 'discussions'],
@@ -259,6 +263,8 @@ export function registerProviderRoutes(app, {
   validateReadContext,
   validateMutationContext,
   mutationExecutor,
+  onMutationSucceeded = async () => {},
+  onMutationStarting = () => null,
   oauthFlowRegistry = createOAuthFlowRegistry(),
 }) {
   const statusCaches = new Map();
@@ -405,15 +411,23 @@ export function registerProviderRoutes(app, {
       return kind === 'unreachable' || kind === 'temporarily-unavailable';
     };
 
-    const readContextOf = (req, instance, directory) => validateReadContext?.({
-      directory,
-      repositoryId: req.query?.repositoryId,
-      provider: id,
-      instance,
-      accountId: req.query?.accountId,
-      bindingRevision: Number(req.query?.bindingRevision),
-      primaryRemote: req.query?.primaryRemote,
-    });
+    /**
+     * `linked=1` asks to read an item a link names wherever its repository
+     * is, with the bound account. Only these reads honour it: writes validate
+     * their own context, so the network still decides what can be changed.
+     */
+    const readContextOf = async (req, instance, directory) => {
+      const context = await validateReadContext?.({
+        directory,
+        repositoryId: req.query?.repositoryId,
+        provider: id,
+        instance,
+        accountId: req.query?.accountId,
+        bindingRevision: Number(req.query?.bindingRevision),
+        primaryRemote: req.query?.primaryRemote,
+      });
+      return context && req.query?.linked === '1' ? { ...context, linked: true } : context;
+    };
 
     /**
      * A bound read: validates the context before any credential lookup, then
@@ -752,31 +766,48 @@ export function registerProviderRoutes(app, {
       const record = (target) => ({ key: context.idempotencyKey, inputDigest: prepared.digest(target), kind, actor, target });
       const classifyError = impl.mutations.classifyError ?? classifyMutationError;
       let execution;
-      if (existing) {
-        requireReplayMatch(existing, kind, actor, context);
-        let replayResolution;
-        const resolveReplay = async () => {
-          replayResolution ??= await impl.mutations.resolveTarget({ session, context, kind, input, replayOf: existing });
-          return replayResolution;
-        };
-        execution = await mutationExecutor.execute({
-          record: record(existing.target),
-          providerAccountId: session.providerUserId,
-          perform: () => { throw mutationConflict(); },
-          reconcile: async () => impl.mutations.reconcile({ session, route, kind, input, resolved: await resolveReplay() }),
-          classifyError,
-        });
-      } else {
-        const resolved = await impl.mutations.resolveTarget({ session, context, kind, input });
-        execution = await mutationExecutor.execute({
-          record: record(resolved.target),
-          providerAccountId: session.providerUserId,
-          perform: () => impl.mutations.perform({ session, route, kind, input, resolved }),
-          reconcile: () => impl.mutations.reconcile({ session, route, kind, input, resolved }),
-          classifyError,
-        });
+      let settleStarted = null;
+      const starting = (target) => {
+        try { settleStarted = onMutationStarting({ context, kind, input, target }) ?? null; }
+        catch { settleStarted = null; }
+      };
+      try {
+        if (existing) {
+          starting(existing.target);
+          requireReplayMatch(existing, kind, actor, context);
+          let replayResolution;
+          const resolveReplay = async () => {
+            replayResolution ??= await impl.mutations.resolveTarget({ session, context, kind, input, replayOf: existing });
+            return replayResolution;
+          };
+          execution = await mutationExecutor.execute({
+            record: record(existing.target),
+            providerAccountId: session.providerUserId,
+            perform: () => { throw mutationConflict(); },
+            reconcile: async () => impl.mutations.reconcile({ session, route, kind, input, resolved: await resolveReplay() }),
+            classifyError,
+          });
+        } else {
+          const resolved = await impl.mutations.resolveTarget({ session, context, kind, input });
+          starting(resolved.target);
+          execution = await mutationExecutor.execute({
+            record: record(resolved.target),
+            providerAccountId: session.providerUserId,
+            perform: () => impl.mutations.perform({ session, route, kind, input, resolved }),
+            reconcile: () => impl.mutations.reconcile({ session, route, kind, input, resolved }),
+            classifyError,
+          });
+        }
+        statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
+        try { await onMutationSucceeded({ context, kind, input, record: execution.record, replayed: execution.replayed }); }
+        catch (error) {
+          // The provider write is already durable. Notification bookkeeping
+          // cannot turn an accepted merge into an apparent failed mutation.
+          console.warn('[source-control] post-mutation follow failed:', error?.code ?? 'FOLLOW_FAILED');
+        }
+      } finally {
+        settleStarted?.();
       }
-      statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
       // Cache invalidation after the write is durable and best effort: the write
       // landed, and a stale cache must not turn that into an error.
       if (impl.mutations.afterSuccess instanceof Function) {
@@ -882,6 +913,20 @@ export function registerProviderRoutes(app, {
         number: requestIssueNumber(req.query?.number),
         host: requestText(req.query?.host),
         kind,
+      }));
+    }, {
+      validate: (req) => (!requestText(req.query?.directory) || !namesProject(req)
+        || !requestIssueNumber(req.query?.number) ? 'directory, owner, repo and number are required' : null),
+    });
+
+    // A change request's review as the diff draws it: the viewer's draft and the threads on its lines.
+    boundRead('reviewDrafts', '/pr/review/state', async ({ req, res, impl, directory, instance, trustedContext }) => {
+      const read = requireResource(impl, 'reviewState');
+      const session = await sessionFor(impl, instance, trustedContext.accountId);
+      return res.json(await read({
+        session, directory, context: trustedContext, remote: trustedContext.primaryRemote,
+        project: optionalProject(req),
+        number: requestIssueNumber(req.query?.number),
       }));
     }, {
       validate: (req) => (!requestText(req.query?.directory) || !namesProject(req)
@@ -1075,6 +1120,7 @@ export function registerProviderRoutes(app, {
       throw error;
     }
   };
+  const linkedRead = (context) => (context?.linked ? { linked: true } : {});
   const invalidProvider = () => Object.assign(new Error('Change request source provider is invalid'), {
     code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
   });
@@ -1120,11 +1166,11 @@ export function registerProviderRoutes(app, {
     },
     /** `revision` (40-hex) only for a provider that keeps revisions; others refuse it with 400. */
     readChangeRequestPatch: async ({ context, number, sourceRepo, revision }) => readWithBoundAccount(
-      context, 'readChangeRequestPatch', withRevision({ number, sourceRepo }, readRevision(providers.describe(context?.provider), revision)),
+      context, 'readChangeRequestPatch', withRevision({ number, sourceRepo, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
     readChangeRequestFile: async ({ context, number, sourceRepo, path, previousPath, status, revision }) => readWithBoundAccount(
       context, 'readChangeRequestFile',
-      withRevision({ number, sourceRepo, path, previousPath, status }, readRevision(providers.describe(context?.provider), revision)),
+      withRevision({ number, sourceRepo, path, previousPath, status, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
     /** A change request's head on the context's primary project network, for a worktree made from it. */
     readChangeRequestHead: (input) => trustedRead(input, 'readChangeRequestHead', () => ({ number: input.number })),

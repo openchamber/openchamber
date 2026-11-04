@@ -4,6 +4,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { hasActiveSubagent, subscribeSessionStatusTransitions, useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useI18n } from '@/lib/i18n';
 import { NoFusionOutputsError, startRunFusion, type FusionJudge } from './fusion';
+import { hasRunningGoal } from './laneStatus';
 import type { MultiRunSummary } from './runs';
 import { useMultiRunSessions } from './useMultiRuns';
 import { RUN_LAUNCHER_ID } from './launcher';
@@ -83,6 +84,7 @@ function useRunAutoFusion(onStartFailed: (failure: AutoFusionFailure) => void): 
         && !activeSessionIds.has(lane.sessionId)
         && !waitingForResumptionLaneIds.has(lane.sessionId)
         && sessionById.get(lane.sessionId)?.outcome !== undefined
+        && !hasRunningGoal(sessionById.get(lane.sessionId))
         && (!waitingLaneIdleTimes.has(lane.sessionId)
           || (sessionById.get(lane.sessionId)?.time.idle ?? 0) > (waitingLaneIdleTimes.get(lane.sessionId) ?? 0))
       ));

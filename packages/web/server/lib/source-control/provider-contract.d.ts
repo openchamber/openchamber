@@ -31,6 +31,13 @@ export interface ProviderCapabilities {
   labels: boolean;
   reviewers: boolean;
   reviewThreads: { start: boolean; reply: boolean; resolve: boolean };
+  /**
+   * The viewer's unpublished review, kept by the host: `/pr/review/state`
+   * reads it with the threads on the diff, `/pr/review/comment*` and
+   * `/pr/review/discard` change it, `/pr/review` sends it. `fileComments`: a
+   * comment can sit on a whole file.
+   */
+  reviewDrafts?: { fileComments: boolean };
   uploads: boolean;
   stacks: boolean;
   changeRequestPatch: boolean;
@@ -111,6 +118,7 @@ export interface ProviderDescriptor {
     features: {
       referenceSearch: boolean; referenceDetail: boolean; listStatuses: boolean; referencesAcross: boolean;
       startThread: boolean; authorCanReview: boolean; projectUploads: boolean; issueCloseReason: boolean;
+      reviewDrafts?: boolean; reviewDraftFileComments?: boolean;
       changeRequestTemplates: string[];
       /** False when a change request's head is a revision ref, not a branch (no stack-on-top, no branch row). Absent means true. */
       branchHeads?: boolean;
@@ -337,6 +345,8 @@ export interface ProviderImplementation {
     referencesAcross?(input: { body: Json; validateReadContext(context: Json): Promise<Json> }): Promise<Json>;
     /** `kind: 'discussion'` reads a discussion's detail; otherwise the issue or change request the number names. */
     referenceDetail?(input: ReadInput & { project: ProjectSelector; number: number; host: string; kind: 'item' | 'discussion' }): Promise<Json>;
+    /** Capability `reviewDrafts`: the viewer's draft and the open threads with their lines. */
+    reviewState?(input: ReadInput & { project: ProjectSelector; number: number }): Promise<Json>;
     /** Statuses of listed change requests (`owner/repo#n[@host]`, comma separated); read with each host's account, so no session. */
     referenceStatuses?(input: Omit<ReadInput, 'session'> & { pulls: string }): Promise<Json>;
   };

@@ -29,6 +29,13 @@ describe('live aggregate', () => {
     expect(areSessionListsEquivalent([original], [{ ...original, model: { ...original.model, providerID: 'custom' } }])).toBe(false)
   })
 
+  it('detects a metadata write, which leaves the timestamp alone', () => {
+    const original = session('ses-1', '/a', 10, { metadata: { openchamber: { goal: { status: 'active' } } } })
+
+    expect(areSessionListsEquivalent([original], [{ ...original, time: { ...original.time } }])).toBe(true)
+    expect(areSessionListsEquivalent([original], [{ ...original, metadata: { openchamber: { goal: { status: 'complete' } } } }])).toBe(false)
+  })
+
   it('compares rebuilt session lists field by field', () => {
     const list = [session('ses-1', '/a', 10), session('ses-2', '/b', 20, { parentID: 'ses-1' })]
 

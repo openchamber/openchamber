@@ -50,6 +50,23 @@ edge, or past it, the editor scrolls and the range follows. The click that
 ends a drag lands on whatever the pointer ended over, so each view's
 click-outside handler skips it (`isDragReleaseClick`) and the range stays.
 
+### Why a comment's annotation keeps one DOM node
+
+Pierre keys its annotation wrappers by index in the list, so an annotation that comes or goes rebuilds every one after it. A card is portalled into its annotation's node, so a new node would unmount the card and drop its height for a frame, which moves the diff and the scroll. `renderAnnotation` hands back the same node per annotation id, and the open comment field goes last in the list, so opening or closing it shifts nothing.
+
+### Why Pierre owns diff line-number selection
+
+`PierreDiffViewer` receives number-column selections through Pierre's
+`onLineSelected`, including clearing a single line, Shift+click ranges and
+touch taps. A separate click listener would run after Pierre's pointerup,
+reopen a cleared comment editor and replace a range with the clicked line.
+Pierre toggles a single selection by number without checking its side. A
+capture-phase pointerdown clears that selection before a same-number press
+on the other side, so Pierre starts a normal selection there. Shift+press
+and unfinished comments keep their existing paths.
+The gutter "+" keeps its own `onGutterUtilityClick` path. An unfinished
+comment still prevents an accidental deselection from closing its editor.
+
 ### Why the window follows the drag and not the gutter
 
 The gutter only sees the pointer while it is over the line-number column,
@@ -285,6 +302,25 @@ unmirrored arrow up inside the LTR block.
 ### Why a bounded flex body and not percentage max-height alone
 
 A percentage max-height inside auto-height wrappers let the inner viewport grow to the entire virtual list. The Files pane then scrolled outside the virtualizer, which mounted every row and froze the renderer on large JSON. The flex layout keeps the virtualizer's viewport bounded without changing file limits, preview preferences or saved tabs.
+
+## Last turn scope
+
+`useLastTurnDiff` reads the last turn's per-file diff from OpenCode
+(`GET /api/session/:id/diff`), which compares the turn's first and last step
+snapshots. The answer moves when a step is added, when the newest step finishes
+(its end snapshot is recorded then) and when the session goes idle, so those
+three key the refetch. The desktop Diff view reads it in every scope while
+shown, so the scope picker's Last turn count is current before the user picks
+it; mobile Changes has no counts and reads it only in that scope. Outside the
+scope a running turn is not read, and its count shows as unknown until the
+turn ends. A failed read keeps its own error and retry, and another session's
+turn never shows while this one's loads.
+
+### Why the count waits for the turn to end outside the scope
+
+A read of a running step makes OpenCode capture a fresh working-copy snapshot.
+Reading on every step only to keep a count current would cost one capture per
+step of every turn while the panel is open on another scope.
 
 ## Pull request comparisons
 

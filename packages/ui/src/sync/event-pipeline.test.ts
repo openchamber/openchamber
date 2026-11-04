@@ -519,6 +519,13 @@ describe("createEventPipeline over the WebSocket transport", () => {
 })
 
 describe("classifyStreamPayload", () => {
+  test("routes authoritative space task titles and refuses malformed title records", () => {
+    const properties = { spaceId: "0123456789ab", taskTitle: { title: "Task", by: "user" } }
+    expect(classifyStreamPayload({ type: "openchamber:space-task-title.updated", properties }, undefined))
+      .toEqual({ kind: "space-task-title", properties })
+    expect(classifyStreamPayload({ type: "openchamber:space-task-title.updated", properties: { ...properties, taskTitle: { title: "Task", by: "other" } } }, undefined))
+      .toEqual({ kind: "events", events: [] })
+  })
   test("classifies each payload kind by its type", () => {
     expect(classifyStreamPayload(textDelta("a"), undefined)).toMatchObject({ kind: "events", events: [{ directory: "/repo" }] })
     expect(classifyStreamPayload({ type: "openchamber:space-setup", properties: { spaceId: "0123456789ab" } }, undefined))

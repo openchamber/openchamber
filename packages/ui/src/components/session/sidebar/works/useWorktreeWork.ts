@@ -9,17 +9,16 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
+import { useFirstSessionWithOpenTurn } from '@/sync/global-session-status';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionUnread } from '@/sync/session-unread';
 import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
 import { useGroupRefs } from '../projects/useGroupRefs';
 import type { SessionGroup } from '../types';
 import { formatProjectLabel, isPathWithinProject, normalizePath } from '../utils';
-import { useSpaceTakesNoNewSession } from '@/lib/spaces/spaces-store';
+import { refreshSpacesJourney, useSpaceTakesNoNewSession } from '@/lib/spaces/spaces-store';
+import { setSpaceTaskTitle } from '@/lib/spaces/spaces-api';
 import { spaceOfCreationRequest } from '@/lib/spaces/space-creation-requests';
-import { hasWorkTitle } from '@/lib/sessionWorkTitle';
-import { updateSessionTitle } from '@/sync/session-actions';
 import { collectWorkSessions, finishSpaceWork, finishWorktreeWork, isWorkInWork, pickWorkSessionToOpen, trackWork } from './workActions';
 
 const CURRENT_SESSION = '\u0000session';
@@ -38,7 +37,7 @@ type Args = {
  * the desktop row with hover actions and menus, the phone's with swipe
  * actions. The row reads like a session row (live state, the task's name, its
  * reference) and opens what the user last worked on there. A space's task
- * name lives on its sessions, its own name stands where a branch would, it has
+ * name lives on the space record, its own name stands where a branch would, it has
  * no pin or archive, and its Done leaves the space as it is.
  */
 export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Args) {
@@ -82,16 +81,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   const selected = isCurrent && (collapsed || (current !== CURRENT_SESSION && !openDraftHasRow));
   const [finishing, setFinishing] = React.useState(false);
 
-  // A space's task is named as a main-checkout task is: the agent's
-  // `work.name` from inside the space names the root session it works in, and
-  // the user's rename of it wins (`metadata.openchamber.workTitle`). Its most
-  // recent named session names the space's row, as a worktree's branch
-  // description names its own.
-  const namedSpaceSession = React.useMemo(
-    () => (space ? group.sessions.find((node) => hasWorkTitle(node.session.metadata))?.session ?? null : null),
-    [group.sessions, space],
-  );
-  const title = space ? namedSpaceSession?.title?.trim() || null : worktree?.title?.trim() || null;
+  const title = space ? space.taskTitle?.title?.trim() || null : worktree?.title?.trim() || null;
   const branch = group.branch?.trim() || worktree?.branch?.trim() || null;
   // The space's own name stands where a worktree's branch does: under the
   // task's name, and the row's name until there is a task.
@@ -105,9 +95,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   // The other name, under the row's name; null when there is none.
   const secondName = [title, ownName].find((name) => name && name !== label) ?? null;
   const sessionToOpen = React.useMemo(() => pickWorkSessionToOpen(group.sessions), [group.sessions]);
-  // A space's task name lives on a session, so a space without one has nothing to rename.
-  const spaceTitleSession = namedSpaceSession ?? sessionToOpen;
-  const canRename = !space || spaceTitleSession !== null;
+  const canRename = true;
   const canNewChat = !spaceTakesNoNewSession;
 
   const prepare = (): void => {
@@ -152,7 +140,8 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
     if (!group.directory || !next.trim() || next.trim() === (title ?? '')) return;
     try {
       if (space) {
-        if (spaceTitleSession) await updateSessionTitle(spaceTitleSession.id, next.trim(), { directory: spaceTitleSession.directory ?? directory, byUser: true });
+        await setSpaceTaskTitle(space.id, next.trim());
+        await refreshSpacesJourney();
         return;
       }
       await setGitWorktreeTitle(group.directory, next.trim());
@@ -216,12 +205,7 @@ export function useWorktreeWork({ group, projectId, collapsed, onNavigate }: Arg
   // turn's duration at the end.
   const activityState = useCollapsedSessionActivityState({ nodes: group.sessions });
   const workSessionIds = React.useMemo(() => sessions.flatMap((session) => (session.parentID ? [] : [session.id])), [sessions]);
-  const runningSessionId = useGlobalSessionStatusStore(React.useCallback((state) => (
-    workSessionIds.find((id) => {
-      const status = state.statusById.get(id)?.status.type;
-      return status === 'busy' || status === 'retry';
-    }) ?? null
-  ), [workSessionIds]));
+  const runningSessionId = useFirstSessionWithOpenTurn(workSessionIds);
   const unreadSessionId = useGlobalSessionsStore(React.useCallback((state) => (
     workSessionIds.find((id) => isSessionUnread(state.entityById.get(id))) ?? null
   ), [workSessionIds]));

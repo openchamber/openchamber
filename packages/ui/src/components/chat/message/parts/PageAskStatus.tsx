@@ -21,7 +21,9 @@ export function PageAskStatus({ ask, answeredSummary }: { ask: RenderedPageAsk; 
                 ? t('chat.htmlRender.answeredInChat')
                 : ask.kind === 'chat-sent-earlier'
                     ? t('chat.htmlRender.chatSentEarlier')
-                    : ask.kind === 'unanswered' ? t('chat.htmlRender.unanswered') : null;
+                    : ask.kind === 'unanswered'
+                        ? t('chat.htmlRender.unanswered')
+                        : ask.kind === 'not-drawn' ? t('chat.htmlRender.notDrawn') : null;
     if (!status) return null;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined;
     return (

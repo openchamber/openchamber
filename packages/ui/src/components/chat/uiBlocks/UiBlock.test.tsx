@@ -50,3 +50,13 @@ test('a form with its own button gets no second one', async () => {
   expect(buttons()).toContain('Go');
   expect(buttons()).not.toContain('Send');
 });
+
+test('a block that cannot be drawn says why and folds its source', async () => {
+  await draw('root = Stack([question])\nquestion = Choice("approach", ["A"])\nConfirm = Button("Go")', async () => {});
+  expect(host.textContent).toContain('Defined but never used: Confirm');
+  const source = host.querySelector('pre');
+  expect(source?.hidden).toBe(true);
+  const toggle = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Source');
+  await act(async () => toggle?.click());
+  expect(source?.hidden).toBe(false);
+});

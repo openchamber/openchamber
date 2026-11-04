@@ -4,6 +4,8 @@ import { requireTheme } from '../definition';
 
 import aura_dark_Raw from './aura-dark.json';
 import aura_light_Raw from './aura-light.json';
+import aurora_dark_Raw from './aurora-dark.json';
+import aurora_light_Raw from './aurora-light.json';
 import ayu_dark_Raw from './ayu-dark.json';
 import ayu_light_Raw from './ayu-light.json';
 import carbonfox_dark_Raw from './carbonfox-dark.json';
@@ -62,6 +64,8 @@ export const presetThemes: Theme[] = [
   fields_of_the_shire_light_Raw,
   aura_dark_Raw,
   aura_light_Raw,
+  aurora_dark_Raw,
+  aurora_light_Raw,
   ayu_dark_Raw,
   ayu_light_Raw,
   carbonfox_dark_Raw,

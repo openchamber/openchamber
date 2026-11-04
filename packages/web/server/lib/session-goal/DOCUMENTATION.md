@@ -227,16 +227,25 @@ before touching the filesystem). Rationale: metadata rides every
 ## Continuation prompt
 
 Built inline in `runtime.js`: the objective as untrusted user data in an
-XML-escaped `<objective>` block, budget numbers, keep-the-full-objective and
+XML-escaped `<objective>` block, budget numbers,
+`GOAL_MISSION_INSTRUCTIONS` (`audit.js`), keep-the-full-objective and
 work-from-evidence rules, a completion-audit instruction, and
-`GOAL_REPORT_INSTRUCTIONS` (`audit.js`): stop background commands that never
-finish before ending a turn, and end every turn with four lines, Done,
-Verified, Remaining and Needs from the user, each with "nothing" said out loud.
-The audit sees only that final turn, so the report is its evidence; Remaining
-and Needs from the user answer the `remaining` and `needs_user` questions
-directly, and user-side steps (testing in the app, review, commits) are named
-as neither. The first-turn reminder (`create.js` and the UI's
-`session-ui-store.ts`) carries the same text.
+`GOAL_REPORT_INSTRUCTIONS` (`audit.js`): the final message ends the run, stop
+background commands that never finish before it, and close it with four
+lines, Done, Verified, Remaining and Needs from the user, each with "nothing"
+said out loud. The audit sees only that final turn, so the report is its
+evidence; Remaining and Needs from the user answer the `remaining` and
+`needs_user` questions directly, and user-side steps (testing in the app,
+review, commits) are named as neither. The first-turn reminder (`create.js`
+and the UI's `sessionGoalActions.ts`) carries the same mission and report text.
+
+### Why the prompts never mention the loop continuing the agent
+
+The agent is sent on the whole objective in one run. A promise that the system
+will prompt it to continue, per-turn reporting and a count of auto-continuations
+all read as permission to stop after one step and hand back a list of what is
+left. The continuation stays as the safety net, unannounced. The four report
+lines keep their shape because the progress check reads them.
 
 ## Recovery after connecting
 
@@ -256,6 +265,8 @@ session or a settled goal costs one read.
   colors/labels shared across surfaces.
 - `stores/useSessionGoalArmStore.ts` — the "next prompt starts a goal" flag,
   consumed by `sendMessage` in `sync/session-ui-store.ts` (works for drafts).
+  A parallel launch reads it too and gives every lane its own goal
+  (`lib/multirun/DOCUMENTATION.md`).
   Armed slash commands resolve their authoritative command template and apply
   OpenCode argument expansion (`$ARGUMENTS`, positional placeholders, or the
   implicit argument suffix) for the audit objective before goal metadata is

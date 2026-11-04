@@ -173,6 +173,9 @@ export function useDraftTarget(enabled: boolean) {
             || selectedDraftProjectIsGitRepo !== true
             || newSessionDraft?.pendingWorktreeRequestId
             || newSessionDraft?.bootstrapPendingDirectory
+            // Closing a PIN window refocuses the app; a read now would replace
+            // the answer the person just signed in for.
+            || useGitStore.getState().isAskingRemotes(selectedDraftProjectPath)
         ) {
             return;
         }

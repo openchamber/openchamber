@@ -1045,4 +1045,7 @@ export const registerGuestRoutes = (app, {
       res.status(500).json({ error: 'Failed to serve guest asset' });
     }
   });
+
+  // The runtime stops the watch on shutdown and before registering the routes again.
+  return { stopPackageWatch: () => packageWatch?.stop() };
 };

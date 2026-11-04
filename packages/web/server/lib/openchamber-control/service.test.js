@@ -436,6 +436,12 @@ describe('OpenChamber control service', () => {
       .resolves.toEqual({ task: 'worktree', title: 'Login fix', named: true });
     expect(setWorktreeTaskTitle).toHaveBeenCalledWith('/wt/a', { title: 'Login fix', by: 'agent' });
 
+    client.session.get = vi.fn(async () => ({ id: 'ses_caller', title: 'Original title', location: { directory: '/repo' } }));
+    client.session.update = vi.fn();
+    await expect(service.execute('work.name', { title: 'Agent replacement' }, '/repo', { contextSessionId: 'ses_caller' }))
+      .resolves.toMatchObject({ named: false, title: 'Original title' });
+    expect(client.session.update).not.toHaveBeenCalled();
+
     const { service: without } = createService();
     await expect(without.execute('work.name', { title: 'Login fix' }, '/repo', { contextSessionId: 'ses_caller' }))
       .rejects.toMatchObject({ statusCode: 503 });

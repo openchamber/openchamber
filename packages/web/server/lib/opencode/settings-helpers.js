@@ -705,6 +705,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.notifyOnCompletion === 'boolean') {
       result.notifyOnCompletion = candidate.notifyOnCompletion;
     }
+    if (candidate.notifyOnPullRequests === true || candidate.notifyOnPullRequests === false) {
+      result.notifyOnPullRequests = candidate.notifyOnPullRequests;
+    }
     if (typeof candidate.notifyOnError === 'boolean') {
       result.notifyOnError = candidate.notifyOnError;
     }
@@ -938,10 +941,6 @@ export const createSettingsHelpers = (dependencies) => {
     // The machine of the Docker over SSH place; the empty string takes that place away.
     const sshHost = sshHostSchema.safeParse(candidate.isolatedSpacesSshHost);
     if (sshHost.success) result.isolatedSpacesSshHost = sshHost.data;
-    const projectImportCompleted = z.boolean().safeParse(candidate.openCodeProjectImportCompleted);
-    if (projectImportCompleted.success) {
-      result.openCodeProjectImportCompleted = projectImportCompleted.data;
-    }
     if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
       const version = candidate.openCodeUpdateToastDismissedVersion.trim();
       result.openCodeUpdateToastDismissedVersion = version.slice(0, VERSION_STRING_MAX_LENGTH);

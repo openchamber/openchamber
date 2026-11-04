@@ -983,6 +983,10 @@ export const createSettingsRuntime = (deps) => {
       next.notifyOnCompletion = true;
       changed = true;
     }
+    if (settings.notifyOnPullRequests !== true && settings.notifyOnPullRequests !== false) {
+      next.notifyOnPullRequests = true;
+      changed = true;
+    }
     if (typeof settings.notifyOnError !== 'boolean') {
       next.notifyOnError = true;
       changed = true;

@@ -125,6 +125,30 @@ describe("send agent selection", () => {
     }
   })
 
+  test("a send goes to the session's own directory when another store also holds it (#6262)", async () => {
+    const wasConnected = useConfigStore.getState().isConnected
+    useConfigStore.setState({ isConnected: true })
+    setActionRefs(manager, () => DIRECTORY)
+    setOptimisticRefs(() => {}, () => {})
+    manager.ensureChild("/chats/other", { bootstrap: false }).setState({ session: [session] })
+    respond = () => new Response(null, { status: 503 })
+    try {
+      await expect(routeMessage({
+        runtimeKey: getRuntimeKey(),
+        sessionId: SESSION_ID,
+        directory: DIRECTORY,
+        content: "Follow up",
+        providerID: MODEL.providerID,
+        modelID: MODEL.id,
+        agent: "build",
+      })).rejects.toThrow()
+
+      expect(requests[0]?.directory).toBe(encodeURIComponent(DIRECTORY))
+    } finally {
+      useConfigStore.setState({ isConnected: wasConnected })
+    }
+  })
+
   test("model and effort changes received during the agent read remain visible to the send", async () => {
     manager.getChild(DIRECTORY)?.setState({ session: [{ ...session, model: { ...MODEL, variant: "high" } }] })
     let started = () => {}

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { pairedDiffLine } from '../source-control/review-position.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
 import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
@@ -200,6 +202,11 @@ export function createGitLabResourceService({ origin, client, download, resolveP
   };
 
   const constrainedProjectNetwork = async (directory, selector, remote, options = {}) => {
+    // A link named this project: read it wherever it is.
+    if (options.linked && selector) {
+      const target = await showProject(projectPath(selector.owner, selector.name));
+      return { primary: target, target, targets: [target] };
+    }
     const resolved = await resolveDirectoryProjects(directory, remote);
     const primary = resolved.projects[0];
     const targets = await expandTargets([primary], { ...options, requireComplete: Boolean(selector) || options.requireComplete });
@@ -408,7 +415,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
   };
 
   const findByNumber = async (directory, number, selector, options = {}) => {
-    if (options.constrainToPrimary) {
+    if (options.constrainToPrimary && !(options.linked && selector)) {
       const resolved = await resolveDirectoryProjects(directory, options.remote);
       const targets = await expandTargets([resolved.projects[0]], { requireComplete: canonicalReads });
       const selectedTargets = selector
@@ -599,6 +606,52 @@ export function createGitLabResourceService({ origin, client, download, resolveP
     }
   };
 
+  const readDraftNotes = (value) => {
+    if (!Array.isArray(value) || value.some((note) => !isPlainObject(note) || !Number.isInteger(note.id) || !isString(note.note))) {
+      throw new Error('GitLab returned invalid draft notes');
+    }
+    return value;
+  };
+  const toReviewPerson = (user) => (isString(user?.username) ? { login: user.username, avatarUrl: isString(user.avatar_url) ? user.avatar_url : undefined } : null);
+  /** Where a note sits, in the review's own terms. */
+  const positionOfNote = (position) => {
+    const path = position?.new_path ?? position?.old_path ?? '';
+    if (position?.position_type === 'file') return { path, side: 'new', line: null, startLine: null };
+    const side = Number.isInteger(position?.new_line) ? 'new' : 'old';
+    const key = side === 'new' ? 'new_line' : 'old_line';
+    const start = position?.line_range?.start?.[key];
+    return { path, side, line: position?.[key] ?? null, startLine: Number.isInteger(start) && start !== position?.[key] ? start : null };
+  };
+  const lineRangeEnd = (path, pair) => ({
+    lineCode: `${createHash('sha1').update(path).digest('hex')}_${pair.oldLine ?? pair.newLine}_${pair.newLine ?? pair.oldLine}`,
+    type: pair.newLine === null ? 'old' : 'new',
+    oldLine: pair.oldLine ?? undefined,
+    newLine: pair.newLine ?? undefined,
+  });
+  /** GitLab needs a line named by both sides where it has both, and a range by its two ends. */
+  const draftPosition = (position, diff, refs) => {
+    const base = {
+      baseSha: refs.base_sha, startSha: refs.start_sha, headSha: refs.head_sha,
+      oldPath: diff.old_path, newPath: diff.new_path,
+    };
+    if (position.line === undefined) return { ...base, positionType: 'file' };
+    const pairOf = (line) => {
+      const pair = pairedDiffLine(diff.diff, position.side, line);
+      if (!pair) throw Object.assign(new Error('This line is not in the merge request diff'), { status: 422 });
+      return pair;
+    };
+    const end = pairOf(position.line);
+    return {
+      ...base,
+      positionType: 'text',
+      oldLine: end.oldLine ?? undefined,
+      newLine: end.newLine ?? undefined,
+      lineRange: position.startLine === undefined
+        ? undefined
+        : { start: lineRangeEnd(diff.new_path, pairOf(position.startLine)), end: lineRangeEnd(diff.new_path, end) },
+    };
+  };
+
   /** Whether every note a thread can resolve is resolved; null for a thread GitLab did not describe. */
   const discussionResolved = (raw) => {
     if (!isPlainObject(raw) || !Array.isArray(raw.notes)) return null;
@@ -716,12 +769,13 @@ export function createGitLabResourceService({ origin, client, download, resolveP
 
     /**
      * A file attached in a description or a note of a project in the bound
-     * network, as the upstream response. GitLab lets any member with the
-     * Guest role or above read it by secret and file name.
+     * network or one a link named (`linked`), as the upstream response. GitLab
+     * lets any member with the Guest role or above read it by secret and file
+     * name.
      */
-    async readUpload(directory, selector, remote, { secret, filename, range, signal }) {
+    async readUpload(directory, selector, remote, { secret, filename, range, signal, linked }) {
       if (!download) throw new Error('GitLab file downloads are unavailable');
-      const target = await constrainedProject(directory, selector, remote);
+      const target = await constrainedProject(directory, selector, remote, { linked });
       return download(`projects/${target.project.id}/uploads/${secret}/${encodeURIComponent(filename)}`, { range, signal });
     },
 
@@ -759,6 +813,92 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       const { projectId, number } = payload.providerTarget;
       const raw = await client.MergeRequestDiscussions.create(projectId, number, payload.body);
       if (!isPlainObject(raw) || !isString(raw.id) || !raw.id) throw new Error('GitLab returned an invalid thread');
+      return {};
+    },
+
+    /** The viewer's draft notes and the threads on the head's lines, for the diff. */
+    async reviewState(directory, number, project, remote) {
+      const { target, raw } = await findByNumber(directory, number, project, { remote, constrainToPrimary: true });
+      const request = requireMutationMergeRequest(raw, target.project);
+      const headSha = raw?.diff_refs?.head_sha ?? request.headSha;
+      const [drafts, discussions, viewer, permissions] = await Promise.all([
+        client.MergeRequestDraftNotes.all(target.project.id, number).then(readDraftNotes),
+        readCollection((page) => client.MergeRequestDiscussions.all(target.project.id, number, page), 'GitLab merge request has more threads than OpenChamber reads'),
+        client.Users.showCurrentUser(),
+        readThreadPermissions(target.project, number),
+      ]);
+      const me = toReviewPerson(viewer);
+      return {
+        connected: true,
+        viewerIsAuthor: raw?.author?.username === viewer?.username,
+        headSha,
+        draft: drafts.length > 0 ? {
+          id: String(number),
+          body: '',
+          comments: drafts.map((note) => ({
+            ...positionOfNote(note.position),
+            id: String(note.id),
+            body: note.note,
+            author: me,
+          })),
+        } : null,
+        threads: discussions.flatMap((discussion) => {
+          const notes = (Array.isArray(discussion?.notes) ? discussion.notes : []).filter((note) => isPlainObject(note) && note.system !== true);
+          const [first] = notes;
+          // A thread on an older push has no line in this diff; the board keeps it.
+          if (first?.type !== 'DiffNote' || !isPlainObject(first.position) || first.position.head_sha !== headSha) return [];
+          return [{
+            ...positionOfNote(first.position),
+            id: discussion.id,
+            resolved: discussionResolved(discussion) === true,
+            canReply: permissions?.reply ?? false,
+            canResolve: permissions?.resolve.get(discussion.id) ?? false,
+            comments: notes.map((note) => ({
+              id: String(note.id),
+              body: note.body,
+              createdAt: note.created_at,
+              url: `${request.url}#note_${note.id}`,
+              author: toReviewPerson(note.author),
+            })),
+          }];
+        }),
+        truncated: false,
+      };
+    },
+
+    async addReviewComment({ providerTarget, position, body }) {
+      const { projectId, number } = providerTarget;
+      const raw = await client.MergeRequests.show(projectId, number);
+      const refs = raw?.diff_refs;
+      if (!isString(refs?.base_sha) || !isString(refs?.start_sha) || !isString(refs?.head_sha)) throw new Error('GitLab returned an invalid merge request');
+      const diffs = await readCollection((page) => client.MergeRequests.allDiffs(projectId, number, page), 'GitLab merge request has more changed files than OpenChamber reads', DIFF_PER_PAGE);
+      const diff = diffs.find((entry) => entry?.new_path === position.path || entry?.old_path === position.path);
+      if (!diff) throw Object.assign(new Error('This file is not in the merge request'), { status: 422 });
+      const created = await client.MergeRequestDraftNotes.create(projectId, number, body, {
+        position: draftPosition(position, diff, refs),
+      });
+      if (!isPlainObject(created) || !Number.isInteger(created.id)) throw new Error('GitLab returned an invalid draft note');
+      return {};
+    },
+
+    async updateReviewComment({ providerTarget, commentId, body }) {
+      const { projectId, number } = providerTarget;
+      const updated = await client.MergeRequestDraftNotes.edit(projectId, number, Number(commentId), { note: body });
+      if (!isPlainObject(updated) || !Number.isInteger(updated.id)) throw new Error('GitLab returned an invalid draft note');
+      return {};
+    },
+
+    async deleteReviewComment({ providerTarget, commentId }) {
+      await client.MergeRequestDraftNotes.remove(providerTarget.projectId, providerTarget.number, Number(commentId));
+      return {};
+    },
+
+    /** GitLab has no call for the whole draft, so each note goes on its own; a failure leaves the rest to discard again. */
+    async discardReview({ providerTarget }) {
+      const { projectId, number } = providerTarget;
+      for (const note of readDraftNotes(await client.MergeRequestDraftNotes.all(projectId, number))) {
+        await client.MergeRequestDraftNotes.remove(projectId, number, note.id);
+      }
       return {};
     },
 
@@ -828,9 +968,16 @@ export function createGitLabResourceService({ origin, client, download, resolveP
      * The verdict first, then its text as a note: GitLab has no review that
      * carries both. A verdict that lands with a note that does not is still
      * a verdict, reported as `commented: false` so the text is not lost.
+     * The viewer's draft notes go out first, so what the verdict answers is
+     * on the merge request when it lands.
      */
     async reviewChangeRequest(payload) {
       const { projectId, number } = payload.providerTarget;
+      const drafts = readDraftNotes(await client.MergeRequestDraftNotes.all(projectId, number));
+      if (payload.verdict === 'comment' && drafts.length === 0 && payload.body === undefined) {
+        throw Object.assign(new Error('A review with no comments needs text'), { status: 422 });
+      }
+      if (drafts.length > 0) await client.MergeRequestDraftNotes.publishBulk(projectId, number);
       if (payload.verdict === 'approve') {
         try {
           // The approval is for the commit the user read.
@@ -847,7 +994,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
           if (status === 401) throw Object.assign(new Error('GitLab did not allow this approval'), { status: 403 });
           throw error;
         }
-      } else {
+      } else if (payload.verdict === 'request-changes') {
         await requestChanges(payload.targetProject, number);
       }
       if (payload.body === undefined) return { commented: false };
@@ -1038,6 +1185,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       const { target, raw } = await findByNumber(directory, number, options.project, {
         constrainToPrimary: options.constrainToPrimary,
         remote: options.remote,
+        linked: options.linked,
       });
       const [noteSource, diffs, ci, headProject, commitPage, diffStats, threadPermissions, chain] = await Promise.all([
         // The preview's timeline reads the notes as their threads; other readers keep the plain list.
@@ -1146,8 +1294,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { items, page: options.page ?? 1, hasMore: page.hasMore };
     },
 
-    async getIssue(directory, number, selector, remote) {
-      const target = await constrainedProject(directory, selector, remote);
+    async getIssue(directory, number, selector, remote, { linked } = {}) {
+      const target = await constrainedProject(directory, selector, remote, { linked });
       const raw = await client.Issues.show(number, { projectId: target.project.id });
       return canonicalReads
         ? requireIssue(raw, target.project)
@@ -1162,7 +1310,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
      */
     async changeRequestPatch(directory, number, options = {}) {
       const { target } = await findByNumber(directory, number, options.project, {
-        constrainToPrimary: true, remote: options.remote, requireNetwork: true,
+        constrainToPrimary: true, remote: options.remote, requireNetwork: true, linked: options.linked,
       });
       const diffs = await readCollection((page) => client.MergeRequests.allDiffs(target.project.id, number, page), 'GitLab merge request has more changed files than OpenChamber reads', DIFF_PER_PAGE);
       if (!Array.isArray(diffs)) throw new Error('GitLab returned an invalid merge request diff list');
@@ -1180,9 +1328,9 @@ export function createGitLabResourceService({ origin, client, download, resolveP
      * diff was taken against, never the target branch tip. A fork's head
      * commit is reachable from the target project, so every read goes there.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status }) {
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, linked }) {
       const { target, raw } = await findByNumber(directory, number, project, {
-        constrainToPrimary: true, remote, requireNetwork: true,
+        constrainToPrimary: true, remote, requireNetwork: true, linked,
       });
       const baseSha = raw?.diff_refs?.base_sha;
       const headSha = raw?.diff_refs?.head_sha;
@@ -1238,8 +1386,8 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       return { summaries: summaries.filter(Boolean), issueSummaries: issueSummaries.filter(Boolean) };
     },
 
-    async issueComments(directory, number, selector, remote) {
-      const target = await constrainedProject(directory, selector, remote);
+    async issueComments(directory, number, selector, remote, { linked } = {}) {
+      const target = await constrainedProject(directory, selector, remote, { linked });
       const issue = await client.Issues.show(number, { projectId: target.project.id });
       const mappedIssue = canonicalReads
         ? requireIssue(issue, target.project)

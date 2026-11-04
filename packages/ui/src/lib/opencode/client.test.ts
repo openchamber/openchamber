@@ -965,6 +965,22 @@ describe("messages and config", () => {
     expect(joinedCatalog).toBe(firstCatalog)
     expect(freshCatalog).not.toBe(firstCatalog)
   })
+
+  test("fresh triggers arriving during a fresh read share one post-call replacement per directory", async () => {
+    const answer = (request: CapturedRequest) => json({ location: {}, data:
+      request.url.pathname === "/api/model/default" ? { modelID: "x", providerID: "openai" } : [] })
+    responses.push(...Array.from({ length: 48 }, () => answer))
+    const before = requests.length
+    await Promise.all(["/repo/app", "/repo/other"].flatMap((directory) =>
+      Array.from({ length: 8 }, () => opencodeClient.getProvidersForConfig(directory, { fresh: true }))))
+    const reads = requests.slice(before)
+    expect(reads).toHaveLength(12)
+    for (const directory of ["/repo/app", "/repo/other"]) {
+      for (const path of ["/api/model", "/api/model/default", "/api/provider"]) {
+        expect(reads.filter((request) => request.url.pathname === path && request.headers.get("x-opencode-directory") === encodeURIComponent(directory))).toHaveLength(2)
+      }
+    }
+  })
 })
 
 describe("providers of an isolated space", () => {

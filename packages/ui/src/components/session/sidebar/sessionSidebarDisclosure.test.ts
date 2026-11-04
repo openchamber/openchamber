@@ -17,6 +17,7 @@ const child = (key: string): SessionSidebarRow => ({
   estimateSize: 20,
   more: true,
   fewer: false,
+  hiddenNodes: [],
   containerKey: key,
   currentCount: 7,
   requestedCount: 7,

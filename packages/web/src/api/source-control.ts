@@ -31,6 +31,10 @@ import type {
   DiscussionCloseReason,
   DiscussionCommentInput,
   ReviewChangeRequestInput,
+  ReviewCommentDeleteInput,
+  ReviewCommentInput,
+  ReviewCommentUpdateInput,
+  ReviewDiscardInput,
   SetDiscussionAnswerInput,
   SetDiscussionStateInput,
   SetStateInput,
@@ -74,7 +78,7 @@ import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
 import type { SourceControlProviderDescriptor } from '@openchamber/ui/lib/source-control/providers/descriptor';
-import { fetchChangeRequestListStatuses, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
+import { fetchChangeRequestListStatuses, fetchChangeRequestReviewState, fetchRepositoryReferenceDetail, fetchRepositoryReferences, fetchRepositoryReferencesAcross } from './repository-references';
 import { BUILT_IN_SOURCE_CONTROL_PROVIDERS, fetchSourceControlProviders, providerPath } from './source-control-providers';
 
 interface ErrorResponse {
@@ -190,7 +194,7 @@ interface MutationResultDTO {
 /** A review on the wire: `{ verdict, body? }` as before, or `{ votes, body? }` for a host that reviews by votes. */
 type ReviewBody = MutationBody<SourceControlExistingMutationTarget> & { body?: string } & (
   | { verdict: NonNullable<ReviewChangeRequestInput['verdict']> }
-  | { votes: Record<string, number> }
+  | { votes: Record<string, number>; publishDrafts?: boolean }
 );
 
 type SourceControlFetch = (input: string, init?: RuntimeFetchOptions) => Promise<Response>;
@@ -202,7 +206,7 @@ type PostBody =
   | { disabled: boolean }
   | CreateBody
   | UpdateBody
-  | (MutationBody<SourceControlExistingMutationTarget> & { method: MergeChangeRequestInput['method'] })
+  | (MutationBody<SourceControlExistingMutationTarget> & { method: MergeChangeRequestInput['method']; cancel?: boolean })
   | (MutationBody<SourceControlExistingMutationTarget> & { body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; body: string })
   | (MutationBody<SourceControlExistingMutationTarget> & { threadId: string; resolved: boolean })
@@ -410,13 +414,17 @@ const request = async <TResult extends ErrorResponse | null>(
   return payload;
 };
 
-const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => new URLSearchParams({
-  directory: context.directory,
-  repositoryId: context.repositoryId,
-  accountId: context.accountId,
-  bindingRevision: String(context.bindingRevision),
-  primaryRemote: context.primaryRemote,
-});
+const boundReadQuery = (context: SourceControlReadContext): URLSearchParams => {
+  const query = new URLSearchParams({
+    directory: context.directory,
+    repositoryId: context.repositoryId,
+    accountId: context.accountId,
+    bindingRevision: String(context.bindingRevision),
+    primaryRemote: context.primaryRemote,
+  });
+  if (context.linked) query.set('linked', '1');
+  return query;
+};
 
 /** The projects a multi-project list could not read; their earlier items stay where the caller keeps them. */
 const parseIncompleteProjectIds = (ids: PageResult<never>['incompleteProjectIds']): string[] | undefined => {
@@ -585,7 +593,7 @@ const parseEmptyMutationResult = (result: MutationResultDTO): SourceControlEmpty
   return {};
 };
 
-const MERGE_OUTCOMES = ['queued', 'merging'] as const;
+const MERGE_OUTCOMES = ['queued', 'merging', 'auto-merge', 'cancelled'] as const;
 const mergeOutcomeOf = (value: string): SourceControlMergeMutationResult['outcome'] | null => (
   MERGE_OUTCOMES.find((outcome) => outcome === value) ?? null
 );
@@ -1364,6 +1372,7 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       const identity = normalizeIdentity(payload);
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/merge', {
         ...mutationBody(payload, identity, 'existing'), method: payload.method,
+        cancel: payload.cancel,
       });
       return parseMutationReceipt(result, payload, identity, parseMergeMutationResult);
     },
@@ -1407,16 +1416,47 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
       let body: ReviewBody;
       if (payload.votes !== undefined) {
         const entries = Object.entries(payload.votes);
-        if (payload.verdict !== undefined || entries.length === 0 || entries.some(([label, value]) => !isNonEmptyString(label) || !isVoteValue(value))) {
+        if (payload.verdict !== undefined || (entries.length === 0 && payload.publishDrafts !== true)
+          || entries.some(([label, value]) => !isNonEmptyString(label) || !isVoteValue(value))) {
           throw new Error('Source control review input is invalid');
         }
-        body = { ...context, votes: Object.fromEntries(entries) };
+        body = { ...context, votes: Object.fromEntries(entries), publishDrafts: payload.publishDrafts };
       } else {
         body = { ...context, verdict: payload.verdict };
       }
       if (payload.body !== undefined) body.body = payload.body;
       const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review', body);
       return parseMutationReceipt(result, payload, identity, parseReviewMutationResult);
+    },
+    changeRequestReviewState: (context, ref) => fetchChangeRequestReviewState(fetch, context, ref),
+    changeRequestReviewComment: async (payload: ReviewCommentInput) => {
+      const identity = normalizeIdentity(payload);
+      const position = payload.line === undefined
+        ? { path: payload.path }
+        : { path: payload.path, side: payload.side, line: payload.line, startLine: payload.startLine };
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment', {
+        ...mutationBody(payload, identity, 'existing'), ...position, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewCommentUpdate: async (payload: ReviewCommentUpdateInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment/update', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId, body: payload.body,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewCommentDelete: async (payload: ReviewCommentDeleteInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/comment/delete', {
+        ...mutationBody(payload, identity, 'existing'), commentId: payload.commentId,
+      });
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
+    },
+    changeRequestReviewDiscard: async (payload: ReviewDiscardInput) => {
+      const identity = normalizeIdentity(payload);
+      const result = await post<MutationReceiptDTO>(fetch, identity, '/pr/review/discard', mutationBody(payload, identity, 'existing'));
+      return parseMutationReceipt(result, payload, identity, parseEmptyMutationResult);
     },
     changeRequestSetState: async (payload: SetStateInput) => {
       const identity = normalizeIdentity(payload);

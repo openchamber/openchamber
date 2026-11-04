@@ -1,5 +1,6 @@
 import { isSkillTool, toolDescription } from '@/lib/opencode/tools';
 import React from 'react';
+import { ChatExternalLink } from './ChatExternalLink';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
@@ -451,11 +452,9 @@ const StaticToolRowInner: React.FC<{
                 : null}
             {isFetchGroup && descriptions.length > 0
                 ? descriptions.map((url, index) => (
-                    <a
+                    <ChatExternalLink
                         key={`${url}-${index}`}
                         href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className={cn(
                             'min-w-0 flex-1 inline-flex items-center gap-1.5 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
                             'truncate whitespace-nowrap', TOOL_ROW_DESCRIPTION_CLASS
@@ -465,7 +464,7 @@ const StaticToolRowInner: React.FC<{
                     >
                         <ExternalLinkFavicon href={url} />
                         <span className="min-w-0 truncate">{url}</span>
-                    </a>
+                    </ChatExternalLink>
                 ))
                 : null}
             {isSkillGroup && skillEntries.length > 0

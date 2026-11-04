@@ -270,7 +270,7 @@ describe('notifications provider contract', () => {
     expect(isNotificationsProviderMethod('browser.open')).toBe(false);
     expect(notificationsProviderTimeoutMs('notify')).toBe(10_000);
     expect(notificationsProviderTimeoutMs('auth.verify')).toBe(15_000);
-    expect(GUEST_NOTIFICATION_KINDS).toEqual(['ready', 'error', 'question', 'permission', 'review', 'goal_complete', 'goal_blocked', 'goal_budget']);
+    expect(GUEST_NOTIFICATION_KINDS).toEqual(['ready', 'error', 'question', 'permission', 'review', 'goal_complete', 'goal_blocked', 'goal_budget', 'pull-request']);
   });
 
   test('the outbound helper posts to its own callback route with the handle', async () => {

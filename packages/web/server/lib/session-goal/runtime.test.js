@@ -432,7 +432,7 @@ describe('session goal tick on v2 messages', () => {
     runtime.stop();
   });
 
-  it('takes the turn cap from Settings for both the prompt and the stop', async () => {
+  it('sends the mission without the turn count, which invites rationing runs', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     const { calls } = v2OpenCode({
       messages: [
@@ -451,7 +451,8 @@ describe('session goal tick on v2 messages', () => {
     await runTick(runtime);
 
     const prompt = calls.find((call) => call.method === 'POST')?.body.text;
-    expect(prompt).toContain('Auto-continuations used: 1 of 7.');
+    expect(prompt).toContain('Work autonomously through the entire objective in this one run.');
+    expect(prompt).not.toContain('Auto-continuations');
     runtime.stop();
   });
 

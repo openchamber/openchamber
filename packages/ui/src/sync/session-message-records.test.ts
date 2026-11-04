@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { createStore } from 'zustand/vanilla';
 import type { Message, Part, Session } from '@/lib/opencode/model';
 
-import { buildSessionMessageRecordsSnapshot } from './sync-context';
+import type { DirectoryStore } from './child-store';
+import { buildSessionMessageRecordsSnapshot, readSessionMessageRecordsSnapshot } from './sync-context';
 import { INITIAL_STATE, type State } from './types';
 
 // v2 messages carry no `parentID`; the argument is kept only so the fixtures
@@ -130,5 +132,28 @@ describe('buildSessionMessageRecordsSnapshot', () => {
     );
 
     expect(next.byId.get(assistant.id)?.parts).toBe(identifiedParts);
+  });
+});
+
+describe('readSessionMessageRecordsSnapshot', () => {
+  test('suspends a message again from its latest parts, not from a snapshot cached before the wait', () => {
+    const assistant = message('assistant_1', 'assistant');
+    const messages = [assistant];
+    const store = createStore<DirectoryStore>(() => ({
+      ...state({ message: { ses_1: messages }, part: { assistant_1: [textPart('before', 'before the page')] } }),
+      patch: () => undefined,
+      replace: () => undefined,
+    }));
+    const empty = buildSessionMessageRecordsSnapshot(state({}), 'ses_1');
+
+    const streaming = readSessionMessageRecordsSnapshot(store, 'ses_1', empty, true, assistant.id);
+    const pageParts = [textPart('before', 'before the page'), textPart('page', 'the page')];
+    store.setState({ part: { assistant_1: pageParts } });
+
+    const waiting = readSessionMessageRecordsSnapshot(store, 'ses_1', streaming, false);
+    expect(waiting.byId.get(assistant.id)?.parts).toBe(pageParts);
+
+    const answered = readSessionMessageRecordsSnapshot(store, 'ses_1', waiting, true, assistant.id);
+    expect(answered.byId.get(assistant.id)?.parts).toBe(pageParts);
   });
 });

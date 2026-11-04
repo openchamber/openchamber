@@ -19,7 +19,7 @@ const QUESTIONS = {
   all_done: {
     question: 'Does `answer` report that all the work requested in `objective` is done?',
     criteria: {
-      true: 'Every part the objective asks for is reported done. Steps left only for the user, such as testing in the app, reviewing, or committing, and optional ideas the objective did not ask for, do not count against it.',
+      true: 'Every part the objective asks for is reported done. Steps left only for the user, such as testing in the app, reviewing, or committing, and optional ideas the objective did not ask for, do not count against it. A step the objective itself asks the agent to do, such as a commit or a pull request, counts as requested work.',
       false: 'Some requested part is reported unfinished, skipped, postponed, not started, or only partly done, or the agent narrowed the goal to a subset, even if the message says "done".',
     },
   },
@@ -27,7 +27,7 @@ const QUESTIONS = {
     question: 'Does `answer` name requested work that the agent itself still has to do?',
     criteria: {
       true: 'The message lists or mentions remaining steps of the objective the agent can still carry out, or says it will continue, fix, retry, or finish something.',
-      false: 'Nothing of the objective is left for the agent: either everything is done, or what is left needs the user, or it is only user-side checking or an optional unrequested idea.',
+      false: 'Nothing of the objective is left for the agent: either everything is done, or what is left needs the user, or it is only user-side checking the objective did not ask the agent to do, or an optional unrequested idea.',
     },
   },
   needs_user: {
@@ -53,14 +53,30 @@ const QUESTION_IDS = Object.keys(QUESTIONS);
  * a server left running would hold every round for the full wait.
  */
 export const GOAL_REPORT_INSTRUCTIONS = [
-  'Before you end a turn, stop every background command you started that does not finish on its own, such as a dev server or a watcher. Start it again in a later turn if you need it.',
+  'Your final message is read by an independent check, and it ends the run. Send it only when the whole objective is done and verified, or when only the user can unblock you. Stopping with work you could still do yourself is an early stop.',
   '',
-  'Progress is checked independently after each turn, from your final message only. End every turn with a short status block, in the language of your reply, with exactly these four lines:',
+  'Before that message, stop every background command you started that does not finish on its own, such as a dev server or a watcher.',
+  '',
+  'End that message with a short status block, in the language of your reply, with exactly these four lines:',
   '- Done: what is finished.',
   '- Verified: how you checked it (the command, test or file), or "not verified".',
   '- Remaining: the parts of the objective you still have to do yourself, or "nothing".',
-  '- Needs from the user: what only the user can provide before you can go on (a decision, credentials, access), or "nothing".',
-  'Testing in the app, review and committing are the user\'s steps after the work, not remaining work and not blockers.',
+  '- Needs from the user: what only the user can provide before you can go on (credentials, access, a choice you cannot safely default), or "nothing".',
+  'Unless the objective asks for them, testing in the app, review and committing are the user\'s steps after the work, not remaining work and not blockers. When it asks for them, such as a commit or a pull request, they are part of the work. Report what is true: unfinished work goes in Remaining.',
+].join('\n');
+
+/**
+ * How the agent works on a goal, sent with the first turn and every
+ * continuation. It says nothing about the loop continuing a stopped agent: a
+ * promised continuation reads as permission to stop after one step.
+ */
+export const GOAL_MISSION_INSTRUCTIONS = [
+  'Work autonomously through the entire objective in this one run. The user is away and is not reading progress updates.',
+  '- When a step is finished, start the next one in the same run.',
+  '- Decide open questions yourself with the most sensible default, note the choice, and go on.',
+  '- When something fails, find the cause and try another route.',
+  '- Check each part by running it, and fix what the check finds.',
+  '- Autonomy covers the objective\'s own work. Leave out irreversible or outward-facing actions it does not ask for.',
 ].join('\n');
 const THRESHOLD = 0.5;
 

@@ -161,7 +161,10 @@ describe('Gerrit mutations', () => {
 
   it('performs the change routes only; create is pushed, not posted', async () => {
     const { impl } = await setup();
-    expect(impl.mutations.routes).toEqual(['/pr/merge', '/pr/ready', '/pr/review', '/pr/comment', '/pr/state', '/pr/reviewers']);
+    expect(impl.mutations.routes).toEqual([
+      '/pr/merge', '/pr/ready', '/pr/review', '/pr/review/comment', '/pr/review/comment/update', '/pr/review/comment/delete',
+      '/pr/review/discard', '/pr/comment', '/pr/state', '/pr/reviewers',
+    ]);
     expect(() => impl.mutations.prepare({ route: '/pr/create', input: { title: 'x' }, context, actor, credential })).toThrow(expect.objectContaining({ status: 400 }));
   });
 
@@ -204,7 +207,7 @@ describe('Gerrit mutations', () => {
     const mutation = await run(impl, session, '/pr/review', { votes: { 'Code-Review': 2 } });
 
     await expect(mutation.perform()).resolves.toEqual({ commented: false });
-    expect(calls.at(-1).body).toEqual({ labels: { 'Code-Review': 2 } });
+    expect(calls.at(-1).body).toEqual({ labels: { 'Code-Review': 2 }, drafts: 'PUBLISH_ALL_REVISIONS' });
     expect(await mutation.reconcile()).toEqual({ state: 'outcome-unknown' });
   });
 

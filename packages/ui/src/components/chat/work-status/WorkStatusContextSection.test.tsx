@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -11,6 +11,9 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import * as sessionActions from '@/sync/session-actions';
+
+let outsideRepository: string | null = null;
+mock.module('@/components/sourceBoard/useOutsideRepository', () => ({ useOutsideRepository: () => outsideRepository }));
 
 let WorkStatusContextSection: typeof import('./WorkStatusContextSection').WorkStatusContextSection;
 
@@ -110,6 +113,14 @@ describe('agent-linked threads in the context section', () => {
     expect(unlink.mock.calls[0]?.[2]).toMatchObject({ id: 'acme/app#12' });
     expect(unlink.mock.calls[0]?.[3]).toBe(false);
     unlink.mockRestore();
+  });
+
+  test('names the repository of a link outside the project after its number', async () => {
+    await render();
+    outsideRepository = 'dotnet/runtime';
+    await publish([githubIssue]);
+    expect(container.textContent).toContain('#12 · dotnet/runtime · Rail badge count');
+    outsideRepository = null;
   });
 
   test('reports a failed unlink instead of silently keeping the link', async () => {

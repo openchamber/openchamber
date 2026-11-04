@@ -70,7 +70,7 @@ import { useSourceBoardChoice, useSourceBoardStore, type SourceBoardTab } from '
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
-import { SourceBoardActions, SourceBoardPullLinks, SourceBoardStateMenuItems, type SourceBoardProject } from './SourceBoardActions';
+import { SourceBoardActions, SourceBoardPullLinks, SourceBoardReviewDraft, SourceBoardStateMenuItems, type SourceBoardProject } from './SourceBoardActions';
 import { SourceBoardTrackerStatus } from './SourceBoardTrackerStatus';
 import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
@@ -431,19 +431,39 @@ const SourceBoardBody: React.FC<{
         query: pinnedLink?.url ?? '',
     });
     const pinnedLookup = allRepositories ? pinnedAcross : pinnedSingle;
+    // Past the project's fork network a link is read with the project's account
+    // where that account's host is the link's, and only read (`TrackerItemView`).
+    const urls = useRepositoryUrlMatcher();
+    const outsideDirectory = allRepositories?.[0] ?? pinnedDirectory;
+    const pinnedFolderValue = useRepositoryReadContext(pinnedLink ? outsideDirectory : null);
+    const pinnedFolderContext = pinnedFolderValue && pinnedFolderValue !== 'missing' ? pinnedFolderValue : null;
+    const pinnedHost = pinnedLink ? urls.match(pinnedLink.url) : null;
+    const namesPinnedLink = (item: RepositoryReference) => pinnedLink !== null && isSameRepositoryItemLink(item.url, pinnedLink.url, urls);
+    const pinnedAcrossItem = allRepositories ? pinnedAcross.items.find(namesPinnedLink) ?? null : null;
+    const pinnedAskedItem = allRepositories ? pinnedAcrossItem : pinnedSingle.items.find(namesPinnedLink) ?? null;
+    const asksOutside = tab === 'repository' && pinnedLink !== null && (allRepositories !== null || pinnedLinkFolder.status === 'ready')
+        && !pinnedAskedItem
+        && (pinnedLookup.status === 'ready' || pinnedLookup.status === 'unavailable' || (pinnedLookup.status === 'error' && !pinnedLinkFolder.owned))
+        && pinnedFolderContext !== null && pinnedHost?.provider === pinnedFolderContext.provider && pinnedHost.instance === pinnedFolderContext.instance;
+    const pinnedOutside = useRepositoryReferenceList({
+        enabled: asksOutside,
+        directory: outsideDirectory,
+        kind: pinnedLink?.kind ?? 'issue',
+        filter: DEFAULT_REPOSITORY_FILTER,
+        query: pinnedLink?.url ?? '',
+        linked: true,
+    });
+    const pinnedOutsideItem = asksOutside ? pinnedOutside.items.find(namesPinnedLink) ?? null : null;
     // A tracker's get takes its human identifier as well as its own id.
     const { detail: pinnedTracker, followed: pinnedTrackerFollowed } = useTrackerItemDetail(
         tracker && pinnedTrackerId ? { provider: tracker, id: pinnedTrackerId } : null,
         true,
     );
-    const urls = useRepositoryUrlMatcher();
     // Only the item the link names: a lookup that fell back to a search lists others.
-    const namesPinnedLink = (item: RepositoryReference) => pinnedLink !== null && isSameRepositoryItemLink(item.url, pinnedLink.url, urls);
-    const pinnedAcrossItem = tab === 'repository' && allRepositories ? pinnedAcross.items.find(namesPinnedLink) ?? null : null;
-    const pinnedReference = tab === 'repository' && !allRepositories ? pinnedSingle.items.find(namesPinnedLink) ?? null : pinnedAcrossItem;
+    const pinnedReference = tab === 'repository' ? pinnedAskedItem ?? pinnedOutsideItem : null;
     // Across repositories the item names the folder it was read through;
     // singly, that is the folder its link resolved to.
-    const pinnedFolder = allRepositories ? pinnedAcrossItem?.directory : pinnedDirectory;
+    const pinnedFolder = pinnedOutsideItem ? outsideDirectory : allRepositories ? pinnedAcrossItem?.directory : pinnedDirectory;
     const pinnedTrackerItem = tracker && pinnedTracker.status === 'ready' ? pinnedTracker.value : null;
     const pinnedItem = React.useMemo<ReferencePickerItem | null>(() => {
         if (pinnedReference) return { source: 'repository', reference: pinnedReference, directory: pinnedFolder ?? undefined };
@@ -462,10 +482,11 @@ const SourceBoardBody: React.FC<{
     });
     // The item a link asked to show is followed like a listed one; a lookup
     // that fell back to a search lists others, which are not.
+    const pinnedLinkFollowed = pinnedOutsideItem ? pinnedOutside.followed : pinnedLookup.followed;
     const pinnedFollowed = React.useMemo(() => (pinnedItem?.source === 'tracker'
         ? pinnedTrackerFollowed
-        : pinnedLookup.followed.filter((item) => !isTrackedWorkItem(item) && item.number === pinnedReference?.number)
-    ), [pinnedItem, pinnedTrackerFollowed, pinnedLookup.followed, pinnedReference]);
+        : pinnedLinkFollowed.filter((item) => !isTrackedWorkItem(item) && item.number === pinnedReference?.number)
+    ), [pinnedItem, pinnedTrackerFollowed, pinnedLinkFollowed, pinnedReference]);
     useTrackedItems(onScreen && pinnedItem ? pinnedFollowed : NO_FOLLOWED);
     const { previewItem, setQuery, selectRepositoryKind, showItem } = browser;
     const shownPinRequestRef = React.useRef(0);
@@ -502,7 +523,7 @@ const SourceBoardBody: React.FC<{
     }, [pinRequest, pinnedItem, pinnedLink, repositoryDiscoveryPending, showItem]);
     // Not found: a link the project's host does not know opens in the browser;
     // a tracker identifier is searched for instead.
-    const pinnedLinkStatus = pinnedLookup.status;
+    const pinnedLinkStatus = asksOutside ? pinnedOutside.status : pinnedLookup.status;
     React.useEffect(() => {
         if (allRepositories === null && pinnedLinkFolder.status !== 'ready') return;
         if (!pinnedLink || pinnedLinkStatus === 'loading' || pinnedReference) return;
@@ -552,7 +573,11 @@ const SourceBoardBody: React.FC<{
     const readsNestedRepository = tab === 'repository'
         && (allRepositories !== null || (actionPath !== null && readFolder !== null && readFolder !== actionPath));
     const actionContext = useRepositoryReadContext(readFolder);
-    const context: SourceControlReadContext | null = actionContext && actionContext !== 'missing' ? actionContext : null;
+    const boundContext: SourceControlReadContext | null = actionContext && actionContext !== 'missing' ? actionContext : null;
+    // A linked item is only read: `readContext` reads it, and nothing acts on it through `context`.
+    const previewLinked = previewItem?.source === 'repository' && previewItem.reference.linked === true;
+    const readContext = React.useMemo(() => (boundContext && previewLinked ? { ...boundContext, linked: true as const } : boundContext), [boundContext, previewLinked]);
+    const context = previewLinked ? null : boundContext;
 
     const projectOwnsDirectory = React.useCallback((candidate: string | undefined) => {
         if (!candidate || !actionProjectEntry) return false;
@@ -595,14 +620,14 @@ const SourceBoardBody: React.FC<{
         <SourceBoardActions
             item={previewItem}
             project={actionProject}
-            context={context}
+            context={readContext}
             onStartWorktree={(target, selection) => setWorktreeRequest({ project: target, selection })}
             onChanged={browser.list.retry}
             startIn={startIn}
             onLeave={onLeave}
-            worktreeAvailable={!readsNestedRepository}
+            worktreeAvailable={!readsNestedRepository && !previewLinked}
             stack={previewItem?.source === 'repository' && browser.repositoryDetail.status === 'ready' ? browser.repositoryDetail.value.pull?.stack ?? null : null}
-            onStartOnTop={actionProject ? (pull) => setWorktreeRequest({ project: actionProject, onTopOf: pull.head }) : undefined}
+            onStartOnTop={actionProject && !previewLinked ? (pull) => setWorktreeRequest({ project: actionProject, onTopOf: pull.head }) : undefined}
             submitRequirements={latestPull?.submitRequirements}
             submitRequirementsUnreadable={previewItem?.source === 'repository' && browser.repositoryLatestDetail.status === 'error'}
             mergeable={previewPullStatus?.mergeable ?? null}
@@ -615,10 +640,10 @@ const SourceBoardBody: React.FC<{
     const [checksOpenFor, setChecksOpenFor] = React.useState<string | null>(null);
     const previewPull = previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' ? previewItem.reference : null;
     const previewKey = previewItem ? referencePickerItemKey(previewItem) : null;
-    const checksDialog = previewPull && context ? (
+    const checksDialog = previewPull && readContext ? (
         <SourceBoardChecksDialog
             pull={previewPull}
-            context={context}
+            context={readContext}
             open={checksOpenFor !== null && checksOpenFor === previewKey}
             onOpenChange={(open) => setChecksOpenFor(open ? previewKey : null)}
             onAttachFailed={attachments.attachFailedChecks}
@@ -710,8 +735,8 @@ const SourceBoardBody: React.FC<{
             onOpenTrackerItem={(item) => browser.openItem({ source: 'tracker', provider: item.provider, item })}
             onOpenStackLayer={openStackLayer}
             revisionChoice={latestPull?.revisions ? { revisions: latestPull.revisions, selected: browser.previewRevision, onSelect: browser.selectPreviewRevision } : undefined}
-            onOpenChecks={previewPull && context ? () => setChecksOpenFor(previewKey) : undefined}
-            onRefresh={previewItem?.source === 'repository' && context ? refreshFromHost : undefined}
+            onOpenChecks={previewPull && readContext ? () => setChecksOpenFor(previewKey) : undefined}
+            onRefresh={previewItem?.source === 'repository' && readContext ? refreshFromHost : undefined}
             threadActions={threadActions}
             stateMenu={previewItem?.source === 'repository' && previewItem.reference.state !== 'merged' && context
                 && (previewItem.reference.kind !== 'discussion' || canChangeDiscussionState(previewItem.reference, previewDiscussion)) ? (
@@ -724,13 +749,27 @@ const SourceBoardBody: React.FC<{
                 <SourceBoardLabels key={referencePickerItemKey(previewItem)} reference={previewItem.reference} context={context} onChanged={refreshRepositoryItem} />
             ) : undefined}
             reviewersControl={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && context ? (
-                <SourceBoardReviewers
-                    key={referencePickerItemKey(previewItem)}
-                    pull={previewItem.reference}
-                    detail={browser.repositoryDetail}
-                    context={context}
-                    onChanged={refreshRepositoryItem}
-                />
+                <span className="inline-flex flex-wrap items-center gap-2">
+                    <SourceBoardReviewers
+                        key={referencePickerItemKey(previewItem)}
+                        pull={previewItem.reference}
+                        detail={browser.repositoryDetail}
+                        context={context}
+                        onChanged={refreshRepositoryItem}
+                    />
+                    {actionProject ? (
+                        <SourceBoardReviewDraft
+                            key={`draft-${referencePickerItemKey(previewItem)}`}
+                            pull={previewItem.reference}
+                            project={actionProject}
+                            repository={tab === 'repository' ? readFolder : null}
+                            context={context}
+                            projectOwnsDirectory={projectOwnsDirectory}
+                            currentDirectory={currentDirectory}
+                            onLeave={onLeave}
+                        />
+                    ) : null}
+                </span>
             ) : undefined}
             // Keyed by the item: a draft never carries over to another one.
             // A locked discussion takes no comment from someone who may not update it.
@@ -745,12 +784,12 @@ const SourceBoardBody: React.FC<{
                     onLatestRevision={browser.previewRevision === null}
                 />
             ) : undefined}
-            pullLinks={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && actionProject && context ? (
+            pullLinks={previewItem?.source === 'repository' && previewItem.reference.kind === 'pull' && actionProject && readContext ? (
                 <SourceBoardPullLinks
                     pull={previewItem.reference}
                     project={actionProject}
                     repository={tab === 'repository' ? readFolder : null}
-                    context={context}
+                    context={readContext}
                     projectOwnsDirectory={projectOwnsDirectory}
                     currentDirectory={currentDirectory}
                     onLeave={onLeave}
