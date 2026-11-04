@@ -83,7 +83,9 @@ export const createSessionRuntime = ({
   // upstream stream. Clients that do not initialize a directory cannot read
   // its pending list from OpenCode (that read creates a location), so this map
   // is their seed. Entries live until the matching reply, the session's
-  // deletion, or an OpenCode restart, which drops every pending request.
+  // deletion, or an OpenCode restart, which drops every pending request. A
+  // permission also ends with its turn: OpenCode drops the request of a stopped
+  // turn without announcing it.
   // Pages an agent shows that wait for the user's answer sit beside them; they
   // come from this server's own render.page calls, not from OpenCode, and
   // leave when the call stops waiting (`trackWaitingPage`).
@@ -541,6 +543,7 @@ export const createSessionRuntime = ({
       setSessionActivityPhase(update.sessionId, 'busy');
     } else if (update.type === 'idle') {
       endTurn(update.sessionId);
+      settlePendingRequest('permissions', update.sessionId, '');
       setSessionActivityPhase(update.sessionId, 'cooldown');
     }
 

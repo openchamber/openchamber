@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -544,6 +544,39 @@ describe('cli args', () => {
       messageId: 'msg_123',
       prompt: 'Try another approach',
     });
+  });
+
+  it('exits non-zero when a wait ends on a session that waits for the user', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalExitCode = process.exitCode;
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    let type = 'waiting';
+    globalThis.fetch = async () => createMockJsonResponse({ sessionStatus: { type }, messages: [] });
+    const run = (extra) => sessionCommand({ session: 'ses_1', directory: '/repo', port: 45677, ...extra }, 'messages');
+    try {
+      await run({ wait: true, json: true });
+      expect(process.exitCode).toBe(1);
+      expect(stderr).not.toHaveBeenCalled();
+
+      process.exitCode = undefined;
+      await run({ wait: true, quiet: true });
+      expect(process.exitCode).toBe(1);
+      expect(stderr).toHaveBeenCalledWith('Session is waiting for the user and has not finished.\n');
+
+      process.exitCode = undefined;
+      await run({});
+      expect(process.exitCode).toBeUndefined();
+
+      type = 'idle';
+      await run({ wait: true, quiet: true });
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+      process.exitCode = originalExitCode;
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
   });
 
   it('validates session message selectors before HTTP', async () => {
