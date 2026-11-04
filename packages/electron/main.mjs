@@ -17,7 +17,7 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 import { collectLocalFileDiagnostics, collectSshBufferDiagnostics } from '@openchamber/web/server/lib/diagnostics/local-files.js';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { persistMainWindowState } from './window-state.mjs';
-import { attachWindowVisibility, isNativeWindowVisible } from './window-visibility.mjs';
+import { attachWindowEvents, isNativeWindowVisible } from './window-events.mjs';
 import { createTrayController } from './tray.mjs';
 import { buildDockMenuTemplate, buildUnreadJumpList, isJumpListSessionId } from './dock-menu.mjs';
 import { createSessionLinkGate } from './session-link-gate.mjs';
@@ -2646,7 +2646,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   browserWindow.on('blur', () => {
     state.focusedWindowIds.delete(browserWindow.id);
   });
-  attachWindowVisibility(browserWindow, emitToWindow);
+  attachWindowEvents(browserWindow, emitToWindow);
 
   // Traffic lights disappear during dock-restore animation when using
   // titleBarStyle:'hidden' + custom trafficLightPosition. macOS caches a
@@ -2674,9 +2674,6 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
   }
 
   browserWindow.on('resize', () => {
-    if (process.platform === 'darwin') {
-      emitToWindow(browserWindow, 'openchamber:window-resized');
-    }
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('maximize', () => {

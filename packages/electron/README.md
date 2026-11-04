@@ -551,6 +551,11 @@ minimize and restore. Shared quota readouts use it to stop provider refresh in
 hidden windows. Focus changes do not change visibility. Chromium's document
 visibility is insufficient here because desktop disables background throttling.
 
+On macOS, `openchamber:window-resized` asks the renderer to refresh titlebar
+geometry after a resize and when the window enters or leaves fullscreen. Native
+fullscreen transitions can change the titlebar insets without changing window
+bounds.
+
 Renderer code should call the desktop bridge exposed by `preload.mjs`. Do not import Electron from shared UI code.
 
 Add new native capabilities in this order:
