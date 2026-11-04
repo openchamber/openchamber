@@ -15,6 +15,10 @@ The shared renderer classifies and confirms local references before opening them
 
 ## Decisions
 
+### Why the phone checks inline code on tap and not ahead of time
+
+The phone makes no file requests before the user acts, so path-looking inline code cannot show that it is a file. A tap asks once and either opens the file or shows a toast. The answer skips the stat cache: a cached miss would keep saying "not found" after the file appears, and the cache records a failed request as a miss.
+
 ### Why explicit href input and not decoding every reference
 
 The same resolver receives URLs and native path text. Explicit input kinds preserve a native filename such as `50%25off.md` while resolving the href `50%25off.md` to `50%off.md`.

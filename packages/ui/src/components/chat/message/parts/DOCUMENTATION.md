@@ -606,6 +606,14 @@ update, with the `shellID`, when the command starts.
 - File references use `markdown/markdownFileReferences.ts`, `MarkdownLink`
   and the code plugin's token metadata. Automatic confirmation runs through
   the bounded, cached stat queue after settlement and never on mobile.
+  On mobile, path-looking inline code looks like any other code and asks the
+  server only when tapped, without the cache: a file opens the drawer on Files,
+  a missing file shows a toast, and a failed request or a name several files
+  share shows a different toast (#6056). It carries no `role="button"`, which
+  would make it unselectable and 36px tall (`mobile.css`). A surrounding link,
+  button or disclosure keeps its tap, and a selection-ending tap opens nothing.
+  An answer that arrives after the code left the screen does nothing. Fenced
+  code stays inert on mobile.
   Code-path annotations are declarative; unconfirmed tokens stay code.
   Automatic probes skip emails, handles and digit-leading suffixes
   (`user@gmail.com`, `v1.2.3`, `backup.7z`); an `@` after a slash is a path
