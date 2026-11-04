@@ -5,6 +5,7 @@ import { Window } from 'happy-dom';
 import { OpenCode } from '@opencode/client';
 import type { Session } from '@/lib/opencode/model';
 import { I18nProvider } from '@/lib/i18n';
+import { toast } from '@/components/ui';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -425,6 +426,13 @@ describe('TextSelectionMenu render subscriptions', () => {
     host.append(frame);
     document.body.append(host);
     containerRef.current = host;
+    const input = document.createElement('div');
+    input.dataset.chatInput = 'true';
+    const editor = document.createElement('div');
+    editor.className = 'cm-content';
+    input.append(editor);
+    document.body.append(input);
+    const focus = spyOn(editor, 'focus');
     const settings = useUIStore.getState();
     const linkedDrafts = useLinkedReferenceDrafts.getState().drafts;
     const send = spyOn(useSessionUIStore.getState(), 'sendMessage').mockImplementation(async () => {});
@@ -457,14 +465,62 @@ describe('TextSelectionMenu render subscriptions', () => {
       expect(useInputStore.getState().pendingInputText).toBe('Keep my draft');
       expect(useInputStore.getState().getAttachedFiles(identity)).toBe(files);
       expect(readLinkedReferences(identity)).toEqual(linked);
+      expect(focus.mock.calls).toHaveLength(1);
       expect(send.mock.calls).toEqual([]);
       expect(queue.mock.calls).toEqual([]);
       expect(document.querySelector('[aria-label="Approve selection"]')).toBeNull();
     } finally {
+      focus.mockRestore();
       send.mockRestore();
       queue.mockRestore();
       useLinkedReferenceDrafts.setState({ drafts: linkedDrafts });
       await act(async () => useUIStore.setState({ isMobile: settings.isMobile, selectionApprovalText: settings.selectionApprovalText }));
+    }
+  });
+
+  test('approval preserves the selection when the composer target or attachment is unavailable', async () => {
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.append(frame);
+    document.body.append(host);
+    containerRef.current = host;
+    const settings = useUIStore.getState();
+    const controller = createMobileCommentDraftController();
+    const target = { directory, sessionKey: 'approval-target' };
+    const addDraft = useInlineCommentDraftStore.getState().addDraft;
+    const error = spyOn(toast, 'error').mockImplementation(() => 'toast');
+    let cleared = 0;
+    try {
+      useUIStore.setState({ isMobile: false });
+      await render(true, controller);
+      await act(async () => dispatchFrameSelection(frame, {
+        text: 'picked', rect: { top: 40, left: 80, width: 100, height: 20 }, clear: () => { cleared += 1; },
+      }));
+      const button = document.querySelector<HTMLButtonElement>('[aria-label="Approve selection"]');
+      if (!button) throw new Error('Missing approval action');
+
+      await act(async () => button.click());
+      controller.setScope({ runtimeKey: 'another-runtime', ...target });
+      await act(async () => button.click());
+      controller.setScope({ runtimeKey: getRuntimeKey(), ...target });
+      useInlineCommentDraftStore.setState({ addDraft: () => null });
+      await act(async () => button.click());
+
+      expect(error.mock.calls).toHaveLength(3);
+      expect(cleared).toBe(0);
+      expect(document.querySelector('[aria-label="Approve selection"]')).not.toBeNull();
+      expect(useInlineCommentDraftStore.getState().getDrafts(target)).toEqual([]);
+
+      useInlineCommentDraftStore.setState({ addDraft });
+      await act(async () => button.click());
+      expect(useInlineCommentDraftStore.getState().getDrafts(target)).toHaveLength(1);
+      expect(cleared).toBe(1);
+      expect(document.querySelector('[aria-label="Approve selection"]')).toBeNull();
+    } finally {
+      useInlineCommentDraftStore.setState({ addDraft });
+      error.mockRestore();
+      await act(async () => useUIStore.setState({ isMobile: settings.isMobile }));
+      containerRef.current = null;
     }
   });
 

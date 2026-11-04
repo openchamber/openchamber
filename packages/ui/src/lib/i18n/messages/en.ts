@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/en';
 import { settingsDict } from './en.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -105,6 +106,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': 'Used {count} subagents',
   'sessions.sidebar.projectAction.active': 'Project action active',
   ...settingsDict,
+  ...selectionApprovalMessages,
   'gitView.operation.title': 'Git operation',
   'gitView.operation.recovery.storage': 'OpenChamber can\'t save the state of Git transfers here. Allow site storage and reload; pushing and pulling are paused until then.',
   'gitView.operation.recovery.capacity': 'Too many unfinished Git transfers are saved. Check the ones below before starting another.',
@@ -2560,7 +2562,6 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'Quote',
   'chat.textSelection.actions.read': 'Read',
   'chat.textSelection.actions.stopReading': 'Stop',
-  'chat.selection.approve': "Approve selection",
   'chat.textSelection.actions.comment': 'Comment',
   'chat.textSelection.actions.askOpenChamber': 'By the way…',
   'chat.textSelection.title.askOpenChamber': 'Open a BTW draft with the selection',

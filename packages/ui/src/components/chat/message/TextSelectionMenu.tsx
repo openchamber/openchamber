@@ -1,5 +1,4 @@
 import React from 'react';
-import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { createPortal, flushSync } from 'react-dom';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -11,7 +10,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
-import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { PROJECT_NOTE_BODY_MAX_LENGTH } from '@/lib/projectContextApi';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
@@ -30,6 +28,7 @@ import {
     useMobileCommentComposerController,
     useMobileCommentDraft,
 } from '../composer/comment/MobileCommentComposerContext';
+import { SelectionApprovalModule } from '../selection-approval';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { resolveShadowSelectionRange } from './shadowSelection';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
@@ -736,34 +735,15 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     });
   }, [addContextDraft, attachCitedImages, commentText, focusColumnInput, hideMenu, mobileCommentController, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
 
-  const handleApproveSelection = React.useCallback(() => {
-    if (!pendingSelectionRef.current || !selectedTextMarkdown) return;
-    const composerTarget = mobileCommentController?.getScope();
-    if (!composerTarget || composerTarget.runtimeKey !== getRuntimeKey()) {
-      toast.error(t('chat.textSelection.comment.attachFailed'));
-      return;
-    }
-    const draftId = addContextDraft(
-      { directory: composerTarget.directory, sessionKey: composerTarget.sessionKey },
-      {
-        source: 'chat-quote',
-        fileLabel: selectedMessageId ?? '',
-        startLine: 1,
-        endLine: 1,
-        code: selectedTextMarkdown,
-        language: '',
-        text: useUIStore.getState().selectionApprovalText.trim() || 'LGTM',
-        anchor: captureCommentAnchor() ?? undefined,
-      },
-    );
-    if (!draftId) {
-      toast.error(t('chat.textSelection.comment.attachFailed'));
-      return;
-    }
+  const getApprovalSelection = React.useCallback(() => {
+    if (!pendingSelectionRef.current || !selectedTextMarkdown) return null;
+    return { markdownText: selectedTextMarkdown, messageId: selectedMessageId, anchor: captureCommentAnchor() };
+  }, [captureCommentAnchor, selectedMessageId, selectedTextMarkdown]);
+
+  const finishApproval = React.useCallback(() => {
     hideMenu();
     window.getSelection()?.removeAllRanges();
-    if (!isMobile) queueMicrotask(() => focusColumnInput());
-  }, [addContextDraft, captureCommentAnchor, focusColumnInput, hideMenu, isMobile, mobileCommentController, selectedMessageId, selectedTextMarkdown, t]);
+  }, [hideMenu]);
 
   const selectionDirectory = effectiveDirectory ?? currentSessionDirectory ?? '';
   const spaceProjectDirectory = useSpaceProjectDirectory(selectionDirectory);
@@ -837,19 +817,11 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     )
     : null;
 
-  const approvalButton = currentSessionId && selectedMessageId ? (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      onClick={handleApproveSelection}
-      aria-label={t('chat.selection.approve')}
-      title={t('chat.selection.approve')}
-      className={isMobile ? 'h-11 w-11 shrink-0 rounded-xl bg-foreground/[0.04] active:opacity-80 transition-opacity duration-150' : 'rounded-full'}
-    >
-      <Icon name="thumb-up" className={isMobile ? 'size-5' : 'size-4'} />
-    </Button>
-  ) : null;
+  const approvalButton = currentSessionId && selectedMessageId
+    ? isMobile
+      ? <SelectionApprovalModule.Mobile getSelection={getApprovalSelection} onSuccess={finishApproval} />
+      : <SelectionApprovalModule.Desktop getSelection={getApprovalSelection} onSuccess={finishApproval} />
+    : null;
 
   const commentInput = (
     <div

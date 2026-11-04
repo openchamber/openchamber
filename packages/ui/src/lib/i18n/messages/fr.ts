@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/fr';
 import { settingsDict } from './fr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -105,6 +106,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} sous-agents utilisés',
   'sessions.sidebar.projectAction.active': 'Action du projet en cours',
   ...settingsDict,
+  ...selectionApprovalMessages,
   'gitView.operation.title': 'Opération Git',
   'gitView.operation.recovery.storage': 'OpenChamber ne peut pas enregistrer ici l’état des transferts Git. Autorisez le stockage du site et rechargez ; d’ici là, push et pull sont en pause.',
   'gitView.operation.recovery.capacity': 'Trop de transferts Git inachevés sont enregistrés. Vérifiez ceux ci-dessous avant d’en lancer un autre.',
@@ -2274,7 +2276,6 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'Citer',
   'chat.textSelection.actions.read': 'Lire',
   'chat.textSelection.actions.stopReading': 'Arrêter',
-  'chat.selection.approve': "Approuver la sélection",
   'chat.textSelection.actions.comment': 'Commenter',
   'chat.textSelection.actions.askOpenChamber': 'Au fait…',
   'chat.textSelection.title.askOpenChamber': 'Ouvrir un brouillon BTW avec la sélection',

@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/tr';
 import { settingsDict } from './tr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -105,6 +106,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} alt agent kullanıldı',
   'sessions.sidebar.projectAction.active': 'Proje eylemi çalışıyor',
   ...settingsDict,
+  ...selectionApprovalMessages,
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,
   ...repositoryDiscussionsI18n.tr,
@@ -3557,7 +3559,6 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'Alıntıla',
   'chat.textSelection.actions.read': 'Oku',
   'chat.textSelection.actions.stopReading': 'Durdur',
-  'chat.selection.approve': "Seçimi onayla",
   'chat.textSelection.actions.comment': 'Yorum yap',
   'chat.textSelection.actions.askOpenChamber': 'Bu arada…',
   'chat.textSelection.title.askOpenChamber': 'Seçili metinle BTW taslağı aç',

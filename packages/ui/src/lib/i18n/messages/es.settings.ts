@@ -5,8 +5,6 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
-  'settings.openchamber.visual.field.selectionApprovalText': 'Texto de aprobación de la selección',
-  'settings.openchamber.visual.field.selectionApprovalTextInfo': 'Respuesta personalizada para el atajo 👍 al seleccionar texto del asistente. Déjalo vacío para usar el texto predeterminado.',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Cuenta el periodo de retención desde el archivado. Las sesiones caducadas se eliminan.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Cuenta el periodo de retención desde la última actividad de la sesión. Las sesiones caducadas se archivan.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Cuenta el periodo de retención desde la última actividad de la sesión. Las sesiones caducadas se eliminan.',

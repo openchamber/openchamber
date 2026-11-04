@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/ko';
 import type { I18nKey } from './en';
 import { settingsDict } from './ko.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -106,6 +107,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '하위 에이전트 {count}개 사용',
   'sessions.sidebar.projectAction.active': '프로젝트 작업 실행 중',
   ...settingsDict,
+  ...selectionApprovalMessages,
   'gitView.operation.title': 'Git 작업',
   'gitView.operation.recovery.storage': 'OpenChamber가 여기에 Git 전송 상태를 저장할 수 없습니다. 사이트 저장소를 허용하고 새로 고치세요. 그때까지 push와 pull은 일시 중지됩니다.',
   'gitView.operation.recovery.capacity': '끝나지 않은 Git 전송이 너무 많이 저장되어 있습니다. 새로 시작하기 전에 아래 항목을 확인하세요.',
@@ -2560,7 +2562,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToInput': '인용',
   'chat.textSelection.actions.read': '읽기',
   'chat.textSelection.actions.stopReading': '중지',
-  'chat.selection.approve': "선택한 내용 승인",
   'chat.textSelection.actions.comment': '댓글',
   'chat.textSelection.actions.askOpenChamber': '그런데…',
   'chat.textSelection.title.askOpenChamber': '선택한 텍스트로 BTW 초안 열기',

@@ -5,8 +5,6 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
-  'settings.openchamber.visual.field.selectionApprovalText': '선택한 텍스트 동의 문구',
-  'settings.openchamber.visual.field.selectionApprovalTextInfo': '선택한 어시스턴트 텍스트의 👍 바로가기에 사용할 맞춤 피드백입니다. 비워 두면 기본 문구를 사용합니다.',
   'settings.openchamber.sessionRetention.field.archivedDescription': '보존 기간은 보관 시점부터 계산합니다. 기간이 지난 세션은 삭제됩니다.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '보존 기간은 세션의 마지막 활동부터 계산합니다. 기간이 지난 세션은 보관됩니다.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '보존 기간은 세션의 마지막 활동부터 계산합니다. 기간이 지난 세션은 삭제됩니다.',

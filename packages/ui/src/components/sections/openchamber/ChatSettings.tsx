@@ -1,12 +1,11 @@
 import React from 'react';
 
-import { Input } from '@/components/ui/input';
+import { SelectionApprovalModule } from '@/components/chat/selection-approval';
 import { NumberInput } from '@/components/ui/number-input';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import {
   SettingsSection,
   SettingsFieldRow,
-  SettingsStackedField,
   SettingsCheckboxRow,
   SettingsChipGroup,
   SettingsControlGroup,
@@ -123,8 +122,6 @@ const MessagesTab: React.FC = () => {
   const setCodeBlockLineWrap = useUIStore((state) => state.setCodeBlockLineWrap);
   const tableCellWrap = useUIStore((state) => state.tableCellWrap);
   const setTableCellWrap = useUIStore((state) => state.setTableCellWrap);
-  const selectionApprovalText = useUIStore((state) => state.selectionApprovalText);
-  const setSelectionApprovalText = useUIStore((state) => state.setSelectionApprovalText);
   const copyMessagesAsPlainText = useUIStore((state) => state.copyMessagesAsPlainText);
   const setCopyMessagesAsPlainText = useUIStore((state) => state.setCopyMessagesAsPlainText);
   const activityOptions = useChipOptions(ACTIVITY_RENDER_MODE_OPTIONS);
@@ -265,20 +262,7 @@ const MessagesTab: React.FC = () => {
           info={t('settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip')}
           settingsItem="chat.inline-assistant-actions"
         />
-        <SettingsStackedField
-          className="pt-3"
-          label={t('settings.openchamber.visual.field.selectionApprovalText')}
-          info={t('settings.openchamber.visual.field.selectionApprovalTextInfo')}
-          settingsItem="chat.selection-approval-text"
-        >
-          <Input
-            value={selectionApprovalText}
-            placeholder="LGTM"
-            onChange={(event) => setSelectionApprovalText(event.target.value)}
-            aria-label={t('settings.openchamber.visual.field.selectionApprovalText')}
-            dir="auto"
-          />
-        </SettingsStackedField>
+        <SelectionApprovalModule.Settings />
       </SettingsSection>
 
       <SettingsSection title={t('settings.layout.chat.section.formatting')} contentClassName="space-y-3">

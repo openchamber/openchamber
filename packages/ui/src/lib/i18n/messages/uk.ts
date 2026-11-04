@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/uk';
 import type { I18nKey } from './en';
 import { settingsDict } from './uk.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -106,6 +107,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': 'Залучено сабагентів: {count}',
   'sessions.sidebar.projectAction.active': 'Виконується дія проєкту',
   ...settingsDict,
+  ...selectionApprovalMessages,
   'gitView.context.configure': 'Налаштувати репозиторій',
   'gitView.context.description': 'Remote, до яких ідентичність репозиторію не дістає, і доступ для сабмодулів і Git LFS. Ідентичності — в налаштуваннях Git.',
   'gitView.context.needsAttention': 'Потребує уваги',
@@ -2529,7 +2531,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.actions.addToInput": "Цитувати",
   "chat.textSelection.actions.read": "Читати",
   "chat.textSelection.actions.stopReading": "Зупинити",
-  'chat.selection.approve': "Схвалити виділене",
   "chat.textSelection.actions.comment": "Коментувати",
   "chat.textSelection.actions.askOpenChamber": "До речі…",
   "chat.textSelection.title.askOpenChamber": "Відкрити BTW-чернетку з виділеним текстом",

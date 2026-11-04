@@ -5,8 +5,6 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
-  'settings.openchamber.visual.field.selectionApprovalText': 'Seçim onay metni',
-  'settings.openchamber.visual.field.selectionApprovalTextInfo': 'Seçilen asistan metnindeki 👍 kısayolu için özel geri bildirim. Varsayılan metni kullanmak için boş bırakın.',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Saklama süresi arşivleme anından itibaren sayılır. Süresi dolan oturumlar silinir.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Saklama süresi oturumun son etkinliğinden itibaren sayılır. Süresi dolan oturumlar arşivlenir.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Saklama süresi oturumun son etkinliğinden itibaren sayılır. Süresi dolan oturumlar silinir.',

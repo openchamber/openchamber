@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/es';
 import type { I18nKey } from './en';
 import { settingsDict } from './es.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -106,6 +107,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} subagentes utilizados',
   'sessions.sidebar.projectAction.active': 'Acción del proyecto en curso',
   ...settingsDict,
+  ...selectionApprovalMessages,
   'gitView.context.configure': 'Configurar repositorio',
   'gitView.context.description': 'Remotos que la identidad del repositorio no alcanza y acceso para submódulos y Git LFS. Las identidades están en los ajustes de Git.',
   'gitView.context.needsAttention': 'Requiere atención',
@@ -2529,7 +2531,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.actions.addToInput": "Citar",
   "chat.textSelection.actions.read": "Leer",
   "chat.textSelection.actions.stopReading": "Detener",
-  'chat.selection.approve': "Aprobar selección",
   "chat.textSelection.actions.comment": "Comentar",
   "chat.textSelection.actions.askOpenChamber": "Por cierto…",
   "chat.textSelection.title.askOpenChamber": "Abrir un borrador BTW con la selección",

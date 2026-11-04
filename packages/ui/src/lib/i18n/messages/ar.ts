@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/ar';
 import { settingsDict } from './ar.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -2485,7 +2486,6 @@ export const dict = {
   'chat.textSelection.actions.addToInput': 'اقتباس',
   'chat.textSelection.actions.read': 'قراءة',
   'chat.textSelection.actions.stopReading': 'إيقاف',
-  'chat.selection.approve': "الموافقة على النص المحدد",
   'chat.textSelection.actions.comment': 'تعليق',
   'chat.textSelection.actions.askOpenChamber': 'بالمناسبة…',
   'chat.textSelection.title.askOpenChamber': 'فتح مسودة BTW بالنص المحدد',
@@ -3849,6 +3849,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'هذه المهمة في قائمة الانتظار بالفعل وستعمل عند توفر مكان',
   'chat.modelControls.agentFavoriteAdd': 'إضافة إلى المفضلة. عند وجود مفضلة، يتنقل Tab بينها فقط',
   ...settingsDict,
+  ...selectionApprovalMessages,
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...repositoryDiscussionsI18n.ar,

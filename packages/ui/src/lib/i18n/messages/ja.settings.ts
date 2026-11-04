@@ -5,8 +5,6 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
-  'settings.openchamber.visual.field.selectionApprovalText': '選択テキストへの賛同文',
-  'settings.openchamber.visual.field.selectionApprovalTextInfo': 'アシスタントの選択テキストに対する 👍 ショートカットのカスタム返信。空欄の場合は既定の文面を使います。',
   'settings.openchamber.sessionRetention.field.archivedDescription': '保持期間はアーカイブ時点から数えます。期間を過ぎたセッションは削除されます。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保持期間はセッションの最終アクティビティから数えます。期間を過ぎたセッションはアーカイブされます。',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': '保持期間はセッションの最終アクティビティから数えます。期間を過ぎたセッションは削除されます。',

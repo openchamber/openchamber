@@ -5,8 +5,6 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
-  'settings.openchamber.visual.field.selectionApprovalText': 'Zustimmungstext für markierten Text',
-  'settings.openchamber.visual.field.selectionApprovalTextInfo': 'Eigene Rückmeldung für das 👍-Kürzel bei markiertem Assistententext. Leer lassen, um den Standardtext zu verwenden.',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Zählt die Aufbewahrungsdauer ab der Archivierung. Abgelaufene Sitzungen werden gelöscht.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Zählt die Aufbewahrungsdauer ab der letzten Aktivität der Sitzung. Abgelaufene Sitzungen werden archiviert.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Zählt die Aufbewahrungsdauer ab der letzten Aktivität der Sitzung. Abgelaufene Sitzungen werden gelöscht.',

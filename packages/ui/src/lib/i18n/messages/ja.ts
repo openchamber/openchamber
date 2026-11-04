@@ -1,3 +1,4 @@
+import { selectionApprovalMessages } from '@/components/chat/selection-approval/locale/ja';
 import type { I18nKey } from './en';
 import { settingsDict } from './ja.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -106,6 +107,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} サブエージェントを使用',
   'sessions.sidebar.projectAction.active': 'プロジェクトアクション実行中',
   ...settingsDict,
+  ...selectionApprovalMessages,
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber はここで Git 転送の状態を保存できません。サイトのストレージを許可して再読み込みしてください。それまで push と pull は一時停止します。',
   'gitView.operation.recovery.capacity': '未完了の Git 転送が多すぎます。新しく始める前に下のものを確認してください。',
@@ -2556,7 +2558,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.actions.addToInput': '引用',
   'chat.textSelection.actions.read': '読み上げ',
   'chat.textSelection.actions.stopReading': '停止',
-  'chat.selection.approve': "選択した内容を承認",
   'chat.textSelection.actions.comment': 'コメント',
   'chat.textSelection.actions.askOpenChamber': 'ところで…',
   'chat.textSelection.title.askOpenChamber': '選択したテキストでBTWの下書きを開く',

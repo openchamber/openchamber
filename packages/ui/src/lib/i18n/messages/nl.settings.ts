@@ -5,8 +5,6 @@ import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const settingsDict = {
-  'settings.openchamber.visual.field.selectionApprovalText': 'Instemmingstekst voor selectie',
-  'settings.openchamber.visual.field.selectionApprovalTextInfo': 'Eigen feedback voor de 👍-snelactie bij geselecteerde assistenttekst. Laat leeg om de standaardtekst te gebruiken.',
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Telt de bewaartermijn vanaf het archiveren. Verlopen sessies worden verwijderd.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Telt de bewaartermijn vanaf de laatste activiteit van de sessie. Verlopen sessies worden gearchiveerd.',
   'settings.openchamber.sessionRetention.field.unarchivedDeleteDescription': 'Telt de bewaartermijn vanaf de laatste activiteit van de sessie. Verlopen sessies worden verwijderd.',
