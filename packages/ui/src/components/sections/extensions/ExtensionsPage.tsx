@@ -41,6 +41,7 @@ import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest
 import { errorToastKey, updateErrorToastKey } from './extensionToasts';
 import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
+import { useGuestInstallRequestStore } from '@/lib/guests/install-request';
 import { describeGuestRequestFailure } from '@/lib/guests/request-failure';
 import { getGitIdentities, getGlobalGitIdentity } from '@/lib/gitApi';
 import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
@@ -794,6 +795,22 @@ export const ExtensionsPage: React.FC = () => {
     if (getRuntimeKey() !== requestRuntimeKey) return;
     await finishInstall(result, source, { allowConflictDialog: !options.replace });
   };
+
+  // A link asked for this package: a chat link goes straight on, an outside one stops at the add dialog.
+  const installRequest = useGuestInstallRequestStore((state) => state.request);
+  const runInstallRef = React.useRef(runInstall);
+  runInstallRef.current = runInstall;
+  React.useEffect(() => {
+    if (!installRequest || status !== 'ready' || busy) return;
+    const request = useGuestInstallRequestStore.getState().take();
+    if (!request) return;
+    if (request.confirmed) {
+      void runInstallRef.current({ kind: 'input', input: request.source });
+      return;
+    }
+    setInstallValue(request.source);
+    setAddOpen(true);
+  }, [busy, installRequest, status]);
 
   const add = async () => {
     const trimmed = installValue.trim();
