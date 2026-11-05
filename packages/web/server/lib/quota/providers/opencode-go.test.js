@@ -240,6 +240,15 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(result.usage.windows['5h'].usedPercent).toBe(25);
   });
 
+  it('supports Go Teams', async () => {
+    const result = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'go-teams' }))),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows['5h'].usedPercent).toBe(25);
+  });
+
   it('skips only the unusable meters and keeps the rest', () => {
     const windows = parseConsoleGoUsage(consolePayload({ meters: {
       fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '0', usedMicroCents: '10' },
