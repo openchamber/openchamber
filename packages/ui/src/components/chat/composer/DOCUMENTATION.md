@@ -759,6 +759,7 @@ command can leave the queue untouched and delivery can take only part of it.
   route takes no skill attachments. A hand-typed leading `/name` that matches
   a skill and no command still attaches the skill (`session-ui-store`), so the
   old form keeps working; the composer just no longer offers or chips it.
+- Extension rows in the `@` menu (`lib/guests/mentions.ts`) join the list when they arrive and never hold the files back. Picking one removes the `@` text and reads the row's content; the result lands as a chip through `useInputStore.setPendingGuestIssue`, and a failed read is a toast and no chip.
 - Extension slash commands are routed first (`submit/guestCommands.ts`,
   entries from `useGuestCommands` minus every name the composer already
   knows, so an extension can never shadow a built-in or an OpenCode command;
