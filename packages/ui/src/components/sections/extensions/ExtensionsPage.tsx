@@ -43,7 +43,7 @@ import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { describeGuestRequestFailure } from '@/lib/guests/request-failure';
 import { getGitIdentities, getGlobalGitIdentity } from '@/lib/gitApi';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
 import type { GitIdentityProfile } from '@/stores/useGitIdentitiesStore';
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
 import { checkGuestUpdates, updateGuest } from '@/lib/guests/updates';
@@ -559,6 +559,7 @@ const UnreadableExtensionCard: React.FC<{
 export const ExtensionsPage: React.FC = () => {
   const { t, locale } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
+  const updatable = React.useMemo(() => guests.filter((guest) => guest.source === 'git' && guest.update), [guests]);
   const unreadable = useGuestsStore((state) => state.unreadable);
   const status = useGuestsStore((state) => state.status);
   const catalogFailure = useGuestsStore((state) => state.failure);
@@ -647,16 +648,20 @@ export const ExtensionsPage: React.FC = () => {
     }
   };
 
+  const updateErrorToast = (result: Extract<Awaited<ReturnType<typeof updateGuest>>, { ok: false }>) => {
+    toast.error(
+      result.code === 'host-too-old' && result.required
+        ? t('settings.extensions.toast.hostTooOld', { version: result.required })
+        : t(updateErrorToastKey(result.code)),
+    );
+  };
+
   const update = async (guest: InstalledGuest) => {
     setBusy(true);
     const result = await updateGuest(guest.id);
     setBusy(false);
     if (!result.ok) {
-      toast.error(
-        result.code === 'host-too-old' && result.required
-          ? t('settings.extensions.toast.hostTooOld', { version: result.required })
-          : t(updateErrorToastKey(result.code)),
-      );
+      updateErrorToast(result);
       return;
     }
     // Open panels reload with the new bundle: the update moves the catalog row's revision.
@@ -670,6 +675,35 @@ export const ExtensionsPage: React.FC = () => {
     if (guestNeedsApproval(result.guest)) {
       setApproval(result.guest);
     }
+  };
+
+  // One at a time, so one failure leaves the others updated. The first version
+  // that asks for more opens the review; the rest wait on their cards.
+  const updateAll = async () => {
+    const targets = updatable;
+    // A switch to another server ends the batch: the same ids may live there.
+    const isCurrent = captureRuntimeInstance();
+    setBusy(true);
+    let updated = 0;
+    let needsApproval: InstalledGuest | null = null;
+    for (const guest of targets) {
+      const result = await updateGuest(guest.id);
+      if (!isCurrent()) return;
+      if (!result.ok) {
+        updateErrorToast(result);
+        continue;
+      }
+      updated += 1;
+      if (!needsApproval && guestNeedsApproval(result.guest)) needsApproval = result.guest;
+    }
+    setBusy(false);
+    if (updated > 0) {
+      toast.success(updated === targets.length
+        ? t('settings.extensions.toast.updatedAll', { count: updated })
+        : t('settings.extensions.toast.updatedSome', { count: updated, total: targets.length }));
+    }
+    await loadGuestCatalog();
+    if (needsApproval) setApproval(needsApproval);
   };
 
   const finishInstall = async (
@@ -1094,6 +1128,18 @@ export const ExtensionsPage: React.FC = () => {
                 <Icon name="external-link" className="size-3.5 text-muted-foreground" />
               </Button>
             )}
+            {updatable.length > 1 ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 shrink-0"
+                disabled={busy || checking}
+                onClick={() => void updateAll()}
+              >
+                {t('settings.extensions.updates.all')}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="ghost"
