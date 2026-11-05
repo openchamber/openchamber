@@ -529,6 +529,13 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   drops session cookies (no expiry) on quit, and many sign-ins live in one, so
   before quitting they are rewritten with an expiry (`browser-panel-cookies.mjs`),
   as Chrome keeps them when it continues where you left off.
+- Pages in the panel see a plain Chrome user agent (`plainChromeUserAgent`),
+  without the Electron and app tokens. Each panel session sets it, and
+  `entry.mjs` sets `app.userAgentFallback` to the same string before `ready`,
+  because shared and service workers ignore the session's user agent and read
+  the fallback. A page that saw Electron in its workers and plain Chrome in its
+  window failed Cloudflare Turnstile. The app's own windows read the fallback as
+  well.
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;

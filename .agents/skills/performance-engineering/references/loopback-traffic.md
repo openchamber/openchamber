@@ -32,7 +32,7 @@ Then count requests by path:
 grep -aoE '(GET|POST|PUT|PATCH|DELETE) /[^ ]+ HTTP' /tmp/oc-lo0.txt | sed -E 's/ HTTP$//; s/(directory|cursor)=[^&]*/\1=X/g' | sort | uniq -c | sort -rn
 ```
 
-The `user-agent` header says who asked: the Electron one is the renderer, `node` is the server. On one keep-alive connection, the difference between the `ack` numbers of two consecutive requests is the size of the response in between.
+The `user-agent` header says who asked: the Chrome one is the renderer, `node` is the server. On one keep-alive connection, the difference between the `ack` numbers of two consecutive requests is the size of the response in between.
 
 ## Sizing a response
 
