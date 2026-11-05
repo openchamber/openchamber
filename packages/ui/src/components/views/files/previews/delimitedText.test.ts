@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { delimiterForPath, parseDelimitedText } from './delimitedText';
+import { delimiterForPath, parseDelimitedText, setDelimitedField } from './delimitedText';
 
 describe('parseDelimitedText', () => {
   test('splits a plain CSV into a header and rows, ignoring the trailing newline', () => {
@@ -36,5 +36,29 @@ describe('parseDelimitedText', () => {
   test('a ragged file reports the widest row and an empty file has no columns', () => {
     expect(parseDelimitedText('a,b\n1,2,3\n', ',').columnCount).toBe(3);
     expect(parseDelimitedText('', ',')).toEqual({ header: [], rows: [], totalRows: 0, columnCount: 0, truncated: false });
+  });
+});
+
+describe('setDelimitedField', () => {
+  test('replaces one field and keeps every other byte', () => {
+    const file = '﻿a,"b, q"\r\n1,"x ""y"""\r\n\r\n3,4';
+    expect(setDelimitedField(file, ',', 1, 0, '9')).toBe('﻿a,"b, q"\r\n9,"x ""y"""\r\n\r\n3,4');
+    expect(setDelimitedField(file, ',', 1, 1, 'z')).toBe('﻿a,"b, q"\r\n1,z\r\n\r\n3,4');
+    expect(setDelimitedField(file, ',', 2, 1, '5')).toBe('﻿a,"b, q"\r\n1,"x ""y"""\r\n\r\n3,5');
+  });
+
+  test('quotes what needs it', () => {
+    expect(setDelimitedField('a,b\n', ',', 0, 1, 'x,"y"')).toBe('a,"x,""y"""\n');
+  });
+
+  test('adds a missing column and a new row', () => {
+    expect(setDelimitedField('a,b\n1\n', ',', 1, 2, 'c')).toBe('a,b\n1,,c\n');
+    expect(setDelimitedField('a,b\n1,2\n', ',', 2, 1, 'n')).toBe('a,b\n1,2\n,n\n');
+    expect(setDelimitedField('a\tb', '\t', 1, 0, 'n')).toBe('a\tb\nn\n');
+  });
+
+  test('reads back through the parser', () => {
+    const edited = setDelimitedField('name,note\nAda,"line one\nline two"\n', ',', 1, 1, 'new\nvalue');
+    expect(parseDelimitedText(edited, ',').rows).toEqual([['Ada', 'new\nvalue']]);
   });
 });

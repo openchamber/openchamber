@@ -4,6 +4,7 @@ import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
 import type { OfficePreview } from './officeDocument';
+import type { WorkbookDocument } from './workbook/model';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -49,16 +50,27 @@ describe('OfficeArtifact', () => {
     expect(container.textContent).toContain('3 slides');
   });
 
-  test('a workbook shows column letters, the sheet\'s row numbers and its own column count', async () => {
-    const preview: OfficePreview = {
-      kind: 'workbook',
-      sheets: [{ name: 'Data', rowNumbers: [1, 4], rows: [['a', 'b'], ['c', 'd']], columnCount: 2, totalRows: 2 }],
+  test('a workbook shows column letters, row numbers and its own column count', async () => {
+    const document: WorkbookDocument = {
+      sheets: [{
+        name: 'Data',
+        locked: new Set(),
+        protected: false,
+        cells: new Map([
+          ['1:0', { row: 1, column: 0, kind: 'number', raw: '1', display: '1' }],
+          ['3:1', { row: 3, column: 1, kind: 'text', raw: 'b', display: 'b' }],
+        ]),
+      }],
+      definedNames: [],
+      date1904: false,
+      write: async () => bytes,
     };
+    const preview: OfficePreview = { kind: 'workbook', document, bytes };
     const container = await render(
       <OfficeArtifact name="book.xlsx" path="/book.xlsx" sizeBytes={null} loadBytes={async () => bytes} readPreview={async () => preview} />,
     );
     expect(Array.from(container.querySelectorAll('th')).map((cell) => cell.textContent)).toEqual(['', 'A', 'B']);
-    expect(container.textContent).toContain('2 rows · 2 columns');
+    expect(container.textContent).toContain('3 rows · 2 columns');
   });
 
   test('a file that cannot be parsed says so and keeps its actions', async () => {

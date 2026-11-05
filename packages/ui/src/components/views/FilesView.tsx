@@ -3835,9 +3835,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     </Tooltip>
   ) : null;
 
-  const fetchSelectedFile = React.useCallback(async (signal: AbortSignal): Promise<Response> => {
-    const path = selectedFilePathRef.current;
-    if (!path) throw new Error('No file is open.');
+  const fetchRawFile = React.useCallback(async (path: string, signal: AbortSignal): Promise<Response> => {
     const readOptions = resolveFileReadOptions(path);
     const response = await runtimeFetch('/api/fs/raw', {
       signal,
@@ -3853,18 +3851,35 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [resolveFileReadOptions, root, t]);
 
   const loadCanvasBytes = React.useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
-    const response = await fetchSelectedFile(AbortSignal.timeout(60_000));
+    const path = selectedFilePathRef.current;
+    if (!path) throw new Error('No file is open.');
+    const response = await fetchRawFile(path, AbortSignal.timeout(60_000));
     return new Uint8Array(await response.arrayBuffer());
-  }, [fetchSelectedFile]);
+  }, [fetchRawFile]);
 
   // The stat that names the size can arrive after this read starts, so the
   // read is bounded itself and stops when the preview goes away.
-  const loadOfficeBytes = React.useCallback(async (cancel: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
+  const loadOfficeBytes = React.useCallback(async (path: string, cancel: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
     const signal = AbortSignal.any([cancel, AbortSignal.timeout(60_000)]);
-    const response = await fetchSelectedFile(signal);
+    const response = await fetchRawFile(path, signal);
     const blob = await readAssetBlob(response, MAX_OFFICE_PREVIEW_BYTES, signal);
     return new Uint8Array(await blob.arrayBuffer());
-  }, [fetchSelectedFile]);
+  }, [fetchRawFile]);
+
+  // Named by path: an edit can still be saving after the viewer moved on.
+  const saveOfficeBytes = React.useCallback(async (path: string, bytes: Uint8Array<ArrayBuffer>): Promise<boolean> => {
+    if (!files.uploadFile) return false;
+    // No baseline while writing: the poll records the new stat instead of
+    // reading our own write as an external change and reloading the preview.
+    if (selectedFilePathRef.current === path) lastLoadedFileStatRef.current = null;
+    const written = await files.uploadFile(path, new Blob([bytes]), { overwrite: true });
+    if (!written?.success) return false;
+    if (root && isPathWithinRoot(path, root)) {
+      const relativePath = getDisplayPath(root, path);
+      if (relativePath) sessionEvents.requestGitRefresh({ directory: root, paths: [relativePath] });
+    }
+    return true;
+  }, [files, root]);
 
   const openInDefaultAppButton = selectedFile && isDesktopLocalOriginActive() ? (
     <Tooltip>
@@ -3932,6 +3947,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             sizeBytes={artifactSize}
             loadBytes={loadOfficeBytes}
             actions={binaryFileActions}
+            onSave={files.uploadFile && !selectedFileIsOutsideWorkspace ? saveOfficeBytes : undefined}
           />
         );
       }
@@ -3946,7 +3962,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       );
     }
     if (isTable && tableViewMode === 'table') {
-      return <TableArtifact path={file.path} content={fileContent} sizeBytes={artifactSize} />;
+      return (
+        <TableArtifact
+          key={file.path}
+          path={file.path}
+          content={canEdit ? draftContent : fileContent}
+          sizeBytes={artifactSize}
+          onContentChange={canEdit ? setDraftContent : undefined}
+        />
+      );
     }
     if (isMermaid && mermaidViewMode === 'preview') {
       return (
@@ -4983,6 +5007,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                       enableFileReferences={false}
                       allowRawHtml
                       windowed
+                      tableWidthScope={selectedFile.path}
                     />
                   </div>
                 </ErrorBoundary>
@@ -5308,6 +5333,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     enableFileReferences={false}
                     allowRawHtml
                     windowed
+                    tableWidthScope={selectedFile.path}
                   />
                 </div>
               </ErrorBoundary>

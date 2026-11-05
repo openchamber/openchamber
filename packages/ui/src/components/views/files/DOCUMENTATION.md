@@ -356,12 +356,50 @@ elements and every URL outside the file, so a link in a preview is not clickable
 and shows its target on hover. Macros never run. A workbook's cells go through
 React as text and need none of this.
 
-Shown spreadsheet values come from the file: formulas show the result saved in
-it and are not calculated. `xl/styles.xml` decides how a number reads for dates,
-times, elapsed hours, percents and decimals. Currency symbols and digit grouping
-stay out, and a format the reader does not apply, such as scientific notation,
-keeps the stored number instead of rounding it. Charts and merged cells in a
-workbook are not drawn.
+`xl/styles.xml` decides how a number reads for dates, times, elapsed hours,
+percents and decimals. Currency symbols and digit grouping stay out, and a
+format the reader does not apply, such as scientific notation, keeps the stored
+number instead of rounding it. Charts in a workbook are not drawn.
+
+### Tables: sorting, widths and editing
+
+`TableGrid` is one grid for CSV, TSV, XLSX and ODS. Sorting changes the view
+only and stays put while cells change, so a row never jumps out from under an
+edit. A sheet's first row stays on top of a sort when it is all text. Column
+widths and Markdown table widths live in `lib/columnWidthMemory.ts`, per browser
+profile: a sheet is named by its file and sheet, a Markdown table by its file and
+headings, so adding a table above it keeps the widths.
+
+A CSV edit replaces one field in the text (`setDelimitedField`) and goes through
+the editor's draft, so it saves and guards like typing. A workbook edit goes
+through `workbook/WorkbookSession`, and these must stay true:
+
+- A write changes only the cells it names. The archive keeps every other entry;
+  a cell keeps its style. `xlsxDocument` and `odsDocument` patch the XML and never
+  rebuild a part from the model.
+- Nothing reaches the disk unread: `prove` reopens the new bytes and compares
+  each changed cell. A mismatch returns the session to the last good bytes.
+- Before a write the file is read again. When it differs from what this view
+  loaded, the edit is dropped with a toast and the view reloads: the newer file
+  wins, because the agent is the usual other writer.
+- Cells the file's structure forbids stay read-only: parts of merged areas and
+  array formulas, table headings, protected sheets.
+- XLSX writes drop `calcChain.xml` and set `fullCalcOnLoad`: a chain naming a cell
+  that lost its formula makes Excel offer a repair.
+
+### Why IronCalc for formulas
+
+HyperFormula covers more but is GPL, which an MIT app cannot ship. IronCalc is
+MIT or Apache, runs inside the app, and its `wasm` file loads on first need:
+a workbook with a formula missing its stored result (openpyxl writes them that
+way), or the first edit of a workbook with formulas. A viewed workbook with
+complete results never loads it. It reads only its own file format, so the
+session feeds it cells, and it gives only formatted text, so formula cells carry
+a scientific format that yields the 15 digits a spreadsheet stores.
+
+A function it lacks shows an error where the file holds a good result. That
+result stays, it is counted in the meta line, and the spreadsheet app recalculates
+on open. Results are never written over from a failed calculation.
 
 ### Why these renderers
 

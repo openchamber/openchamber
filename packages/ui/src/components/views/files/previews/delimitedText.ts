@@ -5,7 +5,7 @@
  * newlines and doubled quotes. The parser is streaming over one string so a
  * large export never builds an intermediate array of lines, and it stops
  * filling rows past the cap while still counting them, so the preview can say
- * "2,000 of 48,210 rows" without holding all of them.
+ * "100,000 of 480,210 rows" without holding all of them.
  */
 
 type DelimitedTable = {
@@ -17,7 +17,7 @@ type DelimitedTable = {
   truncated: boolean;
 };
 
-export const DEFAULT_TABLE_ROW_CAP = 2_000;
+export const DEFAULT_TABLE_ROW_CAP = 100_000;
 
 export const delimiterForPath = (filePath: string): ',' | '\t' => (
   filePath.toLowerCase().endsWith('.tsv') ? '\t' : ','
@@ -98,4 +98,67 @@ export const parseDelimitedText = (
     columnCount,
     truncated: rows.length < totalRows,
   };
+};
+
+const fieldText = (value: string, delimiter: string): string => (
+  value.includes(delimiter) || /["\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+);
+
+/**
+ * The file's text with one field replaced and every other byte kept, quoting
+ * and line endings included. `record` counts the way the parser does, the
+ * heading being 0; a record or a column past the end is added.
+ */
+export const setDelimitedField = (content: string, delimiter: ',' | '\t', record: number, column: number, value: string): string => {
+  const start = content.charCodeAt(0) === 0xfeff ? 1 : 0;
+  let recordIndex = 0;
+  let fieldIndex = 0;
+  let fieldStart = start;
+  let quoted = false;
+  let recordHasContent = false;
+  const replace = (end: number) => `${content.slice(0, fieldStart)}${fieldText(value, delimiter)}${content.slice(end)}`;
+  const pad = (end: number) => `${content.slice(0, end)}${delimiter.repeat(column - fieldIndex)}${fieldText(value, delimiter)}${content.slice(end)}`;
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (quoted) {
+      if (char === '"') {
+        if (content[index + 1] === '"') index += 1;
+        else quoted = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      recordHasContent = true;
+      continue;
+    }
+    if (char === delimiter) {
+      if (recordIndex === record && fieldIndex === column) return replace(index);
+      fieldIndex += 1;
+      fieldStart = index + 1;
+      recordHasContent = true;
+      continue;
+    }
+    if (char === '\n' || char === '\r') {
+      const blank = fieldIndex === 0 && !recordHasContent && index === fieldStart;
+      if (!blank) {
+        if (recordIndex === record) return fieldIndex === column ? replace(index) : pad(index);
+        recordIndex += 1;
+      }
+      if (char === '\r' && content[index + 1] === '\n') index += 1;
+      fieldIndex = 0;
+      fieldStart = index + 1;
+      recordHasContent = false;
+      continue;
+    }
+    recordHasContent = true;
+  }
+  if (recordIndex === record && (recordHasContent || fieldIndex > 0)) {
+    return fieldIndex === column ? replace(content.length) : pad(content.length);
+  }
+  if (recordHasContent || fieldIndex > 0) recordIndex += 1;
+  const ending = content.includes('\r\n') ? '\r\n' : '\n';
+  const separator = content.length === start || /[\r\n]$/.test(content) ? '' : ending;
+  const blankLines = ending.repeat(Math.max(0, record - recordIndex)).replace(new RegExp(ending, 'g'), `${delimiter}${ending}`);
+  return `${content}${separator}${blankLines}${delimiter.repeat(column)}${fieldText(value, delimiter)}${ending}`;
 };

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { strToU8, zipSync } from "fflate"
-import { extractDocumentAttachments, readWorkbook } from "./document-attachments"
+import { extractDocumentAttachments } from "./document-attachments"
 
 const zippedFile = (name: string, entries: Record<string, string | Uint8Array>) => new File([
   zipSync(Object.fromEntries(Object.entries(entries).map(([path, value]) => [
@@ -230,139 +230,33 @@ describe("document attachment extraction", () => {
   })
 })
 
-describe("workbook reading", () => {
+describe("spreadsheet attachments", () => {
   const workbook = (entries: Record<string, string>) => zippedFile("book.xlsx", {
     "xl/workbook.xml": `<workbook xmlns:r="r"><sheets><sheet name="Data" r:id="rId1"/></sheets></workbook>`,
     "xl/_rels/workbook.xml.rels": relationships([{ id: "rId1", target: "worksheets/sheet1.xml" }]),
     ...entries,
   })
 
-  test("an empty styled cell does not take the next cell's place", async () => {
-    const sheets = await readWorkbook(workbook({
-      "xl/worksheets/sheet1.xml": `<worksheet><sheetData>
-        <row r="1"><c r="A1" s="1"/><c r="B1"><v>5</v></c></row>
-        <row r="2"/>
-        <row r="3"><c r="C3"><v>7</v></c></row>
-      </sheetData></worksheet>`,
-    }), 100)
-    expect(sheets?.[0]).toEqual({
-      name: "Data",
-      rowNumbers: [1, 3],
-      rows: [["", "5", ""], ["", "", "7"]],
-      columnCount: 3,
-      totalRows: 2,
-    })
+  test("an empty styled cell does not take the next cell's place, and dates read as dates", async () => {
+    const text = await (await extractDocumentAttachments(workbook({
+      "xl/styles.xml": `<styleSheet><cellXfs><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs></styleSheet>`,
+      "xl/worksheets/sheet1.xml": `<worksheet><sheetData><row r="1"><c r="A1" s="1"/><c r="B1" s="1"><v>45231</v></c></row></sheetData></worksheet>`,
+    })))?.textFile.text()
+    expect(text).toContain("Range: B1:B1\n2023-11-01")
   })
 
-  test("shows numbers the way their cell format says", async () => {
-    const sheets = await readWorkbook(workbook({
-      "xl/styles.xml": `<styleSheet>
-        <numFmts count="1"><numFmt numFmtId="170" formatCode="&quot;due&quot; dd/mm/yyyy"/></numFmts>
-        <cellStyleXfs count="1"><xf numFmtId="9"/></cellStyleXfs>
-        <cellXfs count="6">
-          <xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="10"/><xf numFmtId="170"/><xf numFmtId="4"/><xf numFmtId="20"/>
-        </cellXfs>
-      </styleSheet>`,
-      "xl/worksheets/sheet1.xml": `<worksheet><sheetData><row r="1">
-        <c r="A1"><v>0.30000000000000004</v></c>
-        <c r="B1" s="1"><v>45231</v></c>
-        <c r="C1" s="2"><v>0.125</v></c>
-        <c r="D1" s="3"><v>45231.5</v></c>
-        <c r="E1" s="4"><v>1234.5</v></c>
-        <c r="F1" s="5"><v>0.75</v></c>
-      </row></sheetData></worksheet>`,
-    }), 100)
-    expect(sheets?.[0].rows[0]).toEqual(["0.3", "2023-11-01", "12.50%", "2023-11-01", "1234.50", "18:00"])
-  })
-
-  test("keeps a number whose format it cannot apply, and counts elapsed hours", async () => {
-    const sheets = await readWorkbook(workbook({
-      "xl/styles.xml": `<styleSheet>
-        <numFmts><numFmt numFmtId="170" formatCode="0.00E+00"/><numFmt numFmtId="171" formatCode="# ?/?"/><numFmt numFmtId="172" formatCode="[$$-409]#,##0.00"/></numFmts>
-        <cellXfs><xf numFmtId="170"/><xf numFmtId="171"/><xf numFmtId="46"/><xf numFmtId="172"/></cellXfs>
-      </styleSheet>`,
-      "xl/worksheets/sheet1.xml": `<worksheet><sheetData><row r="1">
-        <c r="A1" s="0"><v>0.00123</v></c>
-        <c r="B1" s="1"><v>0.5</v></c>
-        <c r="C1" s="2"><v>1.5</v></c>
-        <c r="D1" s="3"><v>1234.5</v></c>
-      </row></sheetData></worksheet>`,
-    }), 100)
-    expect(sheets?.[0].rows[0]).toEqual(["0.00123", "0.5", "36:00:00", "1234.50"])
-  })
-
-  test("a crafted format code is not scanned", async () => {
-    const sheets = await readWorkbook(workbook({
-      "xl/styles.xml": `<styleSheet><numFmts><numFmt numFmtId="170" formatCode="${"[".repeat(2_000_000)}"/></numFmts><cellXfs><xf numFmtId="170"/></cellXfs></styleSheet>`,
-      "xl/worksheets/sheet1.xml": `<worksheet><sheetData><row r="1"><c r="A1" s="0"><v>5</v></c></row></sheetData></worksheet>`,
-    }), 100)
-    expect(sheets?.[0].rows[0]).toEqual(["5"])
-  }, 1_000)
-
-  test("counts dates from 1904 in a workbook that says so", async () => {
-    const sheets = await readWorkbook(zippedFile("book.xlsx", {
-      "xl/workbook.xml": `<workbook xmlns:r="r"><workbookPr date1904="1"/><sheets><sheet name="Data" r:id="rId1"/></sheets></workbook>`,
-      "xl/_rels/workbook.xml.rels": relationships([{ id: "rId1", target: "worksheets/sheet1.xml" }]),
-      "xl/styles.xml": `<styleSheet><cellXfs><xf numFmtId="14"/></cellXfs></styleSheet>`,
-      "xl/worksheets/sheet1.xml": `<worksheet><sheetData><row r="1"><c r="A1" s="0"><v>43769</v></c></row></sheetData></worksheet>`,
-    }), 100)
-    expect(sheets?.[0].rows[0]).toEqual(["2023-11-01"])
-  })
-
-  test("reports rows past the cap", async () => {
-    const rows = Array.from({ length: 5 }, (_, index) => `<row r="${index + 1}"><c r="A${index + 1}"><v>${index}</v></c></row>`).join("")
-    const sheets = await readWorkbook(workbook({ "xl/worksheets/sheet1.xml": `<worksheet><sheetData>${rows}</sheetData></worksheet>` }), 2)
-    expect(sheets?.[0].rows).toEqual([["0"], ["1"]])
-    expect(sheets?.[0].totalRows).toBe(5)
-  })
-
-  test("expands ODS repeats with values and skips the padding", async () => {
+  test("expands ODS repeats with values and stays bounded on absurd ones", async () => {
     const file = zippedFile("book.ods", {
       "content.xml": `<office:document-content><table:table table:name="Budget">
-        <table:table-row table:number-rows-repeated="2"><table:table-cell table:number-columns-repeated="1024"/></table:table-row>
+        <table:table-row><table:table-cell table:number-columns-repeated="4294967296"/><table:table-cell><text:p>far</text:p></table:table-cell></table:table-row>
         <table:table-row>
           <table:table-cell table:number-columns-repeated="2"/>
           <table:table-cell><text:p>A&amp;B</text:p></table:table-cell>
           <table:covered-table-cell/>
           <table:table-cell table:number-columns-repeated="2"><text:p>x</text:p></table:table-cell>
-          <table:table-cell table:number-columns-repeated="1000000"/>
         </table:table-row>
-        <table:table-row table:number-rows-repeated="1048000"><table:table-cell table:number-columns-repeated="1024"/></table:table-row>
       </table:table></office:document-content>`,
-    })
-    const sheets = await readWorkbook(file, 100)
-    expect(sheets?.[0]).toEqual({
-      name: "Budget",
-      rowNumbers: [3],
-      rows: [["", "", "A&B", "", "x", "x"]],
-      columnCount: 6,
-      totalRows: 1,
     })
     expect(await (await extractDocumentAttachments(file))?.textFile.text()).toContain(" |  | A&B |  | x | x\n")
-  })
-
-  test("a blank run with an absurd repeat stays bounded in both readers", async () => {
-    const file = zippedFile("book.ods", {
-      "content.xml": `<office:document-content><table:table table:name="Budget"><table:table-row>
-        <table:table-cell table:number-columns-repeated="4294967296"/>
-        <table:table-cell><text:p>far away</text:p></table:table-cell>
-      </table:table-row><table:table-row><table:table-cell><text:p>near</text:p></table:table-cell></table:table-row></table:table></office:document-content>`,
-    })
-    expect((await readWorkbook(file, 100))?.[0].rows).toEqual([["near"]])
-    expect(await (await extractDocumentAttachments(file))?.textFile.text()).toContain("near")
-  })
-
-  test("repeated rows past the bound still count", async () => {
-    const sheets = await readWorkbook(zippedFile("book.ods", {
-      "content.xml": `<office:document-content><table:table table:name="Budget">
-        <table:table-row table:number-rows-repeated="3000"><table:table-cell><text:p>x</text:p></table:table-cell></table:table-row>
-      </table:table></office:document-content>`,
-    }), 2000)
-    expect(sheets?.[0].rows).toHaveLength(1000)
-    expect(sheets?.[0].totalRows).toBe(3000)
-  })
-
-  test("a file that is not a workbook has no sheets", async () => {
-    expect(await readWorkbook(zippedFile("book.xlsx", { "other.xml": "<a/>" }), 100)).toBeUndefined()
   })
 })

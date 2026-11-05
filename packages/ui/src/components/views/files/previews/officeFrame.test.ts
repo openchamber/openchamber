@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 
 Object.assign(globalThis, { DOMParser: new Window().DOMParser });
 
-const { cleanDocumentHtml, officeFrameDocument } = await import('./officeFrame');
+const { cleanDocumentHtml, isOpenableLink, officeFrameDocument } = await import('./officeFrame');
 
 describe('office document frame', () => {
   test('drops what acts and keeps what the document looks like', () => {
@@ -27,7 +27,7 @@ describe('office document frame', () => {
   test('a link outside the file stops being a link and shows where it pointed', () => {
     const html = cleanDocumentHtml('<a href="javascript:alert(1)">bad</a><a href="https://example.com/x">web</a><a href="#part-2">inside</a>');
     expect(html).not.toContain('href="javascript');
-    expect(html).not.toContain('href="https');
+    expect(html).not.toContain(' href="https');
     expect(html).toContain('title="https://example.com/x"');
     expect(html).toContain('href="#part-2"');
   });
@@ -39,5 +39,16 @@ describe('office document frame', () => {
     expect(page).toContain(`<script nonce="${nonce}">`);
     // The closing tag in the file's styles stays text inside the style element.
     expect(page).not.toContain('</style><script>steal');
+  });
+});
+
+describe('links in a document', () => {
+  test('only an address a browser should open reaches the app', () => {
+    const html = cleanDocumentHtml('<a href="https://a.dev/x">web</a><a href="mailto:a@b.dev">mail</a><a href="javascript:alert(1)">bad</a><a href="file:///etc/passwd">file</a>');
+    expect(html).toContain('data-oc-href="https://a.dev/x"');
+    expect(html).toContain('data-oc-href="mailto:a@b.dev"');
+    expect(html).not.toContain('data-oc-href="javascript');
+    expect(html).not.toContain('data-oc-href="file');
+    expect(isOpenableLink('JAVASCRIPT:alert(1)')).toBe(false);
   });
 });
