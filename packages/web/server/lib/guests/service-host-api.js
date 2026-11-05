@@ -36,8 +36,8 @@ const lastUserPrompt = async (control, sessionId) => {
 
 /** Every connected client gets every event, an idle phone over the paid relay too. */
 const SERVICE_EVENT_CHARS_PER_SECOND = 256_000;
-const SESSION_STARTS_PER_HOUR = 60;
-const SESSION_START_WINDOW_MS = 60 * 60 * 1000;
+const SERVICE_PROMPTS_PER_HOUR = 60;
+const SERVICE_STATUS_CHANGES_PER_MINUTE = 30;
 
 /**
  * @param {{
@@ -71,30 +71,37 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
     ? null
     : fail(403, 'NOT_GRANTED', `This call needs the "${capability}" approval. Ask the user to approve the extension in Settings → Extensions.`));
 
-  /** Per guest: when it last started sessions, within the hour. */
-  const sessionStarts = new Map();
+  /** A counter per guest over a sliding window; what it refuses does not count. */
+  const budget = (limit, windowMs) => {
+    const spent = new Map();
+    return (guestId) => {
+      const at = now();
+      const recent = (spent.get(guestId) ?? []).filter((spentAt) => at - spentAt < windowMs);
+      const allowed = recent.length < limit;
+      spent.set(guestId, allowed ? [...recent, at] : recent);
+      return allowed;
+    };
+  };
 
   /** A loop in a service cannot spend the user's tokens without end. */
-  const mayStartSession = (guestId) => {
-    const at = now();
-    const recent = (sessionStarts.get(guestId) ?? []).filter((startedAt) => at - startedAt < SESSION_START_WINDOW_MS);
-    const allowed = recent.length < SESSION_STARTS_PER_HOUR;
-    sessionStarts.set(guestId, allowed ? [...recent, at] : recent);
-    return allowed;
-  };
+  const mayPrompt = budget(SERVICE_PROMPTS_PER_HOUR, 60 * 60 * 1000);
+  /** A changed note makes every client reload the catalog. */
+  const mayChangeStatus = budget(SERVICE_STATUS_CHANGES_PER_MINUTE, 60 * 1000);
+  const tooManyPrompts = () => fail(429, 'TOO_MANY_PROMPTS', `A service sends at most ${SERVICE_PROMPTS_PER_HOUR} prompts an hour.`);
 
   const run = async (guest, { method, input }) => {
     switch (method) {
       case 'sessions.start': {
         const refused = needs(guest, 'sessionControl');
         if (refused) return refused;
-        if (!mayStartSession(guest.id)) return fail(429, 'TOO_MANY_SESSIONS', `A service starts at most ${SESSION_STARTS_PER_HOUR} sessions an hour.`);
+        if (!mayPrompt(guest.id)) return tooManyPrompts();
         const result = await control.execute('session.create', input, undefined, { startedByExtension: guest.id });
         return ok({ sessionId: result.sessionId, directory: result.directory ?? null });
       }
       case 'sessions.send': {
         const refused = needs(guest, 'sessionControl');
         if (refused) return refused;
+        if (!mayPrompt(guest.id)) return tooManyPrompts();
         await control.execute('session.send', input);
         return ok({ sent: true });
       }
@@ -103,6 +110,7 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
         if (refused) return refused;
         const prompt = await lastUserPrompt(control, input.sessionId);
         if (!prompt) return fail(409, 'NOTHING_TO_RETRY', 'The session has no message to send again.');
+        if (!mayPrompt(guest.id)) return tooManyPrompts();
         await control.execute('session.send', { sessionId: input.sessionId, prompt });
         return ok({ sent: true });
       }
@@ -138,6 +146,7 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
       case 'settings.read':
         return ok({ settings: await readSettings(guest) });
       case 'status.set':
+        if (!mayChangeStatus(guest.id)) return fail(429, 'TOO_MANY_EVENTS', `A service sets its status at most ${SERVICE_STATUS_CHANGES_PER_MINUTE} times a minute.`);
         setConfigurationNote(guest.id, input.needsConfiguration);
         return ok({ saved: true });
     }

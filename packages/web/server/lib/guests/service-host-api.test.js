@@ -66,12 +66,21 @@ describe('service host calls', () => {
     expect(await call('sessions.start', { prompt: 'go' })).toMatchObject({ status: 403, body: { error: { message: 'This folder is not trusted' } } });
   });
 
-  test('stops a service that starts sessions without end', async () => {
+  test('stops a service that sends prompts without end, new session or not', async () => {
     const { call } = harness();
-    for (let index = 0; index < 60; index += 1) expect((await call('sessions.start', { prompt: 'go' })).status).toBe(200);
-    const refused = await call('sessions.start', { prompt: 'go' });
-    expect(refused.status).toBe(429);
-    expect(refused.body.error.code).toBe('TOO_MANY_SESSIONS');
+    for (let index = 0; index < 30; index += 1) expect((await call('sessions.start', { prompt: 'go' })).status).toBe(200);
+    for (let index = 0; index < 30; index += 1) expect((await call('sessions.send', { sessionId: 'ses_1', prompt: 'go' })).status).toBe(200);
+    for (const refused of [await call('sessions.start', { prompt: 'go' }), await call('sessions.send', { sessionId: 'ses_1', prompt: 'go' })]) {
+      expect(refused.status).toBe(429);
+      expect(refused.body.error.code).toBe('TOO_MANY_PROMPTS');
+    }
+  });
+
+  test('bounds how often a service changes its status', async () => {
+    const { call, setConfigurationNote } = harness();
+    for (let index = 0; index < 30; index += 1) expect((await call('status.set', { needsConfiguration: `note ${index}` })).status).toBe(200);
+    expect((await call('status.set', { needsConfiguration: 'one more' })).status).toBe(429);
+    expect(setConfigurationNote).toHaveBeenCalledTimes(30);
   });
 
   test('refuses every call of a paused extension, whatever the running process holds', async () => {
