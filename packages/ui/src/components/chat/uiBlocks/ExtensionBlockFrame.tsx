@@ -71,7 +71,8 @@ export function ExtensionBlockFrame({ block, args, complete, answered, answer }:
   }), [answer, block.entry, block.name, call]);
 
   return (
-    <div ref={boxRef} className="oc-box w-full overflow-hidden p-0" style={{ height }}>
+    // Inline: the kit's `.oc-box` padding lands after the utilities, and would take the height the frame asked for.
+    <div ref={boxRef} className="oc-box w-full overflow-hidden" style={{ height, padding: 0 }}>
       {complete && onScreen ? (
         <ErrorBoundary fallback={null}>
           <React.Suspense fallback={null}>

@@ -4,8 +4,9 @@ import { connectHost } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 const host = connectHost();
-const root = document.querySelector('#root');
+const root = document.querySelector<HTMLElement>('#root');
 if (!root) throw new Error('DeskChart: missing root');
+root.style.padding = '12px';
 
 host.onReady((context) => applyHostReady(context, document.documentElement));
 
@@ -30,5 +31,7 @@ host.onBlock(({ args, answered }) => {
   next.disabled = answered !== null;
   next.addEventListener('click', () => { void host.answerBlock('Explain this chart'); });
   root.append(title, bars, next);
-  void host.setHeight(root.getBoundingClientRect().height + 16);
 });
+
+// The height follows the content, which settles after the first draw.
+new ResizeObserver(() => { void host.setHeight(Math.ceil(root.getBoundingClientRect().height)); }).observe(root);

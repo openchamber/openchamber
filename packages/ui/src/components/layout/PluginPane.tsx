@@ -1073,6 +1073,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       src={src || undefined}
       srcDoc={srcDoc}
       sandbox="allow-scripts"
+      // A frame in another scheme than its element paints an opaque canvas, and the chat's scroller is dark in a light theme.
+      style={{ colorScheme: currentTheme.metadata.variant === 'dark' ? 'dark' : 'light' }}
       className={cn(
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',
         // The attach window and the Work Status card draw their own chrome behind the page.
