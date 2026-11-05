@@ -8,13 +8,11 @@
     "engines": {
       "openchamber": ">=2.6.0"
     },
+    "id": "agent-desk",
+    "name": "Agent Desk",
+    "icon": "robot-2",
     "contributes": {
-      "panel": {
-        "id": "agent-desk",
-        "name": "Agent Desk",
-        "icon": "robot-2",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "service": {
         "entry": "service/main.js",
         "runtime": "host",

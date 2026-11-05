@@ -49,13 +49,11 @@ Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git o
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git o
 
 `engines.openchamber` est optionnel. Indiquez la version d'OpenChamber la plus ancienne avec laquelle votre extension fonctionne, sous la forme `1.24.0` ou `>=1.24.0`. Les versions plus anciennes refusent de l'installer au lieu d'échouer plus tard.
 
-`contributes.panel` décrit l'entrée dans la barre latérale. `id` est en kebab-case et doit être unique parmi les extensions installées. `icon` est un nom Remixicon (`RiWindowLine` devient `window`) ou un fichier SVG dans votre dossier, comme `icon.svg`. `entry` est le fichier HTML dans votre dossier ; omettez-le pour une extension qui ne déclare que `tools` (voir [Vos outils dans le chat](#vos-outils-dans-le-chat)).
+`id`, `name` et `icon` nomment l'extension. `id` est en kebab-case et doit être unique parmi les extensions installées. `icon` est un nom Remixicon (`RiWindowLine` devient `window`) ou un fichier SVG dans votre dossier, comme `icon.svg`. `contributes.panel` est le panneau de l'extension dans la barre latérale : son `entry` est le fichier HTML dans votre dossier. Une extension sans panneau dans la barre latérale omet `panel`. Les anciens paquets gardent `id`, `name` et `icon` dans `panel`, et cela continue de fonctionner.
 
 `contributes.attach` est optionnel. Il ajoute votre extension au menu + à côté de la zone de chat, pour que l'utilisateur puisse choisir une tâche et l'attacher à une session.
 

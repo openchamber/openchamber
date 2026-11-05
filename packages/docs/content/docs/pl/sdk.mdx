@@ -49,13 +49,11 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
 
 `engines.openchamber` jest opcjonalne. Podaj najstarszą wersję OpenChamber, z którą działa Twoje rozszerzenie, jako `1.24.0` lub `>=1.24.0`. Starsze wersje odmówią instalacji zamiast zawieść później.
 
-`contributes.panel` opisuje wpis na pasku bocznym. `id` jest w kebab-case i musi być unikalne wśród zainstalowanych rozszerzeń. `icon` to nazwa ikony Remixicon (`RiWindowLine` staje się `window`) albo plik SVG w Twoim folderze, na przykład `icon.svg`. `entry` to plik HTML w Twoim folderze; pomiń je w rozszerzeniu, które deklaruje tylko `tools` (zobacz [Twoje narzędzia w czacie](#twoje-narzędzia-w-czacie)).
+`id`, `name` i `icon` identyfikują rozszerzenie. `id` jest w kebab-case i musi być unikalne wśród zainstalowanych rozszerzeń. `icon` to nazwa ikony Remixicon (`RiWindowLine` staje się `window`) albo plik SVG w Twoim folderze, na przykład `icon.svg`. `contributes.panel` to panel rozszerzenia na pasku bocznym: jego `entry` to plik HTML w Twoim folderze. Rozszerzenie bez panelu na pasku bocznym pomija `panel`. Starsze pakiety trzymają `id`, `name` i `icon` w `panel` i to nadal działa.
 
 `contributes.attach` jest opcjonalne. Dodaje Twoje rozszerzenie do menu + obok pola czatu, żeby użytkownik mógł wybrać zadanie i dołączyć je do sesji.
 

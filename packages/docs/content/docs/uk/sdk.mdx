@@ -49,13 +49,11 @@ OpenChamber читає маніфест і показує діалог зі сп
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ OpenChamber читає маніфест і показує діалог зі сп
 
 `engines.openchamber` необов'язкове. Вкажіть найстарішу версію OpenChamber, з якою працює ваше розширення, як `1.24.0` або `>=1.24.0`. Старіші збірки відмовляться його встановлювати замість того, щоб ламатися пізніше.
 
-`contributes.panel` описує пункт на рейці. `id` пишеться в kebab-case і має бути унікальним серед встановлених розширень. `icon` - це назва іконки Remixicon (`RiWindowLine` стає `window`) або SVG-файл у вашій теці, наприклад `icon.svg`. `entry` - HTML-файл у вашій теці; пропустіть його для розширення, яке оголошує лише `tools` (див. [Ваші інструменти в чаті](#ваші-інструменти-в-чаті)).
+`id`, `name` і `icon` називають розширення. `id` пишеться в kebab-case і має бути унікальним серед встановлених розширень. `icon` - це назва іконки Remixicon (`RiWindowLine` стає `window`) або SVG-файл у вашій теці, наприклад `icon.svg`. `contributes.panel` - це панель розширення на рейці: її `entry` - HTML-файл у вашій теці. Розширення без панелі на рейці пропускає `panel`. Старіші пакети тримають `id`, `name` і `icon` всередині `panel`, і це далі працює.
 
 `contributes.attach` необов'язкове. Воно додає ваше розширення в меню + біля поля чату, щоб користувач міг вибрати задачу і прикріпити її до сесії.
 

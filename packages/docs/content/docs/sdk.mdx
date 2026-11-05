@@ -49,13 +49,11 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
 
 `engines.openchamber` is optional. Set the oldest OpenChamber version your extension works with, as `1.24.0` or `>=1.24.0`. Older builds refuse to install it instead of failing later.
 
-`contributes.panel` describes the rail entry. `id` is kebab-case and must be unique among installed extensions. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG file inside your folder, like `icon.svg`. `entry` is the HTML file inside your folder; leave it out for an extension that only declares `tools` (see [Your tools in the chat](#your-tools-in-the-chat)).
+`id`, `name` and `icon` name the extension. `id` is kebab-case and must be unique among installed extensions. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG file inside your folder, like `icon.svg`. `contributes.panel` is the extension's panel on the rail: its `entry` is the HTML file inside your folder. An extension with no rail panel leaves `panel` out. Older packages keep `id`, `name` and `icon` inside `panel`, and that keeps working.
 
 `contributes.attach` is optional. It adds your extension to the + menu next to the chat box, so the user can pick a task and attach it to a session.
 

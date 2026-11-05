@@ -851,6 +851,37 @@ const packageEnvelopeSchema = z.union([
 
 export type ManifestDocument = z.input<typeof openChamberManifestSchema> | z.input<typeof packageManifestSchema>;
 
+const identityBlockSchema = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  icon: z.string().optional(),
+  contributes: z.looseObject({ panel: z.looseObject({}).optional() }).optional(),
+});
+
+/**
+ * An extension names itself beside `contributes`; `contributes.panel` is its
+ * rail page, when it has one. Older packages keep all of it in `panel`, so the
+ * parsed manifest stays in that one shape for everything downstream.
+ */
+const liftIdentity = (block: z.input<typeof identityBlockSchema>): z.input<typeof identityBlockSchema> => {
+  const parsed = identityBlockSchema.safeParse(block);
+  if (!parsed.success) return block;
+  const { id, name, icon, contributes, ...rest } = parsed.data;
+  if (id === undefined && name === undefined && icon === undefined) return block;
+  const identity = { ...(id === undefined ? {} : { id }), ...(name === undefined ? {} : { name }), ...(icon === undefined ? {} : { icon }) };
+  return { ...rest, contributes: { ...contributes, panel: { ...contributes?.panel, ...identity } } };
+};
+
+const envelopeBlockSchema = z.looseObject({ openchamber: identityBlockSchema });
+
+/** The same lift for a bare manifest and for a whole package.json. */
+const withLiftedIdentity = (document: ManifestDocument): ManifestDocument | z.input<typeof identityBlockSchema> => {
+  const envelope = envelopeBlockSchema.safeParse(document);
+  if (envelope.success) return { ...envelope.data, openchamber: liftIdentity(envelope.data.openchamber) };
+  const bare = identityBlockSchema.safeParse(document);
+  return bare.success && !('openchamber' in bare.data) ? liftIdentity(bare.data) : document;
+};
+
 const fail = (code: ParseManifestErrorCode, message: string): ParseManifestFailure => ({
   ok: false,
   code,
@@ -888,15 +919,15 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail('invalid-panel', issue.message);
   }
   if (path === 'contributes' || path === 'contributes.panel') {
-    return fail('missing-panel', 'contributes.panel is required.');
+    return fail('missing-panel', 'The manifest needs id, name and icon.');
   }
   switch (path) {
     case 'contributes.panel.id':
-      return fail('invalid-panel-id', 'panel.id must be kebab-case starting with a letter.');
+      return fail('invalid-panel-id', 'id must be kebab-case starting with a letter.');
     case 'contributes.panel.name':
-      return fail('invalid-panel-name', 'panel.name must be a non-empty string.');
+      return fail('invalid-panel-name', 'name must be a non-empty string.');
     case 'contributes.panel.icon':
-      return fail('invalid-panel-icon', 'panel.icon must be a Remixicon name or a package .svg path.');
+      return fail('invalid-panel-icon', 'icon must be a Remixicon name or a package .svg path.');
     case 'contributes.panel.entry':
       return fail('invalid-panel-entry', 'panel.entry must be a relative path inside the package.');
     case 'contributes.panel.dock':
@@ -1025,7 +1056,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       ? issue.message
       : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control", "notifications", "tracker", "quota"), optional surface (true), optional keepRunning (true), and optional schedule (up to 8 of { id, cron, timezone? }).');
   }
-  return fail('missing-panel', 'contributes.panel is required.');
+  return fail('missing-panel', 'The manifest needs id, name and icon.');
 };
 
 const decodeManifest = (parsed: ReturnType<typeof openChamberManifestSchema.safeParse>): ParseManifestResult => {
@@ -1041,7 +1072,7 @@ const decodeManifest = (parsed: ReturnType<typeof openChamberManifestSchema.safe
 
 export const parseManifest = (document: ManifestDocument): ParseManifestResult => {
   if ('openchamber' in document) {
-    const parsed = packageManifestSchema.safeParse(document);
+    const parsed = packageManifestSchema.safeParse(withLiftedIdentity(document));
     if (parsed.success) {
       const success: ParseManifestSuccess = {
         ok: true,
@@ -1058,12 +1089,12 @@ export const parseManifest = (document: ManifestDocument): ParseManifestResult =
     }
     return failureFromIssue(issue);
   }
-  return decodeManifest(openChamberManifestSchema.safeParse(document));
+  return decodeManifest(openChamberManifestSchema.safeParse(withLiftedIdentity(document)));
 };
 
 export const parseManifestJson = (json: string): ParseManifestResult => {
   try {
-    const raw = JSON.parse(json);
+    const raw = withLiftedIdentity(JSON.parse(json));
     if (packageEnvelopeSchema.safeParse(raw).success) {
       const parsed = packageManifestSchema.safeParse(raw);
       if (parsed.success) {

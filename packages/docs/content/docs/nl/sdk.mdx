@@ -49,13 +49,11 @@ U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-be
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-be
 
 `engines.openchamber` is optioneel. Geef de oudste ondersteunde OpenChamber-versie op als `1.24.0` of `>=1.24.0`. Oudere builds weigeren de installatie dan meteen, in plaats van later vast te lopen.
 
-`contributes.panel` beschrijft de vermelding in de balk. `id` gebruikt kebab-case en moet uniek zijn onder de geïnstalleerde extensies. `icon` is een Remixicon-naam: `RiWindowLine` wordt `window`. Een SVG-bestand in uw map, zoals `icon.svg`, mag ook. `entry` verwijst naar het HTML-bestand in de map. Laat het weg voor een extensie die alleen `tools` opgeeft. Zie [Uw tools in de chat](#uw-tools-in-de-chat).
+`id`, `name` en `icon` benoemen de extensie. `id` gebruikt kebab-case en moet uniek zijn onder de geïnstalleerde extensies. `icon` is een Remixicon-naam: `RiWindowLine` wordt `window`. Een SVG-bestand in uw map, zoals `icon.svg`, mag ook. `contributes.panel` is het paneel van de extensie in de balk. De `entry` daarvan verwijst naar het HTML-bestand in de map. Een extensie zonder paneel in de balk laat `panel` weg. Oudere pakketten houden `id`, `name` en `icon` in `panel`, en dat blijft werken.
 
 `contributes.attach` is optioneel. Hiermee verschijnt de extensie in het +-menu naast het chatveld, zodat de gebruiker een taak kan kiezen en aan een sessie koppelen.
 

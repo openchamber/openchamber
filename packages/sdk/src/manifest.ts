@@ -1063,6 +1063,11 @@ export type OpenChamberEngines = {
   openchamber: string;
 };
 
+/**
+ * The parsed manifest. A package writes `id`, `name` and `icon` beside
+ * `contributes`; parsing moves them to `contributes.panel`, where older
+ * packages keep them, so there is one shape past this point.
+ */
 export type OpenChamberManifest = {
   apiVersion: OpenChamberManifestApiVersion;
   engines?: OpenChamberEngines;

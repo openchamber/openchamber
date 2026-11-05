@@ -42,6 +42,7 @@ Bundle with the SDK helper from the guest folder (`--node` targets Node for the 
 ```bash
 bunx openchamber-guest-bundle panel/main.ts panel/main.js
 bunx openchamber-guest-bundle --node service/main.ts service/main.js
+bunx openchamber-guest-check   # says what the host would refuse
 ```
 
 Zip or folder for install should include at least: `package.json`, `panel/index.html`, `panel/main.js`, and any declared `icon.svg` / `service/main.js`. Skip `node_modules` and TypeScript sources. Zip and git installs land in `{dataDir}/extensions/{id}`. See also `[GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md)`.
@@ -511,13 +512,11 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.22.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "capabilities": ["prompt", "sessions", "files", "shells"],
       "filesystem": ["~/.config/opencode/opencode.json", "/tmp/acme/**"],
@@ -540,8 +539,8 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 | `version`             | Semver required on install (`1.0.0`)                                                                                                                                                 |
 | `apiVersion`          | Must be `1`                                                                                                                                                                          |
 | `engines.openchamber` | Optional. Only `1.22.0` or `>=1.22.0`. Older host → `host-too-old`                                                                                                                   |
-| `panel.id`            | kebab-case                                                                                                                                                                           |
-| `panel.icon`          | Remixicon kebab name (`window`) **or** package `.svg` path. Remixicon needs no file. An `.svg` path must exist on disk or install fails (`invalid-manifest`). No URLs/absolute paths |
+| `id`, `name`, `icon`  | Beside `contributes`. Older packages keep them in `panel`, and that still works. `id` is kebab-case                                                                                                                                                                           |
+| `icon`                | Remixicon kebab name (`window`) **or** package `.svg` path. Remixicon needs no file. An `.svg` path must exist on disk or install fails (`invalid-manifest`). No URLs/absolute paths |
 | `panel.entry` | Optional visible-panel HTML path inside the package. No `..`, absolute path, or URL. Its scripts must be built. Omitting it removes the rail icon and visible views; `background.entry` can still run code. With neither entry, only `tools` plus package identity/version/engines are allowed. `hasGuestPage` means a visible panel, not background execution |
 | `background.entry` | Optional package-local `.html` path. Loaded on demand for background actions and slash commands, preferred over `panel.entry` for these calls. Adds no rail icon. The file and its built scripts must exist. Malformed declarations are `invalid-background` |
 | `attach`              | `true` / `"panel"` → + menu opens rail; `"dialog"` → host window; omit/`false` → off menus. Object form `{ "mode": "panel" \| "dialog", "entry"?: "panel/attach.html" }`: `entry` (dialog only, same path rules as `panel.entry`, must exist with built scripts) is the page the dialog loads instead of `panel.entry` |

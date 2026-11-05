@@ -49,13 +49,11 @@ También puedes añadir un `.zip` local o un enlace https a un repositorio de gi
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ También puedes añadir un `.zip` local o un enlace https a un repositorio de gi
 
 `engines.openchamber` es opcional. Indica la versión más antigua de OpenChamber con la que funciona tu extensión, como `1.24.0` o `>=1.24.0`. Las versiones anteriores se niegan a instalarla en vez de fallar más tarde.
 
-`contributes.panel` describe la entrada en la barra lateral. `id` va en kebab-case y debe ser único entre las extensiones instaladas. `icon` es un nombre de Remixicon (`RiWindowLine` se convierte en `window`) o un archivo SVG dentro de tu carpeta, como `icon.svg`. `entry` es el archivo HTML dentro de tu carpeta; omítelo en una extensión que solo declara `tools` (consulta [Tus herramientas en el chat](#tus-herramientas-en-el-chat)).
+`id`, `name` e `icon` identifican la extensión. `id` va en kebab-case y debe ser único entre las extensiones instaladas. `icon` es un nombre de Remixicon (`RiWindowLine` se convierte en `window`) o un archivo SVG dentro de tu carpeta, como `icon.svg`. `contributes.panel` es el panel de la extensión en la barra lateral: su `entry` es el archivo HTML dentro de tu carpeta. Una extensión sin panel en la barra lateral omite `panel`. Los paquetes antiguos mantienen `id`, `name` e `icon` dentro de `panel`, y eso sigue funcionando.
 
 `contributes.attach` es opcional. Añade tu extensión al menú + junto al cuadro de chat, para que el usuario pueda elegir una tarea y adjuntarla a una sesión.
 

@@ -780,6 +780,33 @@ describe('parseManifest', () => {
   });
 });
 
+describe('an extension without a panel', () => {
+  const block = { apiVersion: 1, id: 'desk', name: 'Desk', icon: 'robot-2', contributes: { tools: [{ match: 'desk_*' }] } };
+
+  test('names itself beside contributes, in both document forms', () => {
+    const bare = parseManifestJson(JSON.stringify(block));
+    const wrapped = parseManifestJson(JSON.stringify({ name: 'pkg', version: '1.0.0', openchamber: block }));
+    for (const parsed of [bare, wrapped]) {
+      expect(parsed).toMatchObject({ ok: true, manifest: { contributes: { panel: { id: 'desk', name: 'Desk', icon: 'robot-2' } } } });
+    }
+  });
+
+  test('keeps a rail page declared in panel', () => {
+    const parsed = parseManifestJson(JSON.stringify({ ...block, contributes: { panel: { entry: 'index.html' } } }));
+    expect(parsed).toMatchObject({ ok: true, manifest: { contributes: { panel: { id: 'desk', entry: 'index.html' } } } });
+  });
+
+  test('an older package with everything in panel reads the same', () => {
+    const { id, name, icon, contributes } = block;
+    const parsed = parseManifestJson(JSON.stringify({ apiVersion: 1, contributes: { ...contributes, panel: { id, name, icon } } }));
+    expect(parsed).toEqual(parseManifestJson(JSON.stringify(block)));
+  });
+
+  test('a package with no name for itself fails', () => {
+    expect(parseManifestJson(JSON.stringify({ apiVersion: 1, contributes: {} }))).toMatchObject({ ok: false, code: 'missing-panel' });
+  });
+});
+
 describe('contributes.actions and contributes.commands', () => {
   test('display belongs to a selection action', () => {
     const contributes = (action: JsonValue) => parseManifestJson(JSON.stringify({ name: 'x', version: '1.0.0', openchamber: { apiVersion: 1, contributes: { panel: { id: 'x', name: 'X', icon: 'window', entry: 'index.html' }, actions: [action] } } }));

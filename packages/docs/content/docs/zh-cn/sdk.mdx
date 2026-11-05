@@ -49,13 +49,11 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 
 `engines.openchamber` 可选。填写你的扩展支持的最低 OpenChamber 版本，写成 `1.24.0` 或 `>=1.24.0`。更旧的版本会拒绝安装，而不是之后才出错。
 
-`contributes.panel` 描述侧栏入口。`id` 使用 kebab-case，且在已安装扩展中必须唯一。`icon` 是 Remixicon 图标名（`RiWindowLine` 写成 `window`），或者你文件夹内的 SVG 文件，如 `icon.svg`。`entry` 是你文件夹内的 HTML 文件；只声明 `tools` 的扩展可以不写它（见[你的工具在聊天中的样子](#你的工具在聊天中的样子)）。
+`id`、`name` 和 `icon` 用来标识扩展。`id` 使用 kebab-case，且在已安装扩展中必须唯一。`icon` 是 Remixicon 图标名（`RiWindowLine` 写成 `window`），或者你文件夹内的 SVG 文件，如 `icon.svg`。`contributes.panel` 是扩展在侧栏中的面板：它的 `entry` 是你文件夹内的 HTML 文件。没有侧栏面板的扩展可以不写 `panel`。旧版包把 `id`、`name` 和 `icon` 放在 `panel` 内，这种写法仍然有效。
 
 `contributes.attach` 可选。它会把你的扩展加入聊天框旁的 + 菜单，用户可以从中挑选一个任务并附加到会话。
 

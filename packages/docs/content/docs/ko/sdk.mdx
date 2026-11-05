@@ -49,13 +49,11 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 
 `engines.openchamber`는 선택 사항입니다. 확장이 동작하는 가장 오래된 OpenChamber 버전을 `1.24.0` 또는 `>=1.24.0` 형태로 지정하세요. 더 오래된 빌드는 나중에 실패하는 대신 설치 자체를 거부합니다.
 
-`contributes.panel`은 레일 항목을 설명합니다. `id`는 kebab-case이며 설치된 확장 중에서 고유해야 합니다. `icon`은 Remixicon 이름(`RiWindowLine`이면 `window`)이거나 폴더 안의 SVG 파일(예: `icon.svg`)입니다. `entry`는 폴더 안의 HTML 파일입니다. `tools`만 선언하는 확장이라면 생략하세요([채팅에 표시되는 내 도구](#채팅에-표시되는-내-도구) 참고).
+`id`, `name`, `icon`은 확장을 식별합니다. `id`는 kebab-case이며 설치된 확장 중에서 고유해야 합니다. `icon`은 Remixicon 이름(`RiWindowLine`이면 `window`)이거나 폴더 안의 SVG 파일(예: `icon.svg`)입니다. `contributes.panel`은 레일에 표시되는 확장의 패널이며, 그 `entry`는 폴더 안의 HTML 파일입니다. 레일 패널이 없는 확장은 `panel`을 생략합니다. 오래된 패키지는 `id`, `name`, `icon`을 `panel` 안에 두며, 이 방식도 계속 작동합니다.
 
 `contributes.attach`는 선택 사항입니다. 채팅창 옆의 + 메뉴에 확장을 추가해서, 사용자가 작업을 골라 세션에 첨부할 수 있게 합니다.
 
