@@ -203,7 +203,7 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 
 ## Running with nobody asking
 
-A service starts on the first request, and a role's service stops after ten idle minutes. Two manifest keys change that, and either one frees the service from needing a panel or background entry.
+A service starts on the first request and stops after ten idle minutes; the next request starts it again, so keep state in a file or set `keepRunning`. Two manifest keys change that, and either one frees the service from needing a panel or background entry.
 
 `service.keepRunning: true` starts the service when OpenChamber starts or the extension is approved, and holds it through every idle stop. A check every 15 s brings a stopped one back, and a process that keeps dying waits longer each time, up to five minutes. A service that needs outside events holds its own connection or polls; arbitrary inbound routes do not exist.
 

@@ -232,8 +232,8 @@ const stopEpochOf = (guestId) => stopEpochs.get(guestId) ?? 0;
  * Services the host starts on its own (a provider role) have no panel whose
  * closing would end them, so they end themselves: a request arms a timer, the
  * next request re-arms it, and when it fires with nothing in flight the
- * process goes away. The next request starts it again. A panel-driven service
- * passes no `idleStopMs` and keeps today's lifetime.
+ * process goes away. The next request starts it again. Panel requests do the
+ * same; a service that holds state or a connection sets `keepRunning`.
  * @type {Map<string, { timer: ReturnType<typeof setTimeout>, inflight: number, idleMs: number }>}
  */
 const idleStops = new Map();
@@ -537,8 +537,8 @@ const startGuestService = async ({
     await discardRuntime(guestId);
     throw new GuestServiceError(
       detail
-        ? `Guest service failed to become ready. ${detail}`
-        : 'Guest service failed to become ready.',
+        ? `The extension's service failed to start. ${detail}`
+        : "The extension's service failed to start.",
       'SERVICE_FAILED',
     );
   }
@@ -623,8 +623,8 @@ const ensureGuestService = async (params) => {
  *   timeoutMs?: number,
  *   idleStopMs?: number,
  *   signal?: AbortSignal,
- * }} params `timeoutMs` and `idleStopMs` are for host-driven calls; a
- * panel's `serviceRequest` keeps the SDK limits. With `idleStopMs` the
+ * }} params `timeoutMs` is for host-driven calls; a panel's `serviceRequest`
+ * keeps the SDK limits. With `idleStopMs` the
  * service stops itself after that long without a request; `holdGuestService`
  * suspends that while a long-lived consumer (a surface viewer) is attached.
  */

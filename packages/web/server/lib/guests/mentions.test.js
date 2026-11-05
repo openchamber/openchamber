@@ -54,6 +54,13 @@ describe('extension rows in the @ menu', () => {
     expect(JSON.parse(params.body)).toEqual({ query: 'rel', directory: '/repo' });
   });
 
+  test('an abandoned search reaches the service as cancelled', async () => {
+    const callService = answering({ good: json({ items: [] }) });
+    const { signal } = new AbortController();
+    await searchGuestMentions({ guests: [row('good')], query: 'rel', directory: null, persistPath: '/s', callService, signal });
+    expect(callService.mock.calls[0][0].signal).toBe(signal);
+  });
+
   test('a row with a link outside http stays out', async () => {
     const callService = answering({ good: json({ items: [{ id: '1', title: 'x', url: 'javascript:alert(1)' }] }) });
     expect(await searchGuestMentions({ guests: [row('good')], query: '', directory: null, persistPath: '/s', callService })).toEqual([]);

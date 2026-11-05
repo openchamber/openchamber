@@ -227,6 +227,9 @@ export const settleGuestDeactivationListeners = (listeners) => async (event) => 
   });
 };
 
+/** A stopped service starts again on the next request, so ten quiet minutes cost nothing but that. */
+const PANEL_SERVICE_IDLE_MS = 10 * 60_000;
+
 export const registerGuestRoutes = (app, {
   openchamberDataDir,
   openchamberVersion,
@@ -331,7 +334,11 @@ export const registerGuestRoutes = (app, {
     const directory = typeof req.body?.directory === 'string' && req.body.directory ? req.body.directory : null;
     try {
       const guests = await listInstalledGuests({ persistPath });
-      res.json({ groups: await searchGuestMentions({ guests, query, directory, persistPath }) });
+      // The next keystroke aborts this one: a slow service stops working on it too.
+      const abort = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+      const groups = await searchGuestMentions({ guests, query, directory, persistPath, signal: abort.signal });
+      if (!abort.signal.aborted) res.json({ groups });
     } catch (error) {
       console.error('Failed to search extension mentions:', error);
       res.status(500).json({ error: 'Failed to search extension mentions' });
@@ -714,6 +721,8 @@ export const registerGuestRoutes = (app, {
         service: guest.service,
         granted: guest.capabilityGrants,
         persistPath,
+        // One process per extension a panel ever touched otherwise stays for good.
+        idleStopMs: guest.service.keepRunning ? undefined : PANEL_SERVICE_IDLE_MS,
         method: parsed.data.method,
         path: parsed.data.path,
         query: parsed.data.query,

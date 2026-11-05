@@ -49,13 +49,14 @@ const parseJson = (text) => {
   }
 };
 
-const searchOne = async (guest, query, directory, persistPath, callService) => {
+const searchOne = async (guest, query, directory, persistPath, callService, signal) => {
   try {
     const answer = await askService(guest, persistPath, {
       path: MENTIONS_SEARCH_PATH,
       body: JSON.stringify({ query, directory }),
       timeoutMs: MENTIONS_SEARCH_TIMEOUT_MS,
       responseMax: SEARCH_ANSWER_MAX,
+      signal,
     }, callService);
     const items = answer.status === 200 ? parseJson(answer.body)?.items : null;
     if (!Array.isArray(items)) return [];
@@ -69,12 +70,12 @@ const searchOne = async (guest, query, directory, persistPath, callService) => {
 };
 
 /**
- * @param {{ guests: object[], query: string, directory: string | null, persistPath: string, callService?: typeof proxyGuestServiceRequest }} params
+ * @param {{ guests: object[], query: string, directory: string | null, persistPath: string, callService?: typeof proxyGuestServiceRequest, signal?: AbortSignal }} params
  * @returns {Promise<Array<{ guestId: string, label: string, items: Array<{ id: string, title: string, subtitle?: string }> }>>}
  */
-export const searchGuestMentions = async ({ guests, query, directory, persistPath, callService }) => {
+export const searchGuestMentions = async ({ guests, query, directory, persistPath, callService, signal }) => {
   const asked = guests.filter((guest) => guest.mentions && guest.service && isMentionGuest(guest));
-  const answers = await Promise.all(asked.map((guest) => searchOne(guest, query, directory, persistPath, callService)));
+  const answers = await Promise.all(asked.map((guest) => searchOne(guest, query, directory, persistPath, callService, signal)));
   return asked
     .map((guest, index) => ({ guestId: guest.id, label: guest.mentions.label, items: answers[index] }))
     .filter((group) => group.items.length > 0);
