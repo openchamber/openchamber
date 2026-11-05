@@ -121,6 +121,8 @@ export type GuestActionContribution = {
   mode?: 'open' | 'background';
   roles?: GuestActionRole[];
   payload?: GuestActionPayload[];
+  /** How a `selection` action shows on the selection bar. Default: `label`. `icon` keeps the label as its tooltip. */
+  display?: 'label' | 'icon' | 'both';
 };
 
 /** A composer slash command the guest resolves into a chip through `host.onResolve`. */

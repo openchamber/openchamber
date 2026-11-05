@@ -137,6 +137,7 @@ const guestActionSchema = z.object({
   mode: z.enum(['open', 'background']).optional(),
   roles: z.array(z.enum(['user', 'assistant'])).optional(),
   payload: z.array(z.enum(['messages'])).optional(),
+  display: z.enum(['label', 'icon', 'both']).optional(),
 });
 
 const guestCommandSchema = z.object({

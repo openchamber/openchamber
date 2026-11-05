@@ -535,8 +535,10 @@ const actionSchema = z.object({
   mode: z.enum(['open', 'background']).optional(),
   roles: z.array(z.enum(['user', 'assistant'])).min(1).max(2).optional(),
   payload: z.array(z.enum(['messages'])).max(1).optional(),
+  display: z.enum(['label', 'icon', 'both']).optional(),
 }).refine((value) => value.where === 'message' || value.roles === undefined, { path: ['roles'] })
-  .refine((value) => value.where === 'session' || value.payload === undefined, { path: ['payload'] });
+  .refine((value) => value.where === 'session' || value.payload === undefined, { path: ['payload'] })
+  .refine((value) => value.where === 'selection' || value.display === undefined, { path: ['display'] });
 
 const actionsSchema = z.array(actionSchema).min(1).max(GUEST_ACTIONS_MAX)
   .refine((actions) => uniqueBy(actions, (action) => action.id), { message: 'action ids must be unique' });
@@ -943,7 +945,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   if (path.startsWith('contributes.actions')) {
     return fail(
       'invalid-actions',
-      'contributes.actions lists up to 8 entries with a unique kebab-case id, a label of 1 to 40 characters, where "message", "session", "selection", "file" or "diff", optional roles (message only), and optional payload ["messages"] (session only).',
+      'contributes.actions lists up to 8 entries with a unique kebab-case id, a label of 1 to 40 characters, where "message", "session", "selection", "file" or "diff", optional roles (message only), optional payload ["messages"] (session only), and optional display "label", "icon" or "both" (selection only).',
     );
   }
   if (path.startsWith('contributes.commands')) {

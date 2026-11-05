@@ -1116,20 +1116,27 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
           {selectionActions.length > 0 ? <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" /> : null}
           {selectionActions.map((entry) => (
-            <button
-              key={`${entry.guest.id}:${entry.action.id}`}
-              onClick={() => runSelectionAction(entry)}
-              className={cn(
-                'flex items-center gap-1.5 px-3.5 py-1.5 rounded-full',
-                'text-sm font-medium',
-                'text-foreground',
-                'hover:bg-[var(--interactive-hover)]',
-                'transition-colors duration-150'
-              )}
-              type="button"
-            >
-              <span className="whitespace-nowrap">{entry.action.label}</span>
-            </button>
+            // Each action says how it shows; the label stays its tooltip when only the icon does.
+            <HoverTooltip key={`${entry.guest.id}:${entry.action.id}`} label={entry.action.label}>
+              <button
+                onClick={() => runSelectionAction(entry)}
+                aria-label={entry.action.label}
+                className={cn(
+                  'flex items-center rounded-full',
+                  entry.action.display === 'icon' ? 'h-8 w-8 justify-center' : 'gap-1.5 px-3.5 py-1.5',
+                  'text-sm font-medium',
+                  'text-foreground',
+                  'hover:bg-[var(--interactive-hover)]',
+                  'transition-colors duration-150'
+                )}
+                type="button"
+              >
+                {entry.action.display === 'icon' || entry.action.display === 'both'
+                  ? <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="h-4 w-4" />
+                  : null}
+                {entry.action.display === 'icon' ? null : <span className="whitespace-nowrap">{entry.action.label}</span>}
+              </button>
+            </HoverTooltip>
           ))}
 
           {approvalButton ? (

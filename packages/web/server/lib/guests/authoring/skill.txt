@@ -52,7 +52,7 @@ Under `contributes`:
 | `fileEditors` | Opens matching files in the Files view with your page |
 | `attach` | A row in the composer's + menu that puts a chip on the message |
 | `commands` | A `/name` in the composer that resolves into a chip |
-| `actions` | Menu entries, `where`: `message`, `session`, `selection`, `file`, `diff` |
+| `actions` | Menu entries, `where`: `message`, `session`, `selection`, `file`, `diff`. On a selection, `display` is `label`, `icon` or `both` |
 | `tools` | How a tool's calls look in the chat, with no code |
 | `blocks` | Components agents write in UI blocks, drawn by your page in the chat |
 | `mentions` | Your service's rows in the composer's `@` menu |

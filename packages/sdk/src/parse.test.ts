@@ -781,6 +781,12 @@ describe('parseManifest', () => {
 });
 
 describe('contributes.actions and contributes.commands', () => {
+  test('display belongs to a selection action', () => {
+    const contributes = (action: JsonValue) => parseManifestJson(JSON.stringify({ name: 'x', version: '1.0.0', openchamber: { apiVersion: 1, contributes: { panel: { id: 'x', name: 'X', icon: 'window', entry: 'index.html' }, actions: [action] } } }));
+    expect(contributes({ id: 'a', label: 'A', where: 'selection', display: 'icon' }).ok).toBe(true);
+    expect(contributes({ id: 'a', label: 'A', where: 'file', display: 'icon' }).ok).toBe(false);
+  });
+
   const withContributes = (extra: Record<string, unknown>) => parseManifest({
     apiVersion: 1,
     contributes: { panel: validBlock.contributes.panel, ...extra },
