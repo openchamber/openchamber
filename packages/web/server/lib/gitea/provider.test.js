@@ -264,19 +264,88 @@ describe('Gitea behind the route shell', () => {
     expect(events.invalidated).toHaveBeenCalledWith({ provider: 'gitea', instance: ORIGIN, accountId });
   });
 
-  it('answers 501 for review threads, uploads and the reference picker', async () => {
+  it('answers 501 for review threads, uploads and the searched reference list', async () => {
     const { app } = await appWith();
     for (const [method, url] of [
       ['post', '/api/source-control/gitea/pr/thread/reply'],
       ['post', '/api/source-control/gitea/pr/thread/resolve'],
       ['get', '/api/source-control/gitea/uploads/0123456789abcdef0123456789abcdef/a.png'],
-      ['get', '/api/source-control/gitea/references'],
       ['post', '/api/source-control/gitea/auth/start'],
       ['post', '/api/source-control/gitea/auth/cli'],
     ]) {
       const response = await request(app)[method](url);
       expect(response.status, url).toBe(501);
     }
+    // The picker's lists stay list-backed (`referenceSearch` off), so nothing
+    // serves the searched list; the across search is the provider's own read.
+    const references = await request(app).get('/api/source-control/gitea/references')
+      .query({ directory: '/repo', kind: 'issue' });
+    expect(references.status).toBe(500);
+  });
+
+  it('searches across a folder\'s bound repositories through the across route', async () => {
+    const issue = { ...fixtures.issue, html_url: `${ORIGIN}/bob/app/issues/6` };
+    const { app, impl, calls } = await appWith(forkNetworkRoutes({
+      'GET /repos/bob/app/issues': [issue],
+    }));
+    await impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
+    const accountId = await impl.auth.readCurrentAccountId({ instance: ORIGIN });
+    calls.length = 0;
+
+    const response = await request(app).post('/api/source-control/gitea/references/across').send({
+      contexts: [{
+        directory: '/repo', repositoryId: 'repo-1', provider: 'gitea', instance: ORIGIN,
+        accountId, bindingRevision: 1, primaryRemote: 'origin',
+      }],
+      kind: 'issue',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.items).toEqual([expect.objectContaining({
+      kind: 'issue',
+      number: 6,
+      title: 'Crash on start',
+      directory: '/repo',
+      sourceRepo: { owner: 'bob', repo: 'app', source: 'origin' },
+    })]);
+    expect(response.body.repositories).toEqual([
+      { directory: '/repo', status: 'included', repo: { owner: 'bob', repo: 'app', url: `${ORIGIN}/bob/app` } },
+    ]);
+    const paths = calls.map((call) => `${call.method} ${call.url.pathname}`);
+    expect(paths).toEqual(expect.arrayContaining(['GET /api/v1/repos/bob/app/issues']));
+  });
+
+  it('reports a folder whose token was refused and writes the account off', async () => {
+    const { app, impl, events } = await appWith(forkNetworkRoutes({
+      'GET /repos/bob/app/issues': () => new Response(JSON.stringify({ message: 'invalid token' }), { status: 401 }),
+    }));
+    await impl.auth.connectToken({ instance: ORIGIN, token: 'pat-1' });
+    const accountId = await impl.auth.readCurrentAccountId({ instance: ORIGIN });
+
+    const response = await request(app).post('/api/source-control/gitea/references/across').send({
+      contexts: [{
+        directory: '/repo', repositoryId: 'repo-1', provider: 'gitea', instance: ORIGIN,
+        accountId, bindingRevision: 1, primaryRemote: 'origin',
+      }],
+      kind: 'issue',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.repositories).toEqual([{ directory: '/repo', status: 'disconnected' }]);
+    expect(events.invalidated).toHaveBeenCalledWith({ provider: 'gitea', instance: ORIGIN, accountId });
+  });
+
+  it('refuses an across request that names another provider or more than 100 folders', async () => {
+    const { app } = await appWith();
+    const base = { directory: '/repo', repositoryId: 'repo-1', provider: 'gitea', instance: ORIGIN, accountId: 'acct', bindingRevision: 1, primaryRemote: 'origin' };
+
+    const otherProvider = await request(app).post('/api/source-control/gitea/references/across')
+      .send({ contexts: [{ ...base, provider: 'forgejo' }], kind: 'issue' });
+    expect(otherProvider.status).toBe(400);
+
+    const tooMany = await request(app).post('/api/source-control/gitea/references/across')
+      .send({ contexts: Array.from({ length: 101 }, (_value, index) => ({ ...base, directory: `/folder/${index}` })), kind: 'issue' });
+    expect(tooMany.status).toBe(400);
   });
 });
 

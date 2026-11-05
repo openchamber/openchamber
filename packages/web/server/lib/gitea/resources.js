@@ -67,7 +67,11 @@ export function createGiteaResourceService({
       const item = await showRepo({ owner: candidate.owner, name: candidate.name }, candidate.remoteName);
       if (!repos.some((known) => known.project.id === item.project.id)) repos.push(item);
     }
-    if (!repos.length) throw malformed(`No ${providerLabel} repository found for the repository remotes`);
+    if (!repos.length) {
+      throw Object.assign(new Error(`No ${providerLabel} repository found for the repository remotes`), {
+        code: 'SOURCE_CONTROL_NO_REPOSITORY',
+      });
+    }
     return repos;
   };
 
@@ -447,6 +451,64 @@ export function createGiteaResourceService({
       const result = await client.page(`${repoPath(primary.project)}/issues`, query, { page, limit: LIST_PAGE });
       const items = result.items.flatMap((raw) => (raw?.pull_request != null ? [] : [requireIssue(raw, primary.project)]));
       return { items, page, hasMore: result.hasMore };
+    },
+
+    /**
+     * One page of raw issues or pull requests of the folder's repository, for
+     * the reference picker's search across repositories. Unlike the neutral
+     * lists above this keeps the host's own fields, so the picker's rows and
+     * preview get their branches, draft flag and comment count.
+     *
+     * Gitea's issue search answers a pull request without its head or base;
+     * `needsDetail` says the page has to read those pull requests before
+     * mapping them. The unfiltered pull list already carries them.
+     */
+    async listReferenceCandidates(directory, options = {}) {
+      const page = options.page ?? 1;
+      const { primary } = await network(directory, null, options.remote);
+      const repo = primary.project;
+      const state = LIST_STATES[options.state] ?? 'open';
+      if (options.kind === 'issue') {
+        const query = { type: 'issues', state, q: options.query };
+        if (options.people === 'created') query.created_by = await readCurrentLogin();
+        if (options.people === 'assigned') query.assigned_by = await readCurrentLogin();
+        const result = await client.page(`${repoPath(repo)}/issues`, query, { page, limit: PAGE_LIMIT });
+        return {
+          repo,
+          items: result.items.filter((raw) => isPlainObject(raw) && raw.pull_request == null),
+          hasMore: result.hasMore,
+        };
+      }
+      if (options.people === 'any' && !options.query && options.state !== 'merged') {
+        const result = await client.page(`${repoPath(repo)}/pulls`, { state, sort: 'recentupdate' }, { page, limit: PAGE_LIMIT });
+        return { repo, items: result.items.filter(isPlainObject), hasMore: result.hasMore };
+      }
+      let result;
+      if (options.people === 'reviewRequested') {
+        // Only the cross-repository search filters on review requests; it is
+        // narrowed to the owner here and to the repository below.
+        result = await client.page('/repos/issues/search', {
+          type: 'pulls', state, q: options.query, owner: repo.owner, review_requested: true,
+        }, { page, limit: PAGE_LIMIT });
+        result.items = result.items.filter((item) => isPlainObject(item?.repository)
+          && Number(item.repository.id) === primary.raw.id);
+      } else {
+        const query = { type: 'pulls', state, q: options.query };
+        if (options.people === 'created') query.created_by = await readCurrentLogin();
+        if (options.people === 'assigned') query.assigned_by = await readCurrentLogin();
+        result = await client.page(`${repoPath(repo)}/issues`, query, { page, limit: PAGE_LIMIT });
+        result.items = result.items.filter((raw) => isPlainObject(raw) && raw.pull_request != null);
+      }
+      if (options.state === 'merged') {
+        result.items = result.items.filter((raw) => raw.pull_request?.merged === true);
+      }
+      return { repo, items: result.items, hasMore: result.hasMore, needsDetail: true };
+    },
+
+    /** One pull request of the folder's repository, for a search hit that needs its head and base. */
+    async readPullDetail(directory, number, remote) {
+      const { primary } = await network(directory, null, remote);
+      return client.get(`${repoPath(primary.project)}/pulls/${number}`);
     },
 
     async getIssue(directory, number, selector, remote, { linked } = {}) {

@@ -75,7 +75,7 @@ describe('source control provider descriptors', () => {
     expect(gitea.capabilities).toMatchObject({
       merge: { methods: ['merge', 'squash', 'rebase'] },
       reviewThreads: { start: false, reply: false, resolve: false },
-      uploads: false, stacks: false, referencePicker: false,
+      uploads: false, stacks: false, referencePicker: true,
     });
     const published = publicProviderDescriptor(gitea, 2);
     expect(published).toMatchObject({ id: 'gitea', auth: { methods: ['pat'] }, instances: { defaultInstance: null } });

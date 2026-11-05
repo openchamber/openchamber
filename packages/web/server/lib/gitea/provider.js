@@ -2,6 +2,7 @@ import { createPatAccountAuth } from '../source-control/pat-account-auth.js';
 import { createStandardMutations } from '../source-control/standard-mutations.js';
 import { classifyGiteaFailure, createGiteaClient } from './client.js';
 import { giteaDescriptor } from './descriptor.js';
+import { readReferencesAcross, readReferencesAcrossRequest } from './references-across.js';
 import { createGiteaResourceService } from './resources.js';
 import { normalizeSshUrl, parseSshUrl } from '../source-control/ssh-url.js';
 import { isForgejoVersion, probeGiteaVersion, verifyGiteaToken } from './verify.js';
@@ -232,6 +233,38 @@ export function createGiteaFamilyProvider({
       readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, linked }) => serviceFor(session)
         .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, linked }),
       liveSummaries: ({ session, refs, issueRefs }) => serviceFor(session).liveSummaries({ refs, issueRefs }),
+      /**
+       * The picker's search across a folder's repositories. One request spans
+       * folders and so more than one session; each folder is validated and
+       * read with its own account, as the GitHub search does.
+       */
+      referencesAcross: ({ body, validateReadContext }) => {
+        const input = readReferencesAcrossRequest(body, descriptor.id);
+        if (!input) {
+          throw Object.assign(new Error('Invalid references request; at most 100 unique contexts are allowed'), { status: 400 });
+        }
+        return readReferencesAcross({
+          input,
+          providerId: descriptor.id,
+          validateReadContext,
+          resolveService: async (trusted) => {
+            const session = await accounts.auth.resolveAccount({
+              instance: trusted.instance,
+              accountId: trusted.accountId,
+            });
+            return serviceFor(session);
+          },
+          // A token the host refuses is written off here too, as a refused
+          // per-repository read does through the shell.
+          onFolderFailure: async (error, identity) => {
+            const status = error?.status ?? error?.response?.status;
+            if (status !== 401 || error?.sourceControlAccountUnavailable) return;
+            const account = error?.sourceControlIdentity ?? identity;
+            if (!account?.accountId) return;
+            await accounts.auth.invalidateAccount({ instance: account.instance, accountId: account.accountId });
+          },
+        });
+      },
       /** A pull request's head on the context's primary repository network, for a worktree made from it. */
       readChangeRequestHead: async ({ session, directory, remote, number }) => {
         const { request, headProject } = await serviceFor(session).findChangeRequest(directory, number, null, remote);

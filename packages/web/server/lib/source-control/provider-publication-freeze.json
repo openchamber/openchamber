@@ -269,7 +269,7 @@
         "referenceSearch": false,
         "referenceDetail": false,
         "listStatuses": false,
-        "referencesAcross": false,
+        "referencesAcross": true,
         "reviewDraftFileComments": false,
         "reviewDrafts": true,
         "startThread": false,

@@ -45,7 +45,9 @@ export const giteaDescriptor = Object.freeze({
     stacks: false,
     changeRequestPatch: true,
     liveSummaries: true,
-    referencePicker: false,
+    // The picker's lists stay list-backed (`referenceSearch` off); the search
+    // across a folder's repositories is the one provider-owned read.
+    referencePicker: true,
     multipleAccounts: true,
   }),
   authMethods: Object.freeze({ device: false, pat: true, cli: false }),
@@ -103,7 +105,7 @@ export const giteaDescriptor = Object.freeze({
       user: Object.freeze(['/{user}']),
     }),
     features: Object.freeze({
-      referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: false,
+      referenceSearch: false, referenceDetail: false, listStatuses: false, referencesAcross: true,
       // Gitea refuses a review of your own pull request.
       startThread: false, reviewDrafts: true, reviewDraftFileComments: false, authorCanReview: false, projectUploads: false, issueCloseReason: false,
       changeRequestTemplates: Object.freeze([
