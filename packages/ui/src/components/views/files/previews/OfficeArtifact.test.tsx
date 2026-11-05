@@ -18,6 +18,7 @@ Object.assign(globalThis, {
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { OfficeArtifact } = await import('./OfficeArtifact');
+const { WorkbookBook } = await import('./documentClient');
 
 const bytes = new Uint8Array([1, 2, 3]);
 let root: Root | null = null;
@@ -67,11 +68,14 @@ describe('OfficeArtifact', () => {
       canRestructure: () => false,
       restructure: async () => bytes,
     };
-    const preview: OfficePreview = { kind: 'workbook', document, bytes };
+    const { adoptWorkbook, handleDocumentCall } = await import('./documentHost');
+    const opened = await adoptWorkbook('test-book', '/book.xlsx', 'book.xlsx', bytes, document);
+    if (!opened) throw new Error('no book');
+    const preview: OfficePreview = { kind: 'workbook', book: new WorkbookBook((op, args, onChunk) => handleDocumentCall(op, args, (chunk) => onChunk?.(chunk)), 'test-book', opened), bytes };
     const container = await render(
       <OfficeArtifact name="book.xlsx" path="/book.xlsx" sizeBytes={null} loadBytes={async () => bytes} readPreview={async () => preview} />,
     );
-    expect(Array.from(container.querySelectorAll('th')).map((cell) => cell.textContent)).toEqual(['', 'A', 'B']);
+    expect(Array.from(container.querySelectorAll('th:not(:last-child)')).map((cell) => cell.textContent)).toEqual(['', 'A', 'B']);
     expect(container.textContent).toContain('3 rows · 2 columns');
   });
 

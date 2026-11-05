@@ -6,7 +6,7 @@ import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import { isFilePathWithinDirectory } from '@/lib/path-utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { isBinaryFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { isBinaryFile, isDelimitedTableFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
@@ -116,7 +116,8 @@ export const validateContextFileOpen = async (
   path: string,
   options?: ContextFileOpenOptions,
 ): Promise<ContextFileOpenValidationResult> => {
-  if (isBinaryFile(path) || isPdfFile(path) || isImageFile(path)) {
+  // A table opens at any length: past the editor's limits it is read as a table only.
+  if (isBinaryFile(path) || isPdfFile(path) || isImageFile(path) || isDelimitedTableFile(path)) {
     return { ok: true };
   }
 

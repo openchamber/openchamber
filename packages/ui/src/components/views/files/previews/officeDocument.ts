@@ -1,12 +1,11 @@
 import { extractDocumentAttachments } from '@/sync/document-attachments';
 import { getFileExtension } from '@/lib/toolHelpers';
 import { officeFrameDocument } from './officeFrame';
-import type { WorkbookDocument } from './workbook/model';
-import { openWorkbookDocument } from './workbook/workbookSession';
+import { openWorkbook, type WorkbookBook } from './documentClient';
 
 export type OfficePreview =
   | { kind: 'page'; html: string; slideCount: number | null }
-  | { kind: 'workbook'; document: WorkbookDocument; bytes: Uint8Array<ArrayBuffer> };
+  | { kind: 'workbook'; book: WorkbookBook; bytes: Uint8Array<ArrayBuffer> };
 
 const escapeHtml = (text: string): string => text
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -49,7 +48,7 @@ const renderOdf = async (file: File): Promise<string | null> => {
 };
 
 /** Throws on a file that is not the document its name says, such as a damaged or password-protected one. */
-export const readOfficePreview = async (name: string, bytes: Uint8Array<ArrayBuffer>): Promise<OfficePreview | null> => {
+export const readOfficePreview = async (name: string, path: string, bytes: Uint8Array<ArrayBuffer>): Promise<OfficePreview | null> => {
   const file = new File([bytes], name);
   switch (getFileExtension(name)) {
     case 'docx':
@@ -58,8 +57,8 @@ export const readOfficePreview = async (name: string, bytes: Uint8Array<ArrayBuf
       return renderPptx(bytes);
     case 'xlsx':
     case 'ods': {
-      const document = await openWorkbookDocument(name, bytes);
-      return document && document.sheets.length > 0 ? { kind: 'workbook', document, bytes } : null;
+      const book = await openWorkbook(path, name, bytes);
+      return book ? { kind: 'workbook', book, bytes } : null;
     }
     case 'odt':
     case 'odp': {

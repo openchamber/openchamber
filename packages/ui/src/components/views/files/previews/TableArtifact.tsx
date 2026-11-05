@@ -38,6 +38,14 @@ const MAX_COLUMN_CHARS = 64;
 const MAX_UNDO = 100;
 const MAX_PASTE_COLUMN = 256;
 const MAX_FILTER_VALUES = 500;
+/** A table this wide or wider draws only the columns near the view. */
+const COLUMN_WINDOW_MIN = 32;
+const COLUMN_OVERSCAN = 4;
+const COMMENT_DELAY_MS = 220;
+/** Keeps the bubble below the column letters when the selection scrolled under them. */
+const COMMENT_TOP_INSET = 48;
+/** Half the comment field, so it stays on screen beside a window edge. */
+const COMMENT_EDGE_INSET = 220;
 
 /**
  * Column widths from the longest value in each column, in `ch` of the
@@ -53,6 +61,44 @@ const measureColumnChars = (header: string[], rows: string[][], columnCount: num
     }
   }
   return widths.map((width) => Math.min(MAX_COLUMN_CHARS, Math.max(MIN_COLUMN_CHARS, width)));
+};
+
+/** Mounts with its submenu: reading a column's values takes every row, far too much for each render. */
+const ColumnValueItems: React.FC<{
+  rows: string[][];
+  pinnedRows: number;
+  column: number;
+  hidden: ReadonlySet<string> | undefined;
+  onToggle: (value: string) => void;
+}> = ({ rows, pinnedRows, column, hidden, onToggle }) => {
+  const { t } = useI18n();
+  const values = React.useMemo(() => {
+    const unique = new Set<string>();
+    for (let index = pinnedRows; index < rows.length; index += 1) unique.add(rows[index]?.[column] ?? '');
+    const collator = new Intl.Collator(undefined, { numeric: true });
+    return Array.from(unique).sort(collator.compare).slice(0, MAX_FILTER_VALUES);
+  }, [rows, pinnedRows, column]);
+  return values.map((value) => (
+    <ContextMenuItem key={value} closeOnClick={false} onClick={() => onToggle(value)}>
+      <Icon name="check" className={cn('me-2 size-4', hidden?.has(value) && 'invisible')} />
+      <span className="truncate">{value || t('filesView.artifact.table.emptyValue')}</span>
+    </ContextMenuItem>
+  ));
+};
+
+type ColumnSlot = { column: number; span?: undefined } | { column: number; span: number };
+
+/** The columns to draw, with what lies between them as one spanning cell: `<col>` keeps its width. */
+const columnSlots = (columnCount: number, drawn: number[]): ColumnSlot[] => {
+  const slots: ColumnSlot[] = [];
+  let next = 0;
+  for (const column of drawn) {
+    if (column > next) slots.push({ column: next, span: column - next });
+    slots.push({ column });
+    next = column + 1;
+  }
+  if (next < columnCount) slots.push({ column: next, span: columnCount - next });
+  return slots;
 };
 
 type CellText = { row: number; column: number; input: string };
@@ -160,8 +206,12 @@ export const TableGrid: React.FC<{
   onSeen?: (keys: string[]) => void;
   /** Save state and other facts for the meta line. */
   status?: string;
+  /** More about `status`, on hover. */
+  statusHint?: string;
+  /** Takes over sorting, for rows the grid does not hold. */
+  onSort?: (sort: { column: number; direction: SortDirection } | null) => void;
   actions?: React.ReactNode;
-}> = ({ tableId, header, rows, rowLabels, columnCount, dataColumnCount = columnCount, totalRows, sizeBytes, pinnedRows = 0, hrefOf, editing, describeCell, commentTarget, changedCells, onSeen, status, actions }) => {
+}> = ({ tableId, header, rows, rowLabels, columnCount, dataColumnCount = columnCount, totalRows, sizeBytes, pinnedRows = 0, hrefOf, editing, describeCell, commentTarget, changedCells, onSeen, status, statusHint, onSort, actions }) => {
   const { t } = useI18n();
   const columnChars = React.useMemo(
     () => measureColumnChars(header, rows, columnCount),
@@ -206,9 +256,6 @@ export const TableGrid: React.FC<{
   }, [order, rows, query, valueFilters, pinnedRows]);
   const bodyRows = React.useMemo(() => viewRows.slice(pinnedRows), [viewRows, pinnedRows]);
   const isFiltered = viewRows.length < rows.length;
-  const columnValues = (column: number): string[] => Array.from(new Set(rows.slice(pinnedRows).map((row) => row[column] ?? '')))
-    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
-    .slice(0, MAX_FILTER_VALUES);
   const toggleValue = (column: number, value: string) => {
     setValueFilters((current) => {
       const next = new Map(current);
@@ -233,11 +280,13 @@ export const TableGrid: React.FC<{
     if (sort?.column === column && sort.direction === 'descending') {
       setSort(null);
       setOrder(null);
+      onSort?.(null);
       return;
     }
     const direction: SortDirection = sort?.column === column ? 'descending' : 'ascending';
     setSort({ column, direction });
-    setOrder(sortedRowOrder(rows, column, direction, pinnedRows));
+    if (onSort) onSort({ column, direction });
+    else setOrder(sortedRowOrder(rows, column, direction, pinnedRows));
   };
 
   const scrollRef = React.useRef<HTMLElement>(null);
@@ -256,6 +305,15 @@ export const TableGrid: React.FC<{
   const [rangeEnd, setRangeEnd] = React.useState<CellPosition | null>(null);
   const [editor, setEditor] = React.useState<Editor | null>(null);
   const [commentAnchor, setCommentAnchor] = React.useState<{ x: number; y: number } | null>(null);
+  const commenting = React.useRef(false);
+  const openComment = React.useCallback(() => {
+    commenting.current = true;
+  }, []);
+  const closeComment = React.useCallback(() => {
+    commenting.current = false;
+    setCommentAnchor(null);
+  }, []);
+  const [pressing, setPressing] = React.useState(false);
   const viewIndexOf = React.useMemo(() => new Map(viewRows.map((row, index) => [row, index])), [viewRows]);
   const range = React.useMemo(() => {
     if (!active || active.row < 0) return null;
@@ -283,7 +341,6 @@ export const TableGrid: React.FC<{
     return chartProgram(rangeRows, headings);
   }, [isMultiCell, range, pinnedRows, rows, header, rangeRows]);
   const selectionFacts = selection ? [
-    rangeName,
     selection.sum ? t('filesView.artifact.table.selectionSum', { value: selection.sum }) : '',
     selection.average ? t('filesView.artifact.table.selectionAverage', { value: selection.average }) : '',
     t('filesView.artifact.table.selectionCount', { count: selection.count }),
@@ -318,6 +375,51 @@ export const TableGrid: React.FC<{
     change();
   };
 
+  const windowed = columnCount >= COLUMN_WINDOW_MIN;
+  // The `<col>`s size in `ch` and rem, so the window needs both in pixels to match them.
+  const [units, setUnits] = React.useState({ ch: 8, rem: 16, rtl: false });
+  React.useLayoutEffect(() => {
+    const grid = gridRef.current;
+    if (!windowed || !grid) return;
+    const probe = document.createElement('span');
+    probe.textContent = '0'.repeat(100);
+    probe.className = 'absolute invisible whitespace-pre font-mono typography-meta';
+    grid.append(probe);
+    const ch = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+    const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+    setUnits((current) => ({ ch: ch || current.ch, rem: rem || current.rem, rtl: isRightToLeft(grid) }));
+  }, [windowed]);
+  const columnPixels = (column: number) => shownWidths[column] ?? columnChars[column] * units.ch + units.rem + 1;
+  const columnVirtualizer = useVirtualizer({
+    horizontal: true,
+    count: windowed ? columnCount : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: columnPixels,
+    overscan: COLUMN_OVERSCAN,
+    paddingStart: rowLabels ? gutterChars * units.ch + units.rem + 1 : 0,
+    isRtl: units.rtl,
+  });
+  // Sizes are cached by the virtualizer, and these change without it noticing.
+  React.useEffect(() => {
+    if (windowed) columnVirtualizer.measure();
+  }, [windowed, columnVirtualizer, widths, dragged, units, columnChars]);
+  const windowColumns = columnVirtualizer.getVirtualItems().map((item) => item.index);
+  // CSS gives up on a `calc()` this long, and the table would collapse to its drawn cells.
+  const fullWidth = windowed ? `${columnVirtualizer.getTotalSize() + 1}px` : tableWidth;
+  const firstColumn = windowColumns[0] ?? 0;
+  const lastColumn = windowColumns[windowColumns.length - 1] ?? 0;
+  const editedColumn = editor?.column ?? -1;
+  const slots = React.useMemo(() => {
+    if (!windowed) return columnSlots(columnCount, Array.from({ length: columnCount }, (_, column) => column));
+    const drawn = new Set<number>();
+    for (let column = 0; column < frozenColumns; column += 1) drawn.add(column);
+    for (let column = firstColumn; column <= lastColumn; column += 1) drawn.add(column);
+    // A cell being typed in stays mounted wherever the view went.
+    if (editedColumn >= 0) drawn.add(editedColumn);
+    return columnSlots(columnCount, Array.from(drawn).sort((left, right) => left - right));
+  }, [windowed, columnCount, frozenColumns, firstColumn, lastColumn, editedColumn]);
+
   const scrollToRow = (row: number) => {
     const bodyIndex = (viewIndexOf.get(row) ?? -1) - pinnedRows;
     if (bodyIndex >= 0) virtualizer.scrollToIndex(bodyIndex, { align: 'auto' });
@@ -327,6 +429,7 @@ export const TableGrid: React.FC<{
     setRangeEnd(null);
     setCommentAnchor(null);
     scrollToRow(position.row);
+    if (windowed) columnVirtualizer.scrollToIndex(position.column, { align: 'auto' });
     gridRef.current?.focus({ preventScroll: true });
   };
   const extendTo = (position: CellPosition) => {
@@ -406,11 +509,62 @@ export const TableGrid: React.FC<{
     if (allowed.length > 0) editing.commit(allowed);
   };
 
-  const openComment = () => {
-    const cell = gridRef.current?.querySelector('[data-active-cell]')?.getBoundingClientRect();
+  // The Comment bubble sits over the selection, the way it does over text.
+  const placeComment = React.useCallback(() => {
     const frame = gridRef.current?.getBoundingClientRect();
-    if (frame) setCommentAnchor({ x: (cell?.left ?? frame.left) + (cell?.width ?? frame.width) / 2, y: (cell?.top ?? frame.top + 40) - 8 });
-  };
+    if (!frame) return;
+    const cells = Array.from(gridRef.current?.querySelectorAll('[data-selected-cell]') ?? [], (cell) => cell.getBoundingClientRect())
+      .filter((cell) => cell.bottom > frame.top + COMMENT_TOP_INSET && cell.top < frame.bottom);
+    if (cells.length === 0) {
+      // A bubble over other rows would point at the wrong cells; a field being typed in stays.
+      if (!commenting.current) setCommentAnchor(null);
+      return;
+    }
+    const left = Math.max(frame.left, Math.min(...cells.map((cell) => cell.left)));
+    const right = Math.min(frame.right, Math.max(...cells.map((cell) => cell.right)));
+    const top = Math.max(frame.top + COMMENT_TOP_INSET, Math.min(...cells.map((cell) => cell.top)));
+    const x = Math.min(window.innerWidth - COMMENT_EDGE_INSET, Math.max(COMMENT_EDGE_INSET, (left + right) / 2));
+    setCommentAnchor({ x, y: top - 6 });
+  }, []);
+  const canComment = Boolean(commentTarget);
+  const isEditing = editor !== null;
+  React.useEffect(() => {
+    if (!rangeName || !canComment || pressing || isEditing) {
+      setCommentAnchor(null);
+      return;
+    }
+    // A moment's wait, so the bubble does not flash on a double click into a cell.
+    const timer = window.setTimeout(placeComment, COMMENT_DELAY_MS);
+    const cancelOutside = (event: PointerEvent) => {
+      // SAFETY: a pointer event target inside the document is always a Node;
+      // `contains` only needs that.
+      if (!gridRef.current?.contains(event.target as Node)) window.clearTimeout(timer);
+    };
+    document.addEventListener('pointerdown', cancelOutside);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', cancelOutside);
+    };
+  }, [rangeName, canComment, pressing, isEditing, placeComment]);
+  const commentShown = commentAnchor !== null;
+  React.useEffect(() => {
+    if (!pressing) return;
+    const release = () => setPressing(false);
+    window.addEventListener('mouseup', release);
+    // A button released outside the window never reports here.
+    window.addEventListener('blur', release);
+    return () => {
+      window.removeEventListener('mouseup', release);
+      window.removeEventListener('blur', release);
+    };
+  }, [pressing]);
+  React.useEffect(() => {
+    if (!commentShown) commenting.current = false;
+    const scroller = scrollRef.current;
+    if (!commentShown || !scroller) return;
+    scroller.addEventListener('scroll', placeComment, { passive: true });
+    return () => scroller.removeEventListener('scroll', placeComment);
+  }, [commentShown, placeComment]);
   const headingRow = pinnedRows > 0 ? rows[0] : header;
   const commentQuote = () => {
     if (!range) return '';
@@ -450,6 +604,16 @@ export const TableGrid: React.FC<{
       return;
     }
     if (!active) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (commentAnchor) {
+        setCommentAnchor(null);
+      } else {
+        setActive(null);
+        setRangeEnd(null);
+      }
+      return;
+    }
     const forward = isRightToLeft(event.currentTarget) ? -1 : 1;
     if (command && event.key.toLowerCase() === 'c') {
       event.preventDefault();
@@ -505,23 +669,25 @@ export const TableGrid: React.FC<{
                           ) : null}
                         </ContextMenu>
                       ) : null}
-                      {columnChars.map((_, column) => {
+                      {slots.map(({ column, span }) => {
+                        if (span) return <td key={`gap-${column}`} colSpan={span} aria-hidden="true" className="border-b border-edge-muted p-0" />;
                         const editingHere = editor?.row === rowIndex && editor.column === column;
                         const isActive = active?.row === rowIndex && active.column === column;
-                        const inRange = Boolean(isMultiCell && range && viewIndex >= range.top && viewIndex <= range.bottom && column >= range.left && column <= range.right);
+                        const inRange = Boolean(range && viewIndex >= range.top && viewIndex <= range.bottom && column >= range.left && column <= range.right);
                         return (
                           <td
                             key={column}
                             className={cn(
                               'truncate border-b border-e border-edge-muted px-2 py-1 align-top text-foreground last:border-e-0',
                               changedCells?.has(`${rowIndex}:${column}`) && 'bg-[color-mix(in_srgb,var(--status-success)_22%,transparent)]',
-                              inRange && 'bg-[color-mix(in_srgb,var(--interactive-selection)_45%,transparent)]',
+                              column < frozenColumns && 'sticky z-[5]',
+                              column < frozenColumns && !inRange && 'bg-[var(--surface-background)]',
+                              inRange && 'bg-[color-mix(in_srgb,var(--interactive-selection)_45%,var(--surface-background))]',
                               isActive && activeClass,
-                              column < frozenColumns && 'sticky z-[5] bg-[var(--surface-background)]',
                             )}
                             style={column < frozenColumns ? { insetInlineStart: frozenStart(column) } : undefined}
                             title={row[column] ?? ''}
-                            data-active-cell={isActive ? '' : undefined}
+                            data-selected-cell={inRange ? '' : undefined}
                             onMouseDown={(event) => {
                               if (event.button !== 0 || editingHere) return;
                               if (event.shiftKey) extendTo({ row: rowIndex, column });
@@ -547,6 +713,7 @@ export const TableGrid: React.FC<{
                           </td>
                         );
                       })}
+                      <td aria-hidden="true" className="border-b border-edge-muted p-0" />
                     </tr>
                   );
   };
@@ -556,20 +723,22 @@ export const TableGrid: React.FC<{
   const paddingBottom = virtualRows.length > 0
     ? virtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end
     : 0;
-  const activeClass = 'outline outline-1 -outline-offset-1 outline-[var(--primary-base)]';
+  const selectedPlace = !isMultiCell && active && active.row >= 0 && describeCell ? describeCell(active.row, active.column) : rangeName;
+  const activeClass = 'shadow-[inset_0_0_0_1px_var(--primary-base)]';
   const cellLabel = (position: CellPosition) => `${header[position.column] ?? ''}${position.row < 0 ? '' : ` ${rowLabels?.[position.row] ?? position.row + 2}`}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ArtifactMetaBar
+        lead={selectedPlace ? t('filesView.artifact.table.selected', { place: selectedPlace }) : undefined}
+        status={status}
+        hint={statusHint}
         items={[
           ...selectionFacts,
-          !isMultiCell && active && active.row >= 0 && describeCell ? describeCell(active.row, active.column) : '',
-          summary,
+          selectedPlace ? '' : summary,
           isFiltered ? t('filesView.artifact.table.filtered', { shown: viewRows.length, total: rows.length }) : '',
-          rows.length < totalRows ? t('filesView.artifact.table.truncated', { shown: rows.length, total: totalRows }) : '',
-          formatArtifactSize(sizeBytes),
-          status ?? '',
+          !selectedPlace && rows.length < totalRows ? t('filesView.artifact.table.truncated', { shown: rows.length, total: totalRows }) : '',
+          selectedPlace ? '' : formatArtifactSize(sizeBytes),
         ]}
         actions={(
           <>
@@ -621,11 +790,6 @@ export const TableGrid: React.FC<{
                 <Icon name="bar-chart-2" className="size-4" />
               </Button>
             ) : null}
-            {range && commentTarget ? (
-              <Button type="button" variant="ghost" size="sm" aria-label={t('filesView.artifact.table.comment')} title={t('filesView.artifact.table.comment')} onClick={openComment}>
-                <Icon name="double-quotes-l" className="size-4" />
-              </Button>
-            ) : null}
             {actions}
           </>
         )}
@@ -641,31 +805,36 @@ export const TableGrid: React.FC<{
           anchor={commentAnchor}
           quote={commentQuote()}
           fileLabel={commentTarget.fileLabel}
-          opened
-          onClose={() => setCommentAnchor(null)}
+          onOpen={openComment}
+          onClose={closeComment}
         />
       ) : null}
       {columnCount === 0 ? (
         <div className="p-3 typography-ui text-muted-foreground">{t('filesView.artifact.table.empty')}</div>
       ) : (
-        <div ref={gridRef} tabIndex={0} role="grid" aria-rowcount={rows.length} className="flex min-h-0 flex-1 flex-col outline-none" onKeyDown={onGridKey} onPaste={pasteAt}>
+        <div ref={gridRef} tabIndex={0} role="grid" onMouseDownCapture={(event) => { if (event.button === 0) setPressing(true); }} aria-rowcount={rows.length} className="flex min-h-0 flex-1 flex-col outline-none" onKeyDown={onGridKey} onPaste={pasteAt}>
           <ScrollableOverlay ref={scrollRef} outerClassName="min-h-0 flex-1">
             {/* A fixed layout only holds with an explicit table width; without it
                 one long value widens its column past the cap. */}
             <table
               className="min-w-full table-fixed select-none border-separate border-spacing-0 font-mono typography-meta"
-              style={{ width: tableWidth }}
+              style={{ width: fullWidth }}
             >
               <colgroup>
                 {rowLabels ? <col style={{ width: gutterWidth }} /> : null}
                 {columnChars.map((_, column) => (
                   <col key={column} style={{ width: columnWidth(column) }} />
                 ))}
+                {/* Takes what is left of a wide pane. Without it the browser
+                    stretches every column, and a drag handle starts from a width
+                    the columns do not hold: the edge jumps away from the pointer. */}
+                <col />
               </colgroup>
               <thead className="sticky top-0 z-20 bg-[var(--surface-subtle)]">
                 <tr>
                   {rowLabels ? <th scope="col" aria-hidden="true" className="sticky start-0 z-10 border-b border-e border-edge-muted bg-[var(--surface-subtle)]" /> : null}
-                  {columnChars.map((_, column) => {
+                  {slots.map(({ column, span }) => {
+                    if (span) return <th key={`gap-${column}`} colSpan={span} aria-hidden="true" className="border-b border-edge-muted p-0" />;
                     const name = header[column] ?? '';
                     const sorted = sort?.column === column ? sort.direction : undefined;
                     const headingEditing = editor?.row === -1 && editor.column === column;
@@ -734,12 +903,13 @@ export const TableGrid: React.FC<{
                           <ContextMenuSub>
                             <ContextMenuSubTrigger>{t('filesView.artifact.table.filterValues')}</ContextMenuSubTrigger>
                             <ContextMenuSubContent className="max-h-80 w-56 overflow-y-auto">
-                              {columnValues(column).map((value) => (
-                                <ContextMenuItem key={value} closeOnClick={false} onClick={() => toggleValue(column, value)}>
-                                  <Icon name="check" className={cn('me-2 size-4', valueFilters.get(column)?.has(value) && 'invisible')} />
-                                  <span className="truncate">{value || t('filesView.artifact.table.emptyValue')}</span>
-                                </ContextMenuItem>
-                              ))}
+                              <ColumnValueItems
+                                rows={rows}
+                                pinnedRows={pinnedRows}
+                                column={column}
+                                hidden={valueFilters.get(column)}
+                                onToggle={(value) => toggleValue(column, value)}
+                              />
                             </ContextMenuSubContent>
                           </ContextMenuSub>
                           {filtered ? <ContextMenuItem onClick={() => clearFilter(column)}>{t('filesView.artifact.table.clearFilter')}</ContextMenuItem> : null}
@@ -757,6 +927,7 @@ export const TableGrid: React.FC<{
                       </ContextMenu>
                     );
                   })}
+                  <th aria-hidden="true" className="border-b border-edge-muted p-0" />
                 </tr>
                 {viewRows.slice(0, pinnedRows).map((rowIndex, index) => renderRow(rowIndex, index, 0))}
               </thead>

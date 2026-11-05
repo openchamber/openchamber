@@ -14,12 +14,12 @@ import { ArtifactMetaBar } from './ArtifactMetaBar';
 import { BinaryArtifact } from './BinaryArtifact';
 import { formatArtifactSize } from './artifactMeta';
 import type { OfficePreview } from './officeDocument';
-import { DEFAULT_TABLE_ROW_CAP } from './delimitedText';
-import { markSeen, noteOwnEdit, traceChanges } from './cellTraces';
 import { isOpenableLink, OFFICE_LINK_MESSAGE, OFFICE_SELECTION_MESSAGE } from './officeFrame';
 import { TableGrid, type TableEditing } from './TableArtifact';
-import { cellKey, type BookSheet, type StructureChange, type WorkbookDocument } from './workbook/model';
-import { cellInput, sheetGrid, WorkbookSession, type CellRestore, type EditOutcome, type LoadEngineModel } from './workbook/workbookSession';
+import { cellKey, type StructureChange } from './workbook/model';
+import { patchSheetView, type SheetView, type WorkbookBook } from './documentClient';
+import type { BookChange, BookEdit } from './documentProtocol';
+import type { CellRestore } from './workbook/workbookSession';
 
 const MAX_UNDO = 100;
 const officeFrameMessage = z.discriminatedUnion('type', [
@@ -33,11 +33,9 @@ const officeFrameMessage = z.discriminatedUnion('type', [
   }),
 ]);
 
-type ReadPreview = (name: string, bytes: Uint8Array<ArrayBuffer>) => Promise<OfficePreview | null>;
+type ReadPreview = (name: string, path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<OfficePreview | null>;
 
-const readWithRenderers: ReadPreview = async (name, bytes) => (await import('./officeDocument')).readOfficePreview(name, bytes);
-
-const loadEngine: LoadEngineModel = async () => (await import('./workbook/ironcalc')).loadIronCalc();
+const readWithRenderers: ReadPreview = async (name, path, bytes) => (await import('./officeDocument')).readOfficePreview(name, path, bytes);
 
 type LoadState =
   | { status: 'loading' }
@@ -48,64 +46,68 @@ type LoadState =
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
 type CellEdit = { sheet: number; cells: CellRestore[] } | { sheet: number; bytes: Uint8Array<ArrayBuffer> };
 
-const sameBytes = (left: Uint8Array, right: Uint8Array): boolean => (
-  left.byteLength === right.byteLength && left.every((value, index) => value === right[index])
-);
-
-/** A first row of nothing but text names the columns, so it stays on top of a sort. */
-const hasHeadingRow = (sheet: BookSheet, rows: number): boolean => {
-  if (rows < 2) return false;
-  const first = Array.from(sheet.cells.values()).filter((cell) => cell.row === 1);
-  return first.length > 1 && first.every((cell) => cell.kind === 'text' && !cell.formula);
+const sameBytes = (left: Uint8Array, right: Uint8Array): boolean => {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) return false;
+  return true;
 };
 
 const hyperlinkFormula = (formula: string | undefined): string | undefined => formula?.match(/^HYPERLINK\(\s*"([^"]+)"/i)?.[1];
 
 const WorkbookView: React.FC<{
-  name: string;
   path: string;
-  document: WorkbookDocument;
+  book: WorkbookBook;
   bytes: Uint8Array<ArrayBuffer>;
   sizeBytes: number | null;
   readBytes: () => Promise<Uint8Array<ArrayBuffer>>;
   /** Absent where the file cannot be written. */
   onSave?: (bytes: Uint8Array<ArrayBuffer>) => Promise<boolean>;
   onChangedOnDisk: () => void;
-  loadModel?: LoadEngineModel;
-}> = ({ name, path, document, bytes, sizeBytes, readBytes, onSave, onChangedOnDisk, loadModel = loadEngine }) => {
+  /** Stays with the owner, who closes the book only once this has drained. */
+  queue: React.RefObject<Promise<void>>;
+}> = ({ path, book, bytes, sizeBytes, readBytes, onSave, onChangedOnDisk, queue }) => {
   const { t } = useI18n();
-  const [session] = React.useState(() => new WorkbookSession(document, name, bytes, loadModel));
+  const { sheets } = book.opened;
   const [selected, setSelected] = React.useState(0);
-  const [version, setVersion] = React.useState(0);
+  const [view, setView] = React.useState<SheetView | null>(null);
+  const [layoutRevision, setLayoutRevision] = React.useState(0);
+  const [layoutFailed, setLayoutFailed] = React.useState(false);
+  const [unsupported, setUnsupported] = React.useState(book.opened.unsupported);
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>('idle');
   const onDisk = React.useRef(bytes);
-  const queue = React.useRef<Promise<void>>(Promise.resolve());
+  const latest = React.useRef(bytes);
   const undoStack = React.useRef<CellEdit[]>([]);
   const redoStack = React.useRef<CellEdit[]>([]);
+  const [changedCells, setChangedCells] = React.useState<ReadonlySet<string>>(() => new Set(book.opened.unseen));
 
-  const sheet = session.document.sheets[selected] ?? session.document.sheets[0];
+  const sheet = sheets[selected] ?? sheets[0];
   const editable = Boolean(onSave) && !sheet.protected;
-  const grid = React.useMemo(
-    () => sheetGrid(sheet, DEFAULT_TABLE_ROW_CAP, editable),
-    // `version` stands for the cells of this sheet, which change in place.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sheet, editable, version],
-  );
+  // Changes arrive between renders, and the cells they name must meet the view of now.
+  const viewRef = React.useRef<SheetView | null>(null);
+  const showView = (next: SheetView) => {
+    viewRef.current = next;
+    setView(next);
+  };
+
   React.useEffect(() => {
-    queue.current = queue.current.then(async () => {
-      if (await session.fillMissingResults().catch(() => false)) setVersion((value) => value + 1);
+    let current = true;
+    void book.layout(selected, editable).then((next) => {
+      if (current) showView(next);
+    }, () => {
+      if (current) setLayoutFailed(true);
     });
-  }, [session]);
+    return () => {
+      current = false;
+    };
+  }, [book, selected, editable, layoutRevision]);
+
+  const reloadView = () => setLayoutRevision((value) => value + 1);
 
   // A pasted block can run past the last row on screen.
-  const rowNumberOf = (row: number) => grid.rowNumbers[row] ?? (grid.rowNumbers.at(-1) ?? 0) + row - grid.rowNumbers.length + 1;
-  const shownCells = () => new Map(session.document.sheets.flatMap((book, index) => Array.from(book.cells, ([key, cell]): [string, string] => [`${index}:${key}`, `${cell.raw}\u0000${cell.formula ?? ''}`])));
-  const [changedCells, setChangedCells] = React.useState<ReadonlySet<string>>(() => new Set());
-  // After results are filled in, so a formula with no stored result is no news.
-  React.useEffect(() => {
-    queue.current = queue.current.then(() => setChangedCells(traceChanges(path, shownCells())));
-  }, [session, path]);
-  const cellAt = (row: number, column: number) => sheet.cells.get(cellKey(grid.rowNumbers[row], column));
+  const rowNumberOf = (row: number) => (view
+    ? view.rowNumbers[row] ?? (view.rowNumbers.at(-1) ?? 0) + row - view.rowNumbers.length + 1
+    : 0);
+  const noteAt = (row: number, column: number) => (view ? view.notes.get(cellKey(view.rowNumbers[row], column)) : undefined);
 
   const persist = async (next: Uint8Array<ArrayBuffer>): Promise<boolean> => {
     if (!onSave) return false;
@@ -133,17 +135,28 @@ const WorkbookView: React.FC<{
     queue.current = queue.current.then(task).catch(() => {
       // The session is back on the last good file, so the view must follow it.
       setSaveStatus('failed');
-      setVersion((value) => value + 1);
+      reloadView();
     });
   };
 
-  const finishEdit = async (outcome: EditOutcome, record: (previous: CellRestore[]) => void) => {
+  const applyChange = async ({ bytes: next, patches, unsupported: count }: BookChange) => {
+    setUnsupported(count);
+    latest.current = next;
+    const updated = viewRef.current && patches ? patchSheetView(viewRef.current, patches) : null;
+    if (updated) showView(updated);
+    else reloadView();
+    await persist(next);
+  };
+
+  const finishEdit = async (outcome: BookEdit, record: (previous: CellRestore[]) => void) => {
     if (outcome.status === 'invalid-formula') toast.error(t('filesView.artifact.office.invalidFormula'));
-    if (outcome.status !== 'changed') return;
+    if (outcome.status !== 'changed') {
+      // What was typed already shows, so the sheet has to say what it holds.
+      reloadView();
+      return;
+    }
     record(outcome.previous);
-    noteOwnEdit(path, shownCells());
-    setVersion((value) => value + 1);
-    await persist(outcome.bytes);
+    await applyChange(outcome);
   };
 
   const stepHistory = (from: React.RefObject<CellEdit[]>, to: React.RefObject<CellEdit[]>) => {
@@ -152,36 +165,43 @@ const WorkbookView: React.FC<{
       if (!edit) return;
       setSelected(edit.sheet);
       if ('bytes' in edit) {
-        const previous = await session.restoreBytes(edit.bytes);
-        to.current.push({ sheet: edit.sheet, bytes: previous });
-        noteOwnEdit(path, shownCells());
-        setVersion((value) => value + 1);
-        await persist(edit.bytes);
+        const { previousBytes, ...change } = await book.restoreBytes(edit.bytes);
+        to.current.push({ sheet: edit.sheet, bytes: previousBytes });
+        await applyChange(change);
         return;
       }
-      await finishEdit(await session.restore(edit.sheet, edit.cells), (cells) => to.current.push({ sheet: edit.sheet, cells }));
+      await finishEdit(await book.restore(edit.sheet, edit.cells), (cells) => to.current.push({ sheet: edit.sheet, cells }));
     });
   };
 
   const restructure = (change: StructureChange) => {
     enqueue(async () => {
-      const { bytes: next, previousBytes } = await session.restructure(change);
+      const { previousBytes, ...outcome } = await book.restructure(change);
       redoStack.current = [];
       undoStack.current.push({ sheet: change.sheet, bytes: previousBytes });
-      noteOwnEdit(path, shownCells());
-      setVersion((value) => value + 1);
-      await persist(next);
+      await applyChange(outcome);
     });
   };
 
-  const editing: TableEditing | undefined = editable ? {
-    canEdit: (row, column) => row >= 0 && !session.isLocked(selected, rowNumberOf(row), column),
-    inputOf: (row, column) => cellInput(cellAt(row, column)),
+  const isLocked = (row: number, column: number) => sheet.protected || Boolean(view?.lockedCells.has(cellKey(rowNumberOf(row), column)));
+
+  const editing: TableEditing | undefined = editable && view ? {
+    canEdit: (row, column) => row >= 0 && !isLocked(row, column),
+    inputOf: (row, column) => noteAt(row, column)?.input ?? view.rows[row]?.[column] ?? '',
     commit: (cells) => {
       const sheetIndex = selected;
       const inputs = cells.map(({ row, column, input }) => ({ row: rowNumberOf(row), column, input }));
+      // Proving a write reads the whole file back, so what was typed shows first.
+      const typed = patchSheetView(view, inputs.map(({ row, column, input }) => ({
+        sheet: sheetIndex,
+        row,
+        column,
+        display: input,
+        note: view.notes.get(cellKey(row, column)) ?? null,
+      })), true);
+      if (typed) showView(typed);
       enqueue(async () => {
-        await finishEdit(await session.edit(sheetIndex, inputs), (previous) => {
+        await finishEdit(await book.edit(sheetIndex, inputs), (previous) => {
           redoStack.current = [];
           undoStack.current.push({ sheet: sheetIndex, cells: previous });
           if (undoStack.current.length > MAX_UNDO) undoStack.current.shift();
@@ -190,7 +210,7 @@ const WorkbookView: React.FC<{
     },
     undo: () => stepHistory(undoStack, redoStack),
     redo: () => stepHistory(redoStack, undoStack),
-    structure: session.canRestructure(selected) ? {
+    structure: view.canRestructure ? {
       insertRow: (row) => restructure({ sheet: selected, axis: 'row', at: rowNumberOf(row), delta: 1 }),
       deleteRow: (row) => restructure({ sheet: selected, axis: 'row', at: rowNumberOf(row), delta: -1 }),
       insertColumn: (column) => restructure({ sheet: selected, axis: 'column', at: column, delta: 1 }),
@@ -198,58 +218,77 @@ const WorkbookView: React.FC<{
     } : undefined,
   } : undefined;
 
-  const gridChanges = new Set(grid.rowNumbers.flatMap((rowNumber, row) => Array.from({ length: grid.columnCount }, (_, column) => column)
-    .filter((column) => changedCells.has(`${selected}:${cellKey(rowNumber, column)}`))
-    .map((column) => `${row}:${column}`)));
+  const gridChanges = React.useMemo(() => {
+    const shown = new Set<string>();
+    if (!view || changedCells.size === 0) return shown;
+    for (let row = 0; row < view.rowNumbers.length; row += 1) {
+      for (let column = 0; column < view.columnCount; column += 1) {
+        if (changedCells.has(`${selected}:${cellKey(view.rowNumbers[row], column)}`)) shown.add(`${row}:${column}`);
+      }
+    }
+    return shown;
+  }, [view, changedCells, selected]);
 
   const statusText = saveStatus === 'idle' ? '' : t(`filesView.artifact.office.${saveStatus}`);
-  const pending = session.unsupportedFormulas;
-  const pendingText = pending === 0 ? '' : t(pending === 1 ? 'filesView.artifact.office.externalResultsSingle' : 'filesView.artifact.office.externalResultsPlural', { count: pending });
+  const pendingText = unsupported === 0 ? '' : t(unsupported === 1 ? 'filesView.artifact.office.externalResultsSingle' : 'filesView.artifact.office.externalResultsPlural', { count: unsupported });
+
+  if (layoutFailed) {
+    return (
+      <ContentState
+        title={t('filesView.artifact.office.unreadable')}
+        actions={<Button type="button" variant="outline" size="sm" onClick={onChangedOnDisk}>{t('filesView.artifact.state.retry')}</Button>}
+      />
+    );
+  }
+  if (!view || view.sheet !== selected) return <ContentLoadingState label={t('filesView.artifact.state.loading')} />;
 
   return (
     <TableGrid
       key={selected}
       tableId={`${path}#${sheet.name}`}
-      header={grid.header}
-      rows={grid.rows}
-      rowLabels={grid.rowNumbers}
-      columnCount={grid.columnCount}
-      dataColumnCount={grid.dataColumnCount}
-      totalRows={grid.totalRows}
+      header={view.header}
+      rows={view.rows}
+      rowLabels={view.rowNumbers}
+      columnCount={view.columnCount}
+      dataColumnCount={view.dataColumnCount}
+      totalRows={view.totalRows}
       sizeBytes={sizeBytes}
-      pinnedRows={hasHeadingRow(sheet, grid.rows.length) ? 1 : 0}
+      pinnedRows={view.headingRow ? 1 : 0}
       hrefOf={(row, column) => {
-        const cell = cellAt(row, column);
-        return cell?.href ?? hyperlinkFormula(cell?.formula);
+        const note = noteAt(row, column);
+        return note?.href ?? hyperlinkFormula(note?.formula);
       }}
       editing={editing}
       changedCells={gridChanges}
-      onSeen={(keys) => setChangedCells(markSeen(path, keys.map((key) => {
-        const [row, column] = key.split(':').map(Number);
-        return `${selected}:${cellKey(grid.rowNumbers[row], column)}`;
-      })))}
-      commentTarget={{ fileLabel: path, place: session.document.sheets.length > 1 ? `Sheet "${sheet.name}"` : undefined }}
+      onSeen={(keys) => {
+        void book.seen(keys.map((key) => {
+          const [row, column] = key.split(':').map(Number);
+          return `${selected}:${cellKey(view.rowNumbers[row], column)}`;
+        })).then((unseen) => setChangedCells(new Set(unseen)));
+      }}
+      commentTarget={{ fileLabel: path, place: sheets.length > 1 ? `Sheet "${sheet.name}"` : undefined }}
       describeCell={(row, column) => {
-        const reference = `${grid.header[column]}${grid.rowNumbers[row]}`;
-        if (session.isLocked(selected, grid.rowNumbers[row], column)) return `${reference} ${t('filesView.artifact.office.locked')}`;
-        const formula = cellAt(row, column)?.formula;
+        const reference = `${view.header[column]}${view.rowNumbers[row]}`;
+        if (isLocked(row, column)) return `${reference} ${t('filesView.artifact.office.locked')}`;
+        const formula = noteAt(row, column)?.formula;
         return formula ? `${reference} =${formula}` : reference;
       }}
       status={[statusText, pendingText].filter(Boolean).join(' · ')}
+      statusHint={unsupported === 0 ? undefined : t('filesView.artifact.office.externalResultsHint')}
       actions={(
         <>
           {saveStatus === 'failed' ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => enqueue(async () => { await persist(session.currentBytes); })}>
+            <Button type="button" variant="outline" size="sm" onClick={() => enqueue(async () => { await persist(latest.current); })}>
               {t('filesView.artifact.state.retry')}
             </Button>
           ) : null}
-          {session.document.sheets.length > 1 ? (
+          {sheets.length > 1 ? (
             <Select value={String(selected)} onValueChange={(value) => setSelected(Number(value))}>
               <SelectTrigger className="w-fit max-w-48" aria-label={t('filesView.artifact.office.sheet')}>
                 <SelectValue>{sheet.name}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {session.document.sheets.map((entry, index) => (
+                {sheets.map((entry, index) => (
                   <SelectItem key={index} value={String(index)}>{entry.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -275,15 +314,16 @@ export const OfficeArtifact: React.FC<{
   actions?: React.ReactNode;
   /** Writes an edited workbook; absent where the file cannot be written. */
   onSave?: (path: string, bytes: Uint8Array<ArrayBuffer>) => Promise<boolean>;
-  /** Replaced in tests; load the renderers and the formula engine on first use. */
+  /** Replaced in tests; loads the renderers on first use. */
   readPreview?: ReadPreview;
-  loadModel?: LoadEngineModel;
-}> = ({ name, path, sizeBytes, loadBytes, actions, onSave, readPreview = readWithRenderers, loadModel }) => {
+}> = ({ name, path, sizeBytes, loadBytes, actions, onSave, readPreview = readWithRenderers }) => {
   const { t } = useI18n();
   const [state, setState] = React.useState<LoadState>({ status: 'loading' });
   const [attempt, setAttempt] = React.useState(0);
+  const work = React.useRef<Promise<void>>(Promise.resolve());
   const frameRef = React.useRef<HTMLIFrameElement>(null);
   const [selection, setSelection] = React.useState<{ quote: string; x: number; y: number } | null>(null);
+  const closeSelection = React.useCallback(() => setSelection(null), []);
 
   // The frame has no way out, so its links arrive here, from that frame only.
   React.useEffect(() => {
@@ -307,6 +347,7 @@ export const OfficeArtifact: React.FC<{
   React.useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
+    let book: WorkbookBook | undefined;
     setState({ status: 'loading' });
     void (async () => {
       let bytes: Uint8Array<ArrayBuffer>;
@@ -318,13 +359,19 @@ export const OfficeArtifact: React.FC<{
       }
       if (signal.aborted) return;
       try {
-        const preview = await readPreview(name, bytes);
-        if (!signal.aborted) setState(preview ? { status: 'ready', preview } : { status: 'unreadable' });
+        const preview = await readPreview(name, path, bytes);
+        if (preview?.kind === 'workbook') book = preview.book;
+        if (signal.aborted) book?.close();
+        else setState(preview ? { status: 'ready', preview } : { status: 'unreadable' });
       } catch {
         if (!signal.aborted) setState({ status: 'unreadable' });
       }
     })();
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      // An edit may still be on its way to the file.
+      void work.current.finally(() => book?.close());
+    };
   }, [name, path, loadBytes, readPreview, attempt]);
 
   if (state.status === 'loading') {
@@ -365,15 +412,14 @@ export const OfficeArtifact: React.FC<{
   if (preview.kind === 'workbook') {
     return (
       <WorkbookView
-        name={name}
         path={path}
-        document={preview.document}
+        book={preview.book}
         bytes={preview.bytes}
         sizeBytes={sizeBytes}
         readBytes={() => loadBytes(path, AbortSignal.timeout(60_000))}
         onSave={onSave ? (next) => onSave(path, next) : undefined}
         onChangedOnDisk={() => setAttempt((value) => value + 1)}
-        loadModel={loadModel}
+        queue={work}
       />
     );
   }
@@ -400,7 +446,7 @@ export const OfficeArtifact: React.FC<{
           anchor={selection}
           quote={selection.quote}
           fileLabel={path}
-          onClose={() => setSelection(null)}
+          onClose={closeSelection}
         />
       ) : null}
     </div>

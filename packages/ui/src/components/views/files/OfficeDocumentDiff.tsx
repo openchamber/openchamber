@@ -6,8 +6,8 @@ import { useI18n } from '@/lib/i18n';
 import { getFileExtension } from '@/lib/toolHelpers';
 import { extractDocumentAttachments } from '@/sync/document-attachments';
 import { DOCUMENT_DATA_URL } from './documentVersions';
-import { diffWorkbooks, type SheetDifference } from './previews/workbook/workbookDiff';
-import { openWorkbookDocument } from './previews/workbook/workbookSession';
+import { documentTransport } from './previews/documentClient';
+import type { SheetDifference } from './previews/workbook/workbookDiff';
 
 const MAX_SHOWN_CELLS = 2_000;
 
@@ -34,11 +34,8 @@ const compare = async (filePath: string, original: string, modified: string): Pr
   const name = filePath.split(/[/\\]/).pop() ?? filePath;
   const extension = getFileExtension(filePath);
   if (extension === 'xlsx' || extension === 'ods') {
-    const [left, right] = await Promise.all([
-      before ? openWorkbookDocument(name, before) : null,
-      after ? openWorkbookDocument(name, after) : null,
-    ]);
-    return { kind: 'sheets', sheets: diffWorkbooks(left, right) };
+    const call = await documentTransport();
+    return { kind: 'sheets', sheets: await call('workbook.diff', { name, before, after }) };
   }
   const [left, right] = await Promise.all([documentText(name, before), documentText(name, after)]);
   return { kind: 'text', original: left, modified: right };

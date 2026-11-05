@@ -1,6 +1,8 @@
-import type { Database } from 'sql.js/dist/sql-wasm.js';
+import type { Database } from 'sql.js/dist/sql-wasm-browser.js';
 
-export type DataTable = { columns: string[]; rows: string[][]; totalRows: number };
+export type SqliteDatabase = Database;
+
+type DataTable = { columns: string[]; rows: string[][]; totalRows: number };
 
 type DataValue = string | number | bigint | boolean | null | undefined | Date | Uint8Array | DataValue[] | { [key: string]: DataValue };
 
@@ -17,8 +19,8 @@ export const isSqliteFile = (bytes: Uint8Array): boolean => new TextDecoder().de
 
 export const openSqlite = async (bytes: Uint8Array): Promise<Database> => {
   const [{ default: initSqlJs }, { default: wasmUrl }] = await Promise.all([
-    import('sql.js/dist/sql-wasm.js'),
-    import('sql.js/dist/sql-wasm.wasm?url'),
+    import('sql.js/dist/sql-wasm-browser.js'),
+    import('sql.js/dist/sql-wasm-browser.wasm?url'),
   ]);
   const sql = await initSqlJs({ locateFile: () => wasmUrl });
   // The WAL flag asks for a sidecar file this copy in memory does not have.
@@ -36,16 +38,28 @@ export const sqliteTables = (database: Database): string[] => {
 
 export const quoteSqlName = (name: string): string => `"${name.replace(/"/g, '""')}"`;
 
-/** The last statement's rows; the database is a copy in memory, so a query changes nothing on disk. */
-export const runSqlite = (database: Database, query: string, rowCap: number): DataTable => {
-  // Without big integers an id past 2^53 would show rounded.
-  const results = database.exec(query, undefined, { useBigInt: true });
-  const last = results[results.length - 1];
-  if (!last) return { columns: [], rows: [], totalRows: 0 };
-  return { columns: last.columns, rows: last.values.slice(0, rowCap).map((row) => row.map(cellText)), totalRows: last.values.length };
+/**
+ * The last result of a query, its rows past the cap only counted: a table of
+ * millions never lands in memory. The database is a copy, so a query changes
+ * nothing on disk.
+ */
+export const queryCapped = (database: Database, query: string, rowCap: number): DataTable => {
+  let result: DataTable = { columns: [], rows: [], totalRows: 0 };
+  for (const statement of database.iterateStatements(query)) {
+    const rows: string[][] = [];
+    let totalRows = 0;
+    while (statement.step()) {
+      totalRows += 1;
+      // Without big integers an id past 2^53 would show rounded.
+      if (totalRows <= rowCap) rows.push(statement.get(null, { useBigInt: true }).map(cellText));
+    }
+    if (totalRows > 0) result = { columns: statement.getColumnNames(), rows, totalRows };
+    else if (statement.getColumnNames().length > 0) result = { columns: statement.getColumnNames(), rows, totalRows };
+  }
+  return result;
 };
 
-export const readParquet = async (bytes: Uint8Array<ArrayBuffer>, rowCap: number): Promise<DataTable> => {
+export const readParquetRows = async (bytes: Uint8Array<ArrayBuffer>, rowCap: number): Promise<DataTable> => {
   const [{ parquetMetadata, parquetReadObjects }, { compressors }] = await Promise.all([import('hyparquet'), import('hyparquet-compressors')]);
   const metadata = parquetMetadata(bytes.buffer);
   const totalRows = Number(metadata.num_rows);

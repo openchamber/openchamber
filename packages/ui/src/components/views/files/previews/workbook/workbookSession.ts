@@ -30,11 +30,12 @@ const MAX_GRID_COLUMNS = 256;
 export const sheetGrid = (sheet: BookSheet, rowCap: number, editable: boolean): SheetGrid => {
   const filled = new Set<number>();
   let lastColumn = -1;
+  let lastRow = 0;
   for (const cell of sheet.cells.values()) {
     filled.add(cell.row);
     if (cell.column > lastColumn) lastColumn = cell.column;
+    if (cell.row > lastRow) lastRow = cell.row;
   }
-  const lastRow = Math.max(0, ...filled);
   const spare = editable ? 1 : 0;
   const columnCount = Math.min(MAX_GRID_COLUMNS, lastColumn + 1 + spare);
   const ordered = lastRow + spare <= rowCap
@@ -104,7 +105,7 @@ export type EditOutcome =
   | { status: 'saved-nothing' }
   | { status: 'invalid-formula' }
   /** `previous` puts the cell back exactly: typing it again could turn the text `00123` into a number. */
-  | { status: 'changed'; bytes: Uint8Array<ArrayBuffer>; previous: CellRestore[] };
+  | { status: 'changed'; bytes: Uint8Array<ArrayBuffer>; previous: CellRestore[]; changes: CellChange[] };
 
 export type LoadEngineModel = () => Promise<new (name: string, locale: string, timezone: string, language: string) => EngineModel>;
 
@@ -241,7 +242,7 @@ export class WorkbookSession {
       else cells.delete(changeKey);
     }
     this.bytes = next;
-    return { status: 'changed', bytes: next, previous };
+    return { status: 'changed', bytes: next, previous, changes: list };
   }
 
   canRestructure(sheet: number): boolean {

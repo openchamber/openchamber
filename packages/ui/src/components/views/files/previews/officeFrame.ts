@@ -80,6 +80,10 @@ const placeOf = (node) => {
   return page ? 'Page ' + (Array.from(document.querySelectorAll('section.docx')).indexOf(page) + 1) : '';
 };
 let selectionTimer;
+// A press in here never reaches the app, whose comment field closes on one.
+document.addEventListener('pointerdown', () => {
+  parent.postMessage({ type: '${OFFICE_SELECTION_MESSAGE}', text: '', place: '', x: 0, y: 0 }, PARENT_ORIGIN);
+});
 document.addEventListener('selectionchange', () => {
   clearTimeout(selectionTimer);
   selectionTimer = setTimeout(() => {

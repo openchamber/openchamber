@@ -22,9 +22,20 @@ export const traceChanges = (table: string, cells: Map<string, string>): Readonl
   return new Set(unseen);
 };
 
-/** The user's own edit is no news: it moves what the table counts as seen. */
+/** The user's own edit is no news: it moves what the table counts as seen. `value` null is a cell gone. */
 export const noteOwnEdit = (table: string, cells: Map<string, string>): void => {
   traces.set(table, { cells, unseen: traces.get(table)?.unseen ?? new Set() });
+};
+
+/** `noteOwnEdit` for a few cells of a large table; `all` says the list is the whole table. */
+export const noteOwnChanges = (table: string, changes: Array<[string, string | null]>, all = false): void => {
+  const trace = traces.get(table);
+  if (!trace) return;
+  if (all) trace.cells.clear();
+  for (const [key, value] of changes) {
+    if (value === null) trace.cells.delete(key);
+    else trace.cells.set(key, value);
+  }
 };
 
 export const markSeen = (table: string, keys: string[]): ReadonlySet<string> => {

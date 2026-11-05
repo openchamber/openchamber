@@ -66,7 +66,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isArchiveFile, isDataFile, isNotebookFile, isOfficePreviewFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
-import { MAX_OFFICE_PREVIEW_BYTES, MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
+import { MAX_DATA_PREVIEW_BYTES, MAX_OFFICE_PREVIEW_BYTES, MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
@@ -2116,6 +2116,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     if (!isCurrentLoad()) {
       return;
     }
+    if (sizeStat && sizeStat.size > MAX_OPEN_FILE_BYTES && isDelimitedTableFile(node.path)) {
+      // Too large for the editor, not for the table: it opens read-only, from its bytes.
+      setContentDetectedBinary(true);
+      setFileContent('');
+      setDraftContent('');
+      setLoadedFilePath(node.path);
+      setFileLoading(false);
+      return;
+    }
     if (sizeStat && sizeStat.size > MAX_OPEN_FILE_BYTES) {
       setFileContent('');
       setDraftContent('');
@@ -2826,7 +2835,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   // parties, so there a .drawio file opens as its XML like any text file.
   const isDrawio = !claimedByGuest && !enterpriseMode && Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
   const isMermaid = !claimedByGuest && Boolean(selectedFile?.path && isMermaidFile(selectedFile.path));
-  const isTable = !claimedByGuest && Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
+  // One too large for the editor has no text here, only its table view.
+  const isTable = !claimedByGuest && !contentDetectedBinary && Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
   const isNotebook = !claimedByGuest && Boolean(selectedFile?.path && isNotebookFile(selectedFile.path));
   // Both are text with a richer view that the same toggle switches.
   const isTableView = isTable || isNotebook;
@@ -3866,12 +3876,20 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   // The stat that names the size can arrive after this read starts, so the
   // read is bounded itself and stops when the preview goes away.
+  const maxDataBytes = isMobile ? MAX_OFFICE_PREVIEW_BYTES : MAX_DATA_PREVIEW_BYTES;
   const loadOfficeBytes = React.useCallback(async (path: string, cancel: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
     const signal = AbortSignal.any([cancel, AbortSignal.timeout(60_000)]);
     const response = await fetchRawFile(path, signal);
     const blob = await readAssetBlob(response, MAX_OFFICE_PREVIEW_BYTES, signal);
     return new Uint8Array(await blob.arrayBuffer());
   }, [fetchRawFile]);
+
+  const loadDataBytes = React.useCallback(async (path: string, cancel: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
+    const signal = AbortSignal.any([cancel, AbortSignal.timeout(300_000)]);
+    const response = await fetchRawFile(path, signal);
+    const blob = await readAssetBlob(response, maxDataBytes, signal);
+    return new Uint8Array(await blob.arrayBuffer());
+  }, [fetchRawFile, maxDataBytes]);
 
   // Named by path: an edit can still be saving after the viewer moved on.
   // An export lands next to its file, where the agent sees it too.
@@ -3981,8 +3999,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       if (isArchiveFile(file.path) && !officeTooLarge) {
         return <ArchiveArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadOfficeBytes} actions={binaryFileActions} />;
       }
-      if (isDataFile(file.path) && !officeTooLarge) {
-        return <DataFileArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadOfficeBytes} actions={binaryFileActions} />;
+      if ((isDataFile(file.path) || isDelimitedTableFile(file.path)) && !(artifactSize !== null && artifactSize > maxDataBytes)) {
+        return <DataFileArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadDataBytes} actions={binaryFileActions} />;
       }
       if (isOfficePreviewFile(file.path) && !officeTooLarge) {
         return (
@@ -4003,7 +4021,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           path={file.path}
           sizeBytes={artifactSize}
           download={binaryFileActions}
-          description={isOfficePreviewFile(file.path) || isArchiveFile(file.path) || isDataFile(file.path) ? t('filesView.artifact.office.tooLarge') : undefined}
+          description={isOfficePreviewFile(file.path) || isArchiveFile(file.path) || isDataFile(file.path) || isDelimitedTableFile(file.path) ? t('filesView.artifact.office.tooLarge') : undefined}
         />
       );
     }

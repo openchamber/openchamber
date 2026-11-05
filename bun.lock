@@ -131,6 +131,7 @@
       "version": "2.6.1",
       "bin": {
         "openchamber-guest-bundle": "./scripts/bundle-guest.ts",
+        "openchamber-guest-check": "./scripts/check-guest.ts",
       },
       "dependencies": {
         "zod": "^4.3.6",
