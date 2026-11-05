@@ -110,6 +110,57 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `removeWorktree` deletes an unregistered leftover only under the data-dir root, so worktrees created before the setting was set stay removable while a shared configured folder such as `".."` can never make a sibling project eligible for deletion; a config read failure there falls back to the data-dir root instead of blocking the removal. Creation still fails loudly on an unreadable config so a worktree is never created in an unchosen folder.
 - Both the web and VS Code readers merge a secondary user config file (`opencode.jsonc` beside `opencode.json`) as an override layer, as OpenCode does, so `worktree.directory` set there applies in every runtime.
 
+### Worktree teardown commands
+
+`DELETE /api/git/worktrees` and `POST /api/git/worktrees/archives` take an
+optional `teardownCommand`: the project's `teardownWorktree` list joined with
+`&&`, after the client's trust prompt (`resolveWorktreeTeardownCommands` in
+`packages/ui/src/lib/sharedTrustConfirmation.ts`). It runs through the same
+shell runner as the setup commands, with the worktree as working directory,
+stdin closed, and the project's current environment (both routes are user
+actions). The request waits for it, so it is stopped after 5 minutes and the
+removal fails as for any other failing command.
+
+- It runs before anything is touched: before the bootstrap record is cleared,
+  the OpenCode instance released and `git worktree remove` runs, and in an
+  archive before the snapshot, so the snapshot holds what the teardown left.
+- A failing command throws `Worktree teardown command failed, so the worktree
+  was kept: <output>` and leaves the worktree, its instance and its branch as
+  they were. The route answers 500 with that text and the delete toast shows it.
+- A registered worktree whose folder is already gone skips the teardown, so a
+  folder deleted outside the app stays removable. So does a worktree whose
+  bootstrap failed: its setup commands never ran, and the teardown would run
+  against a checkout that may not have landed. An unregistered leftover never
+  runs it.
+- Only removals the client starts carry it. Server-side cleanups (scheduled-task
+  runs, a failed session move) run no teardown, as they run no setup commands.
+  The client's merged-PR cleanup never opens the trust prompt: untrusted shared
+  teardown commands make its archive fail, and the worktree waits for a removal
+  by hand.
+- The VS Code runtime applies the same rule in `removeWorktree`
+  (`packages/vscode/src/gitService.ts`); it has no archive.
+- A delete that also removes the remote branch removes it first, on the client,
+  before this request (a failed remote delete must keep the worktree). A failing
+  teardown then keeps the worktree and its local branch, but the remote branch
+  is already gone.
+
+#### Why a failed teardown keeps the worktree
+
+The commands exist to stop what lives in the folder (a Docker stack, a dev
+server). Deleting it anyway leaves that process running against a folder that is
+gone, or fails `git worktree remove` halfway. A failed removal already restores
+the sessions archived for it (`packages/ui/src/lib/worktrees/worktreeRemovalFlow.ts`),
+so keeping the worktree fits the existing failure path.
+
+#### Why the client's rollbacks still run teardown
+
+A worktree removed because session creation, a session move or an archive
+restore failed right after creating it has run its setup commands, which may
+have started what the teardown stops. Skipping the teardown there would leave
+that running with nothing on screen; a failing teardown leaves a worktree the
+user sees and can delete. A worktree whose bootstrap failed is the exception
+above.
+
 ### Worktree removal and the folder's OpenCode location
 
 Any directory-scoped OpenCode request for a folder inside a worktree starts that

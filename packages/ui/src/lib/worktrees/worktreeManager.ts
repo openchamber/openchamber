@@ -1,4 +1,5 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { resolveWorktreeTeardownCommands } from '@/lib/sharedTrustConfirmation';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { captureRuntimeInstance, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { toast } from '@/components/ui';
@@ -205,13 +206,14 @@ const deriveSdkWorktreeNameFromDirectory = (directory: string): string => {
   return parts[parts.length - 1] ?? normalized;
 };
 
-const buildSdkStartCommand = (args: {
+/** The commands as one `&&` chain for the server, so the first failure stops the rest. */
+const joinWorktreeCommands = (args: {
   projectDirectory: string;
-  setupCommands: string[];
+  commands: string[];
 }): string | undefined => {
   const commands: string[] = [];
 
-  for (const raw of args.setupCommands) {
+  for (const raw of args.commands) {
     const trimmed = raw.trim();
     if (!trimmed) continue;
     commands.push(
@@ -254,9 +256,9 @@ const toCreatePayload = (args: {
   const startRef = (args.startRef || '').trim();
 
   const commands = Array.isArray(args.setupCommands) ? args.setupCommands : [];
-  const startCommand = buildSdkStartCommand({
+  const startCommand = joinWorktreeCommands({
     projectDirectory,
-    setupCommands: commands,
+    commands,
   });
 
   const payload: CreateGitWorktreePayload = { mode };
@@ -817,20 +819,30 @@ const forgetRemovedWorktree = (project: ProjectRef, worktree: WorktreeMetadata):
   clearWorktreeRemoval(worktree.path);
 };
 
+/** What the server runs in the worktree before it goes; may ask for trust first. */
+const resolveTeardownCommand = async (project: ProjectRef, ask = true): Promise<string | undefined> => joinWorktreeCommands({
+  projectDirectory: normalizePath(project.path),
+  commands: await resolveWorktreeTeardownCommands(project, { ask }),
+});
+
 /**
  * Archives the worktree: the server records its state with `sessionIds` (the
  * sessions the caller archived for it) under a private ref and removes the
  * folder, keeping the branch. The row shows the removal until git answers.
+ * `askForTrust: false` is for archives nobody started by hand: untrusted
+ * shared teardown commands then keep the worktree instead of opening a prompt.
  */
 export async function archiveProjectWorktree(
   project: ProjectRef,
   worktree: WorktreeMetadata,
   input: { id: string; sessionIds: string[]; title?: string },
+  { askForTrust = true }: { askForTrust?: boolean } = {},
 ): Promise<GitWorktreeArchive> {
   markWorktreeRemoving(worktree.path);
   let archive: GitWorktreeArchive;
   try {
-    archive = await git.worktree.archive(normalizePath(project.path), { directory: worktree.path, ...input });
+    const teardownCommand = await resolveTeardownCommand(project, askForTrust);
+    archive = await git.worktree.archive(normalizePath(project.path), { directory: worktree.path, ...input, teardownCommand });
   } catch (error) {
     clearWorktreeRemoval(worktree.path);
     throw error;
@@ -859,6 +871,8 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   }
   markWorktreeRemoving(worktree.path);
   try {
+    // Before the remote branch goes, so an unreadable setup stops the whole removal.
+    const teardownCommand = await resolveTeardownCommand(project);
     if (deleteRemote && branchName && remoteName && options?.network) {
       await runBoundRemoteBranchDelete({
         branch: branchName,
@@ -871,6 +885,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
     const raw = await git.worktree.remove(projectDirectory, {
       directory: worktree.path,
       deleteLocalBranch,
+      teardownCommand,
     });
     if (!raw?.success) {
       throw new Error('Worktree removal failed');

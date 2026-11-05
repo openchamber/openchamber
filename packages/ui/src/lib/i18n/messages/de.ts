@@ -2770,6 +2770,7 @@ export const dict = {
   'projects.sharedTrust.title': 'Die im Repository gespeicherten Befehle ausführen?',
   'projects.sharedTrust.description': '{path} in diesem Repository definiert Befehle, die auf diesem Rechner laufen. Einmal vertrauen, und OpenChamber fragt erst wieder, wenn sie sich ändern.',
   'projects.sharedTrust.setupCommands': 'Worktree-Setup-Befehle',
+  'projects.sharedTrust.teardownCommands': 'Worktree-Aufräumbefehle',
   'projects.sharedTrust.actions': 'Aktionen',
   'projects.sharedTrust.skip': 'Diesmal nicht',
   'projects.sharedTrust.trust': 'Vertrauen und ausführen',

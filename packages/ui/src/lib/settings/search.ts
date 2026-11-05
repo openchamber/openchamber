@@ -1126,6 +1126,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['worktree', 'setup commands', 'shared', 'team', 'only mine'],
   },
   {
+    id: 'projects.worktree.teardown',
+    page: 'projects',
+    titleKey: 'settings.openchamber.worktrees.teardown.title',
+    keywords: ['worktree', 'teardown', 'cleanup', 'delete', 'docker', 'stop'],
+  },
+  {
     id: 'projects.environment',
     page: 'projects',
     titleKey: 'settings.projects.environment.title',

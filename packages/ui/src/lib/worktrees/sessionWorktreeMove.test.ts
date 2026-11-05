@@ -150,6 +150,9 @@ mock.module('@/lib/gitApi', () => ({
 mock.module('@/lib/openchamberConfig', () => ({
   substituteCommandVariables: (command: string) => command,
 }));
+mock.module('@/lib/sharedTrustConfirmation', () => ({
+  resolveWorktreeTeardownCommands: async () => [],
+}));
 
 mock.module('@/lib/worktreeSessionCreator', () => ({
   createQuickWorktree: mock((project: ProjectRef, options: CreateQuickWorktreeOptions) => {

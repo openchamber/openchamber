@@ -2976,6 +2976,7 @@ export const dict = {
   'projects.sharedTrust.title': 'להריץ את הפקודות השמורות במאגר זה?',
   'projects.sharedTrust.description': '{path} במאגר זה מגדיר פקודות שרצות במחשב זה. אחרי אישור אחד, OpenChamber ישאל שוב רק כשהן ישתנו.',
   'projects.sharedTrust.setupCommands': 'פקודות הגדרה של עץ העבודה',
+  'projects.sharedTrust.teardownCommands': 'פקודות ניקוי של עץ העבודה',
   'projects.sharedTrust.actions': 'פעולות',
   'projects.sharedTrust.skip': 'לא הפעם',
   'projects.sharedTrust.trust': 'אשר והרץ',

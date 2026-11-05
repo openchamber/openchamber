@@ -37,6 +37,9 @@ Onderdelen uit de repository krijgen het label **In repo**. Met **Voor mij verbe
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ Onderdelen uit de repository krijgen het label **In repo**. Met **Voor mij verbe
 Alleen `version` is verplicht. Alle andere sleutels zijn optioneel. OpenChamber schrijft alleen sleutels die iets bevatten.
 
 `setupWorktree` bevat de shell-opdrachten die OpenChamber direct na het maken van een worktree daarin op volgorde uitvoert. Gebruik `$ROOT_PROJECT_PATH` voor het pad naar de hoofdcheckout. Met `setupWorktreeWait: true` wacht OpenChamber op deze opdrachten voordat het een sessie in de worktree start.
+
+`teardownWorktree` bevat de shell-opdrachten die OpenChamber vlak voor het verwijderen of archiveren van een worktree daarin op volgorde uitvoert, bijvoorbeeld `docker compose down` voor een stack die de worktree heeft gestart. Mislukt er een, dan blijft de worktree bestaan en toont OpenChamber de fout van de opdracht. Opdrachten uit de repository worden eerst uitgevoerd, daarna uw eigen opdrachten, ook als u alleen uw eigen inrichtingsopdrachten gebruikt. Ze krijgen dezelfde vertrouwensvraag als inrichtingsopdrachten.
 
 `projectActions` bevat de acties van het project, die u start vanuit Work Status, het dialoogvenster voor projectacties en het opdrachtenpalet. `id`, `name` en `command` zijn verplicht. `icon` is optioneel; zonder waarde verschijnt een afspeelpictogram. Bekende namen zijn `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` en `file`. Met `autoOpenUrl: true` opent u het adres dat de opdracht toont. Zie [Voorbeeldweergave en ontwikkelservers](/nl/preview/). `platforms` beperkt de actie tot `macos`, `linux` of `windows`. `runIn: "parent"` voert de actie uit in de hoofdcheckout in plaats van in de huidige worktree.
 

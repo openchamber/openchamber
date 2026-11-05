@@ -3090,6 +3090,7 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.title': 'Uruchomić polecenia zapisane w tym repozytorium?',
   'projects.sharedTrust.description': '{path} w tym repozytorium definiuje polecenia uruchamiane na tym komputerze. Zaufaj raz, a OpenChamber zapyta ponownie tylko wtedy, gdy się zmienią.',
   'projects.sharedTrust.setupCommands': 'Polecenia konfiguracji worktree',
+  'projects.sharedTrust.teardownCommands': 'Polecenia sprzątania worktree',
   'projects.sharedTrust.actions': 'Akcje',
   'projects.sharedTrust.skip': 'Nie tym razem',
   'projects.sharedTrust.trust': 'Zaufaj i uruchom',

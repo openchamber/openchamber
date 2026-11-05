@@ -1,4 +1,5 @@
 import { OpenCode } from '@opencode/client';
+import { z } from 'zod';
 import * as gitService from './gitService';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
@@ -179,7 +180,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
 
       if (normalizedMethod === 'DELETE') {
         const removePayload = payload as {
-          body?: { directory?: string; deleteLocalBranch?: boolean };
+          body?: { directory?: string; deleteLocalBranch?: boolean; teardownCommand?: unknown };
           directory?: string;
           deleteLocalBranch?: boolean;
         };
@@ -195,6 +196,7 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         const removed = await gitService.removeWorktree(directory!, {
           directory: worktreeDirectory,
           deleteLocalBranch: removePayload?.body?.deleteLocalBranch === true || removePayload?.deleteLocalBranch === true,
+          teardownCommand: z.string().safeParse(removePayload?.body?.teardownCommand).data,
           disposeInstance: createWorktreeInstanceDisposer(ctx),
         });
         return { id, type, success: true, data: { success: Boolean(removed) } };

@@ -18,13 +18,13 @@ that writes it:
 | Keys | Owner | Reached through |
 |---|---|---|
 | `version`, `scheduledTasks`, `scheduledWorktreeCleanups` | `project-config.js` (scheduled-task runtime) | `/api/projects/:projectId/scheduled-tasks/*` and internal cleanup recovery |
-| `setup-worktree`, `setup-worktree-wait`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
+| `setup-worktree`, `setup-worktree-wait`, `teardownWorktree`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
 
 Notes, todos, and plans moved out of this file to `packages/web/server/lib/project-context`.
 A project's environment variables and environment command are not in this file either: values can be secrets, so they live in `environment.json` (mode 0600, `packages/web/server/lib/environment`).
 
 A second, optional source is the team's shared file, `<repo>/.openchamber/project.json`
-(`version: 1`; `setupWorktree`, `setupWorktreeWait`, `projectActions`, `draftStarters`,
+(`version: 1`; `setupWorktree`, `setupWorktreeWait`, `teardownWorktree`, `projectActions`, `draftStarters`,
 `plansDir`, and `magicPrompts`, which `../magic-prompts` owns). The server reads it from the checkout the project id names
 (`projectPathFromId`). `GET /api/projects/:projectId/config`
 returns one merged view: what runs at the top level, plus `shared` and `personal`
@@ -34,6 +34,7 @@ blocks so a page can edit the personal file without copying a teammate's entry i
 |---|---|
 | `setupWorktree` | shared first, then personal; personal `setupWorktreeMode: "replace"` uses the personal list only |
 | `setupWorktreeWait` | personal when the personal file sets it, else shared, else `false` |
+| `teardownWorktree` | shared first, then personal; `setupWorktreeMode` does not apply, so a user who skips the team's setup still stops what the team's setup may have started |
 | `projectActions` | union by `id`; a personal action replaces the shared one with the same id; ids in personal `hiddenSharedActionIds` are dropped; every entry carries `source` |
 | `projectActionsPrimaryId` | personal only |
 | `draftStarters` | union by `type:name`, shared first, every entry carries `source` |
@@ -79,9 +80,11 @@ and removes the file when only `version` is left.
 Shared setup commands and shared actions run on the machine of whoever pulls
 the repo, so they run only after the user has seen them. The view carries
 `trust: { hash, trusted }`: `hash` is `sharedTrustHashOf(shared)`, a SHA-256
-over the executable parts (`setupWorktree` and each action's `id`, `command`,
-`runIn`, actions sorted by id; names and icons do not count), or `null` when
-nothing executes. `trusted` is true when nothing executes or the personal
+over the executable parts (`setupWorktree`, `teardownWorktree` when it is not
+empty, and each action's `id`, `command`, `runIn`, actions sorted by id; names
+and icons do not count), or `null` when nothing executes. An empty teardown list
+stays out of the hashed document, so an answer recorded before teardown
+commands existed still matches. `trusted` is true when nothing executes or the personal
 file's `sharedTrust.hash` equals the current hash, so a pull that changes a
 command brings the prompt back. The client records an answer with a PUT of
 `sharedTrustHash` (`null` forgets it). The prompt itself lives in the shared

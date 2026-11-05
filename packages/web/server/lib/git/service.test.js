@@ -2071,6 +2071,32 @@ describe('createWorktree', () => {
     expect(runGit(repo, ['diff', '--name-only', archived.head, archived.commit]).trim()).toBe('');
   });
 
+  it('removes a worktree whose bootstrap failed without its teardown command, since setup never ran there', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    const hydrateCheckout = vi.fn(async () => ({
+      status: 'cancelled',
+      submodules: [{ path: 'vendor/slow', status: 'cancelled', error: { code: 'TIMEOUT', message: 'Checkout hydration timed out' } }],
+      lfs: [],
+    }));
+    const bootstrapStore = createWorktreeBootstrapStore({ filePath: path.join(createTempDir(), 'bootstrap.json') });
+    const created = await createWorktree(repo, {
+      mode: 'new', branchName: 'feature/never-set-up', worktreeName: 'never-set-up',
+      returnAfterDirectoryCreated: true,
+    }, { hydrateCheckout, bootstrapStore });
+    await expect.poll(
+      async () => (await getWorktreeBootstrapStatus(created.path, { bootstrapStore })).status,
+      { timeout: 5_000 },
+    ).toBe('failed');
+
+    await expect(removeWorktree(repo, { directory: created.path, teardownCommand: 'exit 1' }, { bootstrapStore })).resolves.toBe(true);
+    expect(fs.existsSync(created.path)).toBe(false);
+  });
+
   it('hydrates a checkout made from a local branch through the branch\'s own remote', async () => {
     if (!canRunGit()) return;
     const repo = createTempDir();
@@ -4734,6 +4760,71 @@ describe('removeWorktree', () => {
     expect(fs.existsSync(metadata)).toBe(false);
   });
 
+  it('runs the teardown command inside the worktree first, and keeps the worktree when it fails', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const scripts = createTempDir();
+    const worktree = path.join(createTempDir(), 'with-teardown');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'teardown', worktree]);
+    const marker = path.join(scripts, 'teardown-cwd.txt');
+    const failing = path.join(scripts, 'fail.cjs');
+    const recording = path.join(scripts, 'record.cjs');
+    fs.writeFileSync(failing, "process.stderr.write('stack still running\\n'); process.exit(3);\n");
+    fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.cwd());\n`);
+    const run = (script) => `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+    const disposeInstance = vi.fn();
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: run(failing), disposeInstance }))
+      .rejects.toThrow(/teardown command failed, so the worktree was kept: [\s\S]*stack still running/);
+    expect(fs.existsSync(path.join(worktree, '.git'))).toBe(true);
+    expect(runGit(repo, ['worktree', 'list', '--porcelain'])).toContain('branch refs/heads/teardown');
+    expect(disposeInstance).not.toHaveBeenCalled();
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: run(recording), disposeInstance })).resolves.toBe(true);
+    expect(fs.readFileSync(marker, 'utf8')).toBe(path.join(fs.realpathSync(path.dirname(worktree)), 'with-teardown'));
+    expect(fs.existsSync(worktree)).toBe(false);
+  });
+
+  it('gives the teardown command no input to wait for', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'reads-stdin');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'reads-stdin', worktree]);
+    // Waits for the end of its input, as a command asking a question would.
+    const reading = path.join(createTempDir(), 'read.cjs');
+    fs.writeFileSync(reading, "process.stdin.resume(); process.stdin.on('end', () => process.exit(0));\n");
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(reading)}` }))
+      .resolves.toBe(true);
+    expect(fs.existsSync(worktree)).toBe(false);
+  }, 10_000);
+
+  it('skips the teardown command when the worktree folder is already gone', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'folder-gone');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'folder-gone', worktree]);
+    fs.rmSync(worktree, { recursive: true, force: true });
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: 'exit 1' })).resolves.toBe(true);
+    expect(runGit(repo, ['worktree', 'list', '--porcelain'])).not.toContain('folder-gone');
+  });
+
   const canRunGitAnnex = () => {
     try {
       execFileSync('git-annex', ['version'], { stdio: 'ignore', timeout: 10_000 });
@@ -4992,6 +5083,27 @@ describe('worktree archives', () => {
     await expect(restoreWorktreeArchive(linked, { id: 'gone' })).resolves.toEqual({ id: 'gone', conflicts: false });
     expect(runGit(linked, ['status', '--porcelain']).trim()).toBe('');
     expect(await listWorktreeArchives(repo)).toEqual([]);
+  });
+
+  it('runs the teardown command before the snapshot, and archives nothing when it fails', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked } = createArchivableWorktree();
+    const scripts = createTempDir();
+    const failing = path.join(scripts, 'fail.cjs');
+    const stopping = path.join(scripts, 'stop.cjs');
+    fs.writeFileSync(failing, "process.stderr.write('stack still running\\n'); process.exit(3);\n");
+    fs.writeFileSync(stopping, "require('fs').writeFileSync('stopped.txt', 'stopped\\n');\n");
+    const run = (script) => `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+
+    await expect(archiveWorktree(repo, { directory: linked, id: 't1', teardownCommand: run(failing) })).rejects.toThrow('stack still running');
+    expect(await listWorktreeArchives(repo)).toEqual([]);
+    expect(fs.readFileSync(path.join(linked, 'new.txt'), 'utf8')).toBe('untracked\n');
+
+    await archiveWorktree(repo, { directory: linked, id: 't2', teardownCommand: run(stopping) });
+    expect(fs.existsSync(linked)).toBe(false);
+    runGit(repo, ['worktree', 'add', linked, 'feature/task']);
+    await expect(restoreWorktreeArchive(linked, { id: 't2' })).resolves.toEqual({ id: 't2', conflicts: false });
+    expect(fs.readFileSync(path.join(linked, 'stopped.txt'), 'utf8')).toBe('stopped\n');
   });
 
   it('refuses a worktree that lost only its .git file, keeping its files out of a partial archive', async () => {

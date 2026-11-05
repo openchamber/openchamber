@@ -47,6 +47,11 @@ mock.module('@/lib/openchamberConfig', () => ({
   substituteCommandVariables: (command: string) => command,
 }));
 
+let teardownCommands: string[] = [];
+mock.module('@/lib/sharedTrustConfirmation', () => ({
+  resolveWorktreeTeardownCommands: async () => teardownCommands,
+}));
+
 mock.module('@/components/ui', () => ({
   toast: {
     warning: (message: string) => warningToasts.push(message),
@@ -591,6 +596,8 @@ describe('worktreeManager list invalidation', () => {
         expect(isWorktreeRemoving(target.path)).toBe(true);
         expect(sessionState.availableWorktrees).toEqual([target]);
 
+        // The teardown commands resolve before git is asked.
+        await new Promise((resolve) => setTimeout(resolve, 0));
         answerGit({ success: true });
         await removal;
         expect(isWorktreeRemoving(target.path)).toBe(false);
@@ -608,6 +615,17 @@ describe('worktreeManager list invalidation', () => {
         expect(sessionState.availableWorktrees).toEqual([target]);
       } finally {
         removeImplementation = undefined;
+      }
+    });
+
+    test('the teardown commands go to the server as one chain that stops at the first failure', async () => {
+      teardownCommands = ['docker compose down', ' rm -f .pid '];
+      removeCalls.length = 0;
+      try {
+        await removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target);
+        expect(removeCalls.map((call) => call.payload.teardownCommand)).toEqual(['docker compose down && rm -f .pid']);
+      } finally {
+        teardownCommands = [];
       }
     });
   });

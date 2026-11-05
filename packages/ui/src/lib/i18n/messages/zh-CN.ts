@@ -3028,6 +3028,7 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.title': '运行此仓库中存储的命令？',
   'projects.sharedTrust.description': '此仓库中的 {path} 定义了会在本机运行的命令。信任一次后，只有当命令变更时 OpenChamber 才会再次询问。',
   'projects.sharedTrust.setupCommands': '工作树设置命令',
+  'projects.sharedTrust.teardownCommands': '工作树清理命令',
   'projects.sharedTrust.actions': '操作',
   'projects.sharedTrust.skip': '这次不运行',
   'projects.sharedTrust.trust': '信任并运行',

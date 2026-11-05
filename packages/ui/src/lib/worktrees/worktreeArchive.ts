@@ -101,6 +101,8 @@ export async function archiveWorktreeWork(input: {
   sessions: readonly Session[];
   /** The name the sidebar showed for the work, kept when the worktree has no task title. */
   title?: string;
+  /** False for an archive nobody started by hand; see `archiveProjectWorktree`. */
+  askForTrust?: boolean;
 }): Promise<void> {
   const sessionIds = input.sessions.map((session) => session.id);
   let partial: Error | null = null;
@@ -115,7 +117,12 @@ export async function archiveWorktreeWork(input: {
           throw new Error(`Could not archive ${sessionIds.length - archivedIds.length} session(s)`);
         }
         try {
-          await archiveProjectWorktree(input.project, input.worktree, { id: newArchiveId(), sessionIds: archivedIds, title: input.title });
+          await archiveProjectWorktree(
+            input.project,
+            input.worktree,
+            { id: newArchiveId(), sessionIds: archivedIds, title: input.title },
+            { askForTrust: input.askForTrust },
+          );
         } catch (error) {
           if (!(error instanceof GitWorktreeRequestError) || error.code !== 'WORKTREE_ARCHIVE_PARTIAL') throw error;
           partial = error;

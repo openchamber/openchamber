@@ -2751,6 +2751,7 @@ export const dict = {
   'projects.sharedTrust.title': 'Exécuter les commandes enregistrées dans ce dépôt ?',
   'projects.sharedTrust.description': '{path} dans ce dépôt définit des commandes qui s\'exécutent sur cette machine. Faites-leur confiance une fois, et OpenChamber ne redemandera que si elles changent.',
   'projects.sharedTrust.setupCommands': 'Commandes de configuration du worktree',
+  'projects.sharedTrust.teardownCommands': 'Commandes de nettoyage du worktree',
   'projects.sharedTrust.actions': 'Actions',
   'projects.sharedTrust.skip': 'Pas cette fois',
   'projects.sharedTrust.trust': 'Faire confiance et exécuter',

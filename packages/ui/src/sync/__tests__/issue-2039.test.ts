@@ -380,6 +380,7 @@ mock.module("@/lib/openchamberConfig", () => ({
 }))
 mock.module("@/lib/sharedTrustConfirmation", () => ({
   resolveWorktreeSetupCommands: async () => [],
+  resolveWorktreeTeardownCommands: async () => [],
 }))
 
 mock.module("@/lib/worktrees/worktreeBootstrap", () => ({

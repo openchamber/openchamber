@@ -307,6 +307,7 @@ export const createVSCodeGitAPI = (): GitAPI => ({
       body: {
         directory: payload.directory,
         deleteLocalBranch: payload.deleteLocalBranch === true,
+        teardownCommand: payload.teardownCommand,
       },
     });
   },
@@ -493,6 +494,7 @@ export const createVSCodeGitAPI = (): GitAPI => ({
         body: {
           directory: payload.directory,
           deleteLocalBranch: payload.deleteLocalBranch === true,
+          teardownCommand: payload.teardownCommand,
         },
       });
     },

@@ -854,6 +854,8 @@ export interface CreateGitWorktreePayload {
 export interface RemoveGitWorktreePayload {
   directory: string;
   deleteLocalBranch?: boolean;
+  /** Runs inside the worktree before anything is removed; a failure keeps the worktree. */
+  teardownCommand?: string;
   /**
    * Releases the OpenCode instance that served the worktree while its path
    * still resolves. The bridge injects it; the webview payload never carries it.
@@ -1464,46 +1466,39 @@ const isBranchKeptOnWorktreeRemoval = async (primaryWorktree: string, branchName
   });
 };
 
-const runWorktreeStartCommand = async (directory: string, command: string): Promise<{ success: boolean; message?: string; stdout?: string; stderr?: string }> => {
+// Mirrors the server: `timeoutMs` 0 means no limit, and stdin is closed
+// because nobody can answer a prompt from these commands.
+const runWorktreeStartCommand = async (
+  directory: string,
+  command: string,
+  { timeoutMs = 0 }: { timeoutMs?: number } = {},
+): Promise<{ success: boolean; message?: string; stdout?: string; stderr?: string }> => {
   const text = String(command || '').trim();
   if (!text) {
     return { success: true };
   }
 
-  const env = await buildGitEnv();
-  if (process.platform === 'win32') {
-    try {
-      const { stdout, stderr } = await execFileAsync('cmd', ['/c', text], {
-        cwd: directory,
-        env,
-        maxBuffer: 20 * 1024 * 1024,
-      });
-      return { success: true, stdout: String(stdout || ''), stderr: String(stderr || '') };
-    } catch (error) {
-      const err = error as { stdout?: string; stderr?: string; message?: string };
-      return {
-        success: false,
-        stdout: err.stdout,
-        stderr: err.stderr,
-        message: String(err.message || err.stderr || err.stdout || 'Failed to run start command').trim(),
-      };
-    }
-  }
-
+  const windows = process.platform === 'win32';
+  const run = execFileAsync(windows ? 'cmd' : 'bash', windows ? ['/c', text] : ['-lc', text], {
+    cwd: directory,
+    env: await buildGitEnv(),
+    maxBuffer: 20 * 1024 * 1024,
+    timeout: timeoutMs,
+  });
+  run.child.stdin?.end();
   try {
-    const { stdout, stderr } = await execFileAsync('bash', ['-lc', text], {
-      cwd: directory,
-      env,
-      maxBuffer: 20 * 1024 * 1024,
-    });
+    const { stdout, stderr } = await run;
     return { success: true, stdout: String(stdout || ''), stderr: String(stderr || '') };
   } catch (error) {
-    const err = error as { stdout?: string; stderr?: string; message?: string };
+    const err = error as { stdout?: string; stderr?: string; message?: string; killed?: boolean; code?: unknown };
+    const timedOut = timeoutMs > 0 && err.killed === true && err.code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
     return {
       success: false,
       stdout: err.stdout,
       stderr: err.stderr,
-      message: String(err.message || err.stderr || err.stdout || 'Failed to run start command').trim(),
+      message: timedOut
+        ? `${text} did not finish within ${Math.round(timeoutMs / 1000)} seconds`
+        : String(err.message || err.stderr || err.stdout || 'Failed to run start command').trim(),
     };
   }
 };
@@ -2316,6 +2311,7 @@ export async function waitForWorktreeRemoval(directory: string): Promise<void> {
 // failure is retried briefly before it is reported.
 const WORKTREE_BUSY_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
 const WORKTREE_BUSY_MESSAGE = 'The worktree folder is still in use by another process (a running session, terminal or editor). Stop it and try again.';
+const WORKTREE_TEARDOWN_TIMEOUT_MS = 5 * 60 * 1000;
 
 // Only Windows locks a folder that is open elsewhere; on other platforms the
 // same words mean a real permission problem and are reported as they are.
@@ -2430,6 +2426,17 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
+  }
+
+  // Mirrors the server: teardown runs while the worktree and its OpenCode
+  // instance are intact, so a failing command leaves both as they were; a
+  // checkout whose bootstrap failed never ran its setup commands.
+  const bootstrapFailed = worktreeBootstrapState.get(toBootstrapStateKey(matchedEntry.worktree))?.status === WORKTREE_BOOTSTRAP_FAILED;
+  if (!bootstrapFailed && await checkPathExists(matchedEntry.worktree)) {
+    const teardown = await runWorktreeStartCommand(matchedEntry.worktree, input?.teardownCommand ?? '', { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
+    if (!teardown.success) {
+      throw new Error(`Worktree teardown command failed, so the worktree was kept: ${teardown.message || 'the command exited with an error'}`);
+    }
   }
 
   const settleRemoval = trackWorktreeRemoval(targetCanonical);

@@ -2976,6 +2976,7 @@ export const dict = {
   'projects.sharedTrust.title': 'هل تريد تشغيل الأوامر المخزنة في هذا المستودع؟',
   'projects.sharedTrust.description': 'يحدد {path} في هذا المستودع أوامر تعمل على هذا الجهاز. ثق بها مرة واحدة، ولن يسألك OpenChamber مجددًا إلا عند تغييرها.',
   'projects.sharedTrust.setupCommands': 'أوامر إعداد شجرة العمل',
+  'projects.sharedTrust.teardownCommands': 'أوامر تنظيف شجرة العمل',
   'projects.sharedTrust.actions': 'الإجراءات',
   'projects.sharedTrust.skip': 'ليس هذه المرة',
   'projects.sharedTrust.trust': 'الثقة والتشغيل',

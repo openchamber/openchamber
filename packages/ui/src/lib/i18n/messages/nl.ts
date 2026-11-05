@@ -3062,6 +3062,7 @@ export const dict = {
   'projects.sharedTrust.title': 'De opdrachten uit deze repository uitvoeren?',
   'projects.sharedTrust.description': '{path} in deze repository bevat opdrachten die op deze machine worden uitgevoerd. Vertrouw ze één keer en OpenChamber vraagt het alleen opnieuw als ze veranderen.',
   'projects.sharedTrust.setupCommands': 'Worktree-setupopdrachten',
+  'projects.sharedTrust.teardownCommands': 'Worktree-opruimopdrachten',
   'projects.sharedTrust.actions': 'Acties',
   'projects.sharedTrust.skip': 'Nu niet',
   'projects.sharedTrust.trust': 'Vertrouwen en uitvoeren',

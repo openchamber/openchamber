@@ -3019,6 +3019,7 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.title": "Виконати команди, збережені в цьому репозиторії?",
   "projects.sharedTrust.description": "{path} у цьому репозиторії містить команди, які виконуються на цьому комп'ютері. Довірте їх один раз, і OpenChamber запитає знову лише коли вони зміняться.",
   "projects.sharedTrust.setupCommands": "Команди налаштування worktree",
+  "projects.sharedTrust.teardownCommands": "Команди очищення worktree",
   "projects.sharedTrust.actions": "Дії",
   "projects.sharedTrust.skip": "Не цього разу",
   "projects.sharedTrust.trust": "Довірити й виконати",

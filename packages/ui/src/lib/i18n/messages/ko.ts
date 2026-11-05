@@ -3062,6 +3062,7 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.title': '이 저장소에 저장된 명령을 실행할까요?',
   'projects.sharedTrust.description': '이 저장소의 {path}에 이 컴퓨터에서 실행되는 명령이 정의되어 있습니다. 한 번 신뢰하면 명령이 바뀔 때만 다시 묻습니다.',
   'projects.sharedTrust.setupCommands': '워크트리 설정 명령',
+  'projects.sharedTrust.teardownCommands': '워크트리 정리 명령',
   'projects.sharedTrust.actions': '작업',
   'projects.sharedTrust.skip': '이번에는 건너뛰기',
   'projects.sharedTrust.trust': '신뢰하고 실행',

@@ -3061,6 +3061,7 @@ export const dict: Record<I18nKey, string> = {
   'projects.sharedTrust.title': 'このリポジトリに保存されたコマンドを実行しますか？',
   'projects.sharedTrust.description': 'このリポジトリの {path} には、このマシンで実行されるコマンドが定義されています。一度信頼すると、変更があった場合のみ再度確認します。',
   'projects.sharedTrust.setupCommands': 'ワークツリーのセットアップコマンド',
+  'projects.sharedTrust.teardownCommands': 'ワークツリーのクリーンアップコマンド',
   'projects.sharedTrust.actions': 'アクション',
   'projects.sharedTrust.skip': '今回は実行しない',
   'projects.sharedTrust.trust': '信頼して実行',

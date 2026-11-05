@@ -3019,6 +3019,7 @@ export const dict: Record<I18nKey, string> = {
   "projects.sharedTrust.title": "¿Ejecutar los comandos guardados en este repositorio?",
   "projects.sharedTrust.description": "{path} en este repositorio define comandos que se ejecutan en esta máquina. Confía una vez y OpenChamber solo volverá a preguntar cuando cambien.",
   "projects.sharedTrust.setupCommands": "Comandos de configuración del worktree",
+  "projects.sharedTrust.teardownCommands": "Comandos de limpieza del worktree",
   "projects.sharedTrust.actions": "Acciones",
   "projects.sharedTrust.skip": "Esta vez no",
   "projects.sharedTrust.trust": "Confiar y ejecutar",

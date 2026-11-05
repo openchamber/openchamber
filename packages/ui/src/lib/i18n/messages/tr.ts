@@ -2880,6 +2880,7 @@ export const dict = {
   'projects.sharedTrust.title': 'Bu depoda saklanan komutlar çalıştırılsın mı?',
   'projects.sharedTrust.description': 'Bu depodaki {path}, bu makinede çalışan komutlar tanımlıyor. Bir kez güvenin; OpenChamber yalnızca değiştiklerinde yeniden sorar.',
   'projects.sharedTrust.setupCommands': 'Worktree kurulum komutları',
+  'projects.sharedTrust.teardownCommands': 'Worktree temizlik komutları',
   'projects.sharedTrust.actions': 'Eylemler',
   'projects.sharedTrust.skip': 'Bu sefer değil',
   'projects.sharedTrust.trust': 'Güven ve çalıştır',

@@ -3062,6 +3062,7 @@ export const dict = {
   'projects.sharedTrust.title': 'Run the commands stored in this repository?',
   'projects.sharedTrust.description': '{path} in this repository defines commands that run on this machine. Trust them once, and OpenChamber asks again only when they change.',
   'projects.sharedTrust.setupCommands': 'Worktree setup commands',
+  'projects.sharedTrust.teardownCommands': 'Worktree teardown commands',
   'projects.sharedTrust.actions': 'Actions',
   'projects.sharedTrust.skip': 'Not this time',
   'projects.sharedTrust.trust': 'Trust and run',

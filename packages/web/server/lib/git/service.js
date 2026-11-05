@@ -2140,38 +2140,31 @@ const isBranchKeptOnWorktreeRemoval = async (primaryWorktree, branchName) => {
   return Object.values(await getRemoteDefaultBranches(git)).includes(branchName);
 };
 
-const runWorktreeStartCommand = async (directory, command) => {
+// `timeoutMs` 0 means no limit. Stdin is closed: nobody can answer a prompt
+// from these commands, and an open pipe would keep one waiting forever.
+const runWorktreeStartCommand = async (directory, command, { timeoutMs = 0 } = {}) => {
   const text = String(command || '').trim();
   if (!text) {
     return { success: true };
   }
 
-  if (process.platform === 'win32') {
-    const result = await execFileAsync('cmd', ['/c', text], {
-      cwd: directory,
-      env: await buildGitEnv(directory),
-      windowsHide: true,
-      maxBuffer: 20 * 1024 * 1024,
-    }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
-      success: false,
-      stdout: error?.stdout,
-      stderr: error?.stderr,
-      message: parseGitErrorText(error),
-    }));
-    return result;
-  }
-
-  const result = await execFileAsync('bash', ['-lc', text], {
+  const windows = process.platform === 'win32';
+  const run = execFileAsync(windows ? 'cmd' : 'bash', windows ? ['/c', text] : ['-lc', text], {
     cwd: directory,
     env: await buildGitEnv(directory),
+    windowsHide: true,
     maxBuffer: 20 * 1024 * 1024,
-  }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
+    timeout: timeoutMs,
+  });
+  run.child.stdin?.end();
+  return run.then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
     success: false,
     stdout: error?.stdout,
     stderr: error?.stderr,
-    message: parseGitErrorText(error),
+    message: timeoutMs > 0 && error?.killed && error?.code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+      ? `${text} did not finish within ${Math.round(timeoutMs / 1000)} seconds`
+      : parseGitErrorText(error),
   }));
-  return result;
 };
 
 // OpenCode owns its own project/sandbox registry. It records a worktree as a
@@ -6653,6 +6646,24 @@ const removeGitWorktreeWhenFree = async (primaryWorktree, worktreePath, targetCa
   }
 };
 
+// The removal request waits for the teardown, so a command that never ends
+// must not hold the worktree in "removing" forever.
+const WORKTREE_TEARDOWN_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Teardown runs before anything is touched, while the worktree and its
+// OpenCode instance are intact, so a failing command leaves both as they
+// were. A folder already gone has nothing left to stop, and a checkout whose
+// bootstrap failed never ran its setup commands.
+const runWorktreeTeardown = async (worktreeDirectory, command) => {
+  if (!(await checkPathExists(worktreeDirectory))) return;
+  const bootstrap = worktreeBootstrapState.get(await toCanonicalBootstrapStateKey(worktreeDirectory));
+  if (bootstrap?.status === WORKTREE_BOOTSTRAP_FAILED) return;
+  const result = await runWorktreeStartCommand(worktreeDirectory, command, { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
+  if (!result.success) {
+    throw new Error(`Worktree teardown command failed, so the worktree was kept: ${result.message || 'the command exited with an error'}`);
+  }
+};
+
 export async function removeWorktree(directory, input = {}, { bootstrapStore } = {}) {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
   if (!targetDirectory) {
@@ -6716,6 +6727,8 @@ export async function removeWorktree(directory, input = {}, { bootstrapStore } =
     await removeManagedOrphan({ registered: false });
     return true;
   }
+
+  await runWorktreeTeardown(matchedEntry.worktree, input?.teardownCommand);
 
   await clearWorktreeBootstrapState(matchedEntry.worktree, bootstrapStore);
   const settleRemoval = trackWorktreeRemoval(targetCanonical);
@@ -6954,6 +6967,8 @@ const archiveRegisteredWorktree = async ({ directory, id, worktreeDirectory, tar
   if (bootstrap?.status === WORKTREE_BOOTSTRAP_FAILED && !bootstrap.hydration) {
     throw new Error('The worktree did not finish setting up, so it cannot be archived. Delete it instead.');
   }
+  // Before the snapshot, so the snapshot holds what the teardown left.
+  await runWorktreeTeardown(worktreeDirectory, input?.teardownCommand);
 
   const branch = entry.branch ?? '';
   // The task title; without one, the name the sidebar showed for the work.

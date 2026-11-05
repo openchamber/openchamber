@@ -1816,7 +1816,8 @@ export function registerGitRoutes(app, {
     }
   });
 
-  app.delete('/api/git/worktrees', async (req, res) => {
+  // A user action, so the teardown command gets the project's current environment, as creation does.
+  app.delete('/api/git/worktrees', userAction(async (req, res) => {
     const { removeWorktree } = await getGitLibraries();
     if (typeof removeWorktree !== 'function') {
       return res.status(501).json({ error: 'Worktree removal is not available' });
@@ -1839,6 +1840,7 @@ export function registerGitRoutes(app, {
       const result = await removeWorktree(directory, {
         directory: worktreeDirectory,
         deleteLocalBranch: req.body?.deleteLocalBranch === true,
+        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
         disposeInstance: canDisposeWorktreeInstance
           ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
           : undefined,
@@ -1850,7 +1852,7 @@ export function registerGitRoutes(app, {
       console.error('Failed to remove worktree:', error);
       res.status(500).json({ error: error.message || 'Failed to remove worktree' });
     }
-  });
+  }));
 
   app.post('/api/git/worktrees/snapshot', async (req, res) => {
     const { snapshotWorktree } = await getGitLibraries();
@@ -1905,6 +1907,7 @@ export function registerGitRoutes(app, {
         id: req.body.id,
         sessionIds: req.body.sessionIds,
         title: req.body.title,
+        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
         disposeInstance: canDisposeWorktreeInstance
           ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
           : undefined,
