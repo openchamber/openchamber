@@ -58,6 +58,7 @@ import {
   takeUsableGuestAuth,
   toPublicGuestAuth,
 } from './oauth.js';
+import { isMentionGuest, resolveGuestMention, searchGuestMentions } from './mentions.js';
 import { proxyGuestRequest } from './request.js';
 import {
   GuestServiceError,
@@ -324,6 +325,32 @@ export const registerGuestRoutes = (app, {
     return findInstalledGuest(id, persistPath);
   };
 
+  // Before the `:id` routes, because `mentions` is a valid panel id shape.
+  app.post('/api/guests/mentions/search', json16, async (req, res) => {
+    const query = typeof req.body?.query === 'string' ? req.body.query.slice(0, 200) : '';
+    const directory = typeof req.body?.directory === 'string' && req.body.directory ? req.body.directory : null;
+    try {
+      const guests = await listInstalledGuests({ persistPath });
+      res.json({ groups: await searchGuestMentions({ guests, query, directory, persistPath }) });
+    } catch (error) {
+      console.error('Failed to search extension mentions:', error);
+      res.status(500).json({ error: 'Failed to search extension mentions' });
+    }
+  });
+
+  app.post('/api/guests/:id/mentions/resolve', json16, async (req, res) => {
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!id) return res.status(400).json({ error: 'BAD_REQUEST' });
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.mentions || !isMentionGuest(guest)) return res.status(404).json({ error: 'NOT_FOUND' });
+      res.json({ text: await resolveGuestMention({ guest, id, persistPath }) });
+    } catch (error) {
+      console.warn(`[mentions] ${req.params.id}: reading a picked row failed (${error?.code ?? 'error'})`);
+      res.status(502).json({ error: 'MENTION_FAILED' });
+    }
+  });
+
   app.get('/api/guests', async (_req, res) => {
     try {
       const guests = await listInstalledGuests({ persistPath });
@@ -534,9 +561,19 @@ export const registerGuestRoutes = (app, {
         if (!allowed.has(key) || typeof value !== 'string') {
           continue;
         }
-        settings[key] = value.trim().slice(0, 2000);
+        const trimmed = value.trim().slice(0, 2000);
+        // The card never holds a stored secret, so an empty field leaves it as it is.
+        if (allowed.get(key).secret && !trimmed) continue;
+        settings[key] = trimmed;
       }
-      const stored = await patchGuestAuth(guest.id, { settings }, authPath);
+      // The card holds no secret, so what it saves never names one to keep:
+      // those stay as stored, read under the store lock.
+      const stored = await patchGuestAuth(guest.id, (current) => ({
+        settings: {
+          ...Object.fromEntries(Object.entries(current?.settings ?? {}).filter(([key]) => allowed.get(key)?.secret)),
+          ...settings,
+        },
+      }), authPath);
       res.json(await toGuestAuthResponse(guest.integration, stored, trackers));
     } catch (error) {
       console.error('Failed to save guest settings:', error);

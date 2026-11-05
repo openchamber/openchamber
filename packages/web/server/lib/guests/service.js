@@ -9,7 +9,6 @@ import {
   GUEST_REQUEST_TIMEOUT_MS,
   OPENCHAMBER_HOST_CALLBACK_URL,
   isGuestRequestPath,
-  serviceProvides,
 } from '@openchamber/sdk';
 
 import { isGuestPackageUnloaded } from './catalog.js';
@@ -347,6 +346,18 @@ const discardRuntime = async (guestId) => {
   }
 };
 
+/**
+ * The extension a callback bearer names: the token its running service was
+ * started with, or `null` for a process no longer running.
+ * @param {string} token
+ */
+export const guestIdOfServiceToken = (token) => {
+  for (const [guestId, runtime] of runtimes) {
+    if (runtime.status !== 'stopped' && runtime.status !== 'failed' && runtime.token === token) return guestId;
+  }
+  return null;
+};
+
 /** Test seam: the pid of a guest's running service, or `null`. */
 export const readServicePid = (guestId) => runtimes.get(guestId)?.child.pid ?? null;
 
@@ -419,7 +430,6 @@ const startGuestService = async ({
   entry,
   socketBindings = [],
   socketOverrides = {},
-  hostCallback = false,
   epoch,
   lifecycle,
 }) => {
@@ -477,11 +487,9 @@ const startGuestService = async ({
   if (Object.keys(socketEnv).length > 0) {
     env.OPENCHAMBER_SERVICE_SOCKETS = JSON.stringify(socketEnv);
   }
-  // Only a service that stands in for a Git host may call OpenChamber back
-  // (`host-callback.js`); every other service never learns the listener.
-  if (hostCallback) {
-    env[OPENCHAMBER_HOST_CALLBACK_URL] = await hostCallbackUrl();
-  }
+  // How the service calls OpenChamber back (`host-callback.js`). The address
+  // alone opens nothing: each route asks for a bearer of its own.
+  env[OPENCHAMBER_HOST_CALLBACK_URL] = await hostCallbackUrl();
   if (cancelled()) {
     throw stoppedError();
   }
@@ -682,8 +690,6 @@ export const openGuestServiceRequest = async ({
       entry: service.entry,
       socketBindings,
       socketOverrides,
-      // A role that sends outbound through the callback listener learns its address; no other service does.
-      hostCallback: serviceProvides(service, 'source-control') || serviceProvides(service, 'notifications') || serviceProvides(service, 'tracker'),
       epoch,
       lifecycle,
     });

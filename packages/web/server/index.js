@@ -130,10 +130,15 @@ import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
 import { createSessionLineage } from './lib/session-lineage.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
-import { beginGuestServiceHost, beginGuestServiceShutdown, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
+import { beginGuestServiceHost, beginGuestServiceShutdown, getServiceStatus, holdGuestService, proxyGuestServiceRequest, stopAllGuestServices } from './lib/guests/service.js';
 import { guestServiceRegistryDir } from './lib/guests/service-registry.js';
-import { findInstalledGuest, listInstalledGuests } from './lib/guests/catalog.js';
+import { findInstalledGuest, listInstalledGuests, setGuestConfigurationNote } from './lib/guests/catalog.js';
 import { createExtensionSessionEvents } from './lib/guests/session-events.js';
+import { createGuestAgentContext } from './lib/guests/agent-context.js';
+import { getGuestAuth, guestAuthPersistPath } from './lib/guests/auth-store.js';
+import { createGuestInstructions } from './lib/guests/instructions.js';
+import { createServiceHostApi } from './lib/guests/service-host-api.js';
+import { createServiceLifetime } from './lib/guests/service-lifetime.js';
 import { extensionsPersistPath } from './lib/guests/persist.js';
 import { createGuestSurfaceRuntime } from './lib/guests/surface.js';
 import { BROWSER_PROVIDER_IDLE_MS, NOTIFICATIONS_OUTBOUND_PATH } from '@openchamber/sdk';
@@ -1145,7 +1150,14 @@ const openCodeSessionClient = (directory) => createOpenCodeClient({
  * asks it — the UI over HTTP, scheduled tasks and agent-dispatched sessions in
  * process — so the answer cannot differ between them.
  */
+const guestInstructions = createGuestInstructions({ dataDir: OPENCHAMBER_DATA_DIR });
+const guestAgentContext = createGuestAgentContext({
+  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  instructions: guestInstructions,
+});
+
 const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
+  readExtensionInstructions: guestAgentContext.instructionText,
   projectContextRuntime,
   agentMemoryRuntime,
   // Called, not captured: the resolver is declared further down, and taking a
@@ -1235,6 +1247,15 @@ const extensionSessionEvents = createExtensionSessionEvents({
   // Both declared further down; only ever called after startup.
   isSessionAutoAccepting: (sessionId, directory, requestId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, requestId),
   isInAutoReview: (sessionId, turnEndedAt) => autoReviewRuntime.speaksFor(sessionId, turnEndedAt),
+});
+
+// Services that run with nobody asking: kept up, or woken on their clock.
+const extensionServiceLifetime = createServiceLifetime({
+  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  proxyServiceRequest: proxyGuestServiceRequest,
+  holdService: holdGuestService,
+  serviceStatus: getServiceStatus,
+  persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR),
 });
 
 const globalMessageStreamHub = createGlobalMessageStreamHub({
@@ -1987,6 +2008,10 @@ const scheduledTaskService = createScheduledTaskService({
   resolvePrimaryWorktreeRoot,
 });
 const openChamberSessionService = createOpenChamberSessionService({
+  onSessionArchived: (sessionID, archivedAt) => extensionSessionEvents.processPayload({
+    type: 'openchamber:session-archived',
+    properties: { sessionID, archivedAt },
+  }),
   chatsScope: scheduledChatsScope,
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -2108,6 +2133,21 @@ const insideSpaceTaskNaming = process.env.OPENCHAMBER_SPACE_TASK_TITLE_FILE && p
     userFile: process.env.OPENCHAMBER_SPACE_USER_TASK_TITLE_FILE,
     announce: broadcastOpenChamberUiEvent,
   }) : null;
+
+const serviceHostApi = createServiceHostApi({
+  listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
+  control: { execute: (...args) => openChamberControlService.execute(...args) },
+  instructions: guestInstructions,
+  readSettings: async (guest) => (await getGuestAuth(guest.id, guestAuthPersistPath(OPENCHAMBER_DATA_DIR)))?.settings ?? {},
+  emitToFrames: (guestId, topic, data) => broadcastOpenChamberUiEvent({
+    type: 'openchamber:guest-service-event',
+    properties: { guestId, topic, data },
+  }),
+  setConfigurationNote: (guestId, message) => {
+    if (setGuestConfigurationNote(guestId, message)) broadcastOpenChamberUiEvent({ type: 'openchamber:guests-changed', properties: {} });
+  },
+});
+serviceHostApi.register();
 
 const openChamberControlService = createOpenChamberControlService({
   chatsScope: scheduledChatsScope,
@@ -2313,6 +2353,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   beginGuestServiceShutdown,
   stopAllGuestServices,
   extensionSessionEvents,
+  extensionServiceLifetime,
   getGuestSurfaceRuntime: () => guestSurfaceRuntime,
   getRealtimeProxyRuntime: () => realtimeProxyRuntime,
   getDictationRuntime: () => dictationRuntime,
@@ -2368,6 +2409,7 @@ async function main(options = {}) {
     agentToolRuntime,
     limitFailoverRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
+    listExtensionSkillDirectories: guestAgentContext.skillDirectories,
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 
@@ -2926,9 +2968,17 @@ async function main(options = {}) {
     openchamberVersion: OPENCHAMBER_VERSION,
     onGuestDeactivated: async (event) => {
       guestSurfaceRuntime?.endForGuest(event.guestId);
+      setGuestConfigurationNote(event.guestId, null);
+      if (event.removed) await guestInstructions.remove(event.guestId);
       return browserControlRouter.handleGuestDeactivated(event);
     },
-    onExtensionSessionEventsChanged: () => extensionSessionEvents.reconcile(),
+    onExtensionSessionEventsChanged: async () => {
+      await Promise.all([
+        extensionSessionEvents.reconcile(),
+        extensionServiceLifetime.reconcile(),
+        managedConfigRuntime?.refreshManagedConfigFile(),
+      ]);
+    },
     extensionNotificationChannels,
     surfaceViewerHeaders: (guestId, viewerId) => guestSurfaceRuntime?.viewerHeaders(guestId, viewerId) ?? null,
     builtInExtensionsDir: options.builtInExtensionsDir,
@@ -3011,6 +3061,8 @@ async function main(options = {}) {
     mergeFollowRuntime,
     workflowRuntime,
   });
+  // Keeps and schedules the services the catalog asks for, after the routes their calls land on.
+  void extensionServiceLifetime.reconcile();
 
   // After bootstrap: the upgrade gate needs the real UI auth controller.
   guestSurfaceRuntime = createGuestSurfaceRuntime({

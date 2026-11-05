@@ -548,6 +548,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     broadcastGlobalUiEvent,
+    onSessionArchived = null,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
     worktreeBootstrapStore,
@@ -619,6 +620,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       type: 'openchamber:session-archived',
       properties: { sessionID, archivedAt },
     });
+    onSessionArchived?.(sessionID, archivedAt);
   };
   const sessionArchive = createSessionArchive({
     store: archiveStore,

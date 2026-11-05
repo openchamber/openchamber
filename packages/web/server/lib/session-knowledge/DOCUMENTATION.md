@@ -34,6 +34,7 @@ source:
 | `openchamber.guidance` | when to link, when to draw a page, where the tools are called |
 | `openchamber.checkout` | the directory and branch the session works on |
 | `openchamber.response-style` | the user's current response style |
+| `openchamber.extensions` | what active extensions add: their UI block components and their instructions (`../guests/agent-context.js`) |
 
 `sync` writes all of them right before a message goes out: the UI awaits it
 before the prompt request, the queue, scheduled tasks and dispatched sessions

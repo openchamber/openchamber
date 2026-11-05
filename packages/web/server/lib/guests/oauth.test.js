@@ -53,10 +53,11 @@ describe('toPublicGuestAuth', () => {
       accessToken: 'tok',
       account: 'ada',
       settings: { 'list-id': '1' },
-    })).toEqual({
+    }, { settings: [{ id: 'list-id', label: 'List' }] })).toEqual({
       connected: true,
       account: 'ada',
-      hasClient: true,
+      hasClient: false,
+      secretsSet: [],
       settings: { 'list-id': '1' },
     });
   });
@@ -477,5 +478,19 @@ describe('saveGuestOAuthClient', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('secret settings', () => {
+  const integration = { settings: [{ id: 'plain', label: 'Plain' }, { id: 'key', label: 'Key', secret: true }] };
+  const entry = { settings: { plain: 'a', key: 'hidden', gone: 'old secret' } };
+
+  test('no frame or card receives a secret, and the card learns one is stored', () => {
+    expect(toPublicGuestAuth(entry, integration)).toMatchObject({ settings: { plain: 'a' }, secretsSet: ['key'] });
+  });
+
+  test('a value stops being public when the package stops declaring it', () => {
+    expect(toPublicGuestAuth(entry, { settings: [{ id: 'plain', label: 'Plain' }] }).settings).toEqual({ plain: 'a' });
+    expect(toPublicGuestAuth(entry, undefined).settings).toEqual({});
   });
 });

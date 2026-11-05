@@ -1,0 +1,151 @@
+---
+name: openchamber-extensions
+description: Build, change or publish an OpenChamber extension.
+disable-model-invocation: true
+---
+
+# Writing an OpenChamber extension
+
+An extension is a folder with a `package.json` that has an `openchamber` block. The user installs the folder once from Settings → Extensions; after that every rebuild reloads live.
+
+This file covers what most extensions need. The full reference is at https://docs.openchamber.dev/sdk/ (the host API at `/sdk/host/`, the drawing kit at `/sdk/ui/`, a whole example at `/sdk/example/`). Read the page you need there before guessing a method or a manifest key.
+
+## Steps
+
+1. Settle three things with the user, skipping any the request already answers: what they want to see and where; whether it is private or public, for others to install; and whether it gets its own new Git repository or stays a local copy. Pick the smallest set of points from *What an extension can add*.
+2. Make a folder outside the project repository, unless the user names one: `~/openchamber-extensions/<id>`. For its own repository, `git init` there, so `package.json` sits at the repository root.
+3. Write `package.json`, the sources, and `service/main.js` if there is a service.
+4. Bundle every page script: `bunx openchamber-guest-bundle panel/main.ts panel/main.js`. A page loads one classic IIFE, because a sandboxed frame cannot load ES modules. No runtime compiles TypeScript.
+5. Tell the user the exact folder to add in Settings → Extensions, then to approve it. Done when the panel or service answers in the running app. Check `GET /health` of a service by starting it with `OPENCHAMBER_SERVICE_PORT` and `OPENCHAMBER_SERVICE_TOKEN` set.
+6. For a public extension, walk the user through *Publishing*.
+
+## package.json
+
+```json
+{
+  "name": "deploys",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=2.6.0" },
+    "contributes": {
+      "panel": { "id": "deploys", "name": "Deploys", "icon": "rocket", "entry": "panel/index.html" }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "latest" }
+}
+```
+
+`version` is required. `panel.id` is kebab-case and is the extension's identity. `icon` is a Remixicon name without `Ri` and `Line` (`git-merge`) or a package `.svg`. `panel.entry` is optional: without it the extension has no rail icon, and `background.entry` runs code unseen.
+
+## What an extension can add
+
+Under `contributes`:
+
+| Key | What the user gets |
+|---|---|
+| `panel` | A tab on the right rail |
+| `page` | A full-screen page, opened from the sidebar menu |
+| `statusSection` | A section in the chat's Work Status panel. `source` makes the app draw it from the service's answers, with no frame |
+| `fileEditors` | Opens matching files in the Files view with your page |
+| `attach` | A row in the composer's + menu that puts a chip on the message |
+| `commands` | A `/name` in the composer that resolves into a chip |
+| `actions` | Menu entries, `where`: `message`, `session`, `selection`, `file`, `diff` |
+| `tools` | How a tool's calls look in the chat, with no code |
+| `blocks` | Components agents write in UI blocks, drawn by your page in the chat |
+| `mentions` | Your service's rows in the composer's `@` menu |
+| `service` | A Node process the app starts, with `keepRunning` and `schedule` |
+| `sessionEvents` | The service hears turns finish or fail, and questions |
+| `sessionControl` | The service starts sessions and sends to them |
+| `instructions` | The service adds to what agents read |
+| `skills` | A folder of skills that reach every agent |
+| `integration` | An account on Settings → Integrations; `request` then calls that API with its token |
+| `capabilities` | `prompt`, `sessions`, `files`, `model`, `shells`: what a page may do |
+| `origins` | https origins a page may fetch from directly |
+
+`service.provides` makes a service stand in for an app role: `browser`, `source-control`, `notifications`, `tracker`, `quota`. Each role has its own manifest block and wire; read the `service-provider` example of that role before writing one.
+
+## A page
+
+```html
+<!doctype html><html><body><div id="root"></div><script src="./main.js"></script></body></html>
+```
+
+```ts
+import { connectHost } from '@openchamber/sdk';
+import { applyHostReady, mountButton } from '@openchamber/sdk/ui';
+
+const host = connectHost();
+const root = document.querySelector('#root')!;
+let mounted = false;
+host.onReady((context) => {
+  applyHostReady(context, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  mountButton(root, {
+    label: 'Run',
+    onClick: () => host.serviceRequest({ method: 'POST', path: '/run' }),
+  });
+});
+```
+
+Build screens from `@openchamber/sdk/ui` so they follow the app's look and every theme. A page runs in a sandbox with no network and no access to the app. Data comes through `host.request` (the integration's API), `host.serviceRequest` (your service), or `origins`.
+
+## A service
+
+```js
+import http from 'node:http';
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+const token = process.env.OPENCHAMBER_SERVICE_TOKEN;
+
+http.createServer(async (request, response) => {
+  if (request.headers.authorization !== `Bearer ${token}`) { response.writeHead(401).end(); return; }
+  if (request.url === '/health') { response.writeHead(200).end('{}'); return; }
+  response.writeHead(404).end();
+}).listen(Number(process.env.OPENCHAMBER_SERVICE_PORT), '127.0.0.1');
+```
+
+Bundle it for Node: `bunx openchamber-guest-bundle --node service/main.ts service/main.js`. Every request carries the bearer, including `/health`, which the host polls for 15 seconds. Listen only on `127.0.0.1`. The service gets no API keys from the user's environment.
+
+`createServiceHost` is the service's way back: `sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.lastReply`, `setInstructions`, `emit` (a page hears it through `host.onServiceEvent`), `readSettings`, `needsConfiguration`.
+
+Services stop when nothing uses them. For one that holds a connection, set `service.keepRunning`. For one that runs on a clock, set `service.schedule: [{ "id": "nightly", "cron": "0 3 * * *" }]` and answer `POST /schedule`. Arbitrary inbound routes do not exist; a service that needs outside events polls or holds its own connection.
+
+## A chat block
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+The agent writes `JiraIssue("OPE-1")` in an `openui-lang` block, and your page draws it in a sandboxed frame, once the block is finished and on screen. Read `host.onBlock((block) => …)` for `block.name` and `block.args`, and call `host.setHeight(px)` when the content changes size.
+
+The arguments are written by a model, so text from a web page or a ticket can steer them. Treat them as untrusted, and do nothing with side effects until the user clicks.
+
+## Publishing
+
+A local copy needs nothing more. An extension in a Git repository installs from its URL in Settings → Extensions, private ones over SSH or with the user's Git account too.
+
+1. Commit the built `.js` files with the sources, because installing never builds. Keep `node_modules` out.
+2. Push to a public repository, with `package.json` at its root and a semver `version`.
+3. Ship an update by raising `version`: Settings offers Update when the repository's version is newer. `#tag` or `#branch` on the install URL pins a channel.
+4. To reach the directory at https://openchamber.dev/extensions, write to feedback@openchamber.dev. Offer the user this letter with the fields filled in, and send it only after they read it:
+
+```text
+Subject: OpenChamber extension for the directory
+
+Extension name:
+Repository URL:
+Category (Workflow / Usage / Monitoring / Preview & files / DevOps / Agent setup / Memory / Providers / Themes):
+What it does:
+```
+
+## Limits worth knowing
+
+- The approval dialog lists what the package asks for, and an update that asks for more asks again.
+- VS Code and the phone load no extensions.
+- In enterprise mode, an extension with a service, a network or skills installs only from an allowed repository.
+- Secrets go to `integration.token` or a settings field with `secret: true`, never into a page.
