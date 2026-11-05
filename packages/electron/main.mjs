@@ -3655,7 +3655,7 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
 const UPDATER_E2E_BUILD = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
   && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
 
-const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().desktopUpdateChannel);
+const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().desktopUpdateChannel, APP_VERSION);
 
 /**
  * Points the updater at the chosen channel's feed; every check re-reads the
