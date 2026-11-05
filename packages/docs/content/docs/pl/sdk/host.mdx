@@ -268,7 +268,7 @@ Agent pisze `JiraIssue("OPE-1")`, a Twoja strona odczytuje wywołanie:
 host.onBlock(({ args }) => draw(args.key));
 ```
 
-Wywołaj `host.setHeight(px)`, gdy treść zmieni rozmiar. Do 4 komponentów na rozszerzenie, ponieważ każda sygnatura to tekst, który czyta każda sesja.
+Wywołaj `host.setHeight(px)` z `ResizeObserver` na elemencie głównym. Ramka wypełnia swoje pole bez paddingu, więc dodaj własny. Do 4 komponentów na rozszerzenie, ponieważ każda sygnatura to tekst, który czyta każda sesja.
 
 Blok może odpowiedzieć agentowi, tak jak robi to przycisk w bloku. Wywołaj `host.answerBlock(text)` po kliknięciu: agent dostaje tekst i zaczyna następną turę. Na blok przypada jedna odpowiedź, a `block.answered` przechowuje ją po przeładowaniu, więc narysuj wtedy blok z udzieloną odpowiedzią.
 
@@ -276,6 +276,8 @@ Blok może odpowiedzieć agentowi, tak jak robi to przycisk w bloku. Wywołaj `h
 host.onBlock(({ args, answered }) => draw(args.key, answered));
 button.onclick = () => host.answerBlock('Close this ticket');
 ```
+
+Ustaw `"answers": true` w komponencie, który to robi. Agenci dostają polecenie, by pytać za jego pomocą zamiast wbudowanego wyboru, gdy pasuje jego opis, a strona czekająca na odpowiedź pomija swój przycisk Wyślij. Pod takim blokiem OpenChamber oferuje to samo pole notatki co w swoich formularzach: agent czyta notatkę razem z twoją odpowiedzią, a sama notatka też jest odpowiedzią.
 
 Argumenty pisze model, więc tekst ze strony internetowej lub zgłoszenia może nimi sterować. Traktuj je jako niezaufane i nie rób niczego z efektami ubocznymi, dopóki użytkownik nie kliknie.
 

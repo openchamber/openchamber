@@ -268,7 +268,7 @@ await host.emit('deploy-finished', { id: 42 });
 host.onBlock(({ args }) => draw(args.key));
 ```
 
-内容大小变化时调用 `host.setHeight(px)`。每个扩展最多 4 个组件，因为每个签名都是每个会话要读取的文本。
+从根元素上的 `ResizeObserver` 调用 `host.setHeight(px)`。iframe 填满自己的框且没有内边距，所以请自行添加。每个扩展最多 4 个组件，因为每个签名都是每个会话要读取的文本。
 
 块可以回答智能体，就像块里的按钮那样。在点击时调用 `host.answerBlock(text)`：智能体收到文本并开始下一轮。每个块只能回答一次，重新加载后 `block.answered` 仍保留这个回答，这时请把块绘制为已回答状态。
 
@@ -276,6 +276,8 @@ host.onBlock(({ args }) => draw(args.key));
 host.onBlock(({ args, answered }) => draw(args.key, answered));
 button.onclick = () => host.answerBlock('Close this ticket');
 ```
+
+请在这样做的组件上设置 `"answers": true`。当组件描述相符时，智能体会被告知用它来提问，而不是用内置选项；等待回答的页面会省略自己的发送按钮。在这样的块下方，OpenChamber 会提供与自身表单相同的备注字段：智能体会连同你的回答一起读取备注，只写备注也算回答。
 
 参数由模型写入，所以网页或工单中的文本可能左右它们。请把它们视为不可信内容，在用户点击之前不要执行任何有副作用的操作。
 

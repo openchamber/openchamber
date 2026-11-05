@@ -308,7 +308,7 @@ The agent writes `JiraIssue("OPE-1")`, and your page reads the call:
 host.onBlock(({ args }) => draw(args.key));
 ```
 
-Call `host.setHeight(px)` when the content changes size. Up to 4 components per extension, since every signature is text each session reads.
+Call `host.setHeight(px)` from a `ResizeObserver` on your root. The frame fills its box with no padding, so add your own. Up to 4 components per extension, since every signature is text each session reads.
 
 A block can answer the agent, as a button in a block does. Call `host.answerBlock(text)` from a click: the agent gets the text and starts its next turn. One answer per block, and `block.answered` holds it after a reload, so draw the block as answered then.
 
@@ -316,6 +316,8 @@ A block can answer the agent, as a button in a block does. Call `host.answerBloc
 host.onBlock(({ args, answered }) => draw(args.key, answered));
 button.onclick = () => host.answerBlock('Close this ticket');
 ```
+
+Set `"answers": true` on a component that does this. Agents are told to ask with it instead of the built-in choice when its description fits, and a page that waits for an answer leaves out its Send button. Under such a block OpenChamber offers the same note field as its own forms: the agent reads the note with your answer, and a note on its own is an answer too.
 
 The arguments are written by a model, so text from a web page or a ticket can steer them. Treat them as untrusted, and do nothing with side effects until the user clicks.
 

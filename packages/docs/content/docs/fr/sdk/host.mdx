@@ -268,7 +268,7 @@ L'agent écrit `JiraIssue("OPE-1")`, et votre page lit l'appel :
 host.onBlock(({ args }) => draw(args.key));
 ```
 
-Appelez `host.setHeight(px)` quand la taille du contenu change. Jusqu'à 4 composants par extension, car chaque signature est du texte que chaque session lit.
+Appelez `host.setHeight(px)` depuis un `ResizeObserver` sur votre élément racine. La frame remplit sa boîte sans padding, ajoutez donc le vôtre. Jusqu'à 4 composants par extension, car chaque signature est du texte que chaque session lit.
 
 Un bloc peut répondre à l'agent, comme le fait un bouton dans un bloc. Appelez `host.answerBlock(text)` depuis un clic : l'agent reçoit le texte et démarre son tour suivant. Une seule réponse par bloc, et `block.answered` la conserve après un rechargement, donc dessinez alors le bloc comme déjà répondu.
 
@@ -276,6 +276,8 @@ Un bloc peut répondre à l'agent, comme le fait un bouton dans un bloc. Appelez
 host.onBlock(({ args, answered }) => draw(args.key, answered));
 button.onclick = () => host.answerBlock('Close this ticket');
 ```
+
+Définissez `"answers": true` sur un composant qui fait cela. Les agents ont pour consigne de poser la question avec lui plutôt qu'avec le choix intégré quand sa description convient, et une page qui attend une réponse omet son bouton Envoyer. Sous un tel bloc, OpenChamber propose le même champ de note que dans ses propres formulaires : l'agent lit la note avec votre réponse, et une note seule est aussi une réponse.
 
 Les arguments sont écrits par un modèle, donc du texte provenant d'une page web ou d'un ticket peut les orienter. Traitez-les comme non fiables, et ne faites rien qui ait des effets de bord avant que l'utilisateur clique.
 

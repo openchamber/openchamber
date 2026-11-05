@@ -292,7 +292,7 @@ De agent schrijft `JiraIssue("OPE-1")`, en uw pagina leest de aanroep:
 host.onBlock(({ args }) => draw(args.key));
 ```
 
-Roep `host.setHeight(px)` aan wanneer de inhoud van grootte verandert. Maximaal 4 componenten per extensie, omdat elke handtekening tekst is die elke sessie leest.
+Roep `host.setHeight(px)` aan vanuit een `ResizeObserver` op uw root-element. Het frame vult zijn vak zonder padding, dus voeg uw eigen padding toe. Maximaal 4 componenten per extensie, omdat elke handtekening tekst is die elke sessie leest.
 
 Een blok kan de agent antwoorden, zoals een knop in een blok dat doet. Roep `host.answerBlock(text)` aan vanuit een klik: de agent krijgt de tekst en start zijn volgende beurt. Eén antwoord per blok, en `block.answered` bewaart het na herladen, dus teken het blok dan als beantwoord.
 
@@ -300,6 +300,8 @@ Een blok kan de agent antwoorden, zoals een knop in een blok dat doet. Roep `hos
 host.onBlock(({ args, answered }) => draw(args.key, answered));
 button.onclick = () => host.answerBlock('Close this ticket');
 ```
+
+Stel `"answers": true` in op een component die dit doet. Agenten krijgen de instructie ermee te vragen in plaats van met de ingebouwde keuze wanneer de beschrijving past, en een pagina die op een antwoord wacht, laat de knop Versturen weg. Onder zo'n blok biedt OpenChamber hetzelfde notitieveld als bij zijn eigen formulieren: de agent leest de notitie samen met uw antwoord, en een notitie op zich is ook een antwoord.
 
 De argumenten worden door een model geschreven, dus tekst van een webpagina of ticket kan ze sturen. Behandel ze als onbetrouwbaar en doe niets met neveneffecten totdat de gebruiker klikt.
 
