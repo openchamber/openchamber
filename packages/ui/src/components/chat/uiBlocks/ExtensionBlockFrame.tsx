@@ -31,12 +31,14 @@ const clampHeight = (height: number) => Math.min(GUEST_BLOCK_HEIGHT_MAX, Math.ma
  * One call to an extension's block: the extension's own sandboxed page, with
  * the grants of its panel. It mounts once the block is finished and on screen.
  */
-export function ExtensionBlockFrame({ block, args, complete }: {
+export function ExtensionBlockFrame({ block, args, complete, answered, answer }: {
   block: ExtensionBlock;
   args: Record<string, string>;
   complete: boolean;
+  answered: string | null;
+  answer: (name: string, text: string) => Promise<void>;
 }) {
-  const call = React.useMemo<GuestBlockCall>(() => ({ name: block.name, args }), [args, block.name]);
+  const call = React.useMemo<GuestBlockCall>(() => ({ name: block.name, args, answered }), [answered, args, block.name]);
   const heightKey = React.useMemo(() => JSON.stringify([block.guestId, block.name, args]), [args, block.guestId, block.name]);
   const [height, setHeight] = React.useState(() => rememberedHeights.get(heightKey) ?? clampHeight(block.height ?? GUEST_BLOCK_HEIGHT_DEFAULT));
   const [onScreen, setOnScreen] = React.useState(false);
@@ -62,7 +64,11 @@ export function ExtensionBlockFrame({ block, args, complete }: {
     setHeight((current) => (current === clamped ? current : clamped));
   }, [heightKey]);
 
-  const pane = React.useMemo(() => ({ call, entry: block.entry }), [block.entry, call]);
+  const pane = React.useMemo(() => ({
+    call,
+    entry: block.entry,
+    answer: (text: string) => answer(block.name, text),
+  }), [answer, block.entry, block.name, call]);
 
   return (
     <div ref={boxRef} className="oc-box w-full overflow-hidden p-0" style={{ height }}>

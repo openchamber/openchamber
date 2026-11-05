@@ -76,6 +76,8 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 | `onPopoverClosed(listener)` | `{ id, reason }` | Dismissal of this frame's anchored popover. Events go to the owner, are not replayed, and identify the opening being closed |
 | `onLateGenerateResult(listener)` | `LateGenerateResult` | A `generate` answer that came after the frame that asked was gone (the user closed the panel, switched project, or the frame reloaded). `{ request, ok: true, result: { text } }` or `{ request, ok: false, code, error }`; `request` is what that frame sent. Each one goes to one frame of the same extension, surface and project in the same window, once. Requires `features.lateGenerateResults`; see Late generate answers below |
 | `onResolve(handler)`           | `{ command, args }` → `Promise<AttachIssueRequest \| null>` | Answers a `contributes.commands` slash command. Return the chip to attach, `null` for nothing (the user sees a short notice), or throw (the message reaches the user). One handler at a time |
+| `onBlock(listener)` | `GuestBlockCall` | The call a `block` frame draws: `{ name, args, answered }`. Replays, and again once answered. The arguments are written by a model: treat them as untrusted |
+| `onServiceEvent(listener)` | `{ topic, data }` | What the extension's service sent with `emit`. Nothing replays: read the current state from the service first |
 | `onAction(handler)` | `GuestActionItem` → `void \| Promise<void>` | Runs a `mode: "background"` message or session action. Register synchronously after `connectHost`. Await every operation; the frame is removed when the handler settles. Throw to report an error. One handler at a time; returns an unsubscribe function |
 | `onFileOpen(listener)` | `FileEditorDocument` | File editors only: `{ path, name, readOnly, encoding: 'text', content }` or `{ ..., encoding: 'binary', bytes }` (a `Uint8Array`) of the file this frame edits. Replays the last file; the same file pushed again is not repeated. Registering also sends Cmd/Ctrl+S inside the frame to the host's save |
 | `onFileSnapshot(handler)` | `'save' \| 'handoff'` → `FileEditorSnapshot \| Promise<FileEditorSnapshot>` | File editors only: return the whole edited file (`{ content, version }` for a text editor, `{ bytes, version }` for a binary one) and a version of the state it came from. `save` writes it; `handoff` moves it into the host's source view. Throwing fails that save. One handler at a time |
@@ -92,10 +94,10 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 | `locale`       | `string`                 | Host language tag                                                                        |
 | `directory`    | `string                  | null`                                                                                    |
 | `session`      | snapshot or `null`       | Title falls back to `id`. `busy` is live status. `model` is `providerID/id` when present |
-| `surface` | `'panel' \| 'dialog' \| 'page' \| 'background' \| 'status' \| 'file' \| 'popover'` | Where the host mounted this frame |
+| `surface` | `'panel' \| 'dialog' \| 'page' \| 'background' \| 'status' \| 'file' \| 'popover' \| 'block'` | Where the host mounted this frame |
 | `popover` | optional `{ id, data }` | Present in a host-created popover frame. `data` is bounded JSON from the owning frame |
 | `connection`   | `{ connected, account }` | Integration link state                                                                   |
-| `settings`     | `Record<string, string>` | Declared keys only                                                                       |
+| `settings`     | `Record<string, string>` | Declared keys only, without `secret` fields                                                                       |
 | `item`         | `GuestItem               | null`                                                                                    | Set when the user clicked this guest's chip on the composer, or ran one of this guest's `contributes.actions`. Narrow with `isGuestMessageItem` / `isGuestSessionItem` / `isGuestAttachItem` |
 
 
@@ -105,7 +107,7 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 
 `applyHostReady` exposes the computed colors as `--primary-text`, `--success-text`, `--warning-text`, `--error-text`, and `--info-text`, with matching `--oc-*-text` aliases. These are required theme fields. Apply each `onReady` snapshot to update them when the theme changes.
 
-`GuestItem` is `AttachIssueRequest | GuestMessageItem | GuestSessionItem`:
+`GuestItem` is `AttachIssueRequest | GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem`:
 
 ```ts
 type GuestMessageItem = {
@@ -299,6 +301,10 @@ The host keeps the file. It hands you the text (`onFileOpen`), asks for the edit
 `dismiss: true` adds OK. `persistent: true` disables automatic expiry and always adds OK regardless of `dismiss`, so every persistent toast can be closed. Omitted or false `persistent` retains the host's usual duration.
 
 Copy leaves the toast open, reports success on the button, and shows a retryable error when the clipboard fails. OK dismisses only its own toast. Buttons use the host's locale and clipboard helper. They retain only the supplied text and toast identity, work after guest disposal or a runtime switch, and never call back into the extension. The `toast` promise resolves after display acknowledgement, without waiting for a click. Web and desktop use the same behavior; extension support on other runtimes is unchanged.
+
+### Blocks in the chat
+
+`contributes.blocks` adds components agents write in a UI block, drawn by your page with the grants of your panel. `host.onBlock` gives the call. `host.setHeight` sizes the frame, up to `GUEST_BLOCK_HEIGHT_MAX`. `host.answerBlock(text)`, called from a click, hands the agent `text` as a block's button does and starts its next turn; one answer per block, up to `GUEST_BLOCK_ANSWER_MAX` characters, and `answered` shows it after a reload. Without a click, or on a block that cannot take an answer, it rejects with `HOST_REJECTED`.
 
 ### Background actions
 

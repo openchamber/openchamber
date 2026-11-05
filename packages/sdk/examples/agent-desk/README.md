@@ -7,7 +7,7 @@ A service that acts on its own, and everything it can give an agent.
 - `instructions` adds a line to what agents read in every session.
 - `skills` ships `deploy-notes` to every agent while the extension is on.
 - `mentions` adds **Desk notes** to the composer's `@` menu. Picking one attaches its text.
-- `blocks` lets an agent write `DeskChart("Builds", "3,5,8")` in a UI block, drawn by `blocks/chart.html`.
+- `blocks` lets an agent write `DeskChart("Builds", "3,5,8")` in a UI block, drawn by `blocks/chart.html`. Its button answers the agent.
 - `actions` adds entries on selected text, a Files row and selected lines.
 
 Add this folder in Settings → Extensions, allow what it asks for, and open its rail panel.

@@ -112,8 +112,8 @@ type PluginPaneProps = {
   onDismiss?: () => void;
   onAttach?: (issue: AttachIssueRequest) => void;
   onSessionStarted?: () => void;
-  /** `surface="block"` only: what the agent wrote and the page that draws it. */
-  block?: { call: GuestBlockCall; entry: string };
+  /** `surface="block"` only: what the agent wrote, the page that draws it, and how it answers. */
+  block?: { call: GuestBlockCall; entry: string; answer: (text: string) => Promise<void> };
   /** The guest asked for this content height (`setHeight`). The Work Status section and a chat block size their frames from it. */
   onResize?: (height: number) => void;
   onStatusControls?: (binding: GuestStatusControlBinding | null) => void;
@@ -366,6 +366,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onDismissRef.current = onDismiss;
   const onSessionStartedRef = React.useRef(onSessionStarted);
   onSessionStartedRef.current = onSessionStarted;
+  const blockRef = React.useRef(block);
+  blockRef.current = block;
   const onResizeRef = React.useRef(onResize);
   onResizeRef.current = onResize;
   const onStatusControlsRef = React.useRef(onStatusControls);
@@ -885,6 +887,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         },
         resize: (height) => {
           onResizeRef.current?.(height);
+        },
+        answerBlock: (text) => {
+          const answer = blockRef.current?.answer;
+          if (!answer) return Promise.reject(new Error('Only a block in the chat can answer the agent.'));
+          // A frame starts an agent turn only from a click the user made in it.
+          // Activation alone is not that: a click or a key anywhere in the app
+          // activates this window too, so the focus has to be in the frame.
+          const clicked = !navigator.userActivation || navigator.userActivation.isActive;
+          if (!clicked || document.activeElement !== iframeRef.current) return Promise.reject(new Error('answerBlock works only from a click.'));
+          return answer(text);
         },
         resolveResult: (id, payload: ResolveResultPayload) => {
           const waiter = resolveWaitersRef.current.get(id);

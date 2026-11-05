@@ -49,6 +49,7 @@ import {
   HOST_REQUEST_ERROR_CODES,
   type GuestMessage,
   type HostMessage,
+  GUEST_BLOCK_ANSWER_MAX,
 } from './contract.ts';
 import { GUEST_FILE_EDITOR_CONTENT_MAX, GUEST_FILE_EDITOR_VERSION_MAX } from './file-editor.ts';
 
@@ -286,7 +287,7 @@ const readyPayloadSchema = z.object({
   connection: guestConnectionSchema,
   settings: guestSettingsSchema,
   item: guestItemSchema,
-  block: z.object({ name: z.string().min(1), args: z.record(z.string(), z.string()) }).optional(),
+  block: z.object({ name: z.string().min(1), args: z.record(z.string(), z.string()), answered: z.string().nullable() }).optional(),
   popover: z.object({ id: z.string().min(1).max(80), data: guestPopoverDataSchema }).strict().optional(),
   features: z.object({
     deviceStorage: z.literal(true).optional(),
@@ -532,6 +533,12 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
     payload: z.object({
       url: z.string().trim().min(1).max(GUEST_ATTACH_URL_MAX),
     }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('block-answer'),
+    id: z.string().min(1),
+    payload: z.object({ text: z.string().trim().min(1).max(GUEST_BLOCK_ANSWER_MAX) }),
   }),
   z.object({
     ...envelope,

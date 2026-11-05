@@ -22,6 +22,7 @@ import {
   GUEST_FILE_PATH_MAX,
   GUEST_GENERATE_OUTPUT_TOKENS_MAX,
   GUEST_GENERATE_PROMPT_MAX,
+  GUEST_BLOCK_ANSWER_MAX,
   GUEST_GENERATE_SYSTEM_MAX,
   GUEST_GENERATE_TIMEOUT_MS,
   GUEST_REQUEST_TIMEOUT_MS,
@@ -129,6 +130,12 @@ export type HostClient = {
    * The arguments are written by a model: treat them as untrusted.
    */
   onBlock: (listener: (block: GuestBlockCall) => void) => () => void;
+  /**
+   * From a `block` frame, in a click handler: hands the agent `text`, as a
+   * button of a block does, and starts its next turn. One answer per block.
+   * Refused without a click, or when the block cannot take an answer.
+   */
+  answerBlock: (text: string) => Promise<void>;
   /**
    * What the extension's service sends with `createServiceHost(...).emit`.
    * Nothing replays: a frame that opens later hears only what comes after,
@@ -951,6 +958,13 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       id: nextId(ids),
       payload: { sha },
     }) : Promise.reject(new HostRequestError('HOST_REJECTED', 'Commit id must be 7 to 64 hex characters.'))),
+    answerBlock: (text) => request({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'block-answer',
+      id: nextId(ids),
+      payload: { text: text.trim().slice(0, GUEST_BLOCK_ANSWER_MAX) },
+    }),
     openSurface: (surfaceId) => request({
       channel: OPENCHAMBER_SDK_CHANNEL,
       v: OPENCHAMBER_SDK_API_VERSION,

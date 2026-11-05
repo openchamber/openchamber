@@ -9,7 +9,7 @@ if (!root) throw new Error('DeskChart: missing root');
 
 host.onReady((context) => applyHostReady(context, document.documentElement));
 
-host.onBlock(({ args }) => {
+host.onBlock(({ args, answered }) => {
   const values = (args.values ?? '').split(',').map(Number).filter(Number.isFinite);
   const top = Math.max(1, ...values);
   root.replaceChildren();
@@ -24,6 +24,11 @@ host.onBlock(({ args }) => {
     bar.title = String(value);
     bars.append(bar);
   }
-  root.append(title, bars);
+  // An answer goes to the agent only from this click.
+  const next = document.createElement('button');
+  next.textContent = answered ?? 'Explain this';
+  next.disabled = answered !== null;
+  next.addEventListener('click', () => { void host.answerBlock('Explain this chart'); });
+  root.append(title, bars, next);
   void host.setHeight(root.getBoundingClientRect().height + 16);
 });

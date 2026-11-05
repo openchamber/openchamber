@@ -1385,7 +1385,12 @@ const drawn = blockName.extract([
 ]);
 
 /** The active extensions' components, and whether the block is finished: only a finished one mounts their pages. */
-const ExtensionBlocksContext = React.createContext<{ blocks: ExtensionBlocks; complete: boolean }>({ blocks: NO_EXTENSION_BLOCKS, complete: false });
+const ExtensionBlocksContext = React.createContext<{
+  blocks: ExtensionBlocks;
+  complete: boolean;
+  answered: (name: string) => string | null;
+  answer: (name: string, text: string) => Promise<void>;
+}>({ blocks: NO_EXTENSION_BLOCKS, complete: false, answered: () => null, answer: () => Promise.reject(new Error('This block cannot take an answer.')) });
 
 const extensionArgs = (props: Record<string, BlockValue>): Record<string, string> => Object.fromEntries(
   Object.entries(props).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
@@ -1397,7 +1402,7 @@ function Node({ value }: { value: BlockValue }) {
   const extension = node.data ? extensions.blocks.get(node.data.typeName) : undefined;
   const nodeProps = node.data?.props;
   const args = React.useMemo(() => (extension && nodeProps ? extensionArgs(nodeProps) : null), [extension, nodeProps]);
-  if (extension && args) return <ExtensionBlockFrame block={extension} args={args} complete={extensions.complete} />;
+  if (extension && args) return <ExtensionBlockFrame block={extension} args={args} complete={extensions.complete} answered={extensions.answered(extension.name)} answer={extensions.answer} />;
   const name = drawn.safeParse(node.data?.typeName);
   if (!node.success || !name.success) return null;
   const Renderer = renderers[name.data];
@@ -1482,7 +1487,6 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   const salvage = host.kind === 'reply';
   const extensionBlocks = useExtensionBlocks();
   const parsed = React.useMemo(() => parseUiBlock(source, complete, salvage, extensionBlocks), [source, complete, salvage, extensionBlocks]);
-  const extensionContext = React.useMemo(() => ({ blocks: extensionBlocks, complete }), [complete, extensionBlocks]);
   // The kit's variables (series colours, tones) land on the block's root before paint, and follow a theme switch.
   const blockRef = React.useRef<HTMLDivElement>(null);
   React.useInsertionEffect(addKitStyles, []);
@@ -1529,14 +1533,24 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   }), [fields, values]);
   const disabled = !host.submit || !complete || sending || sent;
 
+  // State arrives a render late, and a frame can answer twice within one.
+  // Taken until a send fails: an answered block stays answered.
+  const delivering = React.useRef(false);
   const deliver = React.useCallback((send: () => Promise<void>) => {
+    if (delivering.current) return Promise.resolve(false);
+    delivering.current = true;
     setSending(true);
     setFailed(false);
-    send().then(() => setSent(true), () => setFailed(true)).finally(() => setSending(false));
+    return send().then(() => {
+      setSent(true);
+      return true;
+    }, () => {
+      delivering.current = false;
+      setFailed(true);
+      return false;
+    }).finally(() => setSending(false));
   }, []);
-  const sendReply = React.useCallback((choices: Chosen) => {
-    if (host.kind !== 'reply' || !host.submit) return;
-    const { submit } = host;
+  const replyAnswer = React.useCallback((choices: Chosen) => {
     const answer: UiBlockReplyAnswerData = {
       picks: [],
       values: answerValues,
@@ -1553,8 +1567,40 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
       if (pick.button || pick.note) answer.picks.push(pick);
       else answer.skipped.push(decision);
     }
-    deliver(() => submit(answer, describeUiBlockReplyAnswer(fields, answer)));
-  }, [host, decisions, answerValues, notes, fields, deliver]);
+    return answer;
+  }, [decisions, answerValues, notes]);
+  const sendReply = React.useCallback((choices: Chosen) => {
+    if (host.kind !== 'reply' || !host.submit) return;
+    const { submit } = host;
+    const answer = replyAnswer(choices);
+    void deliver(() => submit(answer, describeUiBlockReplyAnswer(fields, answer)));
+  }, [host, replyAnswer, fields, deliver]);
+
+  // An extension's frame answers for the whole block, along with what the
+  // user already chose or wrote in it, as a button of the block does.
+  const answerFromFrame = React.useCallback(async (name: string, text: string) => {
+    if (disabled || delivering.current || !host.submit) throw new Error('This block cannot take an answer now.');
+    const send = async () => {
+      if (host.kind === 'reply') {
+        const answer = replyAnswer(chosen);
+        answer.picks.unshift({ button: text, value: name });
+        await host.submit?.(answer, describeUiBlockReplyAnswer(fields, answer));
+      } else {
+        const data: UiBlockAnswerData = { button: text, value: name, values: answerValues };
+        const trimmedNote = note.trim();
+        if (trimmedNote) data.note = trimmedNote;
+        await host.submit?.({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data });
+      }
+      setChosen((current) => new Map(current).set(name, text));
+    };
+    if (!await deliver(send)) throw new Error('The answer did not reach the agent.');
+  }, [answerValues, chosen, deliver, disabled, fields, host, note, replyAnswer, t]);
+  const extensionContext = React.useMemo(() => ({
+    blocks: extensionBlocks,
+    complete,
+    answered: (name: string) => chosen.get(name) ?? null,
+    answer: answerFromFrame,
+  }), [answerFromFrame, chosen, complete, extensionBlocks]);
 
   const form = React.useMemo<FormState>(() => ({
     values: answerValues,
@@ -1588,7 +1634,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         if (value) data.value = value;
         if (trimmedNote) data.note = trimmedNote;
         setChosen(new Map([[decision, button]]));
-        deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
+        void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
         return;
       }
       // A press chooses; pressing the chosen button again clears the choice.

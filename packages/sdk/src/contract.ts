@@ -85,7 +85,12 @@ export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'sta
 export type GuestBlockCall = {
   name: string;
   args: Record<string, string>;
+  /** What this frame answered the agent with (`answerBlock`), kept across a reload; `null` before that. */
+  answered: string | null;
 };
+
+/** Characters of the text a block's frame answers the agent with. */
+export const GUEST_BLOCK_ANSWER_MAX = 2_000;
 
 export type GuestConnection = {
   connected: boolean;
@@ -723,6 +728,7 @@ export type GuestHelloMessage = Envelope & { type: 'hello' };
 export type GuestToastMessage = GuestCall<'toast', ToastRequest>;
 export type GuestOpenUrlMessage = GuestCall<'open-url', { url: string }>;
 export type GuestOpenSurfaceMessage = GuestCall<'open-surface', { surfaceId: string }>;
+export type GuestBlockAnswerMessage = GuestCall<'block-answer', { text: string }>;
 export type GuestClipboardWriteMessage = GuestCall<'clipboard-write', { text: string }>;
 export type GuestComposeMessage = GuestCall<'compose', ComposeRequest>;
 export type GuestAttachMessage = GuestCall<'attach', AttachIssueRequest>;
@@ -781,6 +787,7 @@ export type GuestMessage =
   | GuestToastMessage
   | GuestOpenUrlMessage
   | GuestOpenSurfaceMessage
+  | GuestBlockAnswerMessage
   | GuestClipboardWriteMessage
   | GuestComposeMessage
   | GuestAttachMessage

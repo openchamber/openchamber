@@ -121,7 +121,7 @@ Services stop when nothing uses them. For one that holds a connection, set `serv
 "blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
 ```
 
-The agent writes `JiraIssue("OPE-1")` in an `openui-lang` block, and your page draws it in a sandboxed frame, once the block is finished and on screen. Read `host.onBlock((block) => …)` for `block.name` and `block.args`, and call `host.setHeight(px)` when the content changes size.
+The agent writes `JiraIssue("OPE-1")` in an `openui-lang` block, and your page draws it in a sandboxed frame, once the block is finished and on screen. Read `host.onBlock((block) => …)` for `block.name`, `block.args` and `block.answered`, and call `host.setHeight(px)` when the content changes size. From a click, `host.answerBlock(text)` answers the agent and starts its next turn, once per block.
 
 The arguments are written by a model, so text from a web page or a ticket can steer them. Treat them as untrusted, and do nothing with side effects until the user clicks.
 
