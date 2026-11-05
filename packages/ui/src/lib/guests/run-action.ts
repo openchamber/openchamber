@@ -5,10 +5,12 @@ import { create } from 'zustand';
 import type { I18nKey, I18nParams } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { generateUuid } from '@/lib/uuid';
 import type { GuestActionEntry } from './actions.ts';
 import { isGuestActive } from './capabilities.ts';
+import { FRAME_LOAD_TIMEOUT_MS } from './frame-url.ts';
 import { openGuestWithItem } from './dialog-store.ts';
 import { useGuestsStore } from './store.ts';
 
@@ -63,7 +65,9 @@ const runBackgroundAction = (entry: GuestActionEntry, item: GuestActionItem, run
       useGuestActionHostStore.setState((state) => ({ requests: state.requests.filter((request) => request.id !== id) }));
       resolve(authorized ? outcome : { ok: false, reason: 'unavailable' });
     };
-    const timer = setTimeout(() => complete({ ok: false, reason: 'timeout' }), ACTION_TIMEOUT_MS);
+    // Over the relay the hidden frame reads its package first; a slow read is not the action's failure.
+    const budget = getActiveRelayTunnel() ? FRAME_LOAD_TIMEOUT_MS + ACTION_TIMEOUT_MS : ACTION_TIMEOUT_MS;
+    const timer = setTimeout(() => complete({ ok: false, reason: 'timeout' }), budget);
     const unsubscribeRuntime = subscribeRuntimeEndpointChanged(() => complete({ ok: false, reason: 'unavailable' }));
     const unsubscribeCatalog = useGuestsStore.subscribe(() => {
       if (!isActive()) complete({ ok: false, reason: 'unavailable' });

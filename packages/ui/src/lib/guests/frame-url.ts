@@ -5,6 +5,7 @@ import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { isAmbiguousTransportFailure } from '@/lib/relay/transport-error';
 import { loadRelayGuestDocument } from './relay-document';
 
 /**
@@ -40,10 +41,74 @@ const packagePath = (entry: string): string => entry.split('/').map((segment) =>
  * Documents read over the relay, by what the frame's key names (runtime,
  * package revision, grants). A panel loads once, but a chat with several
  * blocks of one extension would read the whole package through the tunnel for
- * each, again on every scroll back.
+ * each, again on every scroll back. A document can be tens of megabytes, so
+ * the bound that matters on a phone is their size, not their number.
  */
 const relayDocuments = new Map<string, string>();
 const RELAY_DOCUMENTS_MAX = 16;
+const RELAY_DOCUMENTS_MAX_CHARS = 32_000_000;
+
+const keepRelayDocument = (key: string, html: string): void => {
+  if (html.length > RELAY_DOCUMENTS_MAX_CHARS) return;
+  relayDocuments.delete(key);
+  relayDocuments.set(key, html);
+  let chars = 0;
+  for (const kept of relayDocuments.values()) chars += kept.length;
+  for (const [oldest, kept] of relayDocuments) {
+    if (relayDocuments.size <= RELAY_DOCUMENTS_MAX && chars <= RELAY_DOCUMENTS_MAX_CHARS) break;
+    relayDocuments.delete(oldest);
+    chars -= kept.length;
+  }
+};
+
+type RelayDocumentRead = { promise: Promise<string>; abort: AbortController; waiting: number };
+
+/** Reads under way, so frames that appear together share one trip through the tunnel. */
+const relayReads = new Map<string, RelayDocumentRead>();
+
+/** One frame going away never cancels a read another frame waits for; the last one does. */
+const joinRelayRead = (key: string, start: (signal: AbortSignal) => Promise<string>, signal?: AbortSignal): Promise<string> => {
+  let read = relayReads.get(key);
+  if (!read) {
+    const abort = new AbortController();
+    const started: RelayDocumentRead = {
+      abort,
+      waiting: 0,
+      promise: start(abort.signal).finally(() => {
+        if (relayReads.get(key) === started) relayReads.delete(key);
+      }),
+    };
+    relayReads.set(key, started);
+    read = started;
+  }
+  const joined = read;
+  joined.waiting += 1;
+  return new Promise((resolve, reject) => {
+    const leave = () => {
+      joined.waiting -= 1;
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      leave();
+      if (joined.waiting === 0) {
+        joined.abort.abort();
+        if (relayReads.get(key) === joined) relayReads.delete(key);
+      }
+      reject(new DOMException('Extension frame owner changed', 'AbortError'));
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    joined.promise.then(resolve, reject).finally(() => {
+      if (!signal?.aborted) leave();
+    });
+  });
+};
+
+/** Past this a load counts as failed and the pane offers another try; a read over the relay can be slow. */
+export const FRAME_LOAD_TIMEOUT_MS = 60_000;
 
 export const resolveGuestFrameUrl = async (
   guestId: string,
@@ -57,19 +122,31 @@ export const resolveGuestFrameUrl = async (
   if (relay) {
     const kept = documentKey ? relayDocuments.get(documentKey) : undefined;
     if (kept) return { kind: 'document', html: kept };
-    const html = await loadRelayGuestDocument(guestId, entry, (path) => {
-      if (getRuntimeKey() !== runtimeKey || getActiveRelayTunnel() !== relay || signal?.aborted) {
-        throw new DOMException('Extension frame owner changed', 'AbortError');
+    const read = async (readSignal?: AbortSignal): Promise<string> => {
+      const assertOwner = () => {
+        if (getRuntimeKey() !== runtimeKey || getActiveRelayTunnel() !== relay || readSignal?.aborted) {
+          throw new DOMException('Extension frame owner changed', 'AbortError');
+        }
+      };
+      const load = () => loadRelayGuestDocument(guestId, entry, (path) => {
+        assertOwner();
+        return runtimeFetch(path, { signal: readSignal });
+      }, origins);
+      // A tunnel that reconnects mid-read loses its streams. Every request here
+      // is a GET, and the next one waits for the channel, so one more read is safe.
+      let html: string;
+      try {
+        html = await load();
+      } catch (error) {
+        if (!isAmbiguousTransportFailure(error)) throw error;
+        assertOwner();
+        html = await load();
       }
-      return runtimeFetch(path, { signal });
-    }, origins);
-    if (getRuntimeKey() !== runtimeKey || getActiveRelayTunnel() !== relay || signal?.aborted) {
-      throw new DOMException('Extension frame owner changed', 'AbortError');
-    }
-    if (documentKey) {
-      relayDocuments.set(documentKey, html);
-      if (relayDocuments.size > RELAY_DOCUMENTS_MAX) relayDocuments.delete(relayDocuments.keys().next().value ?? '');
-    }
+      assertOwner();
+      if (documentKey) keepRelayDocument(documentKey, html);
+      return html;
+    };
+    const html = documentKey ? await joinRelayRead(documentKey, read, signal) : await read(signal);
     return { kind: 'document', html };
   }
   const grant = await mintGuestFrameGrant(guestId, signal);

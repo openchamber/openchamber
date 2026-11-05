@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { resolveGuestFrameUrl, type GuestFrameUrl } from './frame-url';
+import { FRAME_LOAD_TIMEOUT_MS, resolveGuestFrameUrl, type GuestFrameUrl } from './frame-url';
 
 type GuestFrameOptions = {
   /** A read over the relay may be kept and shared by frames with one `instanceKey`. */
@@ -14,8 +14,6 @@ type GuestFrameOptions = {
   origins: readonly string[];
 };
 
-/** Past this a load counts as failed and the pane offers another try; a read over the relay can be slow. */
-const FRAME_LOAD_TIMEOUT_MS = 60_000;
 
 type FrameState =
   | { key: string; status: 'loading' | 'error' }

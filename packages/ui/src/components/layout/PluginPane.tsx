@@ -90,7 +90,7 @@ import { useInputStore } from '@/sync/input-store';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import { useSessionSelector, useSessionStatus } from '@/sync/sync-context';
 import type { Session } from '@/lib/opencode/model';
 import { GuestPopover } from './GuestPopover';
@@ -201,7 +201,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const { t, locale } = useI18n();
   const { currentTheme } = useThemeSystem();
   const effectiveDirectory = useEffectiveDirectory();
-  const selectedSessionId = useSessionUIStore((state) => state.currentSessionId);
+  // A block lives in a chat column, and a pinned column's session is its own.
+  const { sessionId: selectedSessionId } = useChatSessionSelection();
   const directory = popoverHost?.directory ?? pinnedDirectory ?? (backgroundAction ? backgroundAction.item.directory ?? ''
     : surface === 'status' && statusDirectory !== undefined ? statusDirectory ?? '' : effectiveDirectory);
   const statusContextKey = surface === 'status' ? directory : null;
@@ -345,7 +346,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         : surface === 'dialog' && guest.attachEntry ? guest.attachEntry : guest.entry ?? null
     : null);
   const { src, srcDoc, status: frameStatus, retry: retryFrame, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
-    guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled, origins: approvedOrigins, reuseDocument: surface === 'block',
+    guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled, origins: approvedOrigins, reuseDocument: surface === 'block' || headless,
   });
 
   const readyRef = React.useRef(ready);
