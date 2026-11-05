@@ -5,6 +5,7 @@ import http from 'node:http';
 import {
   MENTIONS_RESOLVE_PATH,
   MENTIONS_SEARCH_PATH,
+  MENTION_TITLE_MAX,
   SERVICE_SCHEDULE_PATH,
   createServiceHost,
   readServiceScheduleRequest,
@@ -49,7 +50,7 @@ const route = async (path: string, body: string, res: http.ServerResponse): Prom
   }
   if (path === MENTIONS_SEARCH_PATH) {
     const { query }: MentionsSearchRequest = JSON.parse(body);
-    const items = [...notes.keys()].filter((id) => id.includes(query.toLowerCase())).map((id) => ({ id, title: id, subtitle: notes.get(id) ?? '' }));
+    const items = [...notes.keys()].filter((id) => id.includes(query.toLowerCase())).map((id) => ({ id, title: id, subtitle: (notes.get(id) ?? '').slice(0, MENTION_TITLE_MAX) }));
     json(res, 200, { items });
     return;
   }

@@ -105,6 +105,7 @@ var readServiceScheduleRequest = (body) => {
 var MENTIONS_SEARCH_PATH = "/mentions/search";
 var MENTIONS_RESOLVE_PATH = "/mentions/resolve";
 var MENTIONS_IDLE_MS = 10 * 60000;
+var MENTION_TITLE_MAX = 120;
 class ServiceHostError extends Error {
   code;
   status;
@@ -266,7 +267,7 @@ var route = async (path, body, res) => {
   }
   if (path === MENTIONS_SEARCH_PATH) {
     const { query } = JSON.parse(body);
-    const items = [...notes.keys()].filter((id) => id.includes(query.toLowerCase())).map((id) => ({ id, title: id, subtitle: notes.get(id) }));
+    const items = [...notes.keys()].filter((id) => id.includes(query.toLowerCase())).map((id) => ({ id, title: id, subtitle: (notes.get(id) ?? "").slice(0, MENTION_TITLE_MAX) }));
     json(res, 200, { items });
     return;
   }

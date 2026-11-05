@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 import {
-  MENTIONS_ITEMS_MAX,
   MENTION_ID_MAX,
   MENTION_TEXT_MAX,
   MENTION_TITLE_MAX,
@@ -49,14 +48,12 @@ export const serviceHostCallSchema = z.discriminatedUnion('method', [
   }).strict(),
 ]);
 
-/** The host's parse of a search answer; one that does not parse adds nothing to the menu. */
-export const mentionsSearchResultSchema = z.object({
-  items: z.array(z.object({
-    id: z.string().min(1).max(MENTION_ID_MAX),
-    title: z.string().trim().min(1).max(MENTION_TITLE_MAX),
-    subtitle: z.string().trim().min(1).max(MENTION_TITLE_MAX).optional(),
-    url: z.url({ protocol: /^https?$/ }).max(2_048).optional(),
-  })).max(MENTIONS_ITEMS_MAX),
+/** The host's parse of one row of a search answer; a row that does not parse stays out, the others stay in. */
+export const mentionItemSchema = z.object({
+  id: z.string().min(1).max(MENTION_ID_MAX),
+  title: z.string().trim().min(1).max(MENTION_TITLE_MAX),
+  subtitle: z.string().trim().min(1).max(MENTION_TITLE_MAX).optional(),
+  url: z.url({ protocol: /^https?$/ }).max(2_048).optional(),
 });
 
 /** The host's parse of a picked row. */
