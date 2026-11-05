@@ -9,7 +9,7 @@ type Deferred<T> = {
 const searchRequests: Array<Deferred<Array<{ path: string }>>> = [];
 let runtimeKey = 'runtime-a';
 let runtimeSearch: (() => Promise<Array<{ path: string; preview: string[] }>>) | undefined;
-const runtimeSearchCalls: unknown[] = [];
+const runtimeSearchCalls: Array<{ signal?: AbortSignal }> = [];
 
 const createDeferred = <T>(): Deferred<T> => {
   let resolve!: (value: T) => void;
@@ -36,7 +36,7 @@ mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }))
 mock.module('@/contexts/runtimeAPIRegistry', () => ({
   getRegisteredRuntimeAPIs: () => {
     const search = runtimeSearch;
-    return search ? { files: { search: (payload: unknown) => {
+    return search ? { files: { search: (payload: { signal?: AbortSignal }) => {
       runtimeSearchCalls.push(payload);
       return search();
     } } } : undefined;
@@ -71,9 +71,10 @@ describe('useFileSearchStore', () => {
       indexed,
       { path: '/project/build/ignored.ts', name: 'ignored.ts', relativePath: 'build/ignored.ts', extension: 'ts' },
     ]);
-    expect(runtimeSearchCalls).toEqual([{
+    expect(runtimeSearchCalls).toHaveLength(1);
+    expect(runtimeSearchCalls[0]).toMatchObject({
       directory: '/project', query: 'ts', maxResults: 3, includeHidden: false, respectGitignore: false,
-    }]);
+    });
   });
 
   test('keeps toggle caches separate and leaves directory searches on OpenCode', async () => {
@@ -126,6 +127,66 @@ describe('useFileSearchStore', () => {
     } finally {
       warning.mockRestore();
     }
+  });
+
+  describe('stopping the search behind the toggles', () => {
+    const searches = () => useFileSearchStore.getState().searchFiles;
+    const walkSignal = (index: number) => runtimeSearchCalls[index]?.signal;
+    const pendingWalk = () => {
+      runtimeSearch = mock(() => new Promise<Array<{ path: string; preview: string[] }>>((_, reject) => {
+        runtimeSearchCalls.at(-1)?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      }));
+    };
+
+    test('stops silently when its only caller moves on, and the same query starts a new walk', async () => {
+      const warning = spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        pendingWalk();
+        const caller = new AbortController();
+        const first = searches()('/project', 'x', 60, { includeHidden: true, signal: caller.signal });
+        expect(walkSignal(0)?.aborted).toBe(false);
+
+        caller.abort();
+        expect(walkSignal(0)?.aborted).toBe(true);
+
+        // Asked again before the stopped walk has settled.
+        void searches()('/project', 'x', 60, { includeHidden: true });
+        expect(runtimeSearchCalls).toHaveLength(2);
+        expect(walkSignal(1)?.aborted).toBe(false);
+
+        searchRequests[0].resolve([{ path: '/project/x.ts' }]);
+        await first;
+        expect(warning).not.toHaveBeenCalled();
+        // Only the plain search's answer is kept; the stopped walk's is not.
+        expect(Object.keys(useFileSearchStore.getState().cache)).toHaveLength(1);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    test('keeps running while another caller still waits', () => {
+      pendingWalk();
+      const one = new AbortController();
+      const two = new AbortController();
+      void searches()('/project', 'x', 60, { includeHidden: true, signal: one.signal });
+      void searches()('/project', 'x', 60, { includeHidden: true, signal: two.signal });
+      expect(runtimeSearchCalls).toHaveLength(1);
+
+      one.abort();
+      expect(walkSignal(0)?.aborted).toBe(false);
+      two.abort();
+      expect(walkSignal(0)?.aborted).toBe(true);
+    });
+
+    test('a caller without a signal keeps it running', () => {
+      pendingWalk();
+      const one = new AbortController();
+      void searches()('/project', 'x', 60, { includeHidden: true, signal: one.signal });
+      void searches()('/project', 'x', 60, { includeHidden: true });
+
+      one.abort();
+      expect(walkSignal(0)?.aborted).toBe(false);
+    });
   });
 
   test('still rejects indexed failures without caching supplemental hits', async () => {

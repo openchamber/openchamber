@@ -26,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -49,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Modelos Zen',
@@ -103,6 +113,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} subagentes utilizados',
   'sessions.sidebar.projectAction.active': 'Ação do projeto em execução',
   ...settingsDict,
+  ...selectionApprovalI18n['pt-BR'],
   'gitView.context.configure': 'Configurar repositório',
   'gitView.context.description': 'Remotos que a identidade do repositório não alcança e acesso para submódulos e Git LFS. As identidades ficam nas configurações do Git.',
   'gitView.context.needsAttention': 'Requer atenção',
@@ -223,6 +234,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['pt-BR'],
   ...sessionReferencesI18n['pt-BR'],
   ...guestStatusViewI18n['pt-BR'],
+  ...tooltipsDiffI18n['pt-BR'],
+  ...tooltipsFilesI18n['pt-BR'],
+  ...tooltipsGitI18n['pt-BR'],
+  ...tooltipsTrackerI18n['pt-BR'],
+  ...tooltipsWalkthroughI18n['pt-BR'],
+  ...tooltipsTerminalBrowserI18n['pt-BR'],
+  ...tooltipsWorkspaceI18n['pt-BR'],
+  ...tooltipsPanelI18n['pt-BR'],
+  ...tooltipsChatI18n['pt-BR'],
   'terminalView.actions.attachSelection': 'Anexar saída selecionada',
   'terminalView.actions.copySelection': 'Copiar saída selecionada',
   'terminalView.toast.selectionCopied': 'Saída copiada',
@@ -803,7 +823,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.unread": "Atualizações não lidas",
   "sessions.sidebar.session.status.backgroundSubagent": "Subagente em execução em segundo plano",
   "sessions.sidebar.session.status.backgroundCommand": "Comando em execução em segundo plano",
-  "sessions.sidebar.session.status.waitingOnPullRequest": "Aguardando um pull request",
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'Aguardando verificações ou uma revisão',
   "sessions.sidebar.session.status.pinned": "Sessão fixada",
   "sessions.sidebar.session.status.movingToWorktree": "Movendo a sessão para um novo worktree",
   "sessions.sidebar.session.status.permissionRequired": "Permissão obrigatória",
@@ -1655,7 +1675,6 @@ export const dict: Record<I18nKey, string> = {
   "sidebarFilesTree.actions.addMenuTitle": "Novo arquivo, pasta ou envio",
   "sidebarFilesTree.actions.refreshTitle": "Atualizar",
   "sidebarFilesTree.actions.collapseAllTitle": "Recolher todas as pastas",
-  "sidebarFilesTree.actions.fileMenuTitle": "Menu do arquivo",
   "sidebarFilesTree.state.searching": "Buscando...",
   "sidebarFilesTree.state.loading": "Carregando...",
   "sidebarFilesTree.dialog.createFile.title": "Criar arquivo",
@@ -1931,12 +1950,14 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.actions.dismiss': 'Dispensar',
   'chat.autoReview.toast.removeFailed': 'Não foi possível contatar o servidor para alterar a revisão de código. Tente novamente.',
   'chat.prWatch.title': 'Aguardando o pull request #{number}',
+  'chat.prWatch.mr.title': 'Aguardando o merge request !{number}',
+  'chat.prWatch.change.title': 'Aguardando a alteração #{number}',
   'chat.prWatch.status.pending': 'verificações em andamento',
   'chat.prWatch.status.passed': 'verificações aprovadas',
   'chat.prWatch.status.failed': 'uma verificação falhou',
   'chat.prWatch.status.waking': 'acordando o agente',
   'chat.prWatch.actions.stop': 'Parar de acompanhar',
-  'chat.prWatch.toast.stopFailed': 'Não foi possível contatar o servidor para parar de acompanhar o pull request. Tente novamente.',
+  'chat.prWatch.toast.stopFailed': 'Não foi possível contatar o servidor para parar de acompanhar. Tente novamente.',
   'chat.draftDirtyNotice.tooltip': 'Você tem alterações sem commit nesta branch.\nUma nova sessão pode entrar em conflito com elas. Talvez seja melhor fazer commit delas primeiro ou usar outro worktree.',
   'chat.draftDirtyNotice.indicatorAria': 'Alterações sem commit neste diretório',
   "diffView.hunk.label": "Trechos",
@@ -2466,7 +2487,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.fileMentionAutocomplete.empty": "Nenhuma correspondência encontrada",
   "chat.queuedMessage.attachments": "+{count} arquivo(s)",
   "chat.queuedMessage.empty": "(vazio)",
-  "chat.queuedMessage.title": "Queued messages",
+  "chat.queuedMessage.title": "Mensagens na fila",
   "chat.queuedMessage.edit": "edit",
   "chat.queuedMessage.send": "send",
   "chat.queuedMessage.removeAria": "Excluir da fila",
@@ -3460,6 +3481,13 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.proposal": "Proposta",
   "markdownRenderer.code.actions.copyTitle": "Copiar código",
   "markdownRenderer.code.actions.copiedTitle": "Copiado",
+  "markdownRenderer.code.actions.runTitle": "Executar comando. O agente continua a partir da saída",
+  "markdownRenderer.code.actions.stopTitle": "Parar comando",
+  "markdownRenderer.code.run.startFailed": "Não foi possível iniciar o comando",
+  "markdownRenderer.code.run.running": "Em execução",
+  "markdownRenderer.code.run.finished": "Concluído",
+  "markdownRenderer.code.run.failed": "Código de saída {code}",
+  "markdownRenderer.code.run.stopped": "Parado",
   "markdownRenderer.table.actions.copyTitle": "Copiar tabela",
   "markdownRenderer.code.actions.enableWrapTitle": "Ativar quebra de linha",
   "markdownRenderer.code.actions.disableWrapTitle": "Desativar quebra de linha",
@@ -3757,6 +3785,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.dispatchedSession.showAnswer': 'Mostrar resposta',
   'chat.dispatchedSession.hideAnswer': 'Ocultar resposta',
   'chat.dispatchedSession.open': 'Abrir sessão',
+  'chat.fileOpenRequest.toast.description': 'Exibido em {session}',
+  'chat.fileOpenRequest.toast.descriptionUntitled': 'Exibido em outra sessão',
+  'chat.fileOpenRequest.toast.openSession': 'Abrir sessão',
   'chat.revertPopover.staged': 'Revertidas: {count}',
   "chat.revertPopover.toast.restoreFailed": "Não foi possível restaurar as mensagens revertidas",
   'chat.workStatus.mcp.needsAuthHint': 'Entre neste servidor MCP em Configurações → MCP.',

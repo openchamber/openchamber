@@ -1,8 +1,8 @@
 import React from 'react';
 import { useI18n } from '@/lib/i18n';
-import { formatWindowLabel, QUOTA_PROVIDERS } from '@/lib/quota';
+import { formatWindowLabel } from '@/lib/quota';
 import { getDisplayModelName } from '@/lib/quota/model-families';
-import { useQuotaStore } from '@/stores/useQuotaStore';
+import { useQuotaProviders, useQuotaStore } from '@/stores/useQuotaStore';
 import type { QuotaProviderId, UsageWindow } from '@/types';
 
 export type UsageLimitRow = {
@@ -37,10 +37,11 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
   const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const selectedQuotaModels = useQuotaStore((state) => state.selectedModels);
+  const providers = useQuotaProviders();
 
   return React.useMemo<UsageProviderGroup[]>(() => {
     const resultsByProvider = new Map(quotaResults.map((result) => [result.providerId, result]));
-    return QUOTA_PROVIDERS
+    return providers
       .filter((providerMeta) => dropdownProviderIds.includes(providerMeta.id))
       .filter((providerMeta) => {
         const result = resultsByProvider.get(providerMeta.id);
@@ -91,5 +92,5 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           status,
         };
       });
-  }, [dropdownProviderIds, quotaResults, refreshErrors, selectedQuotaModels, t]);
+  }, [dropdownProviderIds, providers, quotaResults, refreshErrors, selectedQuotaModels, t]);
 };

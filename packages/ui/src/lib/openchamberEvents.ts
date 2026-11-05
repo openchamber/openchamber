@@ -72,7 +72,8 @@ const UNKNOWN_BROWSER_CONTROL_CONTEXT: BrowserControlRequestContext = { director
 
 /**
  * The agent asked for a file to be shown in the user's file panel. Every
- * client receives it; one showing that project opens the file.
+ * client receives it; the desktop file panel opens the file, and the mobile
+ * shell opens it only for the session on screen and announces the others.
  */
 const fileOpenRequestSchema = z.object({
   path: z.string().min(1),
@@ -142,6 +143,13 @@ type SourceControlProvidersChangedEvent = { type: 'source-control-providers-chan
  * server. Carries nothing; listeners re-read the tracker list.
  */
 type TrackerProvidersChangedEvent = { type: 'tracker-providers-changed' };
+
+/**
+ * The set of usage providers the server serves changed: an extension that
+ * reports usage was approved, enabled, updated, paused or removed. Carries
+ * nothing; listeners re-read the provider list.
+ */
+type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
 
 /**
  * The extension catalog changed: an extension was installed, updated, approved,
@@ -308,6 +316,7 @@ type OpenChamberEvent =
   | BrowserProviderResetEvent
   | SourceControlProvidersChangedEvent
   | TrackerProvidersChangedEvent
+  | QuotaProvidersChangedEvent
   | GuestsChangedEvent
   | ThemesChangedEvent
   | LimitFailoverEvent
@@ -631,6 +640,11 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:tracker-providers-changed') {
     for (const listener of listeners) listener({ type: 'tracker-providers-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:quota-providers-changed') {
+    for (const listener of listeners) listener({ type: 'quota-providers-changed' });
     return;
   }
 

@@ -7,6 +7,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 
 /** The counter appears only once the text gets close to the limit. */
 const COUNTER_THRESHOLD = 0.8;
@@ -113,16 +114,17 @@ export const KnowledgeComposer: React.FC<{
         />
       ) : null}
       {extraActions}
-      <button
-        type="button"
-        onClick={() => void submit()}
-        disabled={blocked || text.trim().length === 0}
-        className={KNOWLEDGE_ICON_BUTTON_CLASS}
-        aria-label={addLabel}
-        title={addLabel}
-      >
-        <Icon name="add" className="h-4 w-4" />
-      </button>
+      <ButtonTooltip label={addLabel} className="shrink-0">
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={blocked || text.trim().length === 0}
+          className={KNOWLEDGE_ICON_BUTTON_CLASS}
+          aria-label={addLabel}
+        >
+          <Icon name="add" className="h-4 w-4" />
+        </button>
+      </ButtonTooltip>
     </div>
   );
 };

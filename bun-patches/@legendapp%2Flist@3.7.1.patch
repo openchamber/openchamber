@@ -173,6 +173,21 @@ diff --git a/react-native.web.js b/react-native.web.js
      let delay = 500;
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
+@@ -7909,10 +8000,10 @@
+       doMaintainScrollAtEnd(ctx, { immediate: true });
+     }
+     checkThresholds(ctx);
+-    if (state) {
+-      const crossAxisPadding = state.props.horizontal ? (state.props.stylePaddingTop || 0) + (state.props.stylePaddingBottom || 0) : (state.props.stylePaddingLeft || 0) + (state.props.stylePaddingRight || 0);
+-      state.needsOtherAxisSize = otherAxisSize - crossAxisPadding < 10;
+-    }
++    // The list stays as wide as its column. Below 10px the library took it for a
++    // list sized by its content and kept the rows' width, as an inline width on
++    // the scroll node and a min-width inside, for as long as the list lived: a
++    // chat squeezed to nothing never came back.
+     if (IS_DEV && measuredLength === 0) {
+       warnDevOnce(
+         "height0",
 @@ -8728,6 +8819,7 @@
    if (value && typeof value === "object") {
      return {
@@ -372,6 +387,21 @@ diff --git a/react-native.web.mjs b/react-native.web.mjs
      let delay = 500;
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
+@@ -7888,10 +7979,10 @@
+       doMaintainScrollAtEnd(ctx, { immediate: true });
+     }
+     checkThresholds(ctx);
+-    if (state) {
+-      const crossAxisPadding = state.props.horizontal ? (state.props.stylePaddingTop || 0) + (state.props.stylePaddingBottom || 0) : (state.props.stylePaddingLeft || 0) + (state.props.stylePaddingRight || 0);
+-      state.needsOtherAxisSize = otherAxisSize - crossAxisPadding < 10;
+-    }
++    // The list stays as wide as its column. Below 10px the library took it for a
++    // list sized by its content and kept the rows' width, as an inline width on
++    // the scroll node and a min-width inside, for as long as the list lived: a
++    // chat squeezed to nothing never came back.
+     if (IS_DEV && measuredLength === 0) {
+       warnDevOnce(
+         "height0",
 @@ -8707,6 +8798,7 @@
    if (value && typeof value === "object") {
      return {
@@ -571,6 +601,21 @@ diff --git a/react.js b/react.js
      let delay = 500;
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
+@@ -7909,10 +8000,10 @@
+       doMaintainScrollAtEnd(ctx, { immediate: true });
+     }
+     checkThresholds(ctx);
+-    if (state) {
+-      const crossAxisPadding = state.props.horizontal ? (state.props.stylePaddingTop || 0) + (state.props.stylePaddingBottom || 0) : (state.props.stylePaddingLeft || 0) + (state.props.stylePaddingRight || 0);
+-      state.needsOtherAxisSize = otherAxisSize - crossAxisPadding < 10;
+-    }
++    // The list stays as wide as its column. Below 10px the library took it for a
++    // list sized by its content and kept the rows' width, as an inline width on
++    // the scroll node and a min-width inside, for as long as the list lived: a
++    // chat squeezed to nothing never came back.
+     if (IS_DEV && measuredLength === 0) {
+       warnDevOnce(
+         "height0",
 @@ -8728,6 +8819,7 @@
    if (value && typeof value === "object") {
      return {
@@ -770,6 +815,21 @@ diff --git a/react.mjs b/react.mjs
      let delay = 500;
      const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
        const container = ref.current;
+@@ -7888,10 +7979,10 @@
+       doMaintainScrollAtEnd(ctx, { immediate: true });
+     }
+     checkThresholds(ctx);
+-    if (state) {
+-      const crossAxisPadding = state.props.horizontal ? (state.props.stylePaddingTop || 0) + (state.props.stylePaddingBottom || 0) : (state.props.stylePaddingLeft || 0) + (state.props.stylePaddingRight || 0);
+-      state.needsOtherAxisSize = otherAxisSize - crossAxisPadding < 10;
+-    }
++    // The list stays as wide as its column. Below 10px the library took it for a
++    // list sized by its content and kept the rows' width, as an inline width on
++    // the scroll node and a min-width inside, for as long as the list lived: a
++    // chat squeezed to nothing never came back.
+     if (IS_DEV && measuredLength === 0) {
+       warnDevOnce(
+         "height0",
 @@ -8707,6 +8798,7 @@
    if (value && typeof value === "object") {
      return {

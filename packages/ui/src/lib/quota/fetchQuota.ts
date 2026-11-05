@@ -39,6 +39,35 @@ const consoleBudgetsSchema = z.object({
 
 export type QuotaGiftResetType = 'FIVE_HOUR' | 'WEEK';
 
+const PROVIDER_LIST_TIMEOUT_MS = 10_000;
+
+/**
+ * Providers the instance has a credential for, or null when it could not say.
+ * Null is not "none": the caller asks every provider, as a cold instance, a
+ * restarting OpenCode or a server without this route answer here. The deadline
+ * covers the body too, because every quota load waits on this read.
+ */
+export const fetchConfiguredQuotaProviders = async (timeoutMs = PROVIDER_LIST_TIMEOUT_MS): Promise<ReadonlySet<string> | null> => {
+  const controller = new AbortController();
+  const read = async () => {
+    const response = await runtimeFetch('/api/quota/providers', { signal: controller.signal });
+    if (!response.ok) return null;
+    return new Set(z.object({ providers: z.array(z.string()) }).parse(await response.json()).providers);
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([read().catch(() => null), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /** The deadline covers response bodies too, including transports that ignore abort. */
 export const fetchQuota = async (
   providerId: QuotaProviderId,

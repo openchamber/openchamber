@@ -26,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -49,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 模型',
@@ -103,6 +113,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '使用了 {count} 个子智能体',
   'sessions.sidebar.projectAction.active': '项目操作正在运行',
   ...settingsDict,
+  ...selectionApprovalI18n['zh-CN'],
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber 无法在这里保存 Git 传输的状态。请允许站点存储并重新加载；在此之前 push 和 pull 已暂停。',
   'gitView.operation.recovery.capacity': '保存的未完成 Git 传输太多。开始新的传输前，请先检查下面这些。',
@@ -213,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['zh-CN'],
   ...sessionReferencesI18n['zh-CN'],
   ...guestStatusViewI18n['zh-CN'],
+  ...tooltipsDiffI18n['zh-CN'],
+  ...tooltipsFilesI18n['zh-CN'],
+  ...tooltipsGitI18n['zh-CN'],
+  ...tooltipsTrackerI18n['zh-CN'],
+  ...tooltipsWalkthroughI18n['zh-CN'],
+  ...tooltipsTerminalBrowserI18n['zh-CN'],
+  ...tooltipsWorkspaceI18n['zh-CN'],
+  ...tooltipsPanelI18n['zh-CN'],
+  ...tooltipsChatI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
   'terminalView.toast.selectionCopied': '已复制输出',
@@ -799,7 +819,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': '有未读更新',
   'sessions.sidebar.session.status.backgroundSubagent': '子智能体正在后台运行',
   'sessions.sidebar.session.status.backgroundCommand': '命令正在后台运行',
-  'sessions.sidebar.session.status.waitingOnPullRequest': '正在等待拉取请求',
+  'sessions.sidebar.session.status.waitingOnPullRequest': '正在等待检查或审查',
   'sessions.sidebar.session.status.pinned': '已置顶会话',
   'sessions.sidebar.session.status.movingToWorktree': '正在将会话移至新工作树',
   'sessions.sidebar.session.status.permissionRequired': '需要权限',
@@ -1664,7 +1684,6 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.actions.addMenuTitle': '新建文件、文件夹或上传',
   'sidebarFilesTree.actions.refreshTitle': '刷新',
   'sidebarFilesTree.actions.collapseAllTitle': '折叠所有文件夹',
-  'sidebarFilesTree.actions.fileMenuTitle': '文件菜单',
   'sidebarFilesTree.state.searching': '搜索中...',
   'sidebarFilesTree.state.loading': '加载中...',
   'sidebarFilesTree.dialog.createFile.title': '新建文件',
@@ -1928,12 +1947,14 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.actions.dismiss': '关闭',
   'chat.autoReview.toast.removeFailed': '无法连接服务器来更改代码审查。请重试。',
   'chat.prWatch.title': '正在等待拉取请求 #{number}',
+  'chat.prWatch.mr.title': '正在等待合并请求 !{number}',
+  'chat.prWatch.change.title': '正在等待变更 #{number}',
   'chat.prWatch.status.pending': '检查运行中',
   'chat.prWatch.status.passed': '检查已通过',
   'chat.prWatch.status.failed': '有检查失败',
   'chat.prWatch.status.waking': '正在唤醒代理',
   'chat.prWatch.actions.stop': '停止关注',
-  'chat.prWatch.toast.stopFailed': '无法连接服务器来停止关注拉取请求。请重试。',
+  'chat.prWatch.toast.stopFailed': '无法连接服务器以停止监视。请重试。',
   'chat.draftDirtyNotice.tooltip': '此分支有未提交的更改。\n新会话可能会与这些更改冲突。你可以考虑先提交这些更改，或使用其他工作树。',
   'chat.draftDirtyNotice.indicatorAria': '此目录有未提交的更改',
   'diffView.hunk.label': '代码块',
@@ -3469,6 +3490,13 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.proposal': '提议',
   'markdownRenderer.code.actions.copyTitle': '复制代码',
   'markdownRenderer.code.actions.copiedTitle': '已复制',
+  'markdownRenderer.code.actions.runTitle': '运行命令。智能体会根据其输出继续',
+  'markdownRenderer.code.actions.stopTitle': '停止命令',
+  'markdownRenderer.code.run.startFailed': '无法启动命令',
+  'markdownRenderer.code.run.running': '运行中',
+  'markdownRenderer.code.run.finished': '已完成',
+  'markdownRenderer.code.run.failed': '退出代码 {code}',
+  'markdownRenderer.code.run.stopped': '已停止',
   'markdownRenderer.table.actions.copyTitle': '复制表格',
   'markdownRenderer.code.actions.enableWrapTitle': '启用自动换行',
   'markdownRenderer.code.actions.disableWrapTitle': '禁用自动换行',
@@ -3757,6 +3785,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.dispatchedSession.showAnswer': '显示回答',
   'chat.dispatchedSession.hideAnswer': '隐藏回答',
   'chat.dispatchedSession.open': '打开会话',
+  'chat.fileOpenRequest.toast.description': '在 {session} 中显示',
+  'chat.fileOpenRequest.toast.descriptionUntitled': '在其他会话中显示',
+  'chat.fileOpenRequest.toast.openSession': '打开会话',
   'chat.revertPopover.staged': '已撤回：{count}',
   "chat.revertPopover.toast.restoreFailed": "无法恢复已撤回的消息",
   'chat.workStatus.mcp.needsAuthHint': '请在“设置 → MCP”中登录此 MCP 服务器。',

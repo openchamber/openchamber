@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { browserProviderResultSchema, notificationsProviderSchemasV1, sourceControlProviderSchemasV1, trackerProviderSchemasV1 } from './service-provider-schemas.ts';
+import { browserProviderResultSchema, notificationsProviderSchemasV1, quotaProviderSchemasV1, sourceControlProviderSchemasV1, trackerProviderSchemasV1 } from './service-provider-schemas.ts';
 import {
   BROWSER_CONTROL_ACTIONS,
   GUEST_NOTIFICATION_KINDS,
@@ -30,6 +30,9 @@ import {
   isTrackerProviderWriteMethod,
   readTrackerProviderRequest,
   trackerProviderTimeoutMs,
+  QUOTA_PROVIDER_METHODS,
+  isQuotaProviderMethod,
+  readQuotaProviderRequest,
 } from './service-providers.ts';
 
 describe('browser provider contract', () => {
@@ -411,5 +414,51 @@ describe('tracker provider contract', () => {
     expect(schemas.data['comments.create'].safeParse({ comment: { id: 'c-9', body: 'echo' } }).success).toBe(false);
     expect(schemas.envelope.safeParse({ ok: false, error: { message: 'Not found', status: 404, code: 'NOT_FOUND' } }).success).toBe(true);
     expect(schemas.outboundRequest.safeParse({ method: 'GET', path: 'https://evil.example/x' }).success).toBe(false);
+  });
+});
+
+describe('quota provider contract', () => {
+  const credentials = { openrouter: { type: 'api', key: 'sk-or-1' }, deepinfra: { type: 'oauth', access: 'a', refresh: 'r', expires: 1_800_000_000_000 } };
+  const call = <T,>(patch?: T) => JSON.stringify({ v: 1, requestId: 'req-1', method: 'usage.read', provider: 'ext-teapot-usage', input: { credentials }, ...patch });
+
+  test('reads the body the host posts and refuses anything else', () => {
+    expect(readQuotaProviderRequest(call())).toEqual({ v: 1, requestId: 'req-1', method: 'usage.read', provider: 'ext-teapot-usage', input: { credentials } });
+    expect(readQuotaProviderRequest(call({ input: { credentials: {} } }))?.input.credentials).toEqual({});
+
+    expect(readQuotaProviderRequest('not json')).toBeNull();
+    expect(readQuotaProviderRequest(call({ v: 2 }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ method: 'items.list' }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ provider: '' }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ input: [] }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ input: {} }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ input: { credentials: [] } }))).toBeNull();
+    expect(readQuotaProviderRequest(call({ input: { credentials: { openrouter: 'sk-or-1' } } }))).toBeNull();
+    expect(QUOTA_PROVIDER_METHODS).toEqual(['usage.read']);
+    expect(isQuotaProviderMethod('usage.read')).toBe(true);
+    expect(isQuotaProviderMethod('items.list')).toBe(false);
+  });
+
+  test('the host accepts a result shaped like a built-in\'s and refuses one it cannot draw', () => {
+    const usage = quotaProviderSchemasV1.data['usage.read'];
+    const window = { usedPercent: 42, windowSeconds: 18_000, resetAt: 1_800_000_000_000 };
+    const result = { ok: true, configured: true, planLabel: 'Pro', usage: { windows: { '5h': window, credits_balance: { usedPercent: null, valueLabel: '$12.50', value: { kind: 'spend', spent: 7.5, limit: 20 } } }, models: { 'teapot-large': { windows: { weekly: { usedPercent: 10, creditsUsed: 3 } } } } } };
+    expect(usage.safeParse(result).success).toBe(true);
+    expect(usage.safeParse({ ok: false, configured: true, error: 'The key was refused; make a new one at teapot.example.', usage: null }).success).toBe(true);
+    expect(usage.safeParse({ ok: false, configured: false, error: 'Not configured', usage: null }).success).toBe(true);
+
+    expect(usage.safeParse({ ...result, extra: 1 }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { ...window, extra: 1 } } } }).success).toBe(false);
+    // A `__proto__` key from a service's JSON never reaches the UI's iteration: zod leaves it out of the record it builds.
+    const prototypeKey = usage.safeParse({ ...result, usage: { windows: JSON.parse('{"__proto__":{"usedPercent":1},"5h":{"usedPercent":2}}') } });
+    expect(prototypeKey.success && Object.keys(prototypeKey.data.usage!.windows)).toEqual(['5h']);
+    expect(usage.safeParse({ ...result, usage: { windows: JSON.parse('{"constructor":{"usedPercent":1}}') } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`w${index}`, window])) } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: -1 } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, resetAt: 1.5 } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, valueLabel: 'x'.repeat(129) } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, usage: { windows: { '5h': { usedPercent: 1, value: { kind: 'spend', spent: 1, limit: 0 } } } } }).success).toBe(false);
+    expect(usage.safeParse({ ...result, planLabel: 'x'.repeat(129) }).success).toBe(false);
+    expect(usage.safeParse({ ok: true, configured: true, usage: { windows: {}, models: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`m${index}`, { windows: {} }])) } }).success).toBe(false);
+    expect(quotaProviderSchemasV1.envelope.safeParse({ ok: false, error: { message: 'down', status: 503 } }).success).toBe(true);
   });
 });

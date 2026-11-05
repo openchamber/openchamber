@@ -21,6 +21,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -95,18 +96,23 @@ const DraftsHerePickerView: React.FC = () => {
 
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="ms-auto h-7 w-fit shrink-0 gap-1 px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent"
-                >
-                    <Icon name="edit" className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="typography-ui-label">{countLabel}</span>
-                    <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
-                </Button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="ms-auto h-7 w-fit shrink-0 gap-1 px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent"
+                        >
+                            <Icon name="edit" className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="typography-ui-label">{countLabel}</span>
+                            <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>{t('chat.draftTarget.drafts.heading')}</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="end" constrainToMain className="max-h-80 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto">
                 <DropdownMenuLabel>{t('chat.draftTarget.drafts.heading')}</DropdownMenuLabel>
                 {drafts.map((draft) => <DraftMenuItem key={draft.id} draft={draft} />)}

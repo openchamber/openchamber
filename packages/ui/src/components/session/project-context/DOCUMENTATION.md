@@ -399,6 +399,15 @@ matched the old project would silently hide everything in the new one.
 - **Plan creation is not optimistic.** The id and file name come from the
   server, and a row that cannot be opened is worse than a brief wait.
 
+## Why list rows share one tooltip
+
+The lists are not virtualized and every row keeps its buttons mounted, so a
+tooltip per button would mount several tooltip roots per row. A control in a
+list carries its text in `data-row-tooltip`, and `DelegatedTooltip`
+(`ui/row-tooltip.tsx`) listens on the panel and anchors one tooltip to it. That also covers the same
+controls in an open entry's toolbar. It answers a mouse or the keyboard; a touch
+gets no tooltip on these controls.
+
 ## Pinned context
 
 The pin toggle on a note or plan attaches it to the current session or draft.

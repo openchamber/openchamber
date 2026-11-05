@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -19,6 +19,7 @@ const { I18nProvider } = await import('@/lib/i18n');
 const { ThemeSystemContext } = await import('@/contexts/theme-system-context');
 const { getDefaultTheme } = await import('@/lib/theme/themes');
 type Answer = Parameters<NonNullable<Extract<React.ComponentProps<typeof UiBlock>['host'], { kind: 'page' }>['submit']>>[0];
+type ReplyAnswer = Parameters<NonNullable<Extract<React.ComponentProps<typeof UiBlock>['host'], { kind: 'reply' }>['submit']>>[0];
 
 const host = document.createElement('div');
 document.body.append(host);
@@ -40,10 +41,11 @@ const render = (source: string, blockHost: React.ComponentProps<typeof UiBlock>[
   ));
 };
 const draw = (source: string, submit: (answer: Answer) => Promise<void>) => render(source, { kind: 'page', submit, answered: null });
-type ReplyAnswer = NonNullable<Extract<React.ComponentProps<typeof UiBlock>['host'], { kind: 'reply' }>['submit']>;
-const drawReply = (source: string, submit: ReplyAnswer) => render(source, { kind: 'reply', submit, answered: null });
+type ReplySubmit = NonNullable<Extract<React.ComponentProps<typeof UiBlock>['host'], { kind: 'reply' }>['submit']>;
+const drawReply = (source: string, submit: ReplySubmit) => render(source, { kind: 'reply', submit, answered: null });
 const buttons = () => [...host.querySelectorAll('button')].map((button) => button.textContent);
 const option = (label: string) => [...host.querySelectorAll('span')].find((element) => element.textContent === label);
+const send = () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Send');
 
 test('a waiting form without buttons gets one that sends its fields', async () => {
   const answers: Answer[] = [];
@@ -61,6 +63,53 @@ test('a form with its own button gets no second one', async () => {
   expect(buttons()).not.toContain('Send');
 });
 
+describe('a form in a reply without buttons', () => {
+  const drawReply = (source: string, submit: (answer: ReplyAnswer, text: string) => Promise<void>) => act(() => root.render(
+    <I18nProvider>
+      <ThemeSystemContext.Provider value={themeSystem}>
+        <UiBlock key={source} source={source} complete host={{ kind: 'reply', submit, answered: null }} />
+      </ThemeSystemContext.Provider>
+    </I18nProvider>,
+  ));
+  const buttonNamed = (name: string) => [...host.querySelectorAll('button')].find((button) => button.textContent === name);
+  const form = 'root = Stack([deploy])\ndeploy = Choice("deploy", ["Yes", "No"], "What should Deploy do?")';
+
+  test('sends the chosen fields, and offers Send only once one is filled', async () => {
+    const answers: { answer: ReplyAnswer; text: string }[] = [];
+    await drawReply(form, async (answer, text) => { answers.push({ answer, text }); });
+    expect(buttonNamed('Send')?.disabled).toBe(true);
+    await act(async () => host.querySelector<HTMLElement>('[role="radio"], [role="checkbox"]')?.click());
+    expect(buttonNamed('Send')?.disabled).toBe(false);
+    await act(async () => buttonNamed('Send')?.click());
+    expect(answers).toEqual([{
+      answer: { picks: [], values: { deploy: 'Yes' }, skipped: [] },
+      text: 'The user answered the UI block in your previous reply:\n- What should Deploy do? Yes',
+    }]);
+    expect(host.textContent).toContain('Sent');
+  });
+
+  test('a block that lost a part draws the rest and says what it lost', async () => {
+    await drawReply('root = Stack([state, note])\nstate = Badge("Done")\nnote = Callout()', async () => {});
+    expect(host.textContent).toContain('Done');
+    expect(host.textContent).toContain('Part of this block could not be drawn.');
+    expect(host.textContent).toContain('missing required field');
+  });
+
+  test('a fold with nothing inside draws nothing and says nothing', async () => {
+    await drawReply('root = Stack([state, a, b])\nstate = Badge("Done")\na = Details("Method notes")\nb = Details("Sources", [])', async () => {});
+    expect(host.textContent).toContain('Done');
+    expect(host.textContent).not.toContain('Method notes');
+    expect(host.textContent).not.toContain('Sources');
+    expect(host.textContent).not.toContain('could not be drawn');
+  });
+
+  test('a block with no fields gets no button', async () => {
+    await drawReply('root = Stack([state])\nstate = Badge("Done")', async () => {});
+    expect(host.textContent).toContain('Done');
+    expect(buttons()).not.toContain('Send');
+  });
+});
+
 test('a block that cannot be drawn says why and folds its source', async () => {
   await draw('root = Stack([question])\nquestion = Choice("approach", ["A"])\nConfirm = Button("Go")', async () => {});
   expect(host.textContent).toContain('Defined but never used: Confirm');
@@ -72,7 +121,7 @@ test('a block that cannot be drawn says why and folds its source', async () => {
 });
 
 test("a reply's form without buttons gets one that sends its fields", async () => {
-  const answers: Parameters<ReplyAnswer>[] = [];
+  const answers: Parameters<ReplySubmit>[] = [];
   await drawReply('root = Stack([scope])\nscope = Choice("scope", ["API", "Links"], "Scope")', async (...answer) => { answers.push(answer); });
   const pick = option('API');
   if (!pick) throw new Error(`Expected an option, got ${buttons().join(', ')}`);
@@ -100,11 +149,11 @@ test("a reply's block without fields or buttons gets no Send", async () => {
 
 test("a reply's field-only form offers Send once a field has a value", async () => {
   await drawReply('root = Stack([scope])\nscope = Choice("scope", ["API", "Links"])', async () => {});
-  expect(buttons()).not.toContain('Send');
+  expect(send()?.disabled).toBe(true);
   const pick = option('API');
   if (!pick) throw new Error(`Expected an option, got ${buttons().join(', ')}`);
   await act(async () => pick.click());
-  expect(buttons()).toContain('Send');
+  expect(send()?.disabled).toBe(false);
 });
 
 test("an answered reply's field-only form shows Sent and no Send", async () => {
@@ -129,7 +178,7 @@ test("a reply's Send can be tried again after a failed send", async () => {
   if (!first) throw new Error(`Expected a Send button, got ${buttons().join(', ')}`);
   await act(async () => first.click());
   expect(host.textContent).toContain('Not sent. Try again.');
-  expect(send()?.getAttribute('aria-pressed')).toBe('false');
+  expect(send()?.disabled).toBe(false);
   const second = send();
   if (!second) throw new Error(`Expected a Send button to retry, got ${buttons().join(', ')}`);
   await act(async () => second.click());
@@ -150,6 +199,6 @@ test("a reply's failed send stops asking to retry once its fields are empty", as
   await act(async () => first.click());
   expect(host.textContent).toContain('Not sent. Try again.');
   await act(async () => pick.click());
-  expect(buttons()).not.toContain('Send');
+  expect(send()?.disabled).toBe(true);
   expect(host.textContent).not.toContain('Not sent. Try again.');
 });

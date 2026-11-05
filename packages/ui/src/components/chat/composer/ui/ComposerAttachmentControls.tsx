@@ -21,6 +21,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -92,27 +93,37 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                         <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
                     </button>
                 ) : isVSCode || filesOnly ? (
-                    <button
-                        type="button"
-                        className={footerIconButtonClass}
-                        onClick={handlePickLocalFiles}
-                        title={t('chat.chatInput.actions.attachFiles')}
-                        aria-label={t('chat.chatInput.actions.attachFiles')}
-                    >
-                        <Icon name="attachment-2" className={cn(iconSizeClass, 'text-current')} />
-                    </button>
-                ) : (
-                    <DropdownMenu onOpenChange={props.onMenuOpenChange}>
-                        <DropdownMenuTrigger asChild>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
                             <button
                                 type="button"
                                 className={footerIconButtonClass}
-                                title={t('chat.chatInput.actions.addAttachment')}
-                                aria-label={t('chat.chatInput.actions.addAttachment')}
+                                onClick={handlePickLocalFiles}
+                                aria-label={t('chat.chatInput.actions.attachFiles')}
                             >
-                                <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                                <Icon name="attachment-2" className={cn(iconSizeClass, 'text-current')} />
                             </button>
-                        </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={8}>{t('chat.chatInput.actions.attachFiles')}</TooltipContent>
+                    </Tooltip>
+                ) : (
+                    <DropdownMenu onOpenChange={props.onMenuOpenChange}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <span className="inline-flex">
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className={footerIconButtonClass}
+                                            aria-label={t('chat.chatInput.actions.addAttachment')}
+                                        >
+                                            <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" sideOffset={8}>{t('chat.chatInput.actions.addAttachment')}</TooltipContent>
+                        </Tooltip>
                         <DropdownMenuContent side="top" align="start">
                             <DropdownMenuItem
                                 onSelect={() => {
@@ -158,15 +169,19 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
             </div>
 
             {onOpenSettings ? (
-                <button
-                    type="button"
-                    onClick={onOpenSettings}
-                    className={footerIconButtonClass}
-                    title={t('chat.chatInput.actions.modelAgentSettings')}
-                    aria-label={t('chat.chatInput.actions.modelAgentSettings')}
-                >
-                    <Icon name="ai-agent" className={cn(iconSizeClass, 'text-current')} />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            onClick={onOpenSettings}
+                            className={footerIconButtonClass}
+                            aria-label={t('chat.chatInput.actions.modelAgentSettings')}
+                        >
+                            <Icon name="ai-agent" className={cn(iconSizeClass, 'text-current')} />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>{t('chat.chatInput.actions.modelAgentSettings')}</TooltipContent>
+                </Tooltip>
             ) : null}
         </div>
     );

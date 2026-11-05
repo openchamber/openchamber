@@ -3,7 +3,7 @@ import { isPlainObject, isString } from '../shared/guards.js';
 import { OpenCode } from '@opencode/client';
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { runAsUserAction } from '../environment/refresh-scope.js';
-import { redactRemoteUrl } from '../source-control/url-redaction.js';
+import { isDiskPathRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 import { parsePublicGitIdentityProfile, toPublicGitIdentityProfile } from './identity-storage.js';
 import { WorktreeCreationError, createWorktreeCreation, hasClientContributorAuthority } from './worktree-creation.js';
 
@@ -1252,15 +1252,21 @@ export function registerGitRoutes(app, {
   });
 
   app.get('/api/git/remotes', async (req, res) => {
-    const { getRemotes } = await getGitLibraries();
+    const { getRemotes, getRepositoryRemoteUrls } = await getGitLibraries();
     try {
       const directory = req.query.directory;
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const remotes = await getRemotes(directory);
-      res.json(remotes.map(toGitRemoteSummary));
+      const [remotes, addresses] = await Promise.all([getRemotes(directory), getRepositoryRemoteUrls(directory)]);
+      // Git operations here cannot use a remote on disk, so it is not offered.
+      // `getRemotes` reads an address with a space as empty, so the addresses
+      // that decide this come from the reader repository identity uses.
+      const onDisk = new Set(addresses
+        .filter((remote) => isDiskPathRemoteUrl(remote.fetchUrl) || isDiskPathRemoteUrl(remote.pushUrl))
+        .map((remote) => remote.name));
+      res.json(remotes.filter((remote) => !onDisk.has(remote.name)).map(toGitRemoteSummary));
     } catch (error) {
       console.error('Failed to get remotes:', error);
       res.status(500).json({ error: error.message || 'Failed to get remotes' });

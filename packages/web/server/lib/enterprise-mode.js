@@ -80,7 +80,11 @@ import { z } from 'zod';
  *   serving as a tracker receives the user's searches and item identifiers,
  *   and the session comments it posts carry a fixed label and the session
  *   link only (`trackers/extension-tracker.js`), so no conversation content
- *   crosses; the allowlist is its gate, as for every service.
+ *   crosses; the allowlist is its gate, as for every service. An allowed
+ *   extension serving as a usage provider receives the credentials OpenCode
+ *   holds for the providers its manifest lists, which the user approved in
+ *   the dialog, and no conversation content (`quota/extension-quota.js`);
+ *   the allowlist is its gate too, re-read on every call.
  *
  * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
  * enterprise mode: managed OpenCode then starts only from that path, never

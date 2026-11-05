@@ -76,9 +76,11 @@ failures retry with backoff and are given up after eight attempts.
 
 The message is a `synthetic` admitted with `delivery: steer` and `resume: true`:
 an `<openchamber-pull-request url number>` envelope naming what changed and
-telling the agent the watch ended, `description` `Pull request #N: …` (the
-chat shows it as a notice row, `packages/ui/src/lib/opencode/session-notices.ts`)
-and `metadata.source: "openchamber-pr-watch"`.
+telling the agent the watch ended, `description` `Pull request #N: …` and
+`metadata` with `source: "openchamber-pr-watch"`, `url`, `events`,
+`failedChecks` and `authors`. The chat builds its row from the metadata in the
+user's language and never shows the envelope
+(`packages/ui/src/lib/opencode/session-notices.ts`).
 
 A failed check or new activity names what to start with: the failed checks
 (`a check failed (lint, tests)`) and the authors of the new comments and

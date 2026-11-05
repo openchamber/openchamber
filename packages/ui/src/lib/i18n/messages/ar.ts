@@ -25,6 +25,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -48,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'نماذج Zen',
@@ -743,7 +753,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'تحديثات غير مقروءة',
   'sessions.sidebar.session.status.backgroundSubagent': 'وكيل فرعي يعمل في الخلفية',
   'sessions.sidebar.session.status.backgroundCommand': 'أمر يعمل في الخلفية',
-  'sessions.sidebar.session.status.waitingOnPullRequest': 'بانتظار طلب سحب',
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'بانتظار الفحوصات أو مراجعة',
   'sessions.sidebar.session.status.pinned': 'جلسة مثبّتة',
   'sessions.sidebar.session.status.movingToWorktree': 'جارٍ نقل الجلسة إلى شجرة عمل جديدة',
   'sessions.sidebar.session.status.permissionRequired': 'مطلوب إذن',
@@ -1632,7 +1642,6 @@ export const dict = {
   'sidebarFilesTree.actions.uploadFilesTitle': 'رفع ملفات',
   'sidebarFilesTree.actions.refreshTitle': 'تحديث',
   'sidebarFilesTree.actions.collapseAllTitle': 'طي كل المجلدات',
-  'sidebarFilesTree.actions.fileMenuTitle': 'قائمة الملف',
   'sidebarFilesTree.state.searching': 'جارٍ البحث…',
   'sidebarFilesTree.state.loading': 'جارٍ التحميل…',
   'sidebarFilesTree.dialog.createFile.title': 'إنشاء ملف',
@@ -1886,12 +1895,14 @@ export const dict = {
   'chat.autoReview.actions.dismiss': 'إغلاق',
   'chat.autoReview.toast.removeFailed': 'تعذر الوصول إلى الخادم لتغيير مراجعة الكود. حاول مرة أخرى.',
   'chat.prWatch.title': 'بانتظار طلب السحب #{number}',
+  'chat.prWatch.mr.title': 'بانتظار طلب الدمج !{number}',
+  'chat.prWatch.change.title': 'بانتظار التغيير #{number}',
   'chat.prWatch.status.pending': 'الفحوصات قيد التشغيل',
   'chat.prWatch.status.passed': 'نجحت الفحوصات',
   'chat.prWatch.status.failed': 'فشل أحد الفحوصات',
   'chat.prWatch.status.waking': 'يوقظ الوكيل',
   'chat.prWatch.actions.stop': 'إيقاف المتابعة',
-  'chat.prWatch.toast.stopFailed': 'تعذر الوصول إلى الخادم لإيقاف متابعة طلب السحب. حاول مرة أخرى.',
+  'chat.prWatch.toast.stopFailed': 'تعذّر الوصول إلى الخادم لإيقاف المتابعة. حاول مرة أخرى.',
   'chat.draftDirtyNotice.tooltip': "لديك تغييرات غير مودعة في هذا الفرع.\nقد تتعارض جلسة جديدة معها. قد ترغب في إيداعها أولًا أو استخدام شجرة عمل (worktree) أخرى.",
   'chat.draftDirtyNotice.indicatorAria': 'تغييرات غير مودعة في هذا المجلد',
   'diffView.hunk.label': 'المقاطع',
@@ -3430,6 +3441,13 @@ export const dict = {
   'markdownRenderer.code.proposal': 'اقتراح',
   'markdownRenderer.code.actions.copyTitle': 'نسخ الشيفرة',
   'markdownRenderer.code.actions.copiedTitle': 'تم النسخ',
+  'markdownRenderer.code.actions.runTitle': 'تشغيل الأمر. سيتابع الوكيل من مخرجاته',
+  'markdownRenderer.code.actions.stopTitle': 'إيقاف الأمر',
+  'markdownRenderer.code.run.startFailed': 'تعذر بدء الأمر',
+  'markdownRenderer.code.run.running': 'قيد التشغيل',
+  'markdownRenderer.code.run.finished': 'اكتمل',
+  'markdownRenderer.code.run.failed': 'رمز الخروج {code}',
+  'markdownRenderer.code.run.stopped': 'تم الإيقاف',
   'markdownRenderer.table.actions.copyTitle': 'نسخ الجدول',
   'markdownRenderer.code.actions.enableWrapTitle': 'تفعيل التفاف الأسطر',
   'markdownRenderer.code.actions.disableWrapTitle': 'تعطيل التفاف الأسطر',
@@ -3658,6 +3676,9 @@ export const dict = {
   'chat.dispatchedSession.showAnswer': 'إظهار الإجابة',
   'chat.dispatchedSession.hideAnswer': 'إخفاء الإجابة',
   'chat.dispatchedSession.open': 'فتح الجلسة',
+  'chat.fileOpenRequest.toast.description': 'معروض في {session}',
+  'chat.fileOpenRequest.toast.descriptionUntitled': 'معروض في جلسة أخرى',
+  'chat.fileOpenRequest.toast.openSession': 'فتح الجلسة',
   'chat.revertPopover.staged': 'تم التراجع: {count}',
   'chat.workStatus.mcp.needsAuthHint': 'سجّل الدخول إلى خادم MCP هذا من الإعدادات → MCP.',
   'mcpDropdown.toast.authorizeOpenFailed': 'تعذّر فتح صفحة التفويض',
@@ -3857,6 +3878,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'هذه المهمة في قائمة الانتظار بالفعل وستعمل عند توفر مكان',
   'chat.modelControls.agentFavoriteAdd': 'إضافة إلى المفضلة. عند وجود مفضلة، يتنقل Tab بينها فقط',
   ...settingsDict,
+  ...selectionApprovalI18n.ar,
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...repositoryDiscussionsI18n.ar,
@@ -3906,6 +3928,15 @@ export const dict = {
   ...workflowsI18n['ar'],
   ...sessionReferencesI18n['ar'],
   ...guestStatusViewI18n['ar'],
+  ...tooltipsDiffI18n['ar'],
+  ...tooltipsFilesI18n['ar'],
+  ...tooltipsGitI18n['ar'],
+  ...tooltipsTrackerI18n['ar'],
+  ...tooltipsWalkthroughI18n['ar'],
+  ...tooltipsTerminalBrowserI18n['ar'],
+  ...tooltipsWorkspaceI18n['ar'],
+  ...tooltipsPanelI18n['ar'],
+  ...tooltipsChatI18n['ar'],
   'settings.usage.page.state.claudeSignedOutTitle': 'لم يتم تسجيل الدخول إلى Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'شغّل هذا الأمر في الطرفية:',
   'settings.openchamber.visual.field.confirmFileTreeMove': 'التأكيد قبل نقل الملفات',

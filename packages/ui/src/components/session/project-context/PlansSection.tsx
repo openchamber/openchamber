@@ -20,6 +20,7 @@ import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { KnowledgeComposer } from './KnowledgeComposer';
 import { KNOWLEDGE_ICON_BUTTON_CLASS } from './knowledgeRowStyle';
 import { KnowledgeMenu, KnowledgePinToggle } from './KnowledgeActions';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { formatKnowledgeDate } from './knowledgeFormat';
 import { planDeleteKey, scheduleKnowledgeDelete, usePendingKnowledgeDeletes } from './pendingKnowledgeDeletes';
 
@@ -143,8 +144,8 @@ export const PlansSection: React.FC<{
     const result = await requestFileAccess({
       defaultPath: projectRef.path,
       filters: [
-        { name: 'Plan files', extensions: ['md', 'markdown', 'txt'] },
-        { name: 'All files', extensions: ['*'] },
+        { name: t('contextTooltips.workspace.plans.filterPlanFiles'), extensions: ['md', 'markdown', 'txt'] },
+        { name: t('contextTooltips.workspace.plans.filterAllFiles'), extensions: ['*'] },
       ],
     });
 
@@ -264,16 +265,17 @@ export const PlansSection: React.FC<{
         dictation={false}
         onSubmit={handleCreatePlan}
         extraActions={(
-          <button
-            type="button"
-            onClick={handleTriggerImport}
-            disabled={isImporting}
-            className={KNOWLEDGE_ICON_BUTTON_CLASS}
-            aria-label={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
-            title={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
-          >
-            <Icon name="upload-2" className="h-3.5 w-3.5" />
-          </button>
+          <ButtonTooltip label={t('rightSidebar.contextNotesTodo.plans.importFromFile')} className="shrink-0">
+            <button
+              type="button"
+              onClick={handleTriggerImport}
+              disabled={isImporting}
+              className={KNOWLEDGE_ICON_BUTTON_CLASS}
+              aria-label={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
+            >
+              <Icon name="upload-2" className="h-3.5 w-3.5" />
+            </button>
+          </ButtonTooltip>
         )}
       />
 
@@ -319,7 +321,7 @@ export const PlansSection: React.FC<{
                       onClick={() => void openSessionLink(sessionId, null)}
                       className={KNOWLEDGE_ICON_BUTTON_CLASS}
                       aria-label={t('rightSidebar.contextNotesTodo.plans.session.open')}
-                      title={t('rightSidebar.contextNotesTodo.plans.session.open')}
+                      data-row-tooltip={t('rightSidebar.contextNotesTodo.plans.session.open')}
                     >
                       <Icon name="chat-3" className="h-3.5 w-3.5" />
                     </button>

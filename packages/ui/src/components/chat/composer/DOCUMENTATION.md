@@ -537,8 +537,7 @@ main composer, "Save draft as #name" with the draft minus the token being
 typed; once saved, that token leaves the draft. Every create row opens the
 quick dialog (`components/snippets/SnippetQuickCreateDialog.tsx`, mounted once
 per app shell) and never writes on its own, so Enter on `fix #42` cannot make
-a snippet. The same dialog backs "Save as snippet" on a user message and on a
-text selection.
+a snippet. The same dialog backs "Save as snippet" on a user message.
 
 Desktop comment fields in ordinary page DOM (chat quote comments, editing a
 pending comment above the composer) are `components/comments/CommentTextEditor`:
@@ -946,7 +945,8 @@ screen, held or not; a new query's answer selects its first row.
 A query has up to two answers. OpenCode's index answers at once and its hits
 show as soon as there are any; the search behind the hidden and gitignored
 toggles may walk the project for seconds, and the list does not wait for it, or
-a large project shows only agents until it ends. Its extra rows join when it
+a large project shows only agents until it ends. A newer query or a closed list
+stops that search, and its rows never join. Its extra rows join when it
 answers, and new rows for the same query leave the selection on the row it was
 on. Only a row pushed out of the list sends the selection back to the first
 row. An index answer of nothing keeps the query searching until the second
@@ -974,7 +974,13 @@ goes as its own context part (`sessionReferences.ts`, kinds `session` and
 - A pasted session or message link pastes as usual and draws as a chip once
   read. One this server cannot resolve, or a message that cannot be read,
   gets a toast and stays a plain link. A message with no text of its own
-  names its session instead. A bare `ses_…` id is text.
+  names its session instead.
+- A paste that is one `ses_…` id, apart from whitespace around it, lands as
+  text and becomes the session's link once read, archived sessions included
+  (`pastedSessionIds.ts`). The editor's changes carry its position through the
+  read, so later edits survive. An id that was edited, now runs into the text
+  around it, or names a session this server cannot read stays text, with no
+  toast. Any other bare id, typed or inside longer text, is text.
 - The text decides what is sent: each linked session or message once, in the
   order it appears; one deleted from the text is not sent. A link not read yet
   (typed by hand, or still loading) is read at send, so it never goes bare.
@@ -1357,6 +1363,13 @@ remounts. Offsets only break ties. Quotes sent before anchors existed are
 found only when their text appears once in the message.
 
 A quote taken inside a page the agent showed (`openchamber_render`) has `page: { partId }` in its anchor: its text stream is the page's body, measured and re-found inside the page's frame. The layer does not paint those marks; it publishes them, asks for reveals and hears clicks through `message/pageQuoteBridge.ts` (see `message/parts/DOCUMENTATION.md`).
+
+The selection menu's thumbs-up attaches a normal `chat-quote` draft to the
+column's published comment scope, including an expanded BTW composer. Its
+comment uses the trimmed `selectionApprovalText` setting, falling back to
+`Sounds good`. Existing drafts, attachments and linked references stay in place;
+the user sends them together through the normal Send action. The shortcut
+focuses the composer on desktop and does not request keyboard focus on mobile.
 
 ## Mobile comment mode
 

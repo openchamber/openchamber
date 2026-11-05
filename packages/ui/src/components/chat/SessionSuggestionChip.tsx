@@ -70,18 +70,22 @@ export const SessionSuggestionChip: React.FC<SessionSuggestionChipProps> = React
             {suggestion}
           </TooltipContent>
         </Tooltip>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={(event) => void handleDismiss(event)}
-          onMouseDown={(event) => event.preventDefault()}
-          aria-label={t('chat.suggestion.dismissAria')}
-          title={t('chat.suggestion.dismissAria')}
-          className="size-7 shrink-0 rounded-lg text-muted-foreground hover:!bg-transparent hover:text-foreground active:!bg-transparent"
-        >
-          <Icon name="close" className="size-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={(event) => void handleDismiss(event)}
+              onMouseDown={(event) => event.preventDefault()}
+              aria-label={t('chat.suggestion.dismissAria')}
+              className="size-7 shrink-0 rounded-lg text-muted-foreground hover:!bg-transparent hover:text-foreground active:!bg-transparent"
+            >
+              <Icon name="close" className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('chat.suggestion.dismissAria')}</TooltipContent>
+        </Tooltip>
     </>
   );
 

@@ -12,6 +12,7 @@ import {
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
   getShortcutAction,
+  isShortcutAvailable,
   formatShortcutForDisplay,
   type ShortcutActionId,
 } from "@/lib/shortcuts";
@@ -111,9 +112,10 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          keys: [formatShortcutForDisplay('mod+shift+alt+n')],
+          id: 'new_window',
           descriptionKey: "helpDialog.item.newWindow",
           icon: "window",
+          keys: '',
         },
       ],
     },
@@ -245,7 +247,7 @@ export const HelpDialog: React.FC = () => {
             const action = shortcut.id ? getShortcutAction(shortcut.id) : undefined;
             const descriptionKey = shortcut.descriptionKey
               ?? (action?.customizable ? action.settingsLabelKey : undefined);
-            if (!descriptionKey) return null;
+            if (!descriptionKey || (action && !isShortcutAvailable(action))) return null;
             // This dialog lists what the keyboard can do right now;
             // an action without a binding belongs to the command
             // palette and Settings, not here.

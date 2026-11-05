@@ -87,6 +87,16 @@ Wstrzymanie rozszerzenia zabiera tracker, dopóki go z powrotem nie włączysz, 
 
 SDK OpenChamber ma działający przykład, `examples/tracker-provider`, z udawanym trackerem do uruchomienia obok. Zobacz [Zbuduj rozszerzenie](/pl/sdk/).
 
+## Rozszerzenie jako dostawca zużycia
+
+Rozszerzenie może dodać dostawcę zużycia obok wbudowanych: dostawcę, którego OpenChamber nie odczytuje samodzielnie, albo własnego. Jego okno uprawnień ma wtedy wiersz zaczynający się od **Raportuje zużycie jak wbudowany dostawca** i wymienia dostawców OpenCode, których dane logowania odczytuje, na przykład `openrouter`; rozszerzenie, które nie wymienia żadnego, mówi o tym.
+
+Gdy na nie pozwolisz, jego karta stoi za wbudowanymi dostawcami w **Ustawienia → Zużycie**, z nazwą i ikoną rozszerzenia, i tak jak każdy wbudowany dostawca trafia do limitów w nagłówku, do stanu pracy, do okienka na telefonie i do zasobnika na pulpicie, gdy zaznaczysz **Pokaż w stanie pracy**. Przy każdym odświeżeniu OpenChamber przekazuje rozszerzeniu dane logowania, które OpenCode przechowuje dla każdego wymienionego dostawcy, i nic więcej; wersja, która wymienia innego dostawcę, ponownie prosi o Twoją zgodę. Rozszerzenie samo odczytuje zużycie, a OpenChamber rysuje je tak, jak zużycie wbudowanego dostawcy.
+
+Wstrzymanie rozszerzenia zabiera kartę, dopóki go z powrotem nie włączysz, a Twoje ustawienia zużycia dla niego zostają. Usunięcie rozszerzenia zabiera kartę na stałe. VS Code nie pokazuje zużycia z rozszerzeń; na telefonie karta jest widoczna, a rozszerzenie konfiguruje się w aplikacji webowej lub desktopowej. Sesja w odizolowanej przestrzeni odczytuje zużycie z własnego serwera tej przestrzeni, który nie ma rozszerzeń.
+
+SDK OpenChamber ma działający przykład, `examples/quota-provider`, z udawanym API zużycia do uruchomienia obok. Zobacz [Zbuduj rozszerzenie](/pl/sdk/).
+
 ## Połącz jego konto
 
 Rozszerzenie, które rozmawia z usługą, dostaje kartę w **Ustawienia → Integracje** w sekcji **Konta rozszerzeń**. Zależnie od usługi karta prosi o token API, nazwę użytkownika i token albo client id do logowania. Wybierz **Połącz**; **Rozłącz** zapomina zapisany token. Dodatkowe pola zadeklarowane przez rozszerzenie zapisują się same, gdy je opuszczasz.

@@ -312,7 +312,7 @@ live in the documentation and `--help`.
 | `bun run profile:composer` | Elements restyled per new composer line. |
 | `bun run profile:toggle` | What opening and closing the session sidebar and the context panel costs, per toggle: input to next frame, dropped and worst frames, style/layout, forced layouts with their JS stacks. |
 | `bun run profile:ios` | On a real iPhone through its WebKit inspector: tap to keyboard, per-frame positions through a keyboard open, where large subtrees hide (`references/ios-webkit.md`). |
-| `bun run profile:compare` | The before/after verdict: builds both sides, runs the scenarios serially, prints median, p95, change and validity flags. |
+| `bun run profile:compare` | The before/after verdict: builds both sides, runs the scenarios you name in alternating pairs until a planned look decides, prints the change, its interval, a verdict and validity flags. |
 | `bun run profile:serve` | An isolated server with the fixture provider for manual runs and ablations. |
 | `bun run profile:analyze` | Attribution for one run: functions, source files, components, long tasks, large restyles, renders. |
 | `bun run build:web:diag` | The unminified, source-mapped build with store notifications, for attribution only. |
@@ -321,7 +321,20 @@ The automated commands fail loudly rather than reporting a clean result when
 the renderer was throttled, the trace collected no tasks, or the scenario never
 rendered. Keep that property when extending them.
 
-`bun run profile:compare` does the before/after; `--dry-run` shows the plan.
+### Before/after with `profile:compare`
+
+```bash
+bun run profile:compare -- --scenarios <what the change can affect>                 # working tree against HEAD
+bun run profile:compare -- --before <ref> --after <ref> --scenarios release         # the full set, for a release
+bun run profile:compare -- --before HEAD --after HEAD --scenarios <name>            # A/A: this machine's noise
+```
+
+- Name one or two scenarios. The table of which change needs which is in `scripts/perf/DOCUMENTATION.md`, *Comparing Two Builds*. One scenario costs 10 to 20 minutes, the full set an hour.
+- Quote the bold primary row: its change, interval and word. `better`, `WORSE` and `same` are verdicts. A primary with no word has none: it never means "no change", so report it as undecided.
+- A change under about 10% on a streaming scenario comes back undecided on a laptop with other work running. Stop other agents first, or raise `--max-minutes`.
+- Secondary rows without a word are descriptive. `exact` rows are counts and need no test.
+- Why it moved: `<output>/why/` holds one instrumented run per side for `profile:analyze`. Those timings are perturbed, so never quote them. Process CPU and wakes come only from the pairs.
+- `--dry-run` shows the plan. `timing.json` shows where the time went.
 
 ## Verification
 

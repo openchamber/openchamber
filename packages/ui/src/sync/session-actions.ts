@@ -572,6 +572,22 @@ export function isSessionBusyNow(sessionId: string): boolean {
   return getSessionLiveActivity(sessionId) === "active"
 }
 
+/**
+ * Answers for a whole session tree, asking OpenCode when the stores cannot: a
+ * folder nobody opened has no status of its own, and one that is gone never
+ * will. "unknown" now means the read itself failed.
+ */
+export async function readSessionsLiveActivity(sessionIds: string[], directory: string): Promise<SessionLiveActivity> {
+  const activities = sessionIds.map(getSessionLiveActivity)
+  if (activities.includes("active")) return "active"
+  if (!activities.includes("unknown")) return "idle"
+
+  const activeStatuses = await opencodeClient.getActiveSessionStatuses(directory)
+  if (activeStatuses === null) return "unknown"
+  // An event that arrived during the read is newer than the snapshot.
+  return sessionIds.some((id) => activeStatuses[id] || isSessionBusyNow(id)) ? "active" : "idle"
+}
+
 async function abortDescendantIfBusy(sessionId: string, directory: string): Promise<void> {
   if (!isSessionBusyNow(sessionId)) return
   try {
@@ -1918,7 +1934,11 @@ async function restoreSessionTree(
   return { restoredIds, failedIds }
 }
 
-async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: string): Promise<boolean> {
+async function restoreArchivedSession(
+  sessionId: string,
+  expectedRuntimeKey: string,
+  { relocate = true }: { relocate?: boolean } = {},
+): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
@@ -1961,7 +1981,7 @@ async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: str
     // Its worktree may have been removed while it sat in the archive; such a
     // session moves to its project root so it can be written to again. Loaded
     // lazily: the relocation module builds on this one.
-    if (!isStaleRuntime(expectedRuntimeKey)) {
+    if (relocate && !isStaleRuntime(expectedRuntimeKey)) {
       void import("@/lib/worktrees/relocateRestoredSession")
         .then((module) => module.relocateRestoredSessionWithNotice(sessionId))
         .catch((error: unknown) => console.warn("[session-actions] restored session relocation failed", error))
@@ -1982,8 +2002,10 @@ export type UnarchiveSessionsOptions = {
   expectedRuntimeKey?: string
   /**
    * Undo of an archive that just happened: put back exactly the sessions it
-   * moved, subsessions included. Without it a subsession is restored on its
-   * own only while its parent is active (`isRestorableOnItsOwn`).
+   * moved, subsessions included, where they were, even when their folder is
+   * gone. Without it a subsession is restored on its own only while its parent
+   * is active (`isRestorableOnItsOwn`), and a session whose folder is gone
+   * moves to its project.
    */
   undo?: boolean
 }
@@ -2020,7 +2042,7 @@ export async function unarchiveSessions(
     }
     if (settled.has(id)) continue
     if (options?.undo) {
-      if (await restoreArchivedSession(id, expectedRuntimeKey)) restoredIds.push(id)
+      if (await restoreArchivedSession(id, expectedRuntimeKey, { relocate: false })) restoredIds.push(id)
       else failedIds.push(id)
       settled.add(id)
       continue

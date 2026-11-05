@@ -11,7 +11,8 @@ import { DiffPreview, WritePreview } from './DiffPreview';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getVisiblePermissionPatterns } from './permissionCardPatterns';
 import { permissionFilePreviewsSchema } from './permissionFilePreviews';
-import { formatShortcutForDisplay } from '@/lib/shortcuts';
+import { formatShortcutForDisplay, getEffectiveShortcutCombo, type ShortcutActionId } from '@/lib/shortcuts';
+import { useUIStore } from '@/stores/useUIStore';
 import { toolFileDiffs } from '@/lib/opencode/tools';
 import { getPermissionToolPresentation, getToolDisplayName } from './permissionToolPresentation';
 import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission, type PermissionTarget } from './permissionSummary';
@@ -370,6 +371,11 @@ export const PermissionActions: React.FC<{
   const always = useAlwaysLabel(permission);
   const hasSave = always.full !== undefined;
   const canSave = canSavePermission(permission.save);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const shortcutHint = (actionId: ShortcutActionId) => {
+    const shortcut = formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides), '');
+    return shortcut ? <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{shortcut}</kbd> : null;
+  };
 
   if (variant === 'dock') {
     return (
@@ -377,20 +383,20 @@ export const PermissionActions: React.FC<{
         <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => onRespond('reject')} className="text-[var(--status-error)]">
           <Icon name="close" className="size-3.5" />
           {t('chat.permissionCard.deny')}
-          <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
+          {shortcutHint('permission_deny')}
         </Button>
         <div className="min-w-0 flex-1" />
         {canSave ? (
           <Button variant="outline" size="xs" disabled={isResponding} onClick={() => onRespond('always')} title={always.full}>
             <Icon name="time" className="size-3.5" />
             <span className="max-w-[180px] truncate">{always.label}</span>
-            {!hasSave ? <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+            {!hasSave ? shortcutHint('permission_allow_always') : null}
           </Button>
         ) : null}
         <Button size="xs" disabled={isResponding} onClick={() => onRespond('once')}>
           {isResponding ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="check" className="size-3.5" />}
           {t('chat.permissionCard.allowOnce')}
-          <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
+          {shortcutHint('permission_allow_once')}
         </Button>
       </div>
     );
@@ -410,7 +416,7 @@ export const PermissionActions: React.FC<{
       >
         <Icon name="check" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
         {t('chat.permissionCard.allowOnce')}
-        <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
+        {shortcutHint('permission_allow_once')}
       </button>
 
       {canSave ? (
@@ -422,7 +428,7 @@ export const PermissionActions: React.FC<{
         >
           <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
           <span className="truncate max-w-[180px]">{always.label}</span>
-          {!hasSave ? <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+          {!hasSave ? shortcutHint('permission_allow_always') : null}
         </button>
       ) : null}
 
@@ -433,7 +439,7 @@ export const PermissionActions: React.FC<{
       >
         <Icon name="close" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
         {t('chat.permissionCard.deny')}
-        <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
+        {shortcutHint('permission_deny')}
       </button>
 
       {isResponding && (

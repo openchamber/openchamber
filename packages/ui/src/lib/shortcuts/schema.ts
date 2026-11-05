@@ -1,3 +1,5 @@
+import { isDesktopShell } from '@/lib/desktop';
+import { isMacOS } from '@/lib/utils';
 import {
   getShortcutConflict,
   isValidShortcutCombo,
@@ -31,6 +33,25 @@ export function getCustomizableShortcutActions(): ReadonlyArray<CustomizableShor
   return SHORTCUT_SCHEMA.filter(
     (action): action is CustomizableShortcutAction => action.customizable,
   );
+}
+
+/** False for a native menu key on a runtime without that menu item. */
+export function isShortcutAvailable(action: ShortcutAction): boolean {
+  if (!('nativeMenu' in action)) return true;
+  return isDesktopShell() && (action.nativeMenu === 'all' || !isMacOS());
+}
+
+export function isSingleChordShortcut(action: ShortcutAction): boolean {
+  return 'singleChord' in action || 'nativeMenu' in action;
+}
+
+/** What the desktop app menu shows and listens to; empty means unassigned. */
+export function getNativeMenuShortcutCombos(
+  overrides?: Record<string, ShortcutCombo>,
+): Record<string, ShortcutCombo> {
+  return Object.fromEntries(SHORTCUT_SCHEMA
+    .filter((action) => 'nativeMenu' in action)
+    .map((action) => [action.id, getEffectiveShortcutCombo(action.id, overrides)]));
 }
 
 export function getEffectiveShortcutCombo(
@@ -80,7 +101,7 @@ export function getShortcutBindingConflicts(
   const action = getShortcutAction(actionId);
   if (!action) return conflicts;
   for (const candidate of SHORTCUT_SCHEMA) {
-    if (candidate.id === actionId) continue;
+    if (candidate.id === actionId || !isShortcutAvailable(candidate)) continue;
     const candidateCombo = ('prefixStyle' in candidate && candidate.prefixStyle)
       ? getEffectiveShortcutPrefix(candidate.id, overrides)
       : getEffectiveShortcutCombo(candidate.id, overrides);

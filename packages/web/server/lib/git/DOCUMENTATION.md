@@ -214,7 +214,12 @@ folder is busy; any other leftover is named by its path with the error that
 stopped its deletion.
 Only a linked worktree git registers for this repository is archived, never
 the primary checkout or a stray folder, and one worktree is archived once at a
-time (`WORKTREE_ARCHIVE_IN_PROGRESS` for a second call).
+time (`WORKTREE_ARCHIVE_IN_PROGRESS` for a second call). A worktree whose folder
+was deleted outside the app (git reports it prunable and the folder is absent)
+has nothing to record: its snapshot equals the commit it stood on, the removal
+drops its registration, and restoring it brings back the branch. A folder that
+lost only its `.git` file is prunable too, but its files are still there, so
+that archive fails and leaves no ref.
 
 `listWorktreeArchives` reads the refs (`GET /api/git/worktrees/archives`).
 `restoreWorktreeArchive` runs in a new checkout of the archive's branch (or of

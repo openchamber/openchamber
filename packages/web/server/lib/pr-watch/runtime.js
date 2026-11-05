@@ -178,8 +178,10 @@ const MAX_NAMES = 8;
  * Names for the message: check names come from whoever wrote the workflow,
  * so nothing in them may close the message's tag or break its line.
  */
+const cleanNames = (names) => Array.from(new Set(names.map((name) => name.replace(/[<>\s]+/g, ' ').trim().slice(0, 80)).filter(Boolean)));
+
 const nameList = (names) => {
-  const clean = Array.from(new Set(names.map((name) => name.replace(/[<>\s]+/g, ' ').trim().slice(0, 80)).filter(Boolean)));
+  const clean = cleanNames(names);
   if (clean.length === 0) return '';
   const shown = clean.slice(0, MAX_NAMES).join(', ');
   return clean.length > MAX_NAMES ? `${shown} and ${clean.length - MAX_NAMES} more` : shown;
@@ -201,7 +203,13 @@ const buildWakeMessage = (watch) => {
   return {
     text: `<openchamber-pull-request url="${escapeAttribute(watch.url)}" number="${number}">\nPull request #${number}: ${changes.join('; ')}.\n${next}\n</openchamber-pull-request>`,
     description: `Pull request #${number}: ${changes.join(', ')}`,
-    metadata: { source: PR_WATCH_SOURCE, url: watch.url, events: watch.wake.events },
+    metadata: {
+      source: PR_WATCH_SOURCE,
+      url: watch.url,
+      events: watch.wake.events,
+      failedChecks: cleanNames(watch.wake.failedChecks),
+      authors: cleanNames(watch.wake.authors),
+    },
   };
 };
 

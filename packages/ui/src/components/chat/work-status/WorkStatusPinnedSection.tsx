@@ -2,6 +2,7 @@ import React from 'react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useDirectorySync, useSession } from '@/sync/sync-context';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -148,18 +149,26 @@ export const WorkStatusPinnedSection: React.FC<Props> = ({ sessionId, directory 
         <WorkStatusRow
           key={entry.id}
           leading={(
-            <button
-              type="button"
-              disabled={busyId === entry.id}
-              aria-label={t('chat.workStatus.pinned.unpin')}
-              onClick={(event) => {
-                event.stopPropagation();
-                void handleUnpin(entry.id);
-              }}
-              className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
-            >
-              <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A row turns off pointer events on all but buttons; the span keeps the tooltip on a disabled one. */}
+                <span className="pointer-events-auto inline-flex shrink-0">
+                  <button
+                    type="button"
+                    disabled={busyId === entry.id}
+                    aria-label={t('chat.workStatus.pinned.unpin')}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleUnpin(entry.id);
+                    }}
+                    className="-m-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40"
+                  >
+                    <Icon name="pushpin-2-fill" className="size-3.5" style={{ color: 'var(--primary)' }} />
+                  </button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>{t('chat.workStatus.pinned.unpin')}</TooltipContent>
+            </Tooltip>
           )}
           muted
           label={entry.text ?? t('chat.workStatus.pinned.unavailable')}

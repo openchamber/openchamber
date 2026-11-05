@@ -4976,6 +4976,34 @@ describe('worktree archives', () => {
     expect(() => runGit(linked, ['rev-parse', '--verify', '--quiet', 'CHERRY_PICK_HEAD'])).toThrow();
   });
 
+  it('archives a worktree whose folder is gone and restores its branch', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked: created } = createArchivableWorktree();
+    const head = runGit(repo, ['rev-parse', 'feature/task']).trim();
+    // The path git lists, which is what the client sends: a gone folder cannot be resolved.
+    const linked = fs.realpathSync(created);
+    fs.rmSync(linked, { recursive: true });
+
+    const archived = await archiveWorktree(repo, { directory: linked, id: 'gone', sessionIds: ['ses_1'] });
+    expect(archived).toMatchObject({ id: 'gone', head, branch: 'feature/task', title: 'Login timeout fix', sessionIds: ['ses_1'] });
+    expect(runGit(repo, ['worktree', 'list', '--porcelain'])).not.toContain('feature/task');
+
+    runGit(repo, ['worktree', 'add', linked, 'feature/task']);
+    await expect(restoreWorktreeArchive(linked, { id: 'gone' })).resolves.toEqual({ id: 'gone', conflicts: false });
+    expect(runGit(linked, ['status', '--porcelain']).trim()).toBe('');
+    expect(await listWorktreeArchives(repo)).toEqual([]);
+  });
+
+  it('refuses a worktree that lost only its .git file, keeping its files out of a partial archive', async () => {
+    if (!canRunGit()) return;
+    const { repo, linked } = createArchivableWorktree();
+    fs.rmSync(path.join(linked, '.git'));
+
+    await expect(archiveWorktree(repo, { directory: linked, id: 'broken' })).rejects.toThrow();
+    expect(await listWorktreeArchives(repo)).toEqual([]);
+    expect(fs.readFileSync(path.join(linked, 'new.txt'), 'utf8')).toBe('untracked\n');
+  });
+
   it('applies the changes over commits the branch got after archiving', async () => {
     if (!canRunGit()) return;
     const { repo, linked } = createArchivableWorktree();

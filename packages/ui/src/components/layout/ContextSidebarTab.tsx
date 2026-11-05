@@ -20,6 +20,7 @@ import {
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { ContextPanelHeaderToolbar } from './contextPanelHeaderSlot';
 import { useInContextPanelHeader } from './contextPanelHeaderSlotContext';
@@ -628,18 +629,22 @@ export const ContextPanelContent: React.FC = () => {
                     <div className="border-t border-[var(--surface-subtle)] p-0">
                       <ScrollableOverlay outerClassName="max-h-[26rem] bg-[var(--surface-background)]" className="group relative" disableHorizontal>
                         <div className="absolute top-1 inset-e-2 z-10 opacity-0 transition-opacity group-hover:opacity-100">
-                          <button
-                            type="button"
-                            className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleCopyRawMessage(message.info.id, jsonValue);
-                            }}
-                            aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
-                            title={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copy')}
-                          >
-                            {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
-                          </button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/60 hover:text-foreground"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleCopyRawMessage(message.info.id, jsonValue);
+                                }}
+                                aria-label={isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}
+                              >
+                                {isCopied ? <Icon name="check" className="size-3.5" /> : <Icon name="file-copy" className="size-3.5" />}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent sideOffset={6}>{isCopied ? t('contextSidebar.actions.copied') : t('contextSidebar.actions.copyJson')}</TooltipContent>
+                          </Tooltip>
                         </div>
                         <WorkerHighlightedCode
                           language="json"

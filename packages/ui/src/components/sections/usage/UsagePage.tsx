@@ -3,10 +3,9 @@ import { UsageCard } from './UsageCard';
 import { QuotaCredentials } from './QuotaCredentials';
 import { ClaudeCodeSignIn } from './ClaudeCodeSignIn';
 import { ConsoleBudgetsSection } from './ConsoleBudgetsSection';
-import { QUOTA_PROVIDERS } from '@/lib/quota';
-import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
+import { useQuotaAutoRefresh, useQuotaProviders, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
 import {
   Collapsible,
   CollapsibleContent,
@@ -52,10 +51,11 @@ export const UsagePage: React.FC = () => {
   const lastUpdated = useQuotaStore((state) => state.lastUpdated);
   const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
-  const setDropdownProviderIds = useQuotaStore((state) => state.setDropdownProviderIds);
+  const setProviderInDropdown = useQuotaStore((state) => state.setProviderInDropdown);
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const toggleModelSelected = useQuotaStore((state) => state.toggleModelSelected);
   const applyDefaultSelections = useQuotaStore((state) => state.applyDefaultSelections);
+  const providers = useQuotaProviders();
 
   useQuotaAutoRefresh(true, true);
 
@@ -67,12 +67,12 @@ export const UsagePage: React.FC = () => {
       return;
     }
     const firstConfigured = results.find((entry) => entry.configured)?.providerId;
-    setSelectedProvider(firstConfigured ?? QUOTA_PROVIDERS[0]?.id ?? null);
-  }, [results, selectedProviderId, setSelectedProvider]);
+    setSelectedProvider(firstConfigured ?? providers[0]?.id ?? null);
+  }, [providers, results, selectedProviderId, setSelectedProvider]);
 
   const selectedResult = results.find((entry) => entry.providerId === selectedProviderId) ?? null;
 
-  const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
+  const providerMeta = providers.find((provider) => provider.id === selectedProviderId);
   const providerName = providerMeta?.name ?? selectedProviderId ?? t('settings.usage.sidebar.title');
   const usage = selectedResult?.usage;
   const refreshError = selectedProviderId ? refreshErrors[selectedProviderId] : undefined;
@@ -95,12 +95,8 @@ export const UsagePage: React.FC = () => {
     if (!selectedProviderId) {
       return;
     }
-    const next = enabled
-      ? Array.from(new Set([...dropdownProviderIds, selectedProviderId]))
-      : dropdownProviderIds.filter((id) => id !== selectedProviderId);
-    setDropdownProviderIds(next);
-    void updateDesktopSettings({ usageDropdownProviders: next });
-  }, [dropdownProviderIds, selectedProviderId, setDropdownProviderIds]);
+    void updateDesktopSettings({ usageDropdownProviders: setProviderInDropdown(selectedProviderId, enabled) });
+  }, [selectedProviderId, setProviderInDropdown]);
 
   const providerModels = React.useMemo((): ModelInfo[] => {
     if (!usage?.models) return [];
@@ -168,7 +164,7 @@ export const UsagePage: React.FC = () => {
   return (
     <SettingsPageLayout
       title={t('settings.usage.page.header.providerUsage', { provider: providerName })}
-      titleLeading={<ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />}
+      titleLeading={<QuotaProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />}
       description={
         isLoading ? (
           <span className={cn('typography-settings-description text-muted-foreground', blink)}>{t('settings.usage.page.header.refreshing')}</span>

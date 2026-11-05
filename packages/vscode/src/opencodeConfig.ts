@@ -1309,22 +1309,38 @@ const ensureProjectPluginConfigPath = (workingDirectory?: string | null): string
 };
 
 /**
- * The config files OpenCode 2 takes plugins from, in its load order: the global
- * file, then `OPENCODE_CONFIG`, then the project file. Each one adds its own
- * entries; `OPENCODE_CONFIG` replaces none of the global ones.
+ * Every config file OpenCode 2 takes plugins from, in its load order: the
+ * global `opencode.json` and `opencode.jsonc`, then `OPENCODE_CONFIG`, then the
+ * files found walking up from the project folder. Each file adds its own
+ * entries; none replaces another's. A parent folder's file reaches every
+ * project below it, so it counts as user scope, like the global file.
  */
 const getPluginConfigSources = (workingDirectory?: string | null): Array<{ scope: PluginScope; path: string; config: Record<string, unknown> }> => {
-  const customPath = getActiveCustomConfigPath();
-  const userPath = getActivePrimaryUserConfigPath();
-  const projectPath = getProjectConfigPath(workingDirectory || undefined);
-  return [
-    { scope: 'user', path: userPath, config: readConfigLayer(userPath).config },
+  const directory = workingDirectory || undefined;
+  const layers = readConfigLayers(directory);
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const projectFiles = getProjectConfigCandidates(directory);
+  const userSources = [
+    { scope: 'user' as const, path: userPath, config: layers.userConfig },
+    ...(userOverridePath
+      ? [{ scope: 'user' as const, path: userOverridePath, config: layers.userOverrideConfig }]
+      : []),
     ...(customPath
-      ? [{ scope: 'user' as const, path: customPath, config: readConfigLayer(customPath).config }]
+      ? [{ scope: 'user' as const, path: customPath, config: layers.customConfig }]
       : []),
-    ...(projectPath
-      ? [{ scope: 'project' as const, path: projectPath, config: readConfigLayer(projectPath).config }]
-      : []),
+  ];
+  // A folder file that is also `OPENCODE_CONFIG` stays the user entry, so the
+  // list, edits and duplicate checks all see one declaration.
+  const seenFiles = new Set(userSources.map((source) => canonicalPluginPath(source.path)));
+  return [
+    ...userSources,
+    ...getFolderConfigPaths(directory)
+      .filter((filePath) => !seenFiles.has(canonicalPluginPath(filePath)))
+      .map((filePath) => ({
+        scope: projectFiles.includes(filePath) ? 'project' as const : 'user' as const,
+        path: filePath,
+        config: readConfigLayer(filePath).config,
+      })),
   ];
 };
 
@@ -1382,8 +1398,8 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
     throw codedError('Plugin entry id must use config prefix', 'INVALID_SPEC');
   }
   const { scope, rest: spec } = parsePluginIdValue(decoded.value);
-  // Two user files can both declare the spec; the later one is the entry the
-  // list shows, so it is the one edited.
+  // Two files can both declare the spec; the later one is the entry the list
+  // shows, so it is the one edited.
   const source = getPluginConfigSources(workingDirectory).reverse().find((candidate) => (
     candidate.scope === scope && hasPluginSpec(readPluginArray(candidate.config), spec)
   ));
@@ -1402,11 +1418,7 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
 
 export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
   const entries: PluginEntry[] = [];
-  const seenSources = new Set<string>();
   for (const source of getPluginConfigSources(workingDirectory)) {
-    const sourcePath = canonicalPluginPath(source.path);
-    if (source.scope === 'project' && seenSources.has(sourcePath)) continue;
-    seenSources.add(sourcePath);
     for (const item of readPluginList(source.config)) {
       const entry: PluginEntry = {
         id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
@@ -1420,8 +1432,8 @@ export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
       entries.push(entry);
     }
   }
-  // A spec in both the global file and `OPENCODE_CONFIG` shares one id; the
-  // `OPENCODE_CONFIG` entry is listed, matching `getPluginTarget`.
+  // A spec in two files of one scope shares one id; the later file's entry is
+  // listed, matching `getPluginTarget`.
   return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
 };
 

@@ -21,6 +21,7 @@ import type { TerminalTheme } from '@/lib/terminalTheme';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
@@ -1248,116 +1249,146 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const preserveTerminalFocus = (event: React.PointerEvent<HTMLButtonElement>) => {
         if (isTouchTerminal) event.preventDefault();
     };
+    // A long press opens a tooltip and swallows the click, so keys on a touch screen go without one.
+    const quickKeyTooltip = (label: string, key: React.ReactElement) => (
+        isTouchTerminal || hasTouchOnlyPointer
+            ? key
+            : <ButtonTooltip label={label} side="top">{key}</ButtonTooltip>
+    );
+    const modifierTooltip = (modifier: Modifier, name: string) => t(
+        activeModifier === modifier
+            ? 'contextTooltips.terminalBrowser.quickKeys.releaseModifier'
+            : 'contextTooltips.terminalBrowser.quickKeys.holdModifier',
+        { key: name },
+    );
     const quickKeysControls = (
         <>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('esc')}
-                disabled={quickKeysDisabled}
-            >
-                {t('terminalView.quickKeys.escape')}
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('tab')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-right" className="h-4 w-4" />
-                <span className="sr-only">{t('terminalView.quickKeys.tabAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="chip"
-                aria-pressed={activeModifier === 'ctrl'}
-                className={isTouchTerminal ? 'px-3' : 'px-2'}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleModifierToggle('ctrl')}
-                disabled={quickKeysDisabled}
-            >
-                <span className="text-xs font-medium">{formatShortcutForDisplay('ctrl')}</span>
-                <span className="sr-only">{t('terminalView.quickKeys.controlModifierAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="chip"
-                aria-pressed={activeModifier === 'alt'}
-                className={isTouchTerminal ? 'px-3' : 'px-2'}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleModifierToggle('alt')}
-                disabled={quickKeysDisabled}
-            >
-                <span className="text-xs font-medium">{formatShortcutForDisplay('alt')}</span>
-                <span className="sr-only">{t('terminalView.quickKeys.altModifierAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('arrow-up')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-up"/>
-                <span className="sr-only">{t('terminalView.quickKeys.arrowUpAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('arrow-left')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-left"/>
-                <span className="sr-only">{t('terminalView.quickKeys.arrowLeftAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('arrow-down')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-down"/>
-                <span className="sr-only">{t('terminalView.quickKeys.arrowDownAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('arrow-right')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-right"/>
-                <span className="sr-only">{t('terminalView.quickKeys.arrowRightAria')}</span>
-            </Button>
-            <Button
-                type="button"
-                size={quickKeySize}
-                variant="outline"
-                className={quickKeyIconClass}
-                onPointerDown={preserveTerminalFocus}
-                onClick={() => handleMobileKeyPress('enter')}
-                disabled={quickKeysDisabled}
-            >
-                <Icon name="arrow-go-back"/>
-                <span className="sr-only">{t('terminalView.quickKeys.enterAria')}</span>
-            </Button>
+            {quickKeyTooltip(t('contextTooltips.terminalBrowser.quickKeys.escape'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('esc')}
+                    disabled={quickKeysDisabled}
+                >
+                    {t('terminalView.quickKeys.escape')}
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.tabAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('tab')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-right" className="h-4 w-4" />
+                    <span className="sr-only">{t('terminalView.quickKeys.tabAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(modifierTooltip('ctrl', t('terminalView.quickKeys.controlLabel')), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="chip"
+                    aria-pressed={activeModifier === 'ctrl'}
+                    className={isTouchTerminal ? 'px-3' : 'px-2'}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleModifierToggle('ctrl')}
+                    disabled={quickKeysDisabled}
+                >
+                    <span className="text-xs font-medium">{formatShortcutForDisplay('ctrl')}</span>
+                    <span className="sr-only">{t('terminalView.quickKeys.controlModifierAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(modifierTooltip('alt', t('terminalView.quickKeys.altLabel')), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="chip"
+                    aria-pressed={activeModifier === 'alt'}
+                    className={isTouchTerminal ? 'px-3' : 'px-2'}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleModifierToggle('alt')}
+                    disabled={quickKeysDisabled}
+                >
+                    <span className="text-xs font-medium">{formatShortcutForDisplay('alt')}</span>
+                    <span className="sr-only">{t('terminalView.quickKeys.altModifierAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.arrowUpAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('arrow-up')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-up"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.arrowUpAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.arrowLeftAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('arrow-left')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-left"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.arrowLeftAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.arrowDownAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('arrow-down')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-down"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.arrowDownAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.arrowRightAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('arrow-right')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-right"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.arrowRightAria')}</span>
+                </Button>
+            ))}
+            {quickKeyTooltip(t('terminalView.quickKeys.enterAria'), (
+                <Button
+                    type="button"
+                    size={quickKeySize}
+                    variant="outline"
+                    className={quickKeyIconClass}
+                    onPointerDown={preserveTerminalFocus}
+                    onClick={() => handleMobileKeyPress('enter')}
+                    disabled={quickKeysDisabled}
+                >
+                    <Icon name="arrow-go-back"/>
+                    <span className="sr-only">{t('terminalView.quickKeys.enterAria')}</span>
+                </Button>
+            ))}
         </>
     );
 
@@ -1386,71 +1417,80 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                             />
                         </div>
 
-                        <Button
-                            type="button"
-                            size="xs"
-                            variant="ghost"
-                            className={cn('shrink-0', isTouchTerminal ? 'h-8 w-8 p-0' : 'h-7 w-7 p-0')}
-                            onClick={handleCreateTab}
-                            title={t('terminalView.tabs.newTabTitle')}
-                        >
-                            <Icon name="add" className={`${isTouchTerminal ? 'h-[18px] w-[18px]' : 'h-4 w-4'}`}/>
-                        </Button>
+                        <ButtonTooltip label={t('contextTooltips.terminalBrowser.terminal.newTab')} side="bottom" className="shrink-0">
+                            <Button
+                                type="button"
+                                size="xs"
+                                variant="ghost"
+                                className={cn('shrink-0', isTouchTerminal ? 'h-8 w-8 p-0' : 'h-7 w-7 p-0')}
+                                onClick={handleCreateTab}
+                                aria-label={t('contextTooltips.terminalBrowser.terminal.newTab')}
+                            >
+                                <Icon name="add" className={`${isTouchTerminal ? 'h-[18px] w-[18px]' : 'h-4 w-4'}`}/>
+                            </Button>
+                        </ButtonTooltip>
 
                         <div className="flex shrink-0 items-center gap-1 overflow-visible">
-                            <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRestart()} disabled={isRestarting || isActionTab} title={t('terminalView.actions.restart')} aria-label={t('terminalView.actions.restart')}>
-                                <Icon name="restart" className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                type="button"
-                                size="xs"
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={handleAttachSelection}
-                                title={t('terminalView.actions.attachSelection')}
-                                aria-label={t('terminalView.actions.attachSelection')}
-                            >
-                                <Icon name="attachment-2" className="h-4 w-4" />
-                            </Button>
-                            <Button
-                                type="button"
-                                size="xs"
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={handleCopySelection}
-                                title={t('terminalView.actions.copySelection')}
-                                aria-label={t('terminalView.actions.copySelection')}
-                            >
-                                <Icon name="file-copy" className="h-4 w-4" />
-                            </Button>
-                            {useTouchTerminalInput ? (
+                            <ButtonTooltip label={t('terminalView.actions.restart')} side="bottom">
+                                <Button type="button" size="xs" variant="ghost" className="h-7 w-7 p-0" onClick={() => void handleRestart()} disabled={isRestarting || isActionTab} aria-label={t('terminalView.actions.restart')}>
+                                    <Icon name="restart" className="h-4 w-4" />
+                                </Button>
+                            </ButtonTooltip>
+                            <ButtonTooltip label={t('terminalView.actions.attachSelection')} side="bottom">
                                 <Button
                                     type="button"
                                     size="xs"
                                     variant="ghost"
                                     className="h-7 w-7 p-0"
-                                    onClick={handlePasteClipboard}
-                                    title={t('terminalView.actions.paste')}
-                                    aria-label={t('terminalView.actions.paste')}
+                                    onClick={handleAttachSelection}
+                                    aria-label={t('terminalView.actions.attachSelection')}
                                 >
-                                    <Icon name="clipboard" className="h-4 w-4" />
+                                    <Icon name="attachment-2" className="h-4 w-4" />
                                 </Button>
-                            ) : null}
-                            {previewUrl ? (
+                            </ButtonTooltip>
+                            <ButtonTooltip label={t('terminalView.actions.copySelection')} side="bottom">
                                 <Button
                                     type="button"
                                     size="xs"
-                                    variant="outline"
-                                    className="h-6 shrink-0 gap-1 px-2"
-                                    onClick={() => {
-                                        if (!contextDirectory) return;
-                                        openContextPreview(contextDirectory, previewUrl);
-                                    }}
-                                    title={t('terminalView.preview.openTitle')}
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0"
+                                    onClick={handleCopySelection}
+                                    aria-label={t('terminalView.actions.copySelection')}
                                 >
-                                    <Icon name="global" className="h-3.5 w-3.5 shrink-0" />
-                                    <span className="whitespace-nowrap">{t('terminalView.preview.open')}</span>
+                                    <Icon name="file-copy" className="h-4 w-4" />
                                 </Button>
+                            </ButtonTooltip>
+                            {useTouchTerminalInput ? (
+                                <ButtonTooltip label={t('terminalView.actions.paste')} side="bottom">
+                                    <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="ghost"
+                                        className="h-7 w-7 p-0"
+                                        onClick={handlePasteClipboard}
+                                        aria-label={t('terminalView.actions.paste')}
+                                    >
+                                        <Icon name="clipboard" className="h-4 w-4" />
+                                    </Button>
+                                </ButtonTooltip>
+                            ) : null}
+                            {previewUrl ? (
+                                <ButtonTooltip label={t('terminalView.preview.openTitle')} side="bottom" className="shrink-0">
+                                    <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="outline"
+                                        className="h-6 shrink-0 gap-1 px-2"
+                                        onClick={() => {
+                                            if (!contextDirectory) return;
+                                            openContextPreview(contextDirectory, previewUrl);
+                                        }}
+                                        aria-label={t('terminalView.preview.openTitle')}
+                                    >
+                                        <Icon name="global" className="h-3.5 w-3.5 shrink-0" />
+                                        <span className="whitespace-nowrap">{t('terminalView.preview.open')}</span>
+                                    </Button>
+                                </ButtonTooltip>
                             ) : null}
                         </div>
                     </div>
@@ -1520,17 +1560,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                     <div className="absolute inset-x-0 bottom-0 bg-[var(--status-error-background)] px-3 py-2 text-xs text-[var(--status-error-text)] flex items-center justify-between gap-2">
                         <span>{connectionError}</span>
                         {isFatalError && isTouchTerminal && (
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                className="h-6 px-2 py-0 text-xs"
-                                onClick={handleHardRestart}
-                                disabled={isRestarting}
-                                title={t('terminalView.actions.hardRestartTitle')}
-                                type="button"
-                            >
-                                {t('terminalView.actions.hardRestart')}
-                            </Button>
+                            <ButtonTooltip label={t('terminalView.actions.hardRestartTitle')} side="top">
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-6 px-2 py-0 text-xs"
+                                    onClick={handleHardRestart}
+                                    disabled={isRestarting}
+                                    type="button"
+                                >
+                                    {t('terminalView.actions.hardRestart')}
+                                </Button>
+                            </ButtonTooltip>
                         )}
                     </div>
                 )}

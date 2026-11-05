@@ -367,8 +367,8 @@ export const createSettingsHelpers = (dependencies) => {
         ...new Set(candidate.workStatusHiddenSections.filter((entry) => typeof entry === 'string' && entry.length > 0)),
       ];
     }
-    if (typeof candidate.workStatusHiddenSectionsExplicit === 'boolean') {
-      result.workStatusHiddenSectionsExplicit = candidate.workStatusHiddenSectionsExplicit;
+    for (const key of ['workStatusHiddenSectionsExplicit', 'workStatusSectionOrderExplicit']) {
+      if (typeof candidate[key] === 'boolean') result[key] = candidate[key];
     }
     if (Array.isArray(candidate.workStatusSectionOrder)) {
       result.workStatusSectionOrder = [
@@ -580,6 +580,10 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.tableCellWrap === 'boolean') {
       result.tableCellWrap = candidate.tableCellWrap;
+    }
+    const selectionApprovalText = z.string().transform((value) => value.slice(0, 1000)).safeParse(candidate.selectionApprovalText);
+    if (selectionApprovalText.success) {
+      result.selectionApprovalText = selectionApprovalText.data;
     }
     if (typeof candidate.copyMessagesAsPlainText === 'boolean') {
       result.copyMessagesAsPlainText = candidate.copyMessagesAsPlainText;

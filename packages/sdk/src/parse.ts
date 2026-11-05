@@ -41,6 +41,9 @@ import {
   GUEST_STATUS_SECTION_HEIGHT_MIN,
   GUEST_STATUS_SECTION_TITLE_MAX,
   NOTIFICATIONS_GUEST_ID_MAX,
+  QUOTA_GUEST_ID_MAX,
+  QUOTA_PROVIDERS_MAX,
+  isOpenCodeProviderId,
   SOURCE_CONTROL_DEFAULT_INSTANCES_MAX,
   SOURCE_CONTROL_GUEST_ID_MAX,
   SOURCE_CONTROL_URL_TEMPLATES_MAX,
@@ -496,6 +499,15 @@ const trackerSchema = z.object({
   });
 });
 
+// The OpenCode providers whose credentials a usage provider receives, by
+// shape: a credential can arrive after install, so nothing is checked against
+// what OpenCode holds now. Duplicates fail, as a tracker's duplicate links do.
+const quotaSchema = z.object({
+  providers: z.array(z.string().trim().refine(isOpenCodeProviderId, { message: 'must be an OpenCode provider id, like "openrouter"' }))
+    .max(QUOTA_PROVIDERS_MAX)
+    .refine((ids) => new Set(ids).size === ids.length, { message: 'provider ids must be unique' }),
+}).strict();
+
 // `roles` only means something on a message action and `payload` only on a
 // session action; a dead field is a misconfiguration and fails closed.
 const actionSchema = z.object({
@@ -590,6 +602,7 @@ const contributesSchema = z.object({
   }).strict().optional(),
   notifications: notificationsSchema.optional(),
   tracker: trackerSchema.optional(),
+  quota: quotaSchema.optional(),
 });
 
 /**
@@ -684,6 +697,22 @@ export const openChamberManifestSchema = z.object({
       ctx.addIssue({
         code: 'custom', path: ['service', 'provides'],
         message: 'An extension is a Git host ("source-control") or a tracker ("tracker"), never both: the two roles would share the id "ext-<panel.id>".',
+      });
+      return;
+    }
+    // The usage provider and the role that serves it come together, named `ext-<panel.id>` in the quota registry.
+    const providesQuota = contributes.service?.provides?.includes('quota') === true;
+    if (providesQuota !== (contributes.quota !== undefined)) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: 'service.provides "quota" and contributes.quota come together: declare both or neither.',
+      });
+      return;
+    }
+    if (providesQuota && contributes.panel.id.length > QUOTA_GUEST_ID_MAX) {
+      ctx.addIssue({
+        code: 'custom', path: ['service', 'provides'],
+        message: `A quota extension's panel.id is at most ${QUOTA_GUEST_ID_MAX} characters: OpenChamber names its usage provider "ext-<panel.id>".`,
       });
       return;
     }
@@ -918,10 +947,16 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       ? `${field}: ${issue.message}`
       : `${field} is invalid: see "contributes.tracker" in GUEST_SERVICES.md for every field.`);
   }
+  if (path.startsWith('contributes.quota')) {
+    const field = fieldPath(issue.path);
+    return fail('invalid-service', issue.code === 'custom'
+      ? `${field}: ${issue.message}`
+      : `${field} is invalid: contributes.quota is { providers: string[] } of up to ${QUOTA_PROVIDERS_MAX} OpenCode provider ids; see "Usage provider" in GUEST_SERVICES.md.`);
+  }
   if (path.startsWith('contributes.service')) {
     return fail('invalid-service', issue.code === 'custom'
       ? issue.message
-      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control", "notifications", "tracker"), and optional surface (true).');
+      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control", "notifications", "tracker", "quota"), and optional surface (true).');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };

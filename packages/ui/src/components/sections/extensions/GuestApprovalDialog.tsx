@@ -54,6 +54,8 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
   const providesSourceControl = serviceProvides(guest?.service, 'source-control');
   const providesNotifications = serviceProvides(guest?.service, 'notifications');
   const providesTracker = serviceProvides(guest?.service, 'tracker');
+  const providesQuota = serviceProvides(guest?.service, 'quota');
+  const quotaProviders = guest?.quota?.providers ?? [];
   const sessionEvents = guest?.sessionEvents?.events ?? [];
   const apiOrigin = guest?.integration?.apiOrigin ?? null;
 
@@ -148,6 +150,24 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         <li>{t('settings.extensions.capability.service.providesTracker.writes')}</li>
                       </ul>
                       <p className="mt-0.5 text-muted-foreground">{t('settings.extensions.capability.service.providesTracker.tokens')}</p>
+                    </div>
+                  ) : null}
+                  {capability === 'service' && providesQuota ? (
+                    // The hand-over the user approves: the listed providers' credentials, or none. A changed list opens this dialog again.
+                    <div className="typography-meta mt-0.5 text-foreground">
+                      {quotaProviders.length > 0 ? (
+                        <>
+                          <p>{t('settings.extensions.capability.service.providesQuota')}</p>
+                          <ul className="mt-0.5 list-disc space-y-0.5 ps-4">
+                            {quotaProviders.map((providerId) => (
+                              <li key={providerId} className="break-all font-mono">{providerId}</li>
+                            ))}
+                          </ul>
+                          <p className="mt-0.5 text-muted-foreground">{t('settings.extensions.capability.service.providesQuota.credentials')}</p>
+                        </>
+                      ) : (
+                        <p>{t('settings.extensions.capability.service.providesQuota.none')}</p>
+                      )}
                     </div>
                   ) : null}
                   {capability === 'service' && sessionEvents.length > 0 ? (

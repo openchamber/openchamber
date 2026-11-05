@@ -940,6 +940,8 @@ interface UIStore {
    */
   workStatusHiddenSections: string[];
   workStatusSectionOrder: WorkStatusPanelSectionId[];
+  /** True once the user arranged the sections, false for a saved default. */
+  workStatusSectionOrderExplicit: boolean;
   /** Explicitly chosen hidden-section state. False keeps the default opt-in seed. */
   workStatusHiddenSectionsExplicit: boolean;
   isSessionSwitcherOpen: boolean;
@@ -947,6 +949,8 @@ interface UIStore {
   pendingDiffFile: string | null;
   pendingDiffStaged: boolean;
   pendingDiffScope: PendingDiffScope | null;
+  /** A file a click asked to see in the session's last turn diff, until Changes answers whether it is there. */
+  pendingTurnDiffFile: { file: string; sessionId: string | null } | null;
   pendingFileNavigation: PendingFileNavigation | null;
   pendingFileFocusPath: string | null;
   isMobile: boolean;
@@ -1203,6 +1207,7 @@ interface UIStore {
   codeBlockLineWrap: boolean;
   tableCellWrap: boolean;
   copyMessagesAsPlainText: boolean;
+  selectionApprovalText: string;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
   timeFormatPreference: TimeFormatPreference;
@@ -1300,6 +1305,7 @@ interface UIStore {
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
   setPendingDiffFile: (filePath: string | null, staged?: boolean, scope?: PendingDiffScope | null) => void;
+  setPendingTurnDiffFile: (request: { file: string; sessionId: string | null } | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
   setPendingFileFocusPath: (path: string | null) => void;
   navigateToDiff: (filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
@@ -1483,6 +1489,7 @@ interface UIStore {
   setCodeBlockLineWrap: (value: boolean) => void;
   setTableCellWrap: (value: boolean) => void;
   setCopyMessagesAsPlainText: (value: boolean) => void;
+  setSelectionApprovalText: (value: string) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
@@ -1526,6 +1533,9 @@ const openFileTab = (state: UIStore, directory: string, filePath: string, previe
   }
 };
 
+/** What the selection menu's thumb-up says when the user set no text of their own. */
+export const DEFAULT_SELECTION_APPROVAL_TEXT = 'Sounds good';
+
 export const useUIStore = create<UIStore>()(
   devtools(
     persist(
@@ -1559,12 +1569,14 @@ export const useUIStore = create<UIStore>()(
         workStatusOverlayOpen: false,
         workStatusHiddenSections: [],
         workStatusSectionOrder: sanitizeWorkStatusSectionOrder([]),
+        workStatusSectionOrderExplicit: false,
         workStatusHiddenSectionsExplicit: false,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
         pendingDiffFile: null,
         pendingDiffStaged: false,
         pendingDiffScope: null,
+        pendingTurnDiffFile: null,
         pendingFileNavigation: null,
         pendingFileFocusPath: null,
         isMobile: false,
@@ -1731,6 +1743,7 @@ export const useUIStore = create<UIStore>()(
         codeBlockLineWrap: true,
         tableCellWrap: true,
         copyMessagesAsPlainText: true,
+        selectionApprovalText: '',
         showToolFileIcons: true,
         showTurnChangedFiles: false,
         timeFormatPreference: 'auto',
@@ -2420,7 +2433,7 @@ export const useUIStore = create<UIStore>()(
           set({ mobileWorkStatusHiddenSections: [...new Set(sectionIds)] });
         },
         setWorkStatusSectionOrder: (sectionIds) => {
-          set({ workStatusSectionOrder: sanitizeWorkStatusSectionOrder(sectionIds) });
+          set({ workStatusSectionOrder: sanitizeWorkStatusSectionOrder(sectionIds), workStatusSectionOrderExplicit: true });
         },
 
         setContextRailSurfaceVisible: (surfaceId, visible) => {
@@ -2479,6 +2492,10 @@ export const useUIStore = create<UIStore>()(
             pendingDiffStaged: filePath ? staged : false,
             pendingDiffScope: filePath ? scope : null,
           });
+        },
+
+        setPendingTurnDiffFile: (request) => {
+          set({ pendingTurnDiffFile: request });
         },
 
         setPendingFileNavigation: (navigation) => {
@@ -3449,6 +3466,9 @@ export const useUIStore = create<UIStore>()(
         setTableCellWrap: (value) => {
           set({ tableCellWrap: value });
         },
+        setSelectionApprovalText: (value) => {
+          set({ selectionApprovalText: value });
+        },
         setCopyMessagesAsPlainText: (value) => {
           set({ copyMessagesAsPlainText: value });
         },
@@ -3546,7 +3566,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 26,
+        version: 27,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3558,6 +3578,12 @@ export const useUIStore = create<UIStore>()(
           // the synced settings after hydration.
           if (version < 23) {
             state.tableCellWrap = true;
+          }
+
+          // v26 -> v27: Context sources moved up the default order; an order
+          // the user arranged stays.
+          if (version < 27 && Array.isArray(state.workStatusSectionOrder)) {
+            state.workStatusSectionOrder = sanitizeWorkStatusSectionOrder(state.workStatusSectionOrder, false);
           }
 
           // v20 -> v21: enable telemetry by default; preserve explicit choices.
@@ -3839,6 +3865,7 @@ export const useUIStore = create<UIStore>()(
           workStatusPanelEnabled: state.workStatusPanelEnabled,
           workStatusHiddenSections: state.workStatusHiddenSections,
           workStatusSectionOrder: state.workStatusSectionOrder,
+          workStatusSectionOrderExplicit: state.workStatusSectionOrderExplicit,
           workStatusHiddenSectionsExplicit: state.workStatusHiddenSectionsExplicit,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           sidebarSection: state.sidebarSection,
@@ -3956,6 +3983,7 @@ export const useUIStore = create<UIStore>()(
           codeBlockLineWrap: state.codeBlockLineWrap,
           tableCellWrap: state.tableCellWrap,
           copyMessagesAsPlainText: state.copyMessagesAsPlainText,
+          selectionApprovalText: state.selectionApprovalText,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
           timeFormatPreference: state.timeFormatPreference,

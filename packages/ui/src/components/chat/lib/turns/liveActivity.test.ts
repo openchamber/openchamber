@@ -322,4 +322,18 @@ describe('getShownPages', () => {
         const step = assistant('step', [waiting, answered, inChat, stopped, shown], { finish: 'tool-calls' });
         expect(getShownPages([step]).map((part) => part.id)).toEqual(['waiting', 'shown']);
     });
+
+    test('a settled form after shown text stays between it and the reply; a secret card still folds', () => {
+        const form = { action: 'render.page', parameters: { ui: 'root = Stack([])', title: 'Scope', awaitAnswer: true } };
+        const answer = { metadata: { openchamber: { ok: true, answer: { answered: true, summary: 'Minimal', data: {} } } } };
+        const lead = text('Overview:\n```openui-lang\nroot = Stack([])\n```\nThe one decision:');
+        const asked = tool('asked', 'openchamber_render', { input: form, ...answer });
+        const again = tool('again', 'openchamber_render', { input: form, ...answer });
+        const reply = assistant('reply', [text('It stayed scoped.')], { finish: 'stop' });
+        const step = assistant('step', [lead, asked, again], { finish: 'tool-calls' });
+        expect(getShownPages([step, reply], reply)).toEqual([lead, asked, again]);
+
+        const secret = tool('secret', 'openchamber_secret', { input: { action: 'secret.request', parameters: { name: 'TOKEN' } } });
+        expect(getShownPages([assistant('step', [lead, secret], { finish: 'tool-calls' })])).toEqual([lead]);
+    });
 });

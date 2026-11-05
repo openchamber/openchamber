@@ -7,12 +7,14 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CISummary, ChangeRequestListStatus, ChangeRequestRevision, ChangeRequestRevisionKind, RepositoryReference, RepositoryReferenceComment, RepositoryReferenceDetail, TrackerItem, TrackerItemSummary, PullRequestStackLayer } from '@/lib/api/types';
 import { useAvatarImage } from '@/hooks/useAvatarImage';
 import { useEmojiShortcodes } from '@/lib/emoji/shortcodes';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import type { CachedValue } from './referenceCache';
 import { ReferenceMarkdownRewriteContext, useProjectUploadRewrite } from './projectUploads';
 import { ReferenceLinksContext, useReferenceLinks } from './referenceLinks';
@@ -178,16 +180,21 @@ const RevisionPicker: React.FC<{ choice: RevisionChoice }> = ({ choice }) => {
         : t('references.picker.preview.revision.number', { number: revision.number }));
     return (
         <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    className={cn(dropdownTriggerVariants(), 'min-w-0 max-w-[14rem] font-normal')}
-                    aria-label={t('references.picker.preview.revision.label')}
-                >
-                    <span className="truncate">{labelOf(shown)}</span>
-                    <Icon name="arrow-down-s" className="size-3.5" />
-                </button>
-            </DropdownMenuTrigger>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            className={cn(dropdownTriggerVariants(), 'min-w-0 max-w-[14rem] font-normal')}
+                            aria-label={t('references.picker.preview.revision.label')}
+                        >
+                            <span className="truncate">{labelOf(shown)}</span>
+                            <Icon name="arrow-down-s" className="size-3.5" />
+                        </button>
+                    </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.choosePatchset')}</TooltipContent>
+            </Tooltip>
             <DropdownMenuContent align="start" className="w-64">
                 <DropdownMenuRadioGroup
                     value={shown.sha}
@@ -274,14 +281,19 @@ const CommentsSection: React.FC<{
                     </span>
                 ) : null}
                 {attachments && shown > 0 && state.status === 'ready' ? (
-                    <button
-                        type="button"
-                        onClick={() => attachments.onAttachAll(state.value.flatMap((entry) => (entry.kind === 'comment' ? [entry, ...(entry.thread?.replies ?? [])] : [])))}
-                        className={cn('ms-auto inline-flex items-center gap-1 typography-meta font-normal hover:text-foreground', REFERENCE_META_TEXT)}
-                    >
-                        <Icon name="attachment-2" className="size-3.5" />
-                        {t('gitView.pr.comments.addAll')}
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                onClick={() => attachments.onAttachAll(state.value.flatMap((entry) => (entry.kind === 'comment' ? [entry, ...(entry.thread?.replies ?? [])] : [])))}
+                                className={cn('ms-auto inline-flex items-center gap-1 typography-meta font-normal hover:text-foreground', REFERENCE_META_TEXT)}
+                            >
+                                <Icon name="attachment-2" className="size-3.5" />
+                                {t('gitView.pr.comments.addAll')}
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.attachAllComments')}</TooltipContent>
+                    </Tooltip>
                 ) : null}
             </h4>
             {state.status === 'error' ? (
@@ -354,15 +366,20 @@ const PullDetailRows: React.FC<{
                 checks.value && checks.value.total > 0 ? (
                     <MetaRow label={t('references.picker.preview.checks')}>
                         {onOpenChecks ? (
-                            <Button
-                                variant="ghost"
-                                size="xs"
-                                onClick={onOpenChecks}
-                                className="-ms-1.5 gap-1.5 px-1.5 typography-meta font-normal normal-case text-muted-foreground"
-                            >
-                                <ChecksSummaryLine checks={checks.value} />
-                                <Icon name="arrow-right-s" className="size-3.5 opacity-60" />
-                            </Button>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="xs"
+                                        onClick={onOpenChecks}
+                                        className="-ms-1.5 gap-1.5 px-1.5 typography-meta font-normal normal-case text-muted-foreground"
+                                    >
+                                        <ChecksSummaryLine checks={checks.value} />
+                                        <Icon name="arrow-right-s" className="size-3.5 opacity-60" />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent sideOffset={6}>{t('contextTooltips.tracker.showChecks')}</TooltipContent>
+                            </Tooltip>
                         ) : (
                             <span className="inline-flex items-center gap-1.5">
                                 <ChecksSummaryLine checks={checks.value} />
@@ -387,15 +404,19 @@ const CopyReferenceLinkButton: React.FC<{ url: string; className?: string }> = (
     const { t } = useI18n();
     const copyLink = useCopyReferenceLink();
     return (
-        <button
-            type="button"
-            className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', REFERENCE_META_TEXT, className)}
-            aria-label={t('references.link.copy')}
-            title={t('references.link.copy')}
-            onClick={() => copyLink(url)}
-        >
-            <Icon name="link" className="size-3.5" />
-        </button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <button
+                    type="button"
+                    className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', REFERENCE_META_TEXT, className)}
+                    aria-label={t('references.link.copy')}
+                    onClick={() => copyLink(url)}
+                >
+                    <Icon name="link" className="size-3.5" />
+                </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('references.link.copy')}</TooltipContent>
+        </Tooltip>
     );
 };
 
@@ -517,20 +538,25 @@ const RepositoryPreview: React.FC<{
                     <div className="flex items-center gap-2">
                         {stateMenu ? (
                             <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <button
-                                        type="button"
-                                        aria-label={t('references.picker.preview.stateMenuAria', { state: t(look.labelKey) })}
-                                        className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
-                                    >
-                                        <StatePill
-                                            icon={look.icon}
-                                            color={look.color}
-                                            label={t(look.labelKey)}
-                                            trailing={<Icon name="arrow-down-s" className="size-3.5 opacity-70" />}
-                                        />
-                                    </button>
-                                </DropdownMenuTrigger>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <DropdownMenuTrigger asChild>
+                                            <button
+                                                type="button"
+                                                aria-label={t('references.picker.preview.stateMenuAria', { state: t(look.labelKey) })}
+                                                className="shrink-0 rounded-full outline-none transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring"
+                                            >
+                                                <StatePill
+                                                    icon={look.icon}
+                                                    color={look.color}
+                                                    label={t(look.labelKey)}
+                                                    trailing={<Icon name="arrow-down-s" className="size-3.5 opacity-70" />}
+                                                />
+                                            </button>
+                                        </DropdownMenuTrigger>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.changeState')}</TooltipContent>
+                                </Tooltip>
                                 <DropdownMenuContent align="start" className="w-56">{stateMenu}</DropdownMenuContent>
                             </DropdownMenu>
                         ) : (
@@ -540,27 +566,33 @@ const RepositoryPreview: React.FC<{
                             {joinProjectPath(reference.sourceRepo.owner, reference.sourceRepo.repo)} {referenceNumberLabel(reference, descriptor)}
                         </span>
                         {refresh ? (
-                            <button
-                                type="button"
-                                className={cn('ms-auto inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
-                                aria-label={t('references.picker.preview.refresh')}
-                                title={t('references.picker.preview.refresh')}
-                                disabled={refreshing}
-                                onClick={refresh}
-                            >
-                                <Icon name="refresh" className={cn('size-3.5', refreshing && 'animate-spin')} />
-                            </button>
+                            <ButtonTooltip label={t('references.picker.preview.refresh')} side="bottom" className="ms-auto shrink-0">
+                                <button
+                                    type="button"
+                                    className={cn('inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none', REFERENCE_META_TEXT)}
+                                    aria-label={t('references.picker.preview.refresh')}
+                                    disabled={refreshing}
+                                    onClick={refresh}
+                                >
+                                    <Icon name="refresh" className={cn('size-3.5', refreshing && 'animate-spin')} />
+                                </button>
+                            </ButtonTooltip>
                         ) : null}
                         <CopyReferenceLinkButton url={reference.url} className={refresh ? undefined : 'ms-auto'} />
-                        <a
-                            href={reference.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
-                        >
-                            {descriptor.label}
-                            <Icon name="external-link" className="size-3.5" />
-                        </a>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <a
+                                    href={reference.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
+                                >
+                                    {descriptor.label}
+                                    <Icon name="external-link" className="size-3.5" />
+                                </a>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.label })}</TooltipContent>
+                        </Tooltip>
                     </div>
                     <h3 className="typography-ui-header font-semibold break-words text-foreground">{reference.title}</h3>
                     <ChangeFlags reference={reference} />
@@ -812,15 +844,20 @@ const TrackerPreview: React.FC<{
                         {stateControl ?? (issue.state?.name ? <StatePill icon={look.icon} color={look.color} label={issue.state.name} /> : null)}
                         <span className={cn('truncate typography-meta', REFERENCE_META_TEXT)}>{issue.identifier}</span>
                         <CopyReferenceLinkButton url={issue.url} className="ms-auto" />
-                        <a
-                            href={issue.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
-                        >
-                            {descriptor.name}
-                            <Icon name="external-link" className="size-3.5" />
-                        </a>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <a
+                                    href={issue.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={cn('inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
+                                >
+                                    {descriptor.name}
+                                    <Icon name="external-link" className="size-3.5" />
+                                </a>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.tracker.openOnHost', { host: descriptor.name })}</TooltipContent>
+                        </Tooltip>
                     </div>
                     <h3 className="typography-ui-header font-semibold break-words text-foreground">{issue.title}</h3>
                 </>

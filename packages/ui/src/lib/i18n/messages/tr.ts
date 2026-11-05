@@ -25,6 +25,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -48,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'Zen Modelleri',
@@ -102,6 +112,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': '{count} alt agent kullanıldı',
   'sessions.sidebar.projectAction.active': 'Proje eylemi çalışıyor',
   ...settingsDict,
+  ...selectionApprovalI18n.tr,
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,
   ...repositoryDiscussionsI18n.tr,
@@ -151,6 +162,15 @@ export const dict = {
   ...workflowsI18n['tr'],
   ...sessionReferencesI18n['tr'],
   ...guestStatusViewI18n['tr'],
+  ...tooltipsDiffI18n['tr'],
+  ...tooltipsFilesI18n['tr'],
+  ...tooltipsGitI18n['tr'],
+  ...tooltipsTrackerI18n['tr'],
+  ...tooltipsWalkthroughI18n['tr'],
+  ...tooltipsTerminalBrowserI18n['tr'],
+  ...tooltipsWorkspaceI18n['tr'],
+  ...tooltipsPanelI18n['tr'],
+  ...tooltipsChatI18n['tr'],
   'terminalView.actions.attachSelection': 'Seçili çıktıyı ekle',
   'terminalView.actions.copySelection': 'Seçili çıktıyı kopyala',
   'terminalView.toast.selectionCopied': 'Çıktı kopyalandı',
@@ -711,7 +731,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'Okunmamış güncellemeler',
   'sessions.sidebar.session.status.backgroundSubagent': 'Alt ajan arka planda çalışıyor',
   'sessions.sidebar.session.status.backgroundCommand': 'Komut arka planda çalışıyor',
-  'sessions.sidebar.session.status.waitingOnPullRequest': 'Bir pull request bekleniyor',
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'Denetimler veya inceleme bekleniyor',
   'sessions.sidebar.session.status.pinned': 'Sabitlenmiş session',
   'sessions.sidebar.session.status.movingToWorktree': 'Session yeni bir worktree\'ye taşınıyor',
   'sessions.sidebar.session.status.permissionRequired': 'İzin gerekiyor',
@@ -1573,7 +1593,6 @@ export const dict = {
   'sidebarFilesTree.actions.addMenuTitle': 'Yeni dosya, klasör veya yükleme',
   'sidebarFilesTree.actions.refreshTitle': 'Yenile',
   'sidebarFilesTree.actions.collapseAllTitle': 'Tüm klasörleri daralt',
-  'sidebarFilesTree.actions.fileMenuTitle': 'Dosya menüsü',
   'sidebarFilesTree.state.searching': 'Aranıyor...',
   'sidebarFilesTree.state.loading': 'Yükleniyor...',
   'sidebarFilesTree.dialog.createFile.title': 'Dosya Oluştur',
@@ -1824,12 +1843,14 @@ export const dict = {
   'chat.autoReview.actions.dismiss': 'Kapat',
   'chat.autoReview.toast.removeFailed': 'Kod incelemesini değiştirmek için sunucuya ulaşılamadı. Tekrar deneyin.',
   'chat.prWatch.title': '#{number} numaralı pull request bekleniyor',
+  'chat.prWatch.mr.title': '!{number} numaralı merge request bekleniyor',
+  'chat.prWatch.change.title': '#{number} numaralı değişiklik bekleniyor',
   'chat.prWatch.status.pending': 'kontroller çalışıyor',
   'chat.prWatch.status.passed': 'kontroller geçti',
   'chat.prWatch.status.failed': 'bir kontrol başarısız oldu',
   'chat.prWatch.status.waking': 'ajan uyandırılıyor',
   'chat.prWatch.actions.stop': 'İzlemeyi bırak',
-  'chat.prWatch.toast.stopFailed': 'Pull request izlemesini durdurmak için sunucuya ulaşılamadı. Tekrar deneyin.',
+  'chat.prWatch.toast.stopFailed': 'İzlemeyi durdurmak için sunucuya ulaşılamadı. Yeniden deneyin.',
   'chat.draftDirtyNotice.tooltip': 'Bu dalda commit edilmemiş değişiklikleriniz var.\nYeni bir oturum bunlarla çakışabilir. Önce commit etmeyi veya başka bir worktree kullanmayı düşünebilirsiniz.',
   'chat.draftDirtyNotice.indicatorAria': 'Bu dizinde commit edilmemiş değişiklikler var',
   'diffView.hunk.label': 'Hunk\'lar',
@@ -3307,6 +3328,13 @@ export const dict = {
   'markdownRenderer.code.proposal': 'Öneri',
   'markdownRenderer.code.actions.copyTitle': 'Kodu kopyala',
   'markdownRenderer.code.actions.copiedTitle': 'Kopyalandı',
+  'markdownRenderer.code.actions.runTitle': 'Komutu çalıştır. Ajan çıktısından devam eder',
+  'markdownRenderer.code.actions.stopTitle': 'Komutu durdur',
+  'markdownRenderer.code.run.startFailed': 'Komut başlatılamadı',
+  'markdownRenderer.code.run.running': 'Çalışıyor',
+  'markdownRenderer.code.run.finished': 'Tamamlandı',
+  'markdownRenderer.code.run.failed': 'Çıkış kodu {code}',
+  'markdownRenderer.code.run.stopped': 'Durduruldu',
   'markdownRenderer.table.actions.copyTitle': 'Tabloyu kopyala',
   'markdownRenderer.code.actions.enableWrapTitle': 'Satır kaydırmayı etkinleştir',
   'markdownRenderer.code.actions.disableWrapTitle': 'Satır kaydırmayı devre dışı bırak',
@@ -3754,6 +3782,9 @@ export const dict = {
   'chat.dispatchedSession.showAnswer': 'Yanıtı göster',
   'chat.dispatchedSession.hideAnswer': 'Yanıtı gizle',
   'chat.dispatchedSession.open': 'Oturumu aç',
+  'chat.fileOpenRequest.toast.description': '{session} oturumunda gösterildi',
+  'chat.fileOpenRequest.toast.descriptionUntitled': 'Başka bir oturumda gösterildi',
+  'chat.fileOpenRequest.toast.openSession': 'Oturumu aç',
   'chat.revertPopover.staged': 'Geri alınan: {count}',
   "chat.revertPopover.toast.restoreFailed": "Geri alınan mesajlar geri yüklenemedi",
   'chat.workStatus.mcp.needsAuthHint': 'Bu MCP sunucusuna Ayarlar → MCP üzerinden giriş yapın.',

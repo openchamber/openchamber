@@ -7,6 +7,7 @@ import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { FormRequest } from '@/lib/opencode/model';
@@ -299,6 +300,8 @@ const FormDockPanel: React.FC<{
             ariaLabel={title}
             compact={collapsed}
             header={<>
+                <Tooltip>
+                <TooltipTrigger asChild>
                 <button
                     type="button"
                     onClick={() => setCollapsed((value) => !value)}
@@ -318,31 +321,37 @@ const FormDockPanel: React.FC<{
                         {t('chat.formDock.progress', { current: String(currentStep + 1), total: String(shown.length) })}
                     </span>
                 </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{collapsed ? t('chat.formDock.expandAria') : t('chat.formDock.collapseAria')}</TooltipContent>
+                </Tooltip>
                 {/* One dot per question: filled when answered, the current one solid. */}
                 {!collapsed ? (
                     <div className="flex shrink-0 items-center gap-1" role="tablist">
                         {shown.map((field, index) => (
-                            <button
-                                key={field.key}
-                                type="button"
-                                role="tab"
-                                aria-selected={index === currentStep}
-                                aria-label={t('chat.formDock.stepAria', { index: String(index + 1), title: stepLabel(field, index) })}
-                                title={stepLabel(field, index)}
-                                onClick={() => setStep(index)}
-                                className="flex size-4 items-center justify-center"
-                            >
-                                <span
-                                    className={cn(
-                                        'block size-1.5 rounded-full transition-colors',
-                                        index === currentStep
-                                            ? 'bg-primary'
-                                            : answered[index]
-                                                ? 'bg-primary/40'
-                                                : 'bg-foreground/15',
-                                    )}
-                                />
-                            </button>
+                            <Tooltip key={field.key}>
+                                <TooltipTrigger asChild>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={index === currentStep}
+                                        aria-label={t('chat.formDock.stepAria', { index: String(index + 1), title: stepLabel(field, index) })}
+                                        onClick={() => setStep(index)}
+                                        className="flex size-4 items-center justify-center"
+                                    >
+                                        <span
+                                            className={cn(
+                                                'block size-1.5 rounded-full transition-colors',
+                                                index === currentStep
+                                                    ? 'bg-primary'
+                                                    : answered[index]
+                                                        ? 'bg-primary/40'
+                                                        : 'bg-foreground/15',
+                                            )}
+                                        />
+                                    </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" sideOffset={6}>{stepLabel(field, index)}</TooltipContent>
+                            </Tooltip>
                         ))}
                     </div>
                 ) : null}
@@ -351,12 +360,22 @@ const FormDockPanel: React.FC<{
                         {t('chat.formDock.waiting', { count: String(waiting) })}
                     </span>
                 ) : null}
-                <button type="button" onClick={() => void handleCopy('markdown')} title={t('chat.questionCard.copyMarkdown')} aria-label={t('chat.questionCard.copyMarkdown')} className={iconButtonClass}>
-                    <Icon name="file-text" className="size-3" />
-                </button>
-                <button type="button" onClick={() => void handleCopy('json')} title={t('chat.questionCard.copyJson')} aria-label={t('chat.questionCard.copyJson')} className={iconButtonClass}>
-                    <Icon name="code" className="size-3" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button type="button" onClick={() => void handleCopy('markdown')} aria-label={t('chat.questionCard.copyMarkdown')} className={iconButtonClass}>
+                            <Icon name="file-text" className="size-3" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{t('chat.questionCard.copyMarkdown')}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button type="button" onClick={() => void handleCopy('json')} aria-label={t('chat.questionCard.copyJson')} className={iconButtonClass}>
+                            <Icon name="code" className="size-3" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{t('chat.questionCard.copyJson')}</TooltipContent>
+                </Tooltip>
             </>}
         >
             {!collapsed ? (

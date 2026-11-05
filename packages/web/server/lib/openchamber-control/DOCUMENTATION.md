@@ -91,6 +91,10 @@ other.
   (`trackWaitingPage` in `../opencode/session-runtime.js`), broadcasts
   `openchamber:page-waiting` / `openchamber:page-settled` to the clients, and
   sends the same "Input needed" notification a form gets.
+  A turn that ends (`session.idle`, `session.error` in `index.js`) releases
+  the session's waits through `releaseAnswerWaits`: they leave the pending
+  list, and a late answer is a `404`. See *Why a released page keeps its
+  request open*.
   `renderPageImageSources` lists the local images a page names by absolute
   path (in quotes or a CSS `url()`, PNG, JPEG, GIF or WebP), every one of them.
   The image grant route (`../markdown-image-grants/`) allows exactly those, and
@@ -148,9 +152,23 @@ other.
   session, a failed prompt keeps its directory. Chats cannot request a worktree.
 - Session status and messages come from official directory-scoped OpenCode
   APIs. Message output includes only ordered `text` parts.
+- `session.status` and `session.messages` ask OpenCode's `session.get` first,
+  because the active-session map names only running sessions: a session it
+  does not name is idle or does not exist. An unknown id is a 404. A lookup
+  that fails is a 503 with its own message, never a 404 or an idle status.
+- A session status is `busy`, `idle`, or `waiting`: a running session with an
+  open permission, form, secret card or page (`readPendingRequests`). A
+  permission the server answers by itself does not count
+  (`isPermissionAutoAnswered`, the rule notifications use; in `safety` mode the
+  read waits for the verdict). Each session answers for itself: a parent whose
+  child waits stays `busy`. The pending list comes from this server's event
+  stream, so a request opened before this server connected to OpenCode reads as
+  `busy`. `session.list` with `withStatus` uses the same rule.
 - Wait (CLI only; the agent tool refuses it) never treats an initial idle
   response as completion after dispatch. It requires observed activity or a
-  newly completed assistant message.
+  newly completed assistant message. A `waiting` session ends the wait at once
+  with that status, because the user may never answer; the CLI then exits
+  non-zero, so a script does not read it as finished.
 - Timeout and cancellation are failures, never authoritative idle results.
 - `returnResult` on create/send/fork hands the dispatched session's final
   answer back to the calling session (`options.contextSessionId`) through
@@ -384,6 +402,24 @@ user was reading. A message the user writes in the chat still ends the wait, and
 transcript while the wait lasts (`holdPendingSynthetic` in `packages/ui`, read
 through `SyntheticMessage.pending`): drawn as a new turn, it took the question
 out of the chat.
+
+### Why a released page keeps its request open
+
+In one OpenCode no call outlives its turn, so `releaseAnswerWaits` finds
+nothing there. It exists for a second OpenCode on the same database. An
+`opencode` CLI command, an agent's shell included, can start
+`opencode serve --service`. At start it takes over every turn with an open
+execution claim, also one alive in the OpenCode this server runs, and it
+inherits the callback URL and token through the shell's environment. Its page
+call reaches this server, but a chat message goes to this server's OpenCode,
+whose prompt hook has no such call. That turn runs and ends, and the page stayed
+listed until the server restarted: the question mark in the sidebar, background
+messages held out of the chat. Aborting the request cleared that too, but the
+other OpenCode's turn then woke up and answered the same message, so the chat
+had two replies and, with a real model, two agents in one session. The release
+takes the page off the list and leaves that call parked until its request
+ends: that OpenCode exits, this server restarts, or the user stops a turn in
+the session (`abortSession`).
 
 ### Why work.name leaves session titles alone
 

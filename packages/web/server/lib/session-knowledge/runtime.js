@@ -224,6 +224,18 @@ const buildPinnedBlock = ({ notes, plans }) => {
 };
 
 /**
+ * What a shell fence in a reply does, stated in every session that has the
+ * `openchamber_render` tool, which marks a session a person reads. Without it
+ * an agent writes such a command in a plain fence, which gets no run button,
+ * and asks the user to report back. OpenCode runs it with stdin closed, where
+ * the session runs, so it is no way to reach a password prompt or the user's
+ * own machine.
+ */
+export const REPLY_COMMAND_GUIDANCE = "A command the user should run themselves, such as one that deletes or publishes something:"
+  + " put it in a ```bash block in your reply and end the turn. The block has a Run button; the command runs in this session's folder with no input,"
+  + " so nothing that prompts, and when it ends you get its output and continue on your own without a message from the user.";
+
+/**
  * When to reach for a workflow, stated in every session that has the
  * `openchamber_workflow` tool. A run costs many agents, so the agent starts
  * one only when the user asks; spotting a task that fits is the agent's job
@@ -255,6 +267,7 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows, directT
   linking && naming ? WORK_NAME_GUIDANCE : '',
   rendering ? UI_BLOCKS_GUIDANCE : '',
   rendering ? RENDER_PAGE_GUIDANCE : '',
+  rendering ? REPLY_COMMAND_GUIDANCE : '',
   secrets ? SECRET_REQUEST_GUIDANCE : '',
   workflows ? WORKFLOW_GUIDANCE : '',
   (linking || rendering || secrets || workflows) && directTools ? DIRECT_TOOLS_GUIDANCE : '',

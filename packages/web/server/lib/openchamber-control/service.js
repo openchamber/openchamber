@@ -241,6 +241,11 @@ export const createOpenChamberControlService = (dependencies) => {
     // Hears when a page an agent shows starts and stops waiting for the
     // user's answer (render.page with awaitAnswer, and secret.request).
     onPageWaitChange = () => {},
+    // The requests each session waits on the user to answer, by session id
+    // (`getPendingBlockingRequestsSnapshot`); an entry exists only while one is open.
+    readPendingRequests = () => ({}),
+    // Whether the server answers this permission for the user (auto-accept).
+    isPermissionAutoAnswered = async () => false,
     // Puts a plan in front of the user; answers how many windows it reached.
     showPlan = null,
     // Delivers a dispatched session's result back to the session that asked
@@ -486,7 +491,6 @@ export const createOpenChamberControlService = (dependencies) => {
   };
 
   // /api/session/active is global in v2 and reports only `{ type: 'running' }`.
-  // The action contract stays busy/idle, so running is reported as busy.
   const activeSessions = async (client) => {
     const statuses = await client.session.active();
     if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) {
@@ -495,11 +499,41 @@ export const createOpenChamberControlService = (dependencies) => {
     return statuses;
   };
 
-  const asPublicStatus = (active) => (active ? { type: 'busy' } : { type: 'idle' });
+  // A permission the server answers by itself never reaches the user.
+  const isWaitingForUser = async (sessionID) => {
+    const pending = readPendingRequests()[sessionID];
+    if (!pending) return false;
+    if (pending.forms.length > 0 || pending.pages.length > 0) return true;
+    const answered = await Promise.all(pending.permissions.map((permission) =>
+      isPermissionAutoAnswered(sessionID, permission.directory, permission.id)));
+    return answered.includes(false);
+  };
 
-  const sessionStatus = async (client, sessionID) => {
-    const statuses = await activeSessions(client);
-    return asPublicStatus(statuses[sessionID]);
+  // Only a running session can be waiting: the event that ends a stopped turn's
+  // pending requests arrives after the active map has dropped the session.
+  const asPublicStatus = async (statuses, sessionID) => {
+    if (!statuses[sessionID]) return { type: 'idle' };
+    return await isWaitingForUser(sessionID) ? { type: 'waiting' } : { type: 'busy' };
+  };
+
+  const sessionStatus = async (client, sessionID) => asPublicStatus(await activeSessions(client), sessionID);
+
+  // The active map names only running sessions, so a session it does not name
+  // is idle or does not exist. session.get tells them apart and starts no
+  // location. An id OpenCode refuses as malformed cannot name a session. A
+  // lookup that fails any other way says nothing about the session.
+  const assertSessionExists = async (client, sessionID) => {
+    try {
+      await client.session.get({ sessionID });
+    } catch (error) {
+      if (error?._tag === 'SessionNotFoundError' || error?._tag === 'InvalidRequestError') {
+        throw new OpenChamberControlError(`Session not found: ${sessionID}`, 404);
+      }
+      throw new OpenChamberControlError(
+        `Could not check whether session ${sessionID} exists: ${error instanceof Error ? error.message : String(error)}`,
+        503,
+      );
+    }
   };
 
   // The message list is cursor-paginated and `order: 'desc'` puts the newest
@@ -541,6 +575,8 @@ export const createOpenChamberControlService = (dependencies) => {
     while (true) {
       if (signal?.aborted) throw new OpenChamberControlError('OpenChamber action was cancelled', 499);
       const status = await sessionStatus(client, sessionID);
+      // Only the user can move this session on, so the caller hears it now.
+      if (status.type === 'waiting') return status;
       if (status.type === 'busy') {
         observedActivity = true;
       } else if (!requireActivity || observedActivity) {
@@ -1116,15 +1152,16 @@ export const createOpenChamberControlService = (dependencies) => {
           if (input.withStatus === true) {
             // One global call now: v2 reports active sessions across directories.
             const statuses = await activeSessions(client).catch(() => null);
-            sessions = sessions.map((session) => ({
+            sessions = await Promise.all(sessions.map(async (session) => ({
               ...session,
-              status: statuses ? asPublicStatus(statuses[session.id]) : { type: 'unknown' },
-            }));
+              status: statuses ? await asPublicStatus(statuses, session.id) : { type: 'unknown' },
+            })));
           }
           return { sessions, limit, directory, archived: input.all === true ? 'included' : 'excluded' };
         }
         if (!directory) throw new OpenChamberControlError('directory is required', 400);
         if (action === 'session.status') {
+          await assertSessionExists(client, sessionID);
           return { sessionId: sessionID, directory, sessionStatus: await sessionStatus(client, sessionID) };
         }
         if (action === 'session.messages') {
@@ -1134,6 +1171,7 @@ export const createOpenChamberControlService = (dependencies) => {
           const last = input.last === true || input.lastAssistant === true;
           if (input.all === true && (last || input.limit !== undefined)) throw new OpenChamberControlError('all cannot be combined with last or limit', 400);
           if (last && input.limit !== undefined) throw new OpenChamberControlError('last cannot be combined with limit', 400);
+          await assertSessionExists(client, sessionID);
           const currentStatus = input.wait === true
             ? await waitForIdle({ client, sessionID, directory, timeoutMs: normalizeWaitTimeoutMs(input.timeout), requireActivity: false, startedAt: now(), signal: options.signal })
             : await sessionStatus(client, sessionID);
@@ -1152,5 +1190,9 @@ export const createOpenChamberControlService = (dependencies) => {
   // id and the directory is resolved here, where it is authoritative.
   // `answerPage` is the chat's side of a page that waits (render.page with
   // awaitAnswer), `answerSecret` the chat's side of a secret.request card.
-  return { execute, resolveSessionDirectory, answerPage: pageAnswers.answer, answerSecret: secretRequests.answer };
+  const releaseAnswerWaits = (sessionId) => {
+    pageAnswers.release(sessionId);
+    secretRequests.release(sessionId);
+  };
+  return { execute, resolveSessionDirectory, answerPage: pageAnswers.answer, answerSecret: secretRequests.answer, releaseAnswerWaits };
 };

@@ -87,6 +87,16 @@ Pausierst du die Erweiterung, verschwindet der Tracker, bis du sie wieder einsch
 
 Das OpenChamber SDK hat ein funktionierendes Beispiel, `examples/tracker-provider`, mit einem Fake-Tracker, den du daneben laufen lassen kannst. Siehe [Eine Erweiterung bauen](/sdk/).
 
+## Eine Erweiterung als Nutzungsanbieter
+
+Eine Erweiterung kann neben den eingebauten Anbietern einen Nutzungsanbieter hinzufügen: einen Anbieter, den OpenChamber nicht selbst ausliest, oder einen eigenen. Ihr Berechtigungsdialog hat dann eine Zeile, die mit **Meldet die Nutzung wie ein eingebauter Anbieter** beginnt und die OpenCode-Anbieter aufzählt, deren Zugangsdaten sie liest, etwa `openrouter`; eine Erweiterung, die keine aufzählt, sagt das.
+
+Sobald du sie erlaubst, steht ihre Karte unter **Einstellungen → Nutzung** hinter den eingebauten Anbietern, mit Name und Symbol der Erweiterung, und sie erscheint wie jeder eingebaute Anbieter in den Rate-Limits der Kopfzeile, im Arbeitsstatus, im Popover des Telefons und im Desktop-Tray, wenn du **Im Arbeitsstatus anzeigen** ankreuzt. Bei jeder Aktualisierung übergibt OpenChamber der Erweiterung die Zugangsdaten, die OpenCode für jeden aufgezählten Anbieter hält, und sonst nichts; eine Version, die einen weiteren Anbieter aufzählt, fragt erneut nach deiner Zustimmung. Die Erweiterung liest die Nutzung selbst, und OpenChamber zeichnet sie so wie bei einem eingebauten Anbieter.
+
+Pausierst du die Erweiterung, verschwindet die Karte, bis du sie wieder einschaltest, und deine Nutzungseinstellungen dafür bleiben. Entfernst du die Erweiterung, verschwindet die Karte endgültig. VS Code zeigt keine Nutzung aus Erweiterungen; auf dem Telefon wird die Karte angezeigt, eingerichtet wird die Erweiterung in der Web- oder Desktop-App. Eine Sitzung in einem isolierten Space liest die Nutzung vom eigenen Server dieses Space, der keine Erweiterungen hat.
+
+Das OpenChamber SDK hat ein funktionierendes Beispiel, `examples/quota-provider`, mit einer Fake-Nutzungs-API, die du daneben laufen lassen kannst. Siehe [Eine Erweiterung bauen](/sdk/).
+
 ## Ihr Konto verbinden
 
 Eine Erweiterung, die mit einem Dienst spricht, bekommt eine Karte unter **Einstellungen → Integrationen** im Abschnitt **Erweiterungskonten**. Je nach Dienst fragt die Karte nach einem API-Token, nach Benutzername und Token oder nach einer Client-ID für einen Anmeldeablauf. Wähle **Verbinden**; **Trennen** vergisst den gespeicherten Token. Zusätzliche Felder, die die Erweiterung deklariert, speichern sich von selbst, sobald du sie verlässt.

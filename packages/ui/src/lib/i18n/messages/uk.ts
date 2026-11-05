@@ -26,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -49,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Моделі Zen',
@@ -103,6 +113,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': 'Залучено сабагентів: {count}',
   'sessions.sidebar.projectAction.active': 'Виконується дія проєкту',
   ...settingsDict,
+  ...selectionApprovalI18n.uk,
   'gitView.context.configure': 'Налаштувати репозиторій',
   'gitView.context.description': 'Remote, до яких ідентичність репозиторію не дістає, і доступ для сабмодулів і Git LFS. Ідентичності — в налаштуваннях Git.',
   'gitView.context.needsAttention': 'Потребує уваги',
@@ -223,6 +234,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['uk'],
   ...sessionReferencesI18n['uk'],
   ...guestStatusViewI18n['uk'],
+  ...tooltipsDiffI18n['uk'],
+  ...tooltipsFilesI18n['uk'],
+  ...tooltipsGitI18n['uk'],
+  ...tooltipsTrackerI18n['uk'],
+  ...tooltipsWalkthroughI18n['uk'],
+  ...tooltipsTerminalBrowserI18n['uk'],
+  ...tooltipsWorkspaceI18n['uk'],
+  ...tooltipsPanelI18n['uk'],
+  ...tooltipsChatI18n['uk'],
   'terminalView.actions.attachSelection': 'Прикріпити вибраний вивід',
   'terminalView.actions.copySelection': 'Скопіювати вибраний вивід',
   'terminalView.toast.selectionCopied': 'Вивід скопійовано',
@@ -803,7 +823,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.unread": "Непрочитані оновлення",
   "sessions.sidebar.session.status.backgroundSubagent": "Субагент працює у фоні",
   "sessions.sidebar.session.status.backgroundCommand": "Команда працює у фоні",
-  "sessions.sidebar.session.status.waitingOnPullRequest": "Чекає на PR",
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'Чекає на перевірки або ревʼю',
   "sessions.sidebar.session.status.pinned": "Закріплена сесія",
   "sessions.sidebar.session.status.movingToWorktree": "Перенесення сесії в новий worktree",
   "sessions.sidebar.session.status.permissionRequired": "Потрібен дозвіл",
@@ -1655,7 +1675,6 @@ export const dict: Record<I18nKey, string> = {
   "sidebarFilesTree.actions.addMenuTitle": "Новий файл, тека або завантаження",
   "sidebarFilesTree.actions.refreshTitle": "Оновити",
   "sidebarFilesTree.actions.collapseAllTitle": "Згорнути всі папки",
-  "sidebarFilesTree.actions.fileMenuTitle": "Меню файлу",
   "sidebarFilesTree.state.searching": "Пошук...",
   "sidebarFilesTree.state.loading": "Завантаження...",
   "sidebarFilesTree.dialog.createFile.title": "Створити файл",
@@ -1931,12 +1950,14 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.actions.dismiss': 'Закрити',
   'chat.autoReview.toast.removeFailed': 'Не вдалося звʼязатися із сервером, щоб змінити код-ревʼю. Спробуйте ще раз.',
   'chat.prWatch.title': 'Чекає на PR #{number}',
+  'chat.prWatch.mr.title': 'Чекає на MR !{number}',
+  'chat.prWatch.change.title': 'Чекає на зміну #{number}',
   'chat.prWatch.status.pending': 'перевірки йдуть',
   'chat.prWatch.status.passed': 'перевірки пройшли',
   'chat.prWatch.status.failed': 'перевірка впала',
   'chat.prWatch.status.waking': 'будить агента',
   'chat.prWatch.actions.stop': 'Не стежити',
-  'chat.prWatch.toast.stopFailed': 'Не вдалося звʼязатися із сервером, щоб перестати стежити за PR. Спробуйте ще раз.',
+  'chat.prWatch.toast.stopFailed': 'Не вдалося звʼязатися із сервером, щоб припинити стеження. Спробуйте ще раз.',
   'chat.draftDirtyNotice.tooltip': 'У цій гілці є незакомічені зміни.\nНова сесія може конфліктувати з ними. Можливо, варто спершу закомітити їх або скористатися іншим worktree.',
   'chat.draftDirtyNotice.indicatorAria': 'Незакомічені зміни в цьому каталозі',
   "diffView.hunk.label": "Шматки",
@@ -3460,6 +3481,13 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.code.proposal": "Пропозиція",
   "markdownRenderer.code.actions.copyTitle": "Скопіювати код",
   "markdownRenderer.code.actions.copiedTitle": "Скопійовано",
+  "markdownRenderer.code.actions.runTitle": "Запустити команду. Агент продовжить із її виводу",
+  "markdownRenderer.code.actions.stopTitle": "Зупинити команду",
+  "markdownRenderer.code.run.startFailed": "Не вдалося запустити команду",
+  "markdownRenderer.code.run.running": "Виконується",
+  "markdownRenderer.code.run.finished": "Завершено",
+  "markdownRenderer.code.run.failed": "Код виходу {code}",
+  "markdownRenderer.code.run.stopped": "Зупинено",
   "markdownRenderer.table.actions.copyTitle": "Скопіювати таблицю",
   "markdownRenderer.code.actions.enableWrapTitle": "Увімкнути перенесення рядків",
   "markdownRenderer.code.actions.disableWrapTitle": "Вимкнути перенесення рядків",
@@ -3757,6 +3785,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.dispatchedSession.showAnswer': 'Показати відповідь',
   'chat.dispatchedSession.hideAnswer': 'Сховати відповідь',
   'chat.dispatchedSession.open': 'Відкрити сесію',
+  'chat.fileOpenRequest.toast.description': 'Показано в сесії {session}',
+  'chat.fileOpenRequest.toast.descriptionUntitled': 'Показано в іншій сесії',
+  'chat.fileOpenRequest.toast.openSession': 'Відкрити сесію',
   'chat.revertPopover.staged': 'Відкочено: {count}',
   "chat.revertPopover.toast.restoreFailed": "Не вдалося відновити відкочені повідомлення",
   'chat.workStatus.mcp.needsAuthHint': 'Увійдіть до цього MCP-сервера в Налаштування → MCP.',

@@ -22,6 +22,7 @@ import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
@@ -149,30 +150,38 @@ const DraftPreviewEntry: React.FC<{
                     {title}
                 </span>
                 {onSaveComment ? (
-                    <button
-                        type="button"
-                        className={ENTRY_ACTION_CLASS}
-                        style={{ minHeight: 0, minWidth: 0 }}
-                        onPointerDown={keepEditorFocus}
-                        onClick={editing ? commitEdit : onStartEdit}
-                        aria-label={editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}
-                        title={editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}
-                    >
-                        <Icon name={editing ? 'check' : 'pencil'} className="h-3 w-3" />
-                    </button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <button
+                                type="button"
+                                className={ENTRY_ACTION_CLASS}
+                                style={{ minHeight: 0, minWidth: 0 }}
+                                onPointerDown={keepEditorFocus}
+                                onClick={editing ? commitEdit : onStartEdit}
+                                aria-label={editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}
+                            >
+                                <Icon name={editing ? 'check' : 'pencil'} className="h-3 w-3" />
+                            </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" sideOffset={6}>{editing ? t('chat.chatInput.contextPreview.saveEdit') : t('chat.chatInput.contextPreview.edit')}</TooltipContent>
+                    </Tooltip>
                 ) : null}
-                <button
-                    type="button"
-                    className={ENTRY_ACTION_CLASS}
-                    style={{ minHeight: 0, minWidth: 0 }}
-                    onPointerDown={keepEditorFocus}
-                    onClick={editing ? cancelEdit : onRemove}
-                    aria-label={editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}
-                    title={editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}
-                >
-                    {/* While editing this button discards the edit, not the quote. */}
-                    <Icon name={editing ? 'close' : 'delete-bin'} className="h-3 w-3" />
-                </button>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            className={ENTRY_ACTION_CLASS}
+                            style={{ minHeight: 0, minWidth: 0 }}
+                            onPointerDown={keepEditorFocus}
+                            onClick={editing ? cancelEdit : onRemove}
+                            aria-label={editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}
+                        >
+                            {/* While editing this button discards the edit, not the quote. */}
+                            <Icon name={editing ? 'close' : 'delete-bin'} className="h-3 w-3" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6}>{editing ? t('chat.chatInput.contextPreview.cancelEdit') : t('chat.chatInput.contextPreview.remove')}</TooltipContent>
+                </Tooltip>
             </div>
             <div className="space-y-2 px-3 py-2">
                 {draft.code.trim() ? (

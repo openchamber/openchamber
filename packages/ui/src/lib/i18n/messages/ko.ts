@@ -26,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -49,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 모델',
@@ -103,6 +113,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '하위 에이전트 {count}개 사용',
   'sessions.sidebar.projectAction.active': '프로젝트 작업 실행 중',
   ...settingsDict,
+  ...selectionApprovalI18n.ko,
   'gitView.operation.title': 'Git 작업',
   'gitView.operation.recovery.storage': 'OpenChamber가 여기에 Git 전송 상태를 저장할 수 없습니다. 사이트 저장소를 허용하고 새로 고치세요. 그때까지 push와 pull은 일시 중지됩니다.',
   'gitView.operation.recovery.capacity': '끝나지 않은 Git 전송이 너무 많이 저장되어 있습니다. 새로 시작하기 전에 아래 항목을 확인하세요.',
@@ -213,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['ko'],
   ...sessionReferencesI18n['ko'],
   ...guestStatusViewI18n['ko'],
+  ...tooltipsDiffI18n['ko'],
+  ...tooltipsFilesI18n['ko'],
+  ...tooltipsGitI18n['ko'],
+  ...tooltipsTrackerI18n['ko'],
+  ...tooltipsWalkthroughI18n['ko'],
+  ...tooltipsTerminalBrowserI18n['ko'],
+  ...tooltipsWorkspaceI18n['ko'],
+  ...tooltipsPanelI18n['ko'],
+  ...tooltipsChatI18n['ko'],
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',
   'terminalView.toast.selectionCopied': '출력을 복사했습니다',
@@ -799,7 +819,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': '읽지 않은 업데이트',
   'sessions.sidebar.session.status.backgroundSubagent': '하위 에이전트가 백그라운드에서 실행 중',
   'sessions.sidebar.session.status.backgroundCommand': '명령이 백그라운드에서 실행 중',
-  'sessions.sidebar.session.status.waitingOnPullRequest': '풀 리퀘스트 대기 중',
+  'sessions.sidebar.session.status.waitingOnPullRequest': '검사 또는 리뷰 대기 중',
   'sessions.sidebar.session.status.pinned': '고정된 세션',
   'sessions.sidebar.session.status.movingToWorktree': '세션을 새 worktree로 이동하는 중',
   'sessions.sidebar.session.status.permissionRequired': '권한 필요',
@@ -868,7 +888,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.group.pr.mergeState': '병합 상태: {state}',
   'sessions.sidebar.group.pr.status.merged': '병합됨',
   'sessions.sidebar.group.pr.status.readyToMerge': '병합 준비됨',
-  'sessions.sidebar.group.pr.status.open': 'PR 열기',
+  'sessions.sidebar.group.pr.status.open': 'PR 열림',
   'sessions.sidebar.group.mr.status.open': 'MR 열림',
   'sessions.sidebar.group.pr.status.mergeConflicts': '병합 충돌',
   'sessions.sidebar.group.pr.status.mergeBlocked': '병합 차단됨',
@@ -1698,7 +1718,6 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.actions.addMenuTitle': '새 파일, 폴더 또는 업로드',
   'sidebarFilesTree.actions.refreshTitle': '새로고침',
   'sidebarFilesTree.actions.collapseAllTitle': '모든 폴더 접기',
-  'sidebarFilesTree.actions.fileMenuTitle': '파일 메뉴',
   'sidebarFilesTree.state.searching': '검색 중…',
   'sidebarFilesTree.state.loading': '로드 중…',
   'sidebarFilesTree.dialog.createFile.title': '파일 생성',
@@ -1905,8 +1924,8 @@ export const dict: Record<I18nKey, string> = {
   'diffView.state.largeDiffDescription': '렌더링이 느릴 수 있습니다. 아래 버튼으로 diff를 계속 볼 수 있습니다.',
   'diffView.summary.changedFilesSingle': '파일 {count}개 변경됨',
   'diffView.summary.changedFilesPlural': '파일 {count}개 변경됨',
-  "diffView.scope.changed": "Changed",
-  "diffView.scope.staged": "Staged",
+  'diffView.scope.changed': '변경됨',
+  'diffView.scope.staged': '스테이지됨',
   "diffView.scope.lastTurn": "마지막 턴",
   "diffView.scope.branch": "브랜치",
   "diffView.branch.resolvingBase": "베이스 브랜치 감지 중...",
@@ -1962,12 +1981,14 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.actions.dismiss': '닫기',
   'chat.autoReview.toast.removeFailed': '코드 리뷰를 변경하려고 서버에 연결하지 못했습니다. 다시 시도하세요.',
   'chat.prWatch.title': '풀 리퀘스트 #{number} 대기 중',
+  'chat.prWatch.mr.title': '머지 리퀘스트 !{number} 대기 중',
+  'chat.prWatch.change.title': '변경 #{number} 대기 중',
   'chat.prWatch.status.pending': '검사 진행 중',
   'chat.prWatch.status.passed': '검사 통과',
   'chat.prWatch.status.failed': '검사가 실패했습니다',
   'chat.prWatch.status.waking': '에이전트를 깨우는 중',
   'chat.prWatch.actions.stop': '감시 중지',
-  'chat.prWatch.toast.stopFailed': '풀 리퀘스트 감시를 중지하려고 서버에 연결하지 못했습니다. 다시 시도하세요.',
+  'chat.prWatch.toast.stopFailed': '감시를 중지하기 위해 서버에 연결하지 못했습니다. 다시 시도하세요.',
   'chat.draftDirtyNotice.tooltip': '이 브랜치에 커밋되지 않은 변경 사항이 있습니다.\n새 세션의 변경 사항과 충돌할 수 있습니다. 먼저 커밋하거나 다른 워크트리를 사용하는 것이 좋습니다.',
   'chat.draftDirtyNotice.indicatorAria': '이 디렉터리에 커밋되지 않은 변경 사항이 있습니다',
   'diffView.hunk.label': '허크',
@@ -2497,7 +2518,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileMentionAutocomplete.empty': '일치하는 항목 없음',
   'chat.queuedMessage.attachments': '+{count} 파일(s)',
   'chat.queuedMessage.empty': '(비어 있음)',
-  'chat.queuedMessage.title': 'Queued messages',
+  'chat.queuedMessage.title': '대기 중인 메시지',
   'chat.queuedMessage.edit': 'edit',
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': '큐에서 제거',
@@ -2631,7 +2652,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.attachFiles': '파일 첨부',
   'chat.chatInput.actions.addAttachment': '첨부 파일 추가',
   'chat.chatInput.actions.modelAgentSettings': '모델 및 에이전트 설정',
-  'chat.chatInput.actions.sendMessageAria': '보내기 메시지',
+  'chat.chatInput.actions.sendMessageAria': '메시지 보내기',
   'chat.chatInput.actions.queueMessageAria': '메시지 대기열에 추가',
   'chat.chatInput.actions.stopGeneratingAria': '생성 중지',
   'chat.chatInput.linked.byAuthor': '작성자: {author}',
@@ -3503,6 +3524,13 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.proposal': '제안',
   'markdownRenderer.code.actions.copyTitle': '코드 복사',
   'markdownRenderer.code.actions.copiedTitle': '복사됨',
+  'markdownRenderer.code.actions.runTitle': '명령을 실행합니다. 에이전트가 출력을 바탕으로 계속합니다',
+  'markdownRenderer.code.actions.stopTitle': '명령 중지',
+  'markdownRenderer.code.run.startFailed': '명령을 시작할 수 없습니다',
+  'markdownRenderer.code.run.running': '실행 중',
+  'markdownRenderer.code.run.finished': '완료됨',
+  'markdownRenderer.code.run.failed': '종료 코드 {code}',
+  'markdownRenderer.code.run.stopped': '중지됨',
   'markdownRenderer.table.actions.copyTitle': '표 복사',
   'markdownRenderer.code.actions.enableWrapTitle': '줄 바꿈 켜기',
   'markdownRenderer.code.actions.disableWrapTitle': '줄 바꿈 끄기',
@@ -3756,6 +3784,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.dispatchedSession.showAnswer': '답변 보기',
   'chat.dispatchedSession.hideAnswer': '답변 숨기기',
   'chat.dispatchedSession.open': '세션 열기',
+  'chat.fileOpenRequest.toast.description': '{session}에서 표시됨',
+  'chat.fileOpenRequest.toast.descriptionUntitled': '다른 세션에서 표시됨',
+  'chat.fileOpenRequest.toast.openSession': '세션 열기',
   'chat.revertPopover.staged': '되돌림: {count}개',
   "chat.revertPopover.toast.restoreFailed": "되돌린 메시지를 복원하지 못했습니다",
   'chat.workStatus.mcp.needsAuthHint': '설정 → MCP에서 이 MCP 서버에 로그인하세요.',

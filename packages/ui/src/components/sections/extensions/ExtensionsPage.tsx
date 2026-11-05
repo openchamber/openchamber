@@ -475,6 +475,13 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           {guest.tracker ? (
             <p className="typography-meta text-foreground">{t('settings.extensions.service.providesTracker', { label: guest.tracker.label })}</p>
           ) : null}
+          {guest.quota ? (
+            <p className="typography-meta text-foreground">
+              {guest.quota.providers.length > 0
+                ? t('settings.extensions.service.providesQuota', { list: guest.quota.providers.join(', ') })
+                : t('settings.extensions.service.providesQuota.none')}
+            </p>
+          ) : null}
           {guest.service ? (
             // A security warning: stays visible.
             <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.warning')}</p>

@@ -87,6 +87,16 @@ Uzantıyı duraklatmak, siz yeniden açana kadar izleyiciyi kaldırır; hesaplar
 
 OpenChamber SDK'sinde çalışan bir örnek var: `examples/tracker-provider`, yanında çalıştırılacak sahte bir izleyiciyle birlikte. Bkz. [Uzantı geliştirme](/tr/sdk/).
 
+## Kullanım sağlayıcısı olarak bir uzantı
+
+Bir uzantı, yerleşik sağlayıcıların yanına bir kullanım sağlayıcısı ekleyebilir: OpenChamber'ın kendisinin okumadığı bir sağlayıcı ya da uzantının kendi sağlayıcısı. İzin iletişim kutusunda o zaman **Yerleşik bir sağlayıcı gibi kullanımı bildirir** ile başlayan bir satır bulunur ve kimlik bilgilerini okuduğu OpenCode sağlayıcıları, örneğin `openrouter`, listelenir; hiçbirini listelemeyen bir uzantı bunu söyler.
+
+İzin verdiğinizde kartı **Ayarlar → Kullanım** sayfasında yerleşik sağlayıcıların arkasında, uzantının adı ve simgesiyle durur; **Çalışma durumunda göster** seçeneğini işaretlediğinizde her yerleşik sağlayıcı gibi üst bilgideki hız sınırlarına, çalışma durumuna, telefondaki açılır pencereye ve masaüstü tepsisine katılır. Her yenilemede OpenChamber, listelenen her sağlayıcı için OpenCode'un sakladığı kimlik bilgisini uzantıya verir, başka hiçbir şey vermez; başka bir sağlayıcı listeleyen bir sürüm yeniden onayınızı ister. Kullanımı uzantı kendisi okur, OpenChamber ise onu yerleşik bir sağlayıcınınki gibi çizer.
+
+Uzantıyı duraklatmak, siz yeniden açana kadar kartı kaldırır; onun için yaptığınız kullanım ayarları kalır. Uzantıyı kaldırmak kartı kalıcı olarak kaldırır. VS Code uzantılardan gelen kullanımı göstermez; telefonda kart görünür, uzantı ise web ya da masaüstü uygulamasından kurulur. Yalıtılmış bir alandaki oturum, kullanımı o alanın kendi sunucusundan okur ve orada uzantı yoktur.
+
+OpenChamber SDK'sinde çalışan bir örnek var: `examples/quota-provider`, yanında çalıştırılacak sahte bir kullanım API'siyle birlikte. Bkz. [Uzantı geliştirme](/tr/sdk/).
+
 ## Hesabını bağlama
 
 Bir hizmetle konuşan uzantı, **Ayarlar → Entegrasyonlar** altında **Uzantı hesapları** bölümünde bir kart alır. Hizmete göre kart bir API jetonu, kullanıcı adı ve jeton ya da oturum açma akışı için bir client id ister. **Bağlan** seçeneğini seçin; **Bağlantıyı kes** kayıtlı jetonu unutur. Uzantının bildirdiği ek alanlar siz alandan çıkınca kendiliğinden kaydedilir.

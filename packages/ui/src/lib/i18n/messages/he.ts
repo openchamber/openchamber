@@ -25,6 +25,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -48,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'מודלי Zen',
@@ -743,7 +753,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'עדכונים שלא נקראו',
   'sessions.sidebar.session.status.backgroundSubagent': 'סוכן משנה פועל ברקע',
   'sessions.sidebar.session.status.backgroundCommand': 'פקודה פועלת ברקע',
-  'sessions.sidebar.session.status.waitingOnPullRequest': 'ממתין לבקשת משיכה',
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'ממתין לבדיקות או לסקירה',
   'sessions.sidebar.session.status.pinned': 'הפעלה מוצמדת',
   'sessions.sidebar.session.status.movingToWorktree': 'ההפעלה מועברת לעץ עבודה חדש',
   'sessions.sidebar.session.status.permissionRequired': 'נדרשת הרשאה',
@@ -1632,7 +1642,6 @@ export const dict = {
   'sidebarFilesTree.actions.uploadFilesTitle': 'העלה קבצים',
   'sidebarFilesTree.actions.refreshTitle': 'רענן',
   'sidebarFilesTree.actions.collapseAllTitle': 'כווץ את כל התיקיות',
-  'sidebarFilesTree.actions.fileMenuTitle': 'תפריט קובץ',
   'sidebarFilesTree.state.searching': 'מחפש…',
   'sidebarFilesTree.state.loading': 'טוען…',
   'sidebarFilesTree.dialog.createFile.title': 'יצירת קובץ',
@@ -1886,12 +1895,14 @@ export const dict = {
   'chat.autoReview.actions.dismiss': 'סגירה',
   'chat.autoReview.toast.removeFailed': 'לא ניתן היה להגיע לשרת כדי לשנות את סקירת הקוד. נסו שוב.',
   'chat.prWatch.title': 'ממתין לבקשת המשיכה #{number}',
+  'chat.prWatch.mr.title': 'ממתין לבקשת המיזוג !{number}',
+  'chat.prWatch.change.title': 'ממתין לשינוי #{number}',
   'chat.prWatch.status.pending': 'הבדיקות רצות',
   'chat.prWatch.status.passed': 'הבדיקות עברו',
   'chat.prWatch.status.failed': 'בדיקה נכשלה',
   'chat.prWatch.status.waking': 'מעיר את הסוכן',
   'chat.prWatch.actions.stop': 'הפסקת מעקב',
-  'chat.prWatch.toast.stopFailed': 'לא ניתן היה להגיע לשרת כדי להפסיק לעקוב אחרי בקשת המשיכה. נסו שוב.',
+  'chat.prWatch.toast.stopFailed': 'לא ניתן להגיע לשרת כדי להפסיק את המעקב. נסה שוב.',
   'chat.draftDirtyNotice.tooltip': "יש שינויים שלא בוצע להם קומיט בענף הזה.\nהפעלה חדשה עלולה להתנגש איתם. כדאי לבצע להם קומיט קודם או להשתמש בעץ עבודה (worktree) אחר.",
   'chat.draftDirtyNotice.indicatorAria': 'שינויים שלא בוצע להם קומיט בתיקייה הזו',
   'diffView.hunk.label': 'קטעים',
@@ -3430,6 +3441,13 @@ export const dict = {
   'markdownRenderer.code.proposal': 'הצעה',
   'markdownRenderer.code.actions.copyTitle': 'העתק קוד',
   'markdownRenderer.code.actions.copiedTitle': 'הועתק',
+  'markdownRenderer.code.actions.runTitle': 'הרצת הפקודה. הסוכן ימשיך מהפלט שלה',
+  'markdownRenderer.code.actions.stopTitle': 'עצירת הפקודה',
+  'markdownRenderer.code.run.startFailed': 'לא ניתן היה להפעיל את הפקודה',
+  'markdownRenderer.code.run.running': 'פועלת',
+  'markdownRenderer.code.run.finished': 'הסתיימה',
+  'markdownRenderer.code.run.failed': 'קוד יציאה {code}',
+  'markdownRenderer.code.run.stopped': 'נעצרה',
   'markdownRenderer.table.actions.copyTitle': 'העתק טבלה',
   'markdownRenderer.code.actions.enableWrapTitle': 'הפעל גלישת שורות',
   'markdownRenderer.code.actions.disableWrapTitle': 'השבת גלישת שורות',
@@ -3658,6 +3676,9 @@ export const dict = {
   'chat.dispatchedSession.showAnswer': 'הצג תשובה',
   'chat.dispatchedSession.hideAnswer': 'הסתר תשובה',
   'chat.dispatchedSession.open': 'פתח הפעלה',
+  'chat.fileOpenRequest.toast.description': 'מוצג בהפעלה {session}',
+  'chat.fileOpenRequest.toast.descriptionUntitled': 'מוצג בהפעלה אחרת',
+  'chat.fileOpenRequest.toast.openSession': 'פתח הפעלה',
   'chat.revertPopover.staged': 'בוטלו: {count}',
   'chat.workStatus.mcp.needsAuthHint': 'אפשר להתחבר לשרת ה-MCP הזה דרך הגדרות → MCP.',
   'mcpDropdown.toast.authorizeOpenFailed': 'לא ניתן היה לפתוח את דף ההרשאה',
@@ -3857,6 +3878,7 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'המשימה הזו כבר ממתינה בתור ההמתנה ותרוץ כשיתפנה מקום',
   'chat.modelControls.agentFavoriteAdd': 'הוסף למועדפים. כשיש מועדפים, Tab עובר רק ביניהם',
   ...settingsDict,
+  ...selectionApprovalI18n.he,
   ...linearIssuePickerI18n.he,
   ...referencePickerI18n.he,
   ...repositoryDiscussionsI18n.he,
@@ -3906,6 +3928,15 @@ export const dict = {
   ...workflowsI18n['he'],
   ...sessionReferencesI18n['he'],
   ...guestStatusViewI18n['he'],
+  ...tooltipsDiffI18n['he'],
+  ...tooltipsFilesI18n['he'],
+  ...tooltipsGitI18n['he'],
+  ...tooltipsTrackerI18n['he'],
+  ...tooltipsWalkthroughI18n['he'],
+  ...tooltipsTerminalBrowserI18n['he'],
+  ...tooltipsWorkspaceI18n['he'],
+  ...tooltipsPanelI18n['he'],
+  ...tooltipsChatI18n['he'],
   'settings.usage.page.state.claudeSignedOutTitle': 'לא מחובר ל-Claude Code',
   'settings.usage.page.state.claudeSignInCommand': 'יש להריץ את הפקודה הזו במסוף:',
   'settings.openchamber.visual.field.confirmFileTreeMove': 'אישור לפני העברת קבצים',

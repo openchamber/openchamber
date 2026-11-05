@@ -1068,12 +1068,25 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     const fsSearch = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn, workspaceSearch: true });
-    const results = await fsSearch.searchFilesystemFiles(resolvedPath, {
-      query,
-      limit,
-      includeHidden,
-      respectGitignore,
-    });
+    // A client that moved on (a new letter, a closed list) ends the walk and its
+    // Git reads instead of letting them finish for nobody.
+    const abort = new AbortController();
+    res.on('close', () => abort.abort());
+    // A client gone during the checks above has already closed the response.
+    if (res.destroyed) abort.abort();
+    let results;
+    try {
+      results = await fsSearch.searchFilesystemFiles(resolvedPath, {
+        query,
+        limit,
+        includeHidden,
+        respectGitignore,
+        signal: abort.signal,
+      });
+    } catch (error) {
+      if (abort.signal.aborted) return undefined;
+      throw error;
+    }
 
     const mapped = results.map((file) => ({
       name: file.name,

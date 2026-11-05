@@ -2,6 +2,7 @@ import React from 'react';
 
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useAgentStatusLabel } from '@/hooks/useAgentStatusLabel';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
@@ -15,23 +16,28 @@ import { registerFloatingPanelClearanceReader } from '@/components/chat/composer
 const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }> = ({ onClick, children }) => {
     const { t } = useI18n();
     return (
-        // Sits inside the pill's hairline border, so the pill as a whole is
-        // 28px like the status row it takes over from.
-        <button
-            type="button"
-            onClick={onClick}
-            aria-label={t('chat.scrollToBottom.aria')}
-            className="inline-flex h-[calc(1.75rem-2px)] min-w-0 max-w-full flex-1 items-center rounded-full [corner-shape:round] text-start"
-        >
-            {/* flex-1 so the icon stays centred when the mobile
-                touch-target floor widens the bare button past 28px;
-                with the status label present it collapses back to
-                its 28px basis. */}
-            <span className="flex h-full w-7 flex-1 shrink-0 basis-7 items-center justify-center text-muted-foreground">
-                <Icon name="arrow-down" className="h-4 w-4" />
-            </span>
-            {children}
-        </button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                {/* Sits inside the pill's hairline border, so the pill as a whole is
+                    28px like the status row it takes over from. */}
+                <button
+                    type="button"
+                    onClick={onClick}
+                    aria-label={t('chat.scrollToBottom.aria')}
+                    className="inline-flex h-[calc(1.75rem-2px)] min-w-0 max-w-full flex-1 items-center rounded-full [corner-shape:round] text-start"
+                >
+                    {/* flex-1 so the icon stays centred when the mobile
+                        touch-target floor widens the bare button past 28px;
+                        with the status label present it collapses back to
+                        its 28px basis. */}
+                    <span className="flex h-full w-7 flex-1 shrink-0 basis-7 items-center justify-center text-muted-foreground">
+                        <Icon name="arrow-down" className="h-4 w-4" />
+                    </span>
+                    {children}
+                </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6}>{t('chat.scrollToBottom.aria')}</TooltipContent>
+        </Tooltip>
     );
 };
 

@@ -26,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -49,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen 模型',
@@ -103,6 +113,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '使用了 {count} 個子代理',
   'sessions.sidebar.projectAction.active': '專案操作正在執行',
   ...settingsDict,
+  ...selectionApprovalI18n['zh-TW'],
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber 無法在這裡儲存 Git 傳輸的狀態。請允許網站儲存空間並重新載入；在那之前 push 和 pull 會暫停。',
   'gitView.operation.recovery.capacity': '已儲存太多未完成的 Git 傳輸。開始新的傳輸前，請先檢查下面這些。',
@@ -213,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['zh-TW'],
   ...sessionReferencesI18n['zh-TW'],
   ...guestStatusViewI18n['zh-TW'],
+  ...tooltipsDiffI18n['zh-TW'],
+  ...tooltipsFilesI18n['zh-TW'],
+  ...tooltipsGitI18n['zh-TW'],
+  ...tooltipsTrackerI18n['zh-TW'],
+  ...tooltipsWalkthroughI18n['zh-TW'],
+  ...tooltipsTerminalBrowserI18n['zh-TW'],
+  ...tooltipsWorkspaceI18n['zh-TW'],
+  ...tooltipsPanelI18n['zh-TW'],
+  ...tooltipsChatI18n['zh-TW'],
   'terminalView.actions.attachSelection': '附加所選輸出',
   'terminalView.actions.copySelection': '複製所選輸出',
   'terminalView.toast.selectionCopied': '已複製輸出',
@@ -819,7 +839,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': '有未讀更新',
   'sessions.sidebar.session.status.backgroundSubagent': '子代理程式正在背景執行',
   'sessions.sidebar.session.status.backgroundCommand': '指令正在背景執行',
-  'sessions.sidebar.session.status.waitingOnPullRequest': '正在等待拉取請求',
+  'sessions.sidebar.session.status.waitingOnPullRequest': '正在等待檢查或審查',
   'sessions.sidebar.session.status.pinned': '已釘選會話',
   'sessions.sidebar.session.status.movingToWorktree': '正在將會話移至新工作樹',
   'sessions.sidebar.session.status.permissionRequired': '需要權限',
@@ -1913,16 +1933,16 @@ export const dict: Record<I18nKey, string> = {
   'diffView.actions.openFileAtFirstChangedLine': '在首個變更行開啟此檔案',
   'diffView.actions.review': 'Review',
   'diffView.actions.reviewAria': 'Review changes',
-  'diffView.reviewDialog.title': 'Review changes',
-  'diffView.reviewDialog.description': 'Start a separate review session for the current changes.',
-  'diffView.reviewDialog.generateHandoff': 'Generate handoff',
+  'diffView.reviewDialog.title': '審查變更',
+  'diffView.reviewDialog.description': '為目前的變更啟動獨立的審查工作階段。',
+  'diffView.reviewDialog.generateHandoff': '產生交接內容',
   'diffView.reviewDialog.autoReview': '執行自動審查循環',
-  'diffView.reviewDialog.info': 'This flow works best if started in the session where the changes were implemented.',
-  'diffView.reviewDialog.actions.cancel': 'Cancel',
-  'diffView.reviewDialog.actions.start': 'Review',
-  'diffView.reviewDialog.actions.starting': 'Starting...',
-  'diffView.reviewDialog.toast.noSessionDirectory': 'Session directory is unavailable',
-  'diffView.reviewDialog.toast.startFailed': 'Failed to start review flow',
+  'diffView.reviewDialog.info': '從實作這些變更的工作階段啟動時，此流程效果最佳。',
+  'diffView.reviewDialog.actions.cancel': '取消',
+  'diffView.reviewDialog.actions.start': '審查',
+  'diffView.reviewDialog.actions.starting': '啟動中...',
+  'diffView.reviewDialog.toast.noSessionDirectory': '無法取得工作階段目錄',
+  'diffView.reviewDialog.toast.startFailed': '無法啟動審查流程',
   'chat.history.loadOlder': '載入更早的訊息',
   'chat.appLink.confirm.title': '要在其他應用程式中開啟此連結嗎？',
   'chat.appLink.confirm.description': '此聊天連結使用 {scheme} 通訊協定，將在其他應用程式中開啟。',
@@ -1944,12 +1964,14 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.actions.dismiss': '關閉',
   'chat.autoReview.toast.removeFailed': '無法連線伺服器來變更程式碼審查。請再試一次。',
   'chat.prWatch.title': '正在等待拉取請求 #{number}',
+  'chat.prWatch.mr.title': '正在等待合併請求 !{number}',
+  'chat.prWatch.change.title': '正在等待變更 #{number}',
   'chat.prWatch.status.pending': '檢查執行中',
   'chat.prWatch.status.passed': '檢查已通過',
   'chat.prWatch.status.failed': '有檢查失敗',
   'chat.prWatch.status.waking': '正在喚醒代理',
   'chat.prWatch.actions.stop': '停止關注',
-  'chat.prWatch.toast.stopFailed': '無法連線伺服器來停止關注拉取請求。請再試一次。',
+  'chat.prWatch.toast.stopFailed': '無法連線至伺服器以停止監看。請再試一次。',
   'chat.draftDirtyNotice.tooltip': '此分支有未提交的變更。\n新的工作階段可能會與這些變更衝突。你可以考慮先提交變更，或使用其他工作樹。',
   'chat.draftDirtyNotice.indicatorAria': '此目錄有未提交的變更',
   'diffView.hunk.label': '程式碼區塊',
@@ -2473,7 +2495,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileMentionAutocomplete.empty': '找不到符合項目',
   'chat.queuedMessage.attachments': '+{count} 個檔案',
   'chat.queuedMessage.empty': '（空）',
-  'chat.queuedMessage.title': 'Queued messages',
+  'chat.queuedMessage.title': '佇列中的訊息',
   'chat.queuedMessage.edit': 'edit',
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': '從佇列移除',
@@ -3465,6 +3487,13 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.proposal': '提議',
   'markdownRenderer.code.actions.copyTitle': '複製程式碼',
   'markdownRenderer.code.actions.copiedTitle': '已複製',
+  'markdownRenderer.code.actions.runTitle': '執行命令。代理會根據其輸出繼續',
+  'markdownRenderer.code.actions.stopTitle': '停止命令',
+  'markdownRenderer.code.run.startFailed': '無法啟動命令',
+  'markdownRenderer.code.run.running': '執行中',
+  'markdownRenderer.code.run.finished': '已完成',
+  'markdownRenderer.code.run.failed': '結束代碼 {code}',
+  'markdownRenderer.code.run.stopped': '已停止',
   'markdownRenderer.table.actions.copyTitle': '複製表格',
   'markdownRenderer.code.actions.enableWrapTitle': '啟用自動換行',
   'markdownRenderer.code.actions.disableWrapTitle': '停用自動換行',
@@ -3516,7 +3545,6 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.preview.console.filter.logs': '日誌',
   'filesView.tree.actions.refreshTitle': '重新整理',
   'filesView.tree.actions.showGitignored': '顯示被 git 忽略的檔案',
-  'sidebarFilesTree.actions.fileMenuTitle': '檔案選單',
   'common.date.today': '今天',
   'common.date.yesterday': '昨天',
   'common.date.yesterdayWithTime': '昨天 {time}',
@@ -3756,6 +3784,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.dispatchedSession.showAnswer': '顯示回答',
   'chat.dispatchedSession.hideAnswer': '隱藏回答',
   'chat.dispatchedSession.open': '開啟工作階段',
+  'chat.fileOpenRequest.toast.description': '在 {session} 中顯示',
+  'chat.fileOpenRequest.toast.descriptionUntitled': '在其他工作階段中顯示',
+  'chat.fileOpenRequest.toast.openSession': '開啟工作階段',
   'chat.revertPopover.staged': '已收回：{count}',
   "chat.revertPopover.toast.restoreFailed": "無法還原已收回的訊息",
   'chat.workStatus.mcp.needsAuthHint': '請在「設定 → MCP」中登入此 MCP 伺服器。',

@@ -28,35 +28,36 @@ const measureColumnChars = (header: string[], rows: string[][], columnCount: num
 };
 
 /**
- * CSV/TSV as a grid: a sticky header row, monospace cells, and a hard cap on
- * rows so a large export renders at all. The cap is stated in the meta line,
- * not hidden, because "2,000 rows" and "the first 2,000 rows" mean different
- * things to someone checking a result. Only the rows in view are rendered: a
- * wide export at the cap is hundreds of thousands of cells, which froze the
- * app when they all went into the DOM at once.
+ * A table as a grid: a sticky header row and monospace cells. Only the rows in
+ * view are rendered: a wide export at the row cap is hundreds of thousands of
+ * cells, which froze the app when they all went into the DOM at once.
  */
-export const TableArtifact: React.FC<{
-  path: string;
-  content: string;
+export const TableGrid: React.FC<{
+  header: string[];
+  rows: string[][];
+  columnCount: number;
+  /** Columns the meta line counts, when the grid adds one of its own. */
+  dataColumnCount?: number;
+  totalRows: number;
   sizeBytes: number | null;
-}> = ({ path, content, sizeBytes }) => {
+  actions?: React.ReactNode;
+}> = ({ header, rows, columnCount, dataColumnCount = columnCount, totalRows, sizeBytes, actions }) => {
   const { t } = useI18n();
-  const table = React.useMemo(() => parseDelimitedText(content, delimiterForPath(path)), [content, path]);
   const columnChars = React.useMemo(
-    () => measureColumnChars(table.header, table.rows, table.columnCount),
-    [table],
+    () => measureColumnChars(header, rows, columnCount),
+    [header, rows, columnCount],
   );
   const totalColumnChars = columnChars.reduce((sum, chars) => sum + chars, 0);
   const scrollRef = React.useRef<HTMLElement>(null);
   const virtualizer = useVirtualizer({
-    count: table.rows.length,
+    count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT_ESTIMATE,
     overscan: 12,
   });
-  const summary = table.totalRows === 1
-    ? t('filesView.artifact.table.rowsSingle', { rows: table.totalRows, columns: table.columnCount })
-    : t('filesView.artifact.table.rowsPlural', { rows: table.totalRows, columns: table.columnCount });
+  const summary = totalRows === 1
+    ? t('filesView.artifact.table.rowsSingle', { rows: totalRows, columns: dataColumnCount })
+    : t('filesView.artifact.table.rowsPlural', { rows: totalRows, columns: dataColumnCount });
   const virtualRows = virtualizer.getVirtualItems();
   const paddingTop = virtualRows[0]?.start ?? 0;
   const paddingBottom = virtualRows.length > 0
@@ -68,11 +69,12 @@ export const TableArtifact: React.FC<{
       <ArtifactMetaBar
         items={[
           summary,
-          table.truncated ? t('filesView.artifact.table.truncated', { shown: table.rows.length, total: table.totalRows }) : '',
+          rows.length < totalRows ? t('filesView.artifact.table.truncated', { shown: rows.length, total: totalRows }) : '',
           formatArtifactSize(sizeBytes),
         ]}
+        actions={actions}
       />
-      {table.columnCount === 0 ? (
+      {columnCount === 0 ? (
         <div className="p-3 typography-ui text-muted-foreground">{t('filesView.artifact.table.empty')}</div>
       ) : (
         <ScrollableOverlay ref={scrollRef} outerClassName="min-h-0 flex-1">
@@ -94,9 +96,9 @@ export const TableArtifact: React.FC<{
                     key={column}
                     scope="col"
                     className="truncate border-b border-e border-edge-muted px-2 py-1 text-start font-medium text-foreground last:border-e-0"
-                    title={table.header[column] ?? ''}
+                    title={header[column] ?? ''}
                   >
-                    {table.header[column] ?? ''}
+                    {header[column] ?? ''}
                   </th>
                 ))}
               </tr>
@@ -104,7 +106,7 @@ export const TableArtifact: React.FC<{
             <tbody>
               {paddingTop > 0 ? <tr aria-hidden="true" style={{ height: paddingTop }} /> : null}
               {virtualRows.map((virtualRow) => {
-                const row = table.rows[virtualRow.index] ?? [];
+                const row = rows[virtualRow.index] ?? [];
                 return (
                   <tr
                     key={virtualRow.index}
@@ -130,5 +132,27 @@ export const TableArtifact: React.FC<{
         </ScrollableOverlay>
       )}
     </div>
+  );
+};
+
+/**
+ * CSV/TSV in a grid, with a hard cap on rows so a large export renders at all.
+ * The cap is stated in the meta line, not hidden, because "2,000 rows" and "the
+ * first 2,000 rows" mean different things to someone checking a result.
+ */
+export const TableArtifact: React.FC<{
+  path: string;
+  content: string;
+  sizeBytes: number | null;
+}> = ({ path, content, sizeBytes }) => {
+  const table = React.useMemo(() => parseDelimitedText(content, delimiterForPath(path)), [content, path]);
+  return (
+    <TableGrid
+      header={table.header}
+      rows={table.rows}
+      columnCount={table.columnCount}
+      totalRows={table.totalRows}
+      sizeBytes={sizeBytes}
+    />
   );
 };

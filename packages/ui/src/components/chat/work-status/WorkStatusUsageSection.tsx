@@ -2,10 +2,11 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
+import { QuotaProviderLogo } from '@/components/usage/QuotaProviderLogo';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
-import { formatQuotaResetLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
+import { formatQuotaResetLabel, formatQuotaWindowValueLabel, isExtensionQuotaProviderId } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUsageProviderGroups } from '@/components/usage/usageGroups';
@@ -55,7 +56,8 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
 
   React.useEffect(() => {
     if (groups.length === 0) return;
-    preloadProviderLogos(groups.map((group) => group.providerId));
+    // An extension's icon comes from its package, not the logo set.
+    preloadProviderLogos(groups.map((group) => group.providerId).filter((id) => !isExtensionQuotaProviderId(id)));
   }, [groups]);
 
   useReportWorkStatusPresence('usage', groups.length > 0);
@@ -95,23 +97,29 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
         </span>
       )}
       action={(
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-6 shrink-0 text-muted-foreground"
-          onClick={() => void fetchQuotas(dropdownProviderIds)}
-          aria-label={t('settings.usage.sidebar.actions.refreshAria')}
-          title={t('settings.usage.sidebar.actions.refreshTitle')}
-          disabled={isLoading}
-        >
-          <Icon name="refresh" className={cn('size-3.5', isLoading && 'animate-spin')} />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex shrink-0">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6 shrink-0 text-muted-foreground"
+                onClick={() => void fetchQuotas(dropdownProviderIds)}
+                aria-label={t('settings.usage.sidebar.actions.refreshAria')}
+                disabled={isLoading}
+              >
+                <Icon name="refresh" className={cn('size-3.5', isLoading && 'animate-spin')} />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6}>{t('settings.usage.sidebar.actions.refreshTitle')}</TooltipContent>
+        </Tooltip>
       )}
     >
       {groups.map((group) => (
         <React.Fragment key={group.providerId}>
           <WorkStatusRow
-            leading={<ProviderLogo providerId={group.providerId} className="size-3.5 shrink-0" />}
+            leading={<QuotaProviderLogo providerId={group.providerId} className="size-3.5 shrink-0" />}
             // A row value never shrinks, so a long status such as an error with
             // its fix sits in the label instead, at the end of the row. The status
             // keeps its width and the name gives way, down to a stub; past that

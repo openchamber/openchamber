@@ -8,8 +8,8 @@ import { useMarkdownPresentation } from './MarkdownPresentationContext';
  * loading failed, the fence shows as code.
  */
 export function MarkdownUiBlock({ code, isIncomplete }: CustomRendererProps) {
-  const { uiBlockReply, directory } = useMarkdownPresentation();
+  const { settledReply, directory } = useMarkdownPresentation();
   const ReplyUiBlock = useReplyUiBlockComponent();
   if (!ReplyUiBlock) return <pre dir="ltr"><code>{code}</code></pre>;
-  return <ReplyUiBlock code={code} complete={!isIncomplete} reply={uiBlockReply} directory={directory ?? ''} />;
+  return <ReplyUiBlock code={code} complete={!isIncomplete} reply={settledReply} directory={directory ?? ''} />;
 }

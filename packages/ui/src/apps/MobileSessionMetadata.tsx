@@ -5,7 +5,7 @@ import type { IconName } from '@/components/icon/icons';
 import { preloadProviderLogos } from '@/hooks/useProviderLogo';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
-import { clampPercent, resolveUsageTone } from '@/lib/quota';
+import { clampPercent, isExtensionQuotaProviderId, resolveUsageTone } from '@/lib/quota';
 import { UsageProviderCards } from '@/components/usage/UsageProviderCards';
 import { useUsageProviderGroups, type UsageProviderGroup } from '@/components/usage/usageGroups';
 import { cn } from '@/lib/utils';
@@ -356,7 +356,8 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
 
 
   React.useEffect(() => {
-    preloadProviderLogos(dropdownProviderIds);
+    // An extension's icon comes from its package, not the logo set.
+    preloadProviderLogos(dropdownProviderIds.filter((id) => !isExtensionQuotaProviderId(id)));
   }, [dropdownProviderIds]);
 
 
@@ -408,7 +409,7 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
 
   React.useEffect(() => {
     if (!open || usageGroups.length === 0) return;
-    preloadProviderLogos(usageGroups.map((group) => group.providerId));
+    preloadProviderLogos(usageGroups.map((group) => group.providerId).filter((id) => !isExtensionQuotaProviderId(id)));
   }, [open, usageGroups]);
 
   return (

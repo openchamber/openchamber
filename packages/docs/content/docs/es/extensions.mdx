@@ -87,6 +87,16 @@ Pausar la extensión quita el gestor hasta que vuelvas a activarla, y tus cuenta
 
 El SDK de OpenChamber tiene un ejemplo funcional, `examples/tracker-provider`, con un gestor falso para ejecutar al lado. Consulta [Crea una extensión](/es/sdk/).
 
+## Una extensión como proveedor de uso
+
+Una extensión puede añadir un proveedor de uso junto a los integrados: un proveedor que OpenChamber no lee por sí mismo, o uno propio. Su diálogo de permisos tiene entonces una línea que empieza por **Informa del uso como un proveedor integrado** y enumera los proveedores de OpenCode cuyas credenciales lee, como `openrouter`; una extensión que no enumera ninguno lo dice.
+
+Cuando la permites, su tarjeta aparece después de los proveedores integrados en **Ajustes → Uso**, con el nombre y el icono de la extensión, y se suma a los límites de la cabecera, al estado de trabajo, al popover del teléfono y a la bandeja del escritorio cuando marcas **Mostrar en el estado de trabajo**, como cualquier proveedor integrado. En cada actualización OpenChamber entrega a la extensión la credencial que OpenCode guarda para cada proveedor enumerado, y nada más; una versión que enumere otro proveedor vuelve a pedir tu aprobación. La extensión lee el uso por sí misma y OpenChamber lo dibuja como dibuja el de un proveedor integrado.
+
+Pausar la extensión quita la tarjeta hasta que vuelvas a activarla, y tus ajustes de uso para ella se conservan. Quitar la extensión quita la tarjeta para siempre. VS Code no muestra uso de extensiones; en el teléfono la tarjeta se muestra, y la extensión se configura desde la aplicación web o de escritorio. Una sesión dentro de un espacio aislado lee el uso del servidor propio de ese espacio, que no tiene extensiones.
+
+El SDK de OpenChamber tiene un ejemplo funcional, `examples/quota-provider`, con una API de uso falsa para ejecutar al lado. Consulta [Crea una extensión](/es/sdk/).
+
 ## Conectar su cuenta
 
 Una extensión que habla con un servicio recibe una tarjeta en **Configuración → Integraciones** bajo **Cuentas de extensiones**. Según el servicio, la tarjeta pide un token de API, un usuario y token, o un client id para un flujo de inicio de sesión. Elige **Conectar**; **Desconectar** olvida el token guardado. Los campos extra que declara la extensión se guardan solos al salir de ellos.

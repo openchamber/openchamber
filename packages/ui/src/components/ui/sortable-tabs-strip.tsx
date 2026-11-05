@@ -24,7 +24,9 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { Icon } from "@/components/icon/Icon";
+import { TooltipLabelWithShortcut } from '@/components/ui/action-toolbar';
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 export type SortableTabsStripItem = {
   id: string;
@@ -33,6 +35,8 @@ export type SortableTabsStripItem = {
   title?: string;
   closable?: boolean;
   closeLabel?: string;
+  /** The close action's shortcut as the shortcuts dialog writes it, shown in the close button's tooltip. */
+  closeShortcut?: string;
   /** A replaceable preview tab; its label is italic, as in VS Code. */
   preview?: boolean;
   /** Dimmed folder shown before the label, telling apart files that share a
@@ -536,6 +540,33 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           const useIntrinsicActiveTab = inactiveTabsIconOnly && usesActivePillIndicator && isActive && !isScrollable && !useIntrinsicPillSizing;
           const closable = item.closable !== false && Boolean(onClose);
           const closeReplacesIcon = closable && Boolean(item.icon);
+          const closeLabel = item.closeLabel ?? t('contextPanel.tab.closeTabAria', { label: item.label });
+          const withCloseTooltip = (control: React.ReactElement) => (
+            <Tooltip>
+              <TooltipTrigger asChild>{control}</TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}><TooltipLabelWithShortcut label={closeLabel} shortcut={item.closeShortcut} /></TooltipContent>
+            </Tooltip>
+          );
+          // Inside the tab button: the empty title keeps the tab's own native
+          // title from showing beside the tooltip.
+          const closeInsideTab = withCloseTooltip(
+            <span
+              role="button"
+              tabIndex={-1}
+              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose?.(item.id);
+              }}
+              aria-label={closeLabel}
+              title=""
+            >
+              <Icon name="close" className="h-3.5 w-3.5" />
+            </span>,
+          );
           const wrapperClassName = (isScrollable || useIntrinsicPillSizing)
             ? undefined
             : usesActivePillIndicator
@@ -646,24 +677,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                       {shouldShowIcon ? (
                         <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
                           <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
-                          {closeReplacesIcon ? (
-                            <span
-                              role="button"
-                              tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
-                              onPointerDown={(event) => {
-                                event.stopPropagation();
-                              }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onClose?.(item.id);
-                              }}
-                              aria-label={item.closeLabel ?? `Close ${item.label} tab`}
-                              title={item.closeLabel ?? `Close ${item.label} tab`}
-                            >
-                              <Icon name="close" className="h-3.5 w-3.5" />
-                            </span>
-                          ) : null}
+                          {closeReplacesIcon ? closeInsideTab : null}
                         </span>
                       ) : null}
                       {shouldShowLabel ? <span className={cn('animated-tabs__label truncate', item.preview && 'italic')}><TabLabelText item={item} /></span> : null}
@@ -678,31 +692,14 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                           )}
                         >
                           <span className={cn('flex items-center justify-center transition-opacity', closeReplacesIcon && (alwaysShowCloseControls ? 'opacity-0' : 'group-hover:opacity-0'))}>{item.icon}</span>
-                          {closeReplacesIcon ? (
-                            <span
-                              role="button"
-                              tabIndex={-1}
-                              className={cn('absolute inset-0 z-20 flex !min-h-0 !min-w-0 items-center justify-center rounded-sm text-muted-foreground transition-opacity hover:text-foreground', alwaysShowCloseControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
-                              onPointerDown={(event) => {
-                                event.stopPropagation();
-                              }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                onClose?.(item.id);
-                              }}
-                              aria-label={item.closeLabel ?? `Close ${item.label} tab`}
-                              title={item.closeLabel ?? `Close ${item.label} tab`}
-                            >
-                              <Icon name="close" className="h-3.5 w-3.5" />
-                            </span>
-                          ) : null}
+                          {closeReplacesIcon ? closeInsideTab : null}
                         </span>
                       ) : null}
                       <span className={cn('truncate leading-[1.2]', item.preview && 'italic')}><TabLabelText item={item} /></span>
                     </span>
                   )}
                 </button>
-                {closable && !closeReplacesIcon ? (
+                {closable && !closeReplacesIcon ? withCloseTooltip(
                   <button
                     type="button"
                     onPointerDown={(event) => {
@@ -725,8 +722,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                           ? 'text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground'
                           : 'text-muted-foreground opacity-0 hover:bg-interactive-hover/80 hover:text-foreground group-hover:opacity-100')
                     )}
-                    aria-label={item.closeLabel ?? `Close ${item.label} tab`}
-                    title={item.closeLabel ?? `Close ${item.label} tab`}
+                    aria-label={closeLabel}
                   >
                     <Icon name="close" className="h-3 w-3" />
                   </button>

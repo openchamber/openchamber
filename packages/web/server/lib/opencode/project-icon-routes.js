@@ -7,6 +7,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     sanitizeProjects,
     readSettingsFromDiskMigrated,
     persistSettings,
+    persistResolvedSettings,
     createFsSearchRuntime,
     spawn,
     resolveGitBinaryForSpawn,
@@ -373,7 +374,7 @@ export const registerProjectIconRoutes = (app, dependencies) => {
 
     try {
       const settings = await readSettingsFromDiskMigrated();
-      const { projects, project } = findProjectById(settings, projectId);
+      const { project } = findProjectById(settings, projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
       }
@@ -425,17 +426,37 @@ export const registerProjectIconRoutes = (app, dependencies) => {
         return res.status(415).json({ error: 'Unsupported favicon format' });
       }
 
+      // The search above can outlast other saves, and every added project runs
+      // it. The project may be gone or have a chosen icon by now, and the new
+      // icon goes onto the list as it is at write time.
+      const { project: latest } = findProjectById(await readSettingsFromDiskMigrated(), projectId);
+      if (!latest) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+      if (latest.iconImage?.source === 'custom' && !force) {
+        return res.json({
+          project: latest,
+          skipped: true,
+          reason: 'custom-icon-present',
+        });
+      }
+
       await fsPromises.mkdir(projectIconsDirPath, { recursive: true });
       await fsPromises.writeFile(iconPath, bytes);
       await removeProjectIconFiles(projectId, iconPath);
 
       const updatedAt = Date.now();
-      const nextProjects = projects.map((entry) => (
-        entry.id === projectId
-          ? { ...entry, iconImage: { mime, updatedAt, source: 'auto' } }
-          : entry
-      ));
-      const updatedSettings = await persistSettings({ projects: nextProjects });
+      const updatedSettings = await persistResolvedSettings((current) => {
+        const { projects, project: currentProject } = findProjectById(current, projectId);
+        if (!currentProject) return {};
+        return {
+          projects: projects.map((entry) => (
+            entry.id === projectId
+              ? { ...entry, iconImage: { mime, updatedAt, source: 'auto' } }
+              : entry
+          )),
+        };
+      });
       const updatedProject = (updatedSettings.projects || []).find((entry) => entry.id === projectId) || null;
 
       return res.json({

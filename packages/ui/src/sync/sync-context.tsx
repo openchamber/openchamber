@@ -44,7 +44,7 @@ import { retry } from "./retry"
 import { touchStreamingSession, updateChangedStreamingSessions, updateStreamingState } from "./streaming"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { runBackgroundNetworkTask } from "@/lib/background-network"
-import { recordDirectoryRecoveryEvent } from "./directory-recovery-snapshots"
+import { recordDirectoryRecoveryEvent, selectHeldSessionStatuses } from "./directory-recovery-snapshots"
 import { hasPromptInFlight, withPromptsInFlight } from "./prompts-in-flight"
 import { applyRecoverableQuestionEvents, deriveRecoveredQuestions, noteQuestionFormSnapshot, useRecoverableQuestionsStore, type RecoveredQuestion } from "./recoverable-questions"
 import { adoptSessionMove, setActionRefs } from "./session-actions"
@@ -112,6 +112,7 @@ import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, settledPageKey
 import { requestHostTurnStarts } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
+import { applyReplyCommandEvents } from "./reply-commands"
 import {
   CHAT_LOCATION_RELEASE_DELAY_MS,
   PROJECT_LOCATION_RELEASE_DELAY_MS,
@@ -134,7 +135,7 @@ import {
   type SessionMaterializationRequest,
 } from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
-import { revealRequest } from "./request-reveal"
+import { revealRequest, revealWaitingPage } from "./request-reveal"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
 import { captureRuntimeInstance, getRuntimeKey } from "@/lib/runtime-switch"
@@ -329,6 +330,7 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     // Before statuses: an idle that follows a command's start in the same
     // flush must see the command.
     applyBackgroundShellEvents(directory, events)
+    applyReplyCommandEvents(events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
     applyRecoverableQuestionEvents(directory, events)
@@ -944,7 +946,7 @@ async function resyncDirectorySessionStatuses(
     const state = store.getState()
     applyGlobalSessionStatusSnapshot(
       directory,
-      withPromptsInFlight(nextStatuses, state.session_status),
+      withPromptsInFlight(selectHeldSessionStatuses(nextStatuses, state.session), state.session_status),
       getDirectoryOwnedSessionIds(directory, state.session),
     )
   }
@@ -2004,7 +2006,13 @@ const notifyWaitingPage = (event: Extract<SyncEvent, { type: "openchamber.page-w
   toast.info(page.title, {
     id: `page-${sessionID}:${page.id}`,
     description: FORM_TOAST_DESCRIPTION,
-    action: { label: "Open session", onClick: () => openSessionFromToast(sessionID, directory) },
+    action: {
+      label: "Open session",
+      onClick: () => {
+        revealWaitingPage(sessionID)
+        openSessionFromToast(sessionID, directory)
+      },
+    },
   })
 }
 
@@ -2216,6 +2224,7 @@ export function handleEvent(
       // Child stores remain the primary source for synced directories; these
       // indexes cover unopened directories and list/status races.
       applyBackgroundShellEvents(directory, [payload])
+      applyReplyCommandEvents([payload])
       applyGlobalSessionStatusEvent(directory, payload)
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
       applyRecoverableQuestionEvents(directory, [payload])

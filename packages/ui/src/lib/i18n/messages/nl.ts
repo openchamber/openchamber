@@ -25,6 +25,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -48,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'Zen-modellen',
@@ -163,6 +173,7 @@ export const dict = {
   'gitView.publish.cancelled': 'Push geannuleerd. Er is niets verzonden.',
   'gitView.publish.succeeded': 'Gepusht',
   ...settingsDict,
+  ...selectionApprovalI18n.nl,
   ...linearIssuePickerI18n.nl,
   ...referencePickerI18n.nl,
   ...repositoryDiscussionsI18n.nl,
@@ -212,6 +223,15 @@ export const dict = {
   ...workflowsI18n['nl'],
   ...sessionReferencesI18n['nl'],
   ...guestStatusViewI18n['nl'],
+  ...tooltipsDiffI18n['nl'],
+  ...tooltipsFilesI18n['nl'],
+  ...tooltipsGitI18n['nl'],
+  ...tooltipsTrackerI18n['nl'],
+  ...tooltipsWalkthroughI18n['nl'],
+  ...tooltipsTerminalBrowserI18n['nl'],
+  ...tooltipsWorkspaceI18n['nl'],
+  ...tooltipsPanelI18n['nl'],
+  ...tooltipsChatI18n['nl'],
   'terminalView.actions.attachSelection': 'Geselecteerde uitvoer toevoegen',
   'terminalView.actions.copySelection': 'Geselecteerde uitvoer kopiëren',
   'terminalView.toast.selectionCopied': 'Uitvoer gekopieerd',
@@ -793,7 +813,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'Ongelezen updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent draait op de achtergrond',
   'sessions.sidebar.session.status.backgroundCommand': 'Opdracht draait op de achtergrond',
-  'sessions.sidebar.session.status.waitingOnPullRequest': 'Wacht op een pull request',
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'Wacht op controles of een review',
   'sessions.sidebar.session.status.pinned': 'Vastgezette sessie',
   'sessions.sidebar.session.status.movingToWorktree': 'Sessie wordt verplaatst naar een nieuwe worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Toestemming vereist',
@@ -1693,7 +1713,6 @@ export const dict = {
   'sidebarFilesTree.actions.addMenuTitle': 'Nieuw bestand, map of uploaden',
   'sidebarFilesTree.actions.refreshTitle': 'Vernieuwen',
   'sidebarFilesTree.actions.collapseAllTitle': 'Alle mappen inklappen',
-  'sidebarFilesTree.actions.fileMenuTitle': 'Bestandsmenu',
   'sidebarFilesTree.state.searching': 'Zoeken...',
   'sidebarFilesTree.state.loading': 'Laden...',
   'sidebarFilesTree.dialog.createFile.title': 'Bestand aanmaken',
@@ -1957,12 +1976,14 @@ export const dict = {
   'chat.autoReview.actions.dismiss': 'Sluiten',
   'chat.autoReview.toast.removeFailed': 'Kon de server niet bereiken om de codereview te wijzigen. Probeer het opnieuw.',
   'chat.prWatch.title': 'Wacht op pull request #{number}',
+  'chat.prWatch.mr.title': 'Wacht op merge request !{number}',
+  'chat.prWatch.change.title': 'Wacht op wijziging #{number}',
   'chat.prWatch.status.pending': 'controles lopen',
   'chat.prWatch.status.passed': 'controles geslaagd',
   'chat.prWatch.status.failed': 'een controle is mislukt',
   'chat.prWatch.status.waking': 'wekt de agent',
   'chat.prWatch.actions.stop': 'Niet meer volgen',
-  'chat.prWatch.toast.stopFailed': 'Kon de server niet bereiken om het volgen van de pull request te stoppen. Probeer het opnieuw.',
+  'chat.prWatch.toast.stopFailed': 'Kan de server niet bereiken om het volgen te stoppen. Probeer het opnieuw.',
   'chat.draftDirtyNotice.tooltip': 'Er staan niet-gecommitte wijzigingen op deze branch.\nEen nieuwe sessie kan daar een conflict mee veroorzaken. Commit ze eerst of gebruik een andere worktree.',
   'chat.draftDirtyNotice.indicatorAria': 'Niet-gecommitte wijzigingen in deze map',
   'diffView.hunk.label': 'Hunks',
@@ -3503,6 +3524,13 @@ export const dict = {
   'markdownRenderer.code.proposal': 'Voorstel',
   'markdownRenderer.code.actions.copyTitle': 'Code kopiëren',
   'markdownRenderer.code.actions.copiedTitle': 'Gekopieerd',
+  'markdownRenderer.code.actions.runTitle': 'Opdracht uitvoeren. De agent gaat verder met de uitvoer',
+  'markdownRenderer.code.actions.stopTitle': 'Opdracht stoppen',
+  'markdownRenderer.code.run.startFailed': 'De opdracht kon niet worden gestart',
+  'markdownRenderer.code.run.running': 'Bezig',
+  'markdownRenderer.code.run.finished': 'Voltooid',
+  'markdownRenderer.code.run.failed': 'Afsluitcode {code}',
+  'markdownRenderer.code.run.stopped': 'Gestopt',
   'markdownRenderer.table.actions.copyTitle': 'Tabel kopiëren',
   'markdownRenderer.code.actions.enableWrapTitle': 'Regelafbreking aanzetten',
   'markdownRenderer.code.actions.disableWrapTitle': 'Regelafbreking uitzetten',
@@ -3735,6 +3763,9 @@ export const dict = {
   'chat.dispatchedSession.showAnswer': 'Antwoord tonen',
   'chat.dispatchedSession.hideAnswer': 'Antwoord verbergen',
   'chat.dispatchedSession.open': 'Sessie openen',
+  'chat.fileOpenRequest.toast.description': 'Getoond in {session}',
+  'chat.fileOpenRequest.toast.descriptionUntitled': 'Getoond in een andere sessie',
+  'chat.fileOpenRequest.toast.openSession': 'Sessie openen',
   'chat.revertPopover.staged': 'Teruggedraaid: {count}',
   "chat.revertPopover.toast.restoreFailed": "De teruggedraaide berichten konden niet worden hersteld",
   'chat.workStatus.mcp.needsAuthHint': 'Log in op deze MCP-server via Instellingen → MCP.',

@@ -24,6 +24,8 @@ export {
   browserProviderResultSchema,
   notificationsProviderMethodSchema,
   notificationsProviderSchemasV1,
+  quotaProviderMethodSchema,
+  quotaProviderSchemasV1,
   sessionEventResultSchema,
   sourceControlProviderMethodSchema,
   sourceControlProviderSchemasV1,

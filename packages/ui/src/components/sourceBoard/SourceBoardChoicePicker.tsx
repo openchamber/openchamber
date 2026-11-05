@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Popover } from '@base-ui/react/popover';
 
 import { Icon } from '@/components/icon/Icon';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import { Command, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
@@ -85,21 +86,22 @@ export const SourceBoardChoicePicker: React.FC<{
 
     return (
         <Popover.Root open={open} onOpenChange={openChange} onOpenChangeComplete={(next) => { if (next) searchRef.current?.focus(); }}>
-            <Popover.Trigger
-                render={
-                    <Button
-                        variant="ghost"
-                        size="xs"
-                        aria-label={ariaLabel}
-                        title={ariaLabel}
-                        aria-haspopup="dialog"
-                        disabled={busy}
-                        className="size-6 shrink-0 px-0 text-muted-foreground data-[popup-open]:bg-interactive-hover"
-                    />
-                }
-            >
-                <Icon name={busy ? 'loader-4' : 'pencil'} className={cn('size-3.5', busy && 'animate-spin')} />
-            </Popover.Trigger>
+            <ButtonTooltip label={ariaLabel} className="shrink-0">
+                <Popover.Trigger
+                    render={
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            aria-label={ariaLabel}
+                            aria-haspopup="dialog"
+                            disabled={busy}
+                            className="size-6 shrink-0 px-0 text-muted-foreground data-[popup-open]:bg-interactive-hover"
+                        />
+                    }
+                >
+                    <Icon name={busy ? 'loader-4' : 'pencil'} className={cn('size-3.5', busy && 'animate-spin')} />
+                </Popover.Trigger>
+            </ButtonTooltip>
             <Popover.Portal>
                 <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
                     <Popover.Popup

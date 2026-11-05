@@ -26,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -49,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Modele Zen',
@@ -103,6 +113,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': 'Użyci subagenci: {count}',
   'sessions.sidebar.projectAction.active': 'Trwa wykonywanie akcji projektu',
   ...settingsDict,
+  ...selectionApprovalI18n.pl,
   'gitView.operation.title': 'Operacja Git',
   'gitView.operation.recovery.storage': 'OpenChamber nie może tu zapisać stanu przesyłów Git. Zezwól na pamięć witryny i odśwież; do tego czasu push i pull są wstrzymane.',
   'gitView.operation.recovery.capacity': 'Zapisano zbyt wiele niedokończonych przesyłów Git. Sprawdź te poniżej, zanim zaczniesz kolejny.',
@@ -213,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['pl'],
   ...sessionReferencesI18n['pl'],
   ...guestStatusViewI18n['pl'],
+  ...tooltipsDiffI18n['pl'],
+  ...tooltipsFilesI18n['pl'],
+  ...tooltipsGitI18n['pl'],
+  ...tooltipsTrackerI18n['pl'],
+  ...tooltipsWalkthroughI18n['pl'],
+  ...tooltipsTerminalBrowserI18n['pl'],
+  ...tooltipsWorkspaceI18n['pl'],
+  ...tooltipsPanelI18n['pl'],
+  ...tooltipsChatI18n['pl'],
   'terminalView.actions.attachSelection': 'Dołącz zaznaczone dane wyjściowe',
   'terminalView.actions.copySelection': 'Kopiuj zaznaczone dane wyjściowe',
   'terminalView.toast.selectionCopied': 'Skopiowano dane wyjściowe',
@@ -799,7 +819,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': 'Nieprzeczytane aktualizacje',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent działa w tle',
   'sessions.sidebar.session.status.backgroundCommand': 'Polecenie działa w tle',
-  'sessions.sidebar.session.status.waitingOnPullRequest': 'Czeka na pull request',
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'Czeka na sprawdzenia lub recenzję',
   'sessions.sidebar.session.status.pinned': 'Przypięta sesja',
   'sessions.sidebar.session.status.movingToWorktree': 'Przenoszenie sesji do nowego worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Wymagane uprawnienie',
@@ -1071,7 +1091,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileMentionAutocomplete.empty': 'Nie znaleziono pasujących',
   'chat.queuedMessage.attachments': '+{count} plik(i)',
   'chat.queuedMessage.empty': '(puste)',
-  'chat.queuedMessage.title': 'Queued messages',
+  'chat.queuedMessage.title': 'Wiadomości w kolejce',
   'chat.queuedMessage.edit': 'edit',
   'chat.queuedMessage.send': 'send',
   'chat.queuedMessage.removeAria': 'Usuń z kolejki',
@@ -1432,7 +1452,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.commands': 'Commands',
   'chat.chatInput.actions.modelAgentSettings': 'Model and agent settings',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
-  'chat.chatInput.actions.sendMessageAria': 'Send message',
+  'chat.chatInput.actions.sendMessageAria': 'Wyślij wiadomość',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.branch': 'Gałąź',
   'chat.chatInput.draftPicker.projectTitle': 'Projekt',
@@ -2181,12 +2201,14 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.actions.dismiss': 'Zamknij',
   'chat.autoReview.toast.removeFailed': 'Nie udało się połączyć z serwerem, aby zmienić przegląd kodu. Spróbuj ponownie.',
   'chat.prWatch.title': 'Czeka na pull request #{number}',
+  'chat.prWatch.mr.title': 'Czeka na merge request !{number}',
+  'chat.prWatch.change.title': 'Czeka na zmianę #{number}',
   'chat.prWatch.status.pending': 'sprawdzenia trwają',
   'chat.prWatch.status.passed': 'sprawdzenia przeszły',
   'chat.prWatch.status.failed': 'sprawdzenie nie powiodło się',
   'chat.prWatch.status.waking': 'budzi agenta',
   'chat.prWatch.actions.stop': 'Przestań obserwować',
-  'chat.prWatch.toast.stopFailed': 'Nie udało się połączyć z serwerem, aby przestać obserwować pull request. Spróbuj ponownie.',
+  'chat.prWatch.toast.stopFailed': 'Nie udało się połączyć z serwerem, aby przestać obserwować. Spróbuj ponownie.',
   'chat.draftDirtyNotice.tooltip': 'Masz niezacommitowane zmiany w tej gałęzi.\nNowa sesja może z nimi kolidować. Być może warto najpierw je zacommitować albo użyć innego worktree.',
   'chat.draftDirtyNotice.indicatorAria': 'Niezacommitowane zmiany w tym katalogu',
   'diffView.hunk.label': 'Fragmenty',
@@ -2951,6 +2973,13 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.proposal': 'Propozycja',
   'markdownRenderer.code.actions.copyTitle': 'Kopiuj kod',
   'markdownRenderer.code.actions.copiedTitle': 'Skopiowano',
+  'markdownRenderer.code.actions.runTitle': 'Uruchom polecenie. Agent będzie kontynuować na podstawie jego wyniku',
+  'markdownRenderer.code.actions.stopTitle': 'Zatrzymaj polecenie',
+  'markdownRenderer.code.run.startFailed': 'Nie udało się uruchomić polecenia',
+  'markdownRenderer.code.run.running': 'Trwa',
+  'markdownRenderer.code.run.finished': 'Zakończono',
+  'markdownRenderer.code.run.failed': 'Kod wyjścia {code}',
+  'markdownRenderer.code.run.stopped': 'Zatrzymano',
   'markdownRenderer.table.actions.copyTitle': 'Kopiuj tabelę',
   'markdownRenderer.code.actions.enableWrapTitle': 'Włącz zawijanie wierszy',
   'markdownRenderer.code.actions.disableWrapTitle': 'Wyłącz zawijanie wierszy',
@@ -3308,7 +3337,6 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.actions.addMenuTitle': 'Nowy plik, folder lub przesyłanie',
   'sidebarFilesTree.actions.refreshTitle': 'Odśwież',
   'sidebarFilesTree.actions.collapseAllTitle': 'Zwiń wszystkie foldery',
-  'sidebarFilesTree.actions.fileMenuTitle': 'Menu pliku',
   'sidebarFilesTree.dialog.cancel': 'Anuluj',
   'sidebarFilesTree.dialog.confirm': 'Potwierdź',
   'sidebarFilesTree.dialog.createFile.description': 'Utwórz nowy plik w {path}',
@@ -3385,7 +3413,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.quickKeys.arrowUpAria': 'Arrow up',
   'terminalView.quickKeys.commandModifierAria': 'Command modifier',
   'terminalView.quickKeys.controlLabel': 'Ctrl',
-  'terminalView.quickKeys.controlModifierAria': 'Control modifier',
+  'terminalView.quickKeys.controlModifierAria': 'Modyfikator Control',
   'terminalView.quickKeys.altLabel': 'Alt',
   'terminalView.quickKeys.altModifierAria': 'Modyfikator Alt',
   'terminalView.quickKeys.enterAria': 'Enter',
@@ -3761,6 +3789,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.dispatchedSession.showAnswer': 'Pokaż odpowiedź',
   'chat.dispatchedSession.hideAnswer': 'Ukryj odpowiedź',
   'chat.dispatchedSession.open': 'Otwórz sesję',
+  'chat.fileOpenRequest.toast.description': 'Pokazano w {session}',
+  'chat.fileOpenRequest.toast.descriptionUntitled': 'Pokazano w innej sesji',
+  'chat.fileOpenRequest.toast.openSession': 'Otwórz sesję',
   'chat.revertPopover.staged': 'Cofnięte: {count}',
   "chat.revertPopover.toast.restoreFailed": "Nie udało się przywrócić cofniętych wiadomości",
   'chat.workStatus.mcp.needsAuthHint': 'Zaloguj się do tego serwera MCP w Ustawienia → MCP.',

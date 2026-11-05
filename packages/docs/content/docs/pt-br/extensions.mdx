@@ -87,6 +87,16 @@ Pausar a extensão tira o rastreador até você ligá-la de novo, e suas contas 
 
 O SDK do OpenChamber tem um exemplo funcional, `examples/tracker-provider`, com um rastreador falso para rodar ao lado. Veja [Construir uma extensão](/pt-br/sdk/).
 
+## Uma extensão como provedor de uso
+
+Uma extensão pode adicionar um provedor de uso ao lado dos integrados: um provedor que o OpenChamber não lê sozinho, ou um dela mesma. Seu diálogo de permissões passa a ter uma linha que começa com **Informa o uso como um provedor integrado** e lista os provedores do OpenCode cujas credenciais ela lê, como `openrouter`; uma extensão que não lista nenhum diz isso.
+
+Depois que você a permite, o cartão dela fica depois dos provedores integrados em **Configurações → Uso**, com o nome e o ícone da extensão, e entra nos limites do cabeçalho, no status de trabalho, no popover do celular e na bandeja do desktop quando você marca **Mostrar no status de trabalho**, como qualquer provedor integrado. A cada atualização o OpenChamber entrega à extensão a credencial que o OpenCode guarda para cada provedor listado, e nada mais; uma versão que lista outro provedor pede sua aprovação de novo. A extensão lê o uso por conta própria, e o OpenChamber o desenha como desenha o de um provedor integrado.
+
+Pausar a extensão tira o cartão até você ligá-la de novo, e suas configurações de uso para ela continuam. Remover a extensão tira o cartão de vez. O VS Code não mostra uso de extensões; no celular o cartão aparece, e a extensão é configurada no aplicativo web ou desktop. Uma sessão dentro de um espaço isolado lê o uso do servidor próprio desse espaço, que não tem extensões.
+
+O SDK do OpenChamber tem um exemplo funcional, `examples/quota-provider`, com uma API de uso falsa para rodar ao lado. Veja [Construir uma extensão](/pt-br/sdk/).
+
 ## Conectar a conta dela
 
 Uma extensão que fala com um serviço ganha um card em **Configurações → Integrações** sob **Contas de extensões**. Dependendo do serviço, o card pede um token de API, um usuário e token, ou um client id para um fluxo de login. Escolha **Conectar**; **Desconectar** esquece o token guardado. Campos extras que a extensão declara são salvos sozinhos quando você sai deles.

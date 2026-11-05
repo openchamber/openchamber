@@ -10,6 +10,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { opencodeClient } from '@/lib/opencode/client';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -121,15 +122,53 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
 
   const normalizedQuery = query.trim().toLowerCase();
 
+  const openCodeProjects = useGlobalSyncStore((state) => state.projects);
+
+  // Sessions belong to their project the way the sidebar groups them: by
+  // folder, then by OpenCode's project, which is what still places a session
+  // of a worktree that is gone.
+  const ownership = React.useMemo(() => createSessionOwnershipIndex(
+    listedSessions,
+    projects.flatMap((project) => {
+      const normalizedPath = normalizePath(project.path);
+      return normalizedPath ? [{ id: project.id, normalizedPath }] : [];
+    }),
+    worktreesByProject,
+    false,
+    [],
+    openCodeProjects,
+  ), [listedSessions, openCodeProjects, projects, worktreesByProject]);
+
+  // A worktree that is gone matches no project by folder, so its sessions are
+  // listed once the server confirms the folder is missing. A folder that still
+  // exists stays behind admission, whatever project OpenCode files it under.
+  const unadmittedOwnedDirectories = React.useMemo(() => [...new Set(listedSessions.flatMap((session) => {
+    const directory = resolveGlobalSessionDirectory(session);
+    return directory && ownership.bySessionId.has(session.id) && !isSessionDirectoryAdmitted(directory, projects, worktreesByProject) ? [directory] : [];
+  }))].sort().join('\n'), [listedSessions, ownership, projects, worktreesByProject]);
+  const [goneDirectories, setGoneDirectories] = React.useState<ReadonlySet<string>>(() => new Set());
+  React.useEffect(() => {
+    if (!unadmittedOwnedDirectories) return undefined;
+    let current = true;
+    void Promise.all(unadmittedOwnedDirectories.split('\n').map(async (directory) => (
+      await opencodeClient.getDirectoryAvailability(directory) === 'missing' ? [directory] : []
+    ))).then((gone) => {
+      if (current) setGoneDirectories(new Set(gone.flat()));
+    });
+    return () => { current = false; };
+  }, [unadmittedOwnedDirectories]);
+
   // A subsession under an archived parent comes back with that parent and is
   // not listed. One archived while its parent stays active would otherwise
   // show nowhere, so it is listed under its parent's title and restored alone.
   const sortedSessions = React.useMemo(
     () => listedSessions.filter((session) => {
       const directory = resolveGlobalSessionDirectory(session);
-      return isSessionDirectoryAdmitted(directory, projects, worktreesByProject) || Boolean(directory && spaceArchives?.has(directory));
+      return isSessionDirectoryAdmitted(directory, projects, worktreesByProject)
+        || Boolean(directory && spaceArchives?.has(directory))
+        || Boolean(directory && goneDirectories.has(directory) && ownership.bySessionId.has(session.id));
     }).sort((a, b) => (b.time?.archived ?? 0) - (a.time?.archived ?? 0)),
-    [listedSessions, projects, spaceArchives, worktreesByProject],
+    [goneDirectories, listedSessions, ownership, projects, spaceArchives, worktreesByProject],
   );
 
   const parentTitles = React.useMemo(() => {
@@ -145,7 +184,6 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     return parentTitles.get(parentID) || t('sessions.sidebar.session.untitled');
   };
 
-  const openCodeProjects = useGlobalSyncStore((state) => state.projects);
   const archivesByProject = useWorktreeArchivesByProject();
   const archiveActions = useWorktreeArchiveActions();
 
@@ -155,21 +193,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     for (const project of projects) void loadWorktreeArchives(project.path).catch(() => undefined);
   }, [projects]);
 
-  // Sessions belong to their project the way the sidebar groups them: by
-  // folder, then by OpenCode's project, which is what still places a session
-  // of a worktree that is gone.
   const buckets = React.useMemo<ArchiveBucket[]>(() => {
-    const ownership = createSessionOwnershipIndex(
-      sortedSessions,
-      projects.flatMap((project) => {
-        const normalizedPath = normalizePath(project.path);
-        return normalizedPath ? [{ id: project.id, normalizedPath }] : [];
-      }),
-      worktreesByProject,
-      false,
-      [],
-      openCodeProjects,
-    );
     const byKey = new Map<string, ArchiveBucket>();
     const bucketFor = (key: string, create: () => Omit<ArchiveBucket, 'sessions'>): ArchiveBucket => {
       const existing = byKey.get(key);
@@ -207,7 +231,7 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
     }
     const order = { project: 0, space: 1, other: 2 } as const;
     return [...byKey.values()].sort((a, b) => order[a.kind] - order[b.kind] || a.label.localeCompare(b.label));
-  }, [archivesByProject, labelOf, openCodeProjects, projects, sortedSessions, spaceArchives, t, worktreesByProject]);
+  }, [archivesByProject, labelOf, ownership, projects, sortedSessions, spaceArchives, t]);
 
   const selectedBucket = selectedKey === null ? null : buckets.find((bucket) => bucket.key === selectedKey) ?? null;
   const selectedProject = selectedBucket?.projectId ? { id: selectedBucket.projectId, path: selectedBucket.directory } : null;

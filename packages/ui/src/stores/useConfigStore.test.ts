@@ -161,6 +161,7 @@ mock.module('@/lib/opencode/client', () => ({
     }),
     getDirectory: mock(() => clientDirectory),
     getFilesystemHome: async () => '/workspace',
+    getFilesystemHomeInfo: async () => ({ home: '/workspace', chatsRoot: '/workspace/.config/openchamber/chats' }),
     getSystemInfo: async () => ({ homeDirectory: '/workspace' }),
     checkHealth: () => checkHealthImpl(),
     probeHealth: (options?: { waitMs?: number }) => {
@@ -1900,6 +1901,48 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().activeDirectoryKey).toBe(chatDirectory);
     expect(agentDirectories).toEqual([chatDirectory]);
     expect(clientDirectoryMoves).toEqual([]);
+  });
+
+  test('startup with a chat draft loads the Chats root catalog, not the active project one (#6283)', async () => {
+    clientDirectory = DIRECTORY;
+    const agentDirectories: Array<string | null | undefined> = [];
+    listAgentsImpl = async (directory) => {
+      agentDirectories.push(directory);
+      return [testAgent('build')];
+    };
+    const draftBefore = useSessionUIStore.getState().newSessionDraft;
+    useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+    try {
+      await useConfigStore.getState().initializeApp();
+    } finally {
+      useSessionUIStore.setState({ newSessionDraft: draftBefore });
+    }
+
+    expect(useConfigStore.getState().activeDirectoryKey).toBe('/workspace/.config/openchamber/chats');
+    expect(agentDirectories).toEqual(['/workspace/.config/openchamber/chats']);
+    expect(clientDirectoryMoves).toEqual([]);
+  });
+
+  test('startup left a chat draft while the Chats root was loading keeps the opened session catalog (#6283)', async () => {
+    const chatDirectory = '/workspace/.config/openchamber/chats/chat-1';
+    clientDirectory = chatDirectory;
+    const agentDirectories: Array<string | null | undefined> = [];
+    listAgentsImpl = async (directory) => {
+      agentDirectories.push(directory);
+      return [testAgent('build')];
+    };
+    const draftBefore = useSessionUIStore.getState().newSessionDraft;
+    useSessionUIStore.setState({ currentSessionId: null, newSessionDraft: { ...draftBefore, open: true, target: 'chat' } });
+    try {
+      const startup = useConfigStore.getState().initializeApp();
+      useSessionUIStore.setState({ currentSessionId: 'ses_chat', currentSessionDirectory: DIRECTORY, newSessionDraft: draftBefore });
+      await startup;
+    } finally {
+      useSessionUIStore.setState({ newSessionDraft: draftBefore });
+    }
+
+    expect(useConfigStore.getState().activeDirectoryKey).toBe(DIRECTORY);
+    expect(agentDirectories).toEqual([DIRECTORY]);
   });
 
   test('startup without an open session still loads an unknown folder under the active project', async () => {

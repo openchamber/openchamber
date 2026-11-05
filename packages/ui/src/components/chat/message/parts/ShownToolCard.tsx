@@ -1,9 +1,10 @@
 import React from 'react';
 
 import type { ToolPart } from '@/lib/opencode/model';
-import type { ShownPart } from '../../lib/turns/liveActivity';
+import { isSettledAsk, type ShownPart } from '../../lib/turns/liveActivity';
 import AssistantTextPart from './AssistantTextPart';
-import { generatedImagePaths, proposedWorkflowRunId, requestedSecret } from '@/lib/opencode/tools';
+import { PageAskStatus } from './PageAskStatus';
+import { generatedImagePaths, proposedWorkflowRunId, renderedPage, requestedSecret } from '@/lib/opencode/tools';
 import { WorkflowRunCard } from '@/components/chat/workflows/WorkflowRunCard';
 import type { ToolPopupContent } from '../types';
 import { GeneratedImages } from './GeneratedImages';
@@ -25,12 +26,27 @@ export function ShownToolCard({ part, onShowPopup }: { part: ToolPart; onShowPop
   return <ShownPage part={part} />;
 }
 
+/** A settled form a collapsed Activity keeps in view: one line, no form. */
+function SettledAskLine({ part }: { part: ToolPart }) {
+  const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
+  if (!page) return null;
+  return (
+    <div className="my-2">
+      <PageAskStatus ask={page.ask} answeredSummary={page.ask.kind === 'answered' ? page.ask.summary : undefined} />
+    </div>
+  );
+}
+
 /**
  * A part a collapsed Activity keeps in view (`getShownPages`): a call drawn in
- * place, or the text with a UI block the agent wrote before a later step.
+ * place, the line of a settled form, or the text with a UI block the agent
+ * wrote before a later step.
  */
 export function ShownPartCard({ part, onShowPopup }: { part: ShownPart; onShowPopup?: (content: ToolPopupContent) => void }) {
-  if (part.type === 'tool') return <ShownToolCard part={part} onShowPopup={onShowPopup} />;
+  if (part.type === 'tool') {
+    if (isSettledAsk(part)) return <SettledAskLine part={part} />;
+    return <ShownToolCard part={part} onShowPopup={onShowPopup} />;
+  }
   return (
     <AssistantTextPart
       part={part}

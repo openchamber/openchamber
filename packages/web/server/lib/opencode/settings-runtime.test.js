@@ -64,6 +64,19 @@ describe('settings runtime', () => {
     } finally { await cleanup(); }
   });
 
+  it('resolves changes against the settings left by the save queued before them', async () => {
+    const { runtime, settingsFilePath, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await fsPromises.writeFile(settingsFilePath, JSON.stringify({ lightThemeId: 'old' }));
+      await Promise.all([
+        runtime.persistSettings({ lightThemeId: 'queued-first' }),
+        runtime.persistResolvedSettings((current) => ({ darkThemeId: `after-${current.lightThemeId}` })),
+      ]);
+      const stored = JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'));
+      expect(stored).toMatchObject({ lightThemeId: 'queued-first', darkThemeId: 'after-queued-first' });
+    } finally { await cleanup(); }
+  });
+
   it('does not overwrite a malformed registry and allows registration after repair', async () => {
     const { runtime, settingsFilePath, cleanup } = await createRuntime();
     try {
@@ -263,13 +276,14 @@ describe('settings runtime', () => {
     }
   });
 
-  it('round-trips shared sidebar preferences through preferences.json', async () => {
+  it('round-trips shared profile preferences through preferences.json', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
     const preferences = {
       sidebarProjectDisplayMode: 'single',
       sidebarViewMode: 'timeline',
       sidebarProjectSortOrder: 'date-added',
       sidebarShowChatsSection: false,
+      selectionApprovalText: '认可此方案 👍',
     };
     try {
       await runtime.persistSettings(preferences);
@@ -279,6 +293,8 @@ describe('settings runtime', () => {
       expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toEqual(preferences);
       const stored = JSON.parse(await fsPromises.readFile(path.join(tempRoot, 'preferences.json'), 'utf8'));
       expect(Object.fromEntries(Object.entries(stored.fields).map(([key, entry]) => [key, entry.value]))).toEqual(preferences);
+      await runtime.persistSettings({ ...preferences, selectionApprovalText: '' });
+      await expect(runtime.readSettingsFromDisk()).resolves.toEqual({ ...preferences, selectionApprovalText: '' });
     } finally {
       await cleanup();
     }

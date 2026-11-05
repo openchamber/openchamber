@@ -1,6 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { useKeybinds } from '@/hooks/useKeybind';
 import { takeSessionActionFailure } from '@/sync/session-action-failures';
 import { describeSessionActionError } from '../sessions/sessionActionError';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -281,41 +282,39 @@ export const useSidebarBulkActions = (args: Args) => {
     await executeBulkDelete(resolution.value.sessionIds, resolution.value.archivedBucket);
   }, [bulkDeleteConfirm, executeBulkDelete, rowOrderRegistry, setBulkDeleteConfirm]);
 
+  const selectionKeysApply = React.useCallback((event: KeyboardEvent): boolean => {
+    if (bulkDeleteConfirm || isInlineEditing) return false;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    return !(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable));
+  }, [bulkDeleteConfirm, isInlineEditing]);
+
   React.useEffect(() => {
     if (!selectionModeEnabled) return;
-    const isMac = /Macintosh|Mac OS X/.test(navigator.userAgent || '');
     const listener = (event: KeyboardEvent) => {
-      if (bulkDeleteConfirm) return;
-      if (isInlineEditing) return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
-      const modifier = isMac ? event.metaKey : event.ctrlKey;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        useSessionMultiSelectStore.getState().disable();
-        return;
-      }
-      if (modifier && event.key === 'Backspace') {
-        event.preventDefault();
-        handleBulkDelete();
-        return;
-      }
-      if (modifier && (event.key === 'a' || event.key === 'A')) {
-        const selection = deriveSessionRowBulkSelectAll(
-          rowOrderRegistry?.getEntries() ?? [],
-          rowOrderRegistry?.getDescendantIds() ?? [],
-          useSessionMultiSelectStore.getState().scopeKey,
-        );
-        if (!selection) return;
-        event.preventDefault();
-        useSessionMultiSelectStore.getState().replaceAll(selection.ids, selection.scopeKey);
-      }
+      if (!selectionKeysApply(event) || event.key !== 'Escape') return;
+      event.preventDefault();
+      useSessionMultiSelectStore.getState().disable();
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [bulkDeleteConfirm, handleBulkDelete, isInlineEditing, rowOrderRegistry, selectionModeEnabled]);
+  }, [selectionKeysApply, selectionModeEnabled]);
+
+  useKeybinds(selectionModeEnabled ? {
+    sessions_bulk_delete: (event) => {
+      if (!selectionKeysApply(event)) return false;
+      handleBulkDelete();
+    },
+    sessions_select_all: (event) => {
+      if (!selectionKeysApply(event)) return false;
+      const selection = deriveSessionRowBulkSelectAll(
+        rowOrderRegistry?.getEntries() ?? [],
+        rowOrderRegistry?.getDescendantIds() ?? [],
+        useSessionMultiSelectStore.getState().scopeKey,
+      );
+      if (!selection) return false;
+      useSessionMultiSelectStore.getState().replaceAll(selection.ids, selection.scopeKey);
+    },
+  } : {});
 
   return {
     selectionModeEnabled,

@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import {
   formatShortcutForDisplay,
   getShortcutBindingConflicts,
+  isMenuAcceleratorCombo,
   isRiskyBrowserShortcut,
   keyToShortcutToken,
   resolveShortcutEventKey,
@@ -229,10 +230,12 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
   const exactConflict = customizableConflicts.find((conflict) => conflict.kind === 'exact');
   const contextualPrefixConflict = conflicts.find((conflict) => conflict.kind === 'contextual-prefix');
 
+  const unsupportedMenuKey = Boolean(action && 'nativeMenu' in action && combo && !isMenuAcceleratorCombo(combo));
+
   const close = () => onOpenChange(false);
   const confirm = () => {
     if (!recording.settled) setRecording(settleShortcutRecordingState);
-    if (!action || !combo || protectedConflict || prefixConflict) return;
+    if (!action || !combo || protectedConflict || prefixConflict || unsupportedMenuKey) return;
     onSave(action.id, combo, exactConflict?.action.id);
     close();
   };
@@ -307,7 +310,11 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
           </div>
         </div>
 
-        {recording.settled && protectedConflict ? (
+        {recording.settled && unsupportedMenuKey ? (
+          <p className="typography-meta text-[var(--status-error)]">
+            {t('settings.openchamber.keyboardShortcuts.error.menuKeyUnsupported')}
+          </p>
+        ) : recording.settled && protectedConflict ? (
           <p className="typography-meta text-[var(--status-error)]">
             {t('settings.openchamber.keyboardShortcuts.error.internalConflict')}
           </p>
@@ -341,7 +348,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
           <Button
             type="button"
             size="sm"
-            disabled={!combo || (recording.settled && (Boolean(protectedConflict) || Boolean(prefixConflict)))}
+            disabled={!combo || (recording.settled && (Boolean(protectedConflict) || Boolean(prefixConflict) || unsupportedMenuKey))}
             onClick={confirm}
           >
             {t('settings.openchamber.keyboardShortcuts.actions.confirm')}

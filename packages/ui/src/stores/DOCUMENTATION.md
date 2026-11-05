@@ -37,6 +37,13 @@ supplies the validated result; failure leaves the existing projects intact.
 Ordinary folder addition keeps its existing optimistic behavior. The import
 suggestion's lifecycle belongs to `components/session/project-import`.
 
+Icon discovery for an added folder joins the debounced settings write and starts
+after it succeeds, because the discovery route finds the project in the server's
+list. A failed save starts no discovery. The answer contributes only that
+project's icon, never the list: the search can outlast changes made in this
+window. The list holding the icon is then written, because a full-list write
+already queued or in flight lacks it and would erase it on the server.
+
 There are multiple store categories in this directory.
 
 ### Catalog refresh
@@ -113,6 +120,17 @@ readout also loads the providers that readout did not request. Runtime switches
 and credential changes invalidate this freshness window and old-account samples.
 A credential event with no visible readout only invalidates samples.
 
+The usage providers installed extensions serve (`extensionProviders`, from
+`GET /api/quota/extensions`) are read with the instance's settings on the first
+load for a runtime, and again when the server announces
+`openchamber:quota-providers-changed` or the event stream reconnects; a failed
+read keeps the list it had. A provider that leaves takes its results, errors,
+in-flight request and page selection with it. A provider that arrives is
+fetched once as soon as the instance has loaded, whether or not a readout is
+shown: the change follows the user's own action in Extensions, a readout opened
+right after would sit inside the freshness window without it, and a Work status
+panel that found no configured provider has no demand left to bring it in.
+
 Hidden documents stop the interval. Electron uses native window visibility
 because Chromium can report `visible` for a hidden window when background
 throttling is disabled. Capacitor additionally uses App foreground state. A
@@ -139,6 +157,10 @@ the project and runs Git in every checkout it meets, which can take seconds.
 An indexed-search failure rejects. A supplemental failure logs a warning and
 returns the indexed hits without caching the partial answer, so the next search
 can retry the supplement.
+A caller may pass a `signal`. The walk stops once every caller waiting for it has
+aborted and none came without a signal; the composer's `@` list aborts on each new
+query. A stopped walk leaves the in-flight list at once, so the same query asked
+again starts over. Its partial answer is not cached and logs no warning.
 
 The Stats page keeps its reports in a feature-local store, `components/views/usage/usageStatsStore.ts`: keyed by runtime, range and project, in memory only, never refetched on its own once a key has a report, cleared on runtime switch. A failed refresh keeps the cached report. The report is requested with `tools: "none"`; tool calls, which make OpenCode scan every tool call in the range, load on request under the same key, over the loaded report's own window. Once the user asks for them, every report shown later in the app session fetches its tool calls after it lands. A failed tool read shows an error with retry and never reads as zero calls.
 
@@ -637,7 +659,7 @@ Project ordering defaults to manual. Session display persistence v3 migrates the
 
 Session display persistence keeps a hydrated local cache for the independent all-projects/single-project mode, session grouping, project sort, and Recent preference; successful server settings snapshots are authoritative for the fields they carry, and a field the server omits leaves the local cache untouched (it is not seeded back to the server). The last confirmed or manually selected project and sticky-header preference stay local to the device. Draft target changes do not write the picker selection; materialized session navigation updates it from the resolved project directory, except the launch restore of the last session, which belongs to the launch and leaves the remembered picker alone.
 
-Session folders are stored by the OpenChamber server and shared by all of its clients (`packages/web/server/lib/session-folders/DOCUMENTATION.md` owns the stored format and the change semantics). `useSessionFoldersStore` shows the server's last answer with this device's not-yet-stored changes laid over it. Every folder action is one change (`lib/sessionFolders/folderChanges.ts`) that the store applies at once, queues in runtime-scoped storage (`oc.sessions.folderChanges.v2:<runtime>`, written immediately so a reload still sends it) and sends to `PATCH /api/session-folders` 150 ms later, up to 500 changes per request; a change stays queued until the server stored it, a failed write retries with backoff up to 30 s and again when the event stream reconnects, and a change the server rejects as malformed is dropped and the server copy read again. The server's answer and every later read replace the shown folders only when their revision is not older than the last one shown. `sync/session-folders-sync.ts` reads them again when the control stream announces `session-folders-changed` with a newer revision, and after each reconnect. Before the first successful read nothing is sent: on its first contact with a server a device hands its own folders from older versions to the server once (an `import` change, with any tombstones an older version left unsent), marks the runtime in `oc.sessions.foldersShared.v2:<runtime>` and only then shows the server's folders. Creates, renames, moves and deletions queued before that are already in the copy the import sends (deletions as tombstones) and leave the queue with it, since a new folder the server joins by name would otherwise come back as a second one under its local id; until that succeeds the local copy stays on screen. A missing file on a server that stores shared folders is an empty list; a failed or malformed read keeps what is shown. A server from before shared folders answers 404 to `PATCH`; the store then writes its whole copy with `POST` the way older clients did, with the folders it deleted as tombstones, and gets no live updates from that server. The runtime-specific v2 browser keys stay as this device's cache of the server copy, flushed on runtime switch, page hide, freeze and unload. Which folders are collapsed stays on the device (`oc.sessions.folderCollapse.v2:<runtime>`) and is never read from the server. VS Code has no OpenChamber server, so its folders stay in its own storage and nothing is sent. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
+Session folders are stored by the OpenChamber server and shared by all of its clients (`packages/web/server/lib/session-folders/DOCUMENTATION.md` owns the stored format and the change semantics). `useSessionFoldersStore` shows the server's last answer with this device's not-yet-stored changes laid over it. Every folder action is one change (`lib/sessionFolders/folderChanges.ts`) that the store applies at once, queues in runtime-scoped storage (`oc.sessions.folderChanges.v2:<runtime>`, written immediately so a reload still sends it) and sends to `PATCH /api/session-folders` 150 ms later, up to 500 changes per request; a change stays queued until the server stored it, a failed write retries with backoff up to 30 s and again when the event stream reconnects, and a change the server rejects as malformed is dropped and the server copy read again. The server's answer and every later read replace the shown folders only when their revision is not older than the last one shown. `sync/session-folders-sync.ts` reads them again when the control stream announces `session-folders-changed` with a newer revision, after each reconnect, and when the window comes back (visible, focused, online or woken). A failed read keeps what is shown and retries with the same backoff; every folder request times out after 15 s (2 minutes for a device's whole copy, which on a slow link would never fit in 15 s) and counts as failed, so a hung one cannot hold the sync. A move records which folder each chat was in (`from`), and both sides skip a chat that has since moved elsewhere, so a move re-sent after a timeout or a reload cannot undo a newer one. Before the first successful read nothing is sent: on its first contact with a server a device hands its own folders from older versions to the server once (an `import` change, with any tombstones an older version left unsent), marks the runtime in `oc.sessions.foldersShared.v2:<runtime>` and only then shows the server's folders. Creates, renames, moves and deletions queued before that are already in the copy the import sends (deletions as tombstones) and leave the queue with it, since a new folder the server joins by name would otherwise come back as a second one under its local id; until that succeeds the local copy stays on screen. An import the server rejects is not sent again until the next start. Changes still queued after an import lose their `from`, since the folders it names may have joined server folders. A missing file on a server that stores shared folders is an empty list; a failed or malformed read keeps what is shown. A server from before shared folders answers 404 to `PATCH`; the store then writes its whole copy with `POST` the way older clients did, with the folders it deleted as tombstones, and gets no live updates from that server. The runtime-specific v2 browser keys stay as this device's cache of the server copy, flushed on runtime switch, page hide, freeze and unload. Which folders are collapsed stays on the device (`oc.sessions.folderCollapse.v2:<runtime>`) and is never read from the server. VS Code has no OpenChamber server, so its folders stay in its own storage and nothing is sent. File-search cache and in-flight keys include runtime plus directory and are cleared on endpoint reset.
 
 Persisted session todos use a bounded composite key of runtime, normalized directory, and session ID. Ambiguous legacy todo entries are discarded rather than claimed by whichever runtime starts first. Authoritative deletion uses an explicit runtime identity, and session-folder deletion scans every scope in the active runtime so archived assignments cannot survive after their session is gone; it reaches the server as a `forget-sessions` change, so the chat leaves its folder on every client. Closing a project sends `forget-scopes` for its root, its archive and each of its worktrees, so its folders do not come back when the project is added again.
 
@@ -841,6 +863,12 @@ start or reconnect and also for a folder outside every project (a chat): only
 with no session open does startup load an unknown folder under the active
 project. Borrowing the active project's catalog for an open chat offered that
 project's agents, which the session cannot run (#5522).
+A chat draft has no folder until its first character, so it reads the managed
+Chats root, on start or reconnect too, where its commands and skills already
+come from. The app's directory stays on the project, so opening a session in
+that directory re-activates its catalog with no directory change to trigger it.
+Reading the active project's catalog instead started the chat on that project's
+`default_agent`, and the first send failed with the agent missing (#6283).
 Two surfaces read them at once: the app (chat, autocompletes, pickers), which
 wants the active project, and Settings, whose own project selector may point
 somewhere else.

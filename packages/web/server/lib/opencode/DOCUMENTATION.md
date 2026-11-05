@@ -602,9 +602,14 @@ Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
 OpenCode loads and OpenChamber does not touch.
 
-`OPENCODE_CONFIG` adds a file on top of the global one and replaces nothing,
-so the plugins page lists user entries from both. A spec in both is one entry,
-the `OPENCODE_CONFIG` one, and new user entries are written there. User plugin
+The plugins page lists entries from every config file OpenCode takes plugins
+from: both global files (`opencode.json` and `opencode.jsonc`),
+`OPENCODE_CONFIG`, and the files found walking up from the project folder. Each
+file adds its own entries and replaces nothing. A parent folder's file reaches
+every project below it, so it counts as user scope. A spec in two files of one
+scope is one entry, the later file's, and edits go to that file. New user
+entries are written to `OPENCODE_CONFIG` when it is set, else to the primary
+global file. User plugin
 files stay in the global `plugins/` folder: OpenCode scans plugin folders only
 in config directories, never next to the `OPENCODE_CONFIG` file. The VS Code
 bridge (`opencodeConfig.ts`) keeps the same rules.
@@ -1052,7 +1057,7 @@ within a ten-minute overall deadline.
   - `GET /api/projects/:projectId/icon`
   - `PUT /api/projects/:projectId/icon`
   - `DELETE /api/projects/:projectId/icon`
-  - `POST /api/projects/:projectId/icon/discover`
+  - `POST /api/projects/:projectId/icon/discover`: writes the icon through `persistResolvedSettings`, so a save that lands during the file search keeps its projects.
 
 ## Public exports (skills.js)
 - `getSkillSources(skillName, workingDirectory, discoveredSkill?, options?)`: returns the skill's Markdown metadata and instructions, source paths and scopes, and supporting files. Supporting files are included by default. `GET /api/config/skills` calls it once per skill with `{ includeSupportingFiles: false }`, which omits `md.supportingFiles` and skips walking supporting files.

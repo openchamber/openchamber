@@ -5,6 +5,8 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ArtifactMetaBar } from './ArtifactMetaBar';
@@ -281,45 +283,51 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
         items={[formatArtifactDimensions(natural), formatArtifactSize(sizeBytes)]}
         actions={(
           <>
-            <Button
-              variant="ghost"
-              size="xs"
-              aria-label={t('filesView.artifact.image.zoomOut')}
-              title={t('filesView.artifact.image.zoomOut')}
-              disabled={!natural}
-              onClick={() => zoomAtCenter(stepImageScale(shownScale, -1))}
-            >
-              <Icon name="subtract" className="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="min-w-11 tabular-nums"
-              title={t('filesView.artifact.image.actualTitle')}
-              disabled={!natural}
-              onClick={() => zoomAtCenter(1)}
-            >
-              {`${Math.round(shownScale * 100)}%`}
-            </Button>
-            <Button
-              variant="ghost"
-              size="xs"
-              aria-label={t('filesView.artifact.image.zoomIn')}
-              title={t('filesView.artifact.image.zoomIn')}
-              disabled={!natural}
-              onClick={() => zoomAtCenter(stepImageScale(shownScale, 1))}
-            >
-              <Icon name="add" className="size-3.5" />
-            </Button>
-            <Button
-              variant="chip"
-              size="xs"
-              aria-pressed={scale === null}
-              title={t('filesView.artifact.image.fitTitle')}
-              onClick={() => setScale(null)}
-            >
-              {t('filesView.artifact.image.fit')}
-            </Button>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.image.zoomOut')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-label={t('filesView.artifact.image.zoomOut')}
+                disabled={!natural}
+                onClick={() => zoomAtCenter(stepImageScale(shownScale, -1))}
+              >
+                <Icon name="subtract" className="size-3.5" />
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.image.actualTitle')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="min-w-11 tabular-nums"
+                aria-label={t('filesView.artifact.image.actualTitle')}
+                disabled={!natural}
+                onClick={() => zoomAtCenter(1)}
+              >
+                {`${Math.round(shownScale * 100)}%`}
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.image.zoomIn')}>
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-label={t('filesView.artifact.image.zoomIn')}
+                disabled={!natural}
+                onClick={() => zoomAtCenter(stepImageScale(shownScale, 1))}
+              >
+                <Icon name="add" className="size-3.5" />
+              </Button>
+            </ButtonTooltip>
+            <ButtonTooltip side="bottom" label={t('filesView.artifact.image.fitTitle')}>
+              <Button
+                variant="chip"
+                size="xs"
+                aria-pressed={scale === null}
+                aria-label={t('filesView.artifact.image.fitTitle')}
+                onClick={() => setScale(null)}
+              >
+                {t('filesView.artifact.image.fit')}
+              </Button>
+            </ButtonTooltip>
           </>
         )}
       />
@@ -333,10 +341,15 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
             description={t('filesView.artifact.image.loadFailedDescription')}
             actions={(
               <>
-                <Button type="button" variant="outline" size="sm" onClick={retry}>
-                  <Icon name="refresh" className="me-2 size-4" />
-                  {t('filesView.artifact.state.retry')}
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button type="button" variant="outline" size="sm" onClick={retry}>
+                      <Icon name="refresh" className="me-2 size-4" />
+                      {t('filesView.artifact.state.retry')}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={6}>{t('contextTooltips.files.retryImage')}</TooltipContent>
+                </Tooltip>
                 {download}
               </>
             )}
@@ -392,24 +405,32 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
         </ScrollableOverlay>
         {neighbors ? (
           <>
-            <button
-              type="button"
-              className={cn(NEIGHBOR_BUTTON_CLASS, 'inset-s-3')}
-              aria-label={t('filesView.artifact.image.previous', { name: neighbors.previous.name })}
-              title={t('filesView.artifact.image.previous', { name: neighbors.previous.name })}
-              onClick={() => step(neighbors.previous)}
-            >
-              <Icon name="arrow-left-s" className="h-6 w-6" />
-            </button>
-            <button
-              type="button"
-              className={cn(NEIGHBOR_BUTTON_CLASS, 'inset-e-3')}
-              aria-label={t('filesView.artifact.image.next', { name: neighbors.next.name })}
-              title={t('filesView.artifact.image.next', { name: neighbors.next.name })}
-              onClick={() => step(neighbors.next)}
-            >
-              <Icon name="arrow-right-s" className="h-6 w-6" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(NEIGHBOR_BUTTON_CLASS, 'inset-s-3')}
+                  aria-label={t('filesView.artifact.image.previous', { name: neighbors.previous.name })}
+                  onClick={() => step(neighbors.previous)}
+                >
+                  <Icon name="arrow-left-s" className="h-6 w-6" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>{t('filesView.artifact.image.previous', { name: neighbors.previous.name })}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(NEIGHBOR_BUTTON_CLASS, 'inset-e-3')}
+                  aria-label={t('filesView.artifact.image.next', { name: neighbors.next.name })}
+                  onClick={() => step(neighbors.next)}
+                >
+                  <Icon name="arrow-right-s" className="h-6 w-6" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>{t('filesView.artifact.image.next', { name: neighbors.next.name })}</TooltipContent>
+            </Tooltip>
           </>
         ) : null}
       </div>

@@ -137,8 +137,9 @@ const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
  * Pages that wait for the user's answer, keyed by session and tool call. The
  * call's request stays open while its page waits: an answer resolves it, and an
  * aborted request (the user stopped the turn, wrote in the chat, or OpenCode
- * went away) drops it. Nothing is kept once a call ends, so a page answers at
- * most once and a stale answer finds nothing to resolve.
+ * went away) drops it, and so does the end of the session's turn (`release`).
+ * Nothing is kept once a call ends, so a page answers at most once and a stale
+ * answer finds nothing to resolve.
  *
  * `onWaitChange` hears when a page starts and stops waiting, so the server can
  * show the session as waiting for the user the way it does for a form.
@@ -166,8 +167,7 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
       return;
     }
     const onAbort = () => {
-      waiting.delete(key);
-      announce({ type: 'settled', sessionId, callId });
+      if (waiting.delete(key)) announce({ type: 'settled', sessionId, callId });
       reject(new OpenChamberControlError('The page stopped waiting before the user answered', 499));
     };
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -217,7 +217,21 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
     return { answered: true };
   };
 
-  return { wait, answer };
+  /**
+   * The session's turn ended, so these pages wait for nobody. In one OpenCode
+   * no call outlives its turn; this finds a call a second OpenCode on the same
+   * database runs (see DOCUMENTATION.md). Its request stays open on purpose:
+   * ending it would wake that OpenCode's turn beside the one the user is in.
+   */
+  const release = (sessionId) => {
+    for (const key of waiting.keys()) {
+      if (!key.startsWith(pageKey(sessionId, ''))) continue;
+      waiting.delete(key);
+      announce({ type: 'settled', sessionId, callId: key.slice(pageKey(sessionId, '').length) });
+    }
+  };
+
+  return { wait, answer, release };
 };
 
 /**

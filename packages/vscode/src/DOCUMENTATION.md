@@ -98,6 +98,7 @@ unchanged; raw global session records remain available for cleanup.
      This walk excludes only `.git` and `node_modules`, has no inspected-file
      ceiling, and fails after its 30-second deadline rather than returning a
      partial answer. The shared store retains OpenCode's indexed hits first.
+     A webview that moved on stops the walk with `api:fs:search:abort`.
   - Read paths are authorized in the requested workspace path space before symlink resolution, matching the web runtime; directly requested outside-workspace paths remain denied.
 
 The sidebar installs a script-free CSP bootstrap document before changing webview options, so VS Code does not diagnose the transient blank document as an extension webview without CSP. The final webview CSP permits `blob:` only for `worker-src` so shared UI parsers can run bounded local decompression off the main thread. Blob scripts remain disallowed by `script-src`.
@@ -356,6 +357,31 @@ Readiness comes from the `server listening on <url>` line on stdout, confirmed
 by `GET /api/info` (OpenCode 2.0.8 removed `/api/health`). A 200 is the whole
 readiness answer; the payload carries `{ version, pid, urls, paths }` and no
 `healthy` field.
+
+## Machine-specific settings
+
+`openchamber.apiUrl` and `openchamber.opencodeBinary` describe one machine. In a
+remote window a value set only in the local User settings never applies: both
+settings are read through `readMachineSetting` (`machine-settings.ts`), and a value
+for the server comes from the Remote or Workspace settings.
+
+### Why `machine-overridable` and not `machine` or `window`
+
+`window` hands the client's path to the server. `machine` drops the project folder
+override that `window` allowed. `machine-overridable` keeps that override, stops
+Settings Sync from copying the value, and sends a Global write in a remote window
+to the Remote settings.
+
+### Why a read helper on top of the scope
+
+The scope alone leaves a gap. While a remote window starts, VS Code reports the
+local User value until it applies the scope about 2 seconds later, and an open
+OpenChamber panel activates the extension inside that gap. Waiting for a later
+configuration event has no signal to wait for: the event that drops the value
+reports `affectsConfiguration` as false. `inspect` names the level the value came
+from, so the helper can decide on the first read. `globalLocalValue` is outside the
+public types; 1.98 has it and 1.95 does not. A build without it falls through to
+`get` and keeps the gap.
 
 ## Global OpenCode paths
 

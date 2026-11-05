@@ -431,6 +431,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['copy', 'clipboard', 'plain text', 'markdown', 'selection'],
   },
   {
+    id: 'chat.selection-approval-text',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.selectionApprovalText',
+    descriptionKey: 'settings.openchamber.visual.field.selectionApprovalTextInfo',
+    keywords: ['lgtm', 'sounds good', 'approval', 'feedback', 'selection', 'citation', 'comment', 'thumbs up', '👍'],
+  },
+  {
     id: 'chat.inline-assistant-actions',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showSplitAssistantMessageActions',
@@ -1485,6 +1492,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
       page: 'shortcuts',
       titleKey: action.settingsLabelKey,
       keywords: ['shortcut', 'hotkey', 'keyboard', 'keybinding'],
+      isAvailable: (ctx) => !('nativeMenu' in action) || (ctx.isDesktop && (action.nativeMenu === 'all' || !ctx.isMac)),
     })),
   {
     id: 'voice.playback',

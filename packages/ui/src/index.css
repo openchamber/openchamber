@@ -2164,6 +2164,11 @@ diffs-container {
   margin: 0;
 }
 
+/* The run button is a third action in the header. */
+[data-streamdown="code-block"]:has([data-reply-command-run]) [data-streamdown="code-block-header"] {
+  padding-inline-end: 7.25rem;
+}
+
 /* Disable Streamdown's code block virtualization and keep block chrome fixed */
 .markdown-content [data-streamdown="code-block"] {
   content-visibility: visible !important;
@@ -2608,6 +2613,17 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   pointer-events: none;
   caret-color: transparent !important;
   outline: none !important;
+}
+
+/* What the IME is composing, drawn over the cursor. The hidden textarea holds
+   the same text but cannot show it. Font and colors come from the surface. */
+.terminal-viewport-container .oc-terminal-preedit {
+  position: absolute;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  white-space: pre;
+  text-decoration: underline;
+  pointer-events: none;
 }
 
 .terminal-viewport-container .oc-terminal-scrollbar {

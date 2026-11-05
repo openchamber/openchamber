@@ -14,6 +14,7 @@ const createService = (overrides = {}) => {
   const client = {
     session: {
       list: vi.fn(async () => ({ data: [] })),
+      get: vi.fn(async ({ sessionID }) => ({ id: sessionID })),
       active: vi.fn(async () => ({})),
       inbox: { list: vi.fn(async () => []) },
     },
@@ -693,6 +694,89 @@ describe('OpenChamber control service', () => {
     expect(client.message.list).not.toHaveBeenCalled();
   });
 
+  describe('a session that cannot be read', () => {
+    const tagged = (tag, message) => Object.assign(new Error(message), { _tag: tag });
+    const reads = [
+      ['session.status', {}],
+      ['session.messages', {}],
+      ['session.messages', { wait: true }],
+    ];
+
+    it.each(reads)('%s %j reports an unknown id as not found', async (action, extra) => {
+      const { service, client } = createService();
+      client.session.get.mockRejectedValue(tagged('SessionNotFoundError', 'Session not found'));
+      await expect(service.execute(action, { sessionId: 'ses_missing', directory: '/repo', ...extra }))
+        .rejects.toMatchObject({ statusCode: 404, message: 'Session not found: ses_missing' });
+      expect(client.session.active).not.toHaveBeenCalled();
+    });
+
+    it('reports an id OpenCode refuses as malformed as not found', async () => {
+      const { service, client } = createService();
+      client.session.get.mockRejectedValue(tagged('InvalidRequestError', 'Expected a string starting with "ses"'));
+      await expect(service.execute('session.status', { sessionId: 'abc', directory: '/repo' }))
+        .rejects.toMatchObject({ statusCode: 404, message: 'Session not found: abc' });
+    });
+
+    it.each(reads)('%s %j keeps a failed lookup apart from not found', async (action, extra) => {
+      const { service, client } = createService();
+      client.session.get.mockRejectedValue(new Error('connection refused'));
+      await expect(service.execute(action, { sessionId: 'ses_1', directory: '/repo', ...extra }))
+        .rejects.toMatchObject({ statusCode: 503, message: 'Could not check whether session ses_1 exists: connection refused' });
+      expect(client.session.active).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a session waiting for the user', () => {
+    const pendingFor = (sessionID) => () => ({ [sessionID]: { permissions: [], forms: [], pages: [{ id: 'call_1' }] } });
+
+    it('reports waiting while the session runs with an open request', async () => {
+      const { service, client } = createService({ readPendingRequests: pendingFor('ses_1') });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' }, ses_2: { type: 'running' } });
+      client.session.list.mockResolvedValue({ data: [{ id: 'ses_1', time: {} }, { id: 'ses_2', time: {} }, { id: 'ses_3', time: {} }] });
+
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+      await expect(service.execute('session.status', { sessionId: 'ses_2', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'busy' } });
+      await expect(service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+      const listed = await service.execute('session.list', { directory: '/repo', withStatus: true });
+      expect(listed.sessions.map((session) => session.status.type)).toEqual(['waiting', 'busy', 'idle']);
+    });
+
+    it('does not count a permission the server answers by itself', async () => {
+      const readPendingRequests = () => ({ ses_1: { permissions: [{ id: 'per_1', directory: '/repo' }], forms: [], pages: [] } });
+      const isPermissionAutoAnswered = vi.fn(async () => true);
+      const { service, client } = createService({ readPendingRequests, isPermissionAutoAnswered });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' } });
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'busy' } });
+      expect(isPermissionAutoAnswered).toHaveBeenCalledWith('ses_1', '/repo', 'per_1');
+
+      isPermissionAutoAnswered.mockResolvedValue(false);
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+    });
+
+    it('reads idle when a request outlived its stopped turn', async () => {
+      const { service } = createService({ readPendingRequests: pendingFor('ses_1') });
+      await expect(service.execute('session.status', { sessionId: 'ses_1', directory: '/repo' }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'idle' } });
+    });
+
+    it('ends a wait at once with waiting', async () => {
+      const sleep = vi.fn(async () => {});
+      const { service, client, sessionService } = createService({ readPendingRequests: pendingFor('ses_1'), sleep });
+      client.session.active.mockResolvedValue({ ses_1: { type: 'running' } });
+      await expect(service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', wait: true }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+      sessionService.create.mockResolvedValue({ sessionId: 'ses_1', directory: '/repo', promptDispatched: true });
+      await expect(service.execute('session.create', { directory: '/repo', prompt: 'x', wait: true }))
+        .resolves.toMatchObject({ sessionStatus: { type: 'waiting' } });
+      expect(sleep).not.toHaveBeenCalled();
+    });
+  });
+
   it('asks for sessionId before looking up the project', async () => {
     const { service, sessionService } = createService();
     await expect(service.execute('session.status', { projectId: 'missing' }, '/current-session'))
@@ -1012,6 +1096,34 @@ describe('render.page', () => {
 
       expect(result).toMatchObject({ title: 'Pick a layout', answer: { answered: true, summary: 'Layout B', data: { layout: 'b' } } });
       expect(result.note).toContain('answered on the page');
+    });
+
+    it('stops listing a page once its session turn ended, without ending the call', async () => {
+      const onPageWaitChange = vi.fn();
+      const { service } = createService({ onPageWaitChange });
+      const controller = new AbortController();
+      const settled = vi.fn();
+      const pending = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
+      pending.then(settled, settled);
+      const other = service.execute('render.page', ask, '/repo', { ...call, contextSessionId: 'ses_2' });
+      await settle();
+
+      service.releaseAnswerWaits('ses_1');
+      await settle();
+
+      expect(onPageWaitChange).toHaveBeenCalledWith({ type: 'settled', sessionId: 'ses_1', callId: 'call_1' });
+      expect(onPageWaitChange).not.toHaveBeenCalledWith({ type: 'settled', sessionId: 'ses_2', callId: 'call_1' });
+      expect(settled).not.toHaveBeenCalled();
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'B' })).toThrow('no longer waiting');
+
+      // The request's end still ends the call, and says nothing twice.
+      const announced = onPageWaitChange.mock.calls.length;
+      controller.abort();
+      await expect(pending).rejects.toThrow('stopped waiting');
+      expect(onPageWaitChange).toHaveBeenCalledTimes(announced);
+
+      service.answerPage({ sessionId: 'ses_2', callId: 'call_1', summary: 'B' });
+      await other;
     });
 
     it('announces when the page starts and stops waiting', async () => {

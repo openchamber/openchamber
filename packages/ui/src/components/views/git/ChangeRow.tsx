@@ -85,7 +85,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
       onClick={handleActionClick}
       className="flex size-5 shrink-0 items-center justify-center rounded typography-micro font-semibold text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
       aria-label={actionLabel}
-      title={actionLabel}
+      data-row-tooltip={t(actionSymbol === '+' ? 'contextTooltips.git.stageFile' : 'contextTooltips.git.unstageFile')}
     >
       {actionSymbol}
     </button>

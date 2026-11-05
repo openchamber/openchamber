@@ -13,8 +13,9 @@ const sortedUnique = (values) => [...new Set(values)].sort();
  * @typedef {{ kind: 'fixed', origin: string } | { kind: 'user' }} NotificationsScope
  * @typedef {{ kind: 'fixed', origin: string } | { kind: 'user' }} TrackerInstanceScope
  * @typedef {{ instances: TrackerInstanceScope, oauth: { authorizeUrl: string, tokenUrl: string } | null, urls: string[] }} TrackerScope
- * @typedef {{ exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean }, sessionEvents?: SessionEventsScope, notifications?: NotificationsScope, tracker?: TrackerScope }} ServiceScope
- * @param {{ filesystem?: string[], integration?: object, service?: { provides?: string[], permissions?: { exec?: string[], sockets?: Array<{ id: string }> } }, sourceControl?: { instances: { defaultInstances: string[], custom: boolean } }, sessionEvents?: { events: string[], content?: true }, notifications?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' } }, tracker?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' }, auth: { oauth?: { authorizeUrl: string, tokenUrl: string } }, urls: { item: string[] } } }} guest
+ * @typedef {{ providers: string[] }} QuotaScope
+ * @typedef {{ exec: string[], sockets: string[], sourceControl?: { defaultInstances: string[], custom: boolean }, sessionEvents?: SessionEventsScope, notifications?: NotificationsScope, tracker?: TrackerScope, quota?: QuotaScope }} ServiceScope
+ * @param {{ filesystem?: string[], integration?: object, service?: { provides?: string[], permissions?: { exec?: string[], sockets?: Array<{ id: string }> } }, sourceControl?: { instances: { defaultInstances: string[], custom: boolean } }, sessionEvents?: { events: string[], content?: true }, notifications?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' } }, tracker?: { instances: { kind: 'fixed', origin: string } | { kind: 'user' }, auth: { oauth?: { authorizeUrl: string, tokenUrl: string } }, urls: { item: string[] } }, quota?: { providers: string[] } }} guest
  * @returns {{ filesystem?: string[], apiOrigin?: string, service?: ServiceScope }}
  */
 export const guestGrantScope = (guest) => {
@@ -83,6 +84,11 @@ export const guestGrantScope = (guest) => {
         urls: sortedUnique(guest.tracker.urls.item),
       };
     }
+    // A usage provider receives the credentials OpenCode holds for the providers
+    // it lists; the approval covers that list, empty included. Absent for every other service.
+    if (serviceProvides(guest.service, 'quota') && guest.quota) {
+      scope.service.quota = { providers: sortedUnique(guest.quota.providers) };
+    }
   }
   return scope;
 };
@@ -125,6 +131,11 @@ const sameTracker = (a, b) => (
     && sameList(a.urls, b.urls))
 );
 
+/** Both without the quota role, or both with it reading the same providers' credentials. */
+const sameQuota = (a, b) => (
+  (!a && !b) || Boolean(a && b && sameList(a.providers, b.providers))
+);
+
 /**
  * The grants that still hold for the package as it is now. A scoped
  * capability (`filesystem`, `origins`, `network`, `service`, `transcript`) only counts when the stored
@@ -159,7 +170,8 @@ export const effectiveGrants = (granted, stored, current) => granted.filter((cap
       && sameSourceControl(stored.service.sourceControl, current.service?.sourceControl)
       && sameSessionEvents(stored.service.sessionEvents, current.service?.sessionEvents)
       && sameNotifications(stored.service.notifications, current.service?.notifications)
-      && sameTracker(stored.service.tracker, current.service?.tracker);
+      && sameTracker(stored.service.tracker, current.service?.tracker)
+      && sameQuota(stored.service.quota, current.service?.quota);
   }
   return true;
 });

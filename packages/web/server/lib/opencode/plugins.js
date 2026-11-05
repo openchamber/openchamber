@@ -4,8 +4,11 @@ import path from 'path';
 import {
   AGENT_SCOPE,
   OPENCODE_CONFIG_DIR,
+  getFolderConfigPaths,
+  getProjectConfigCandidates,
   readConfigFile,
   readConfigLayer,
+  readConfigLayers,
   writeConfig,
 } from './shared.js';
 import { isPluginControlSpec, parsedKindForSpec } from './plugin-spec.js';
@@ -75,65 +78,6 @@ function hasOptions(options) {
 }
 
 
-// `OPENCODE_CONFIG` is one more file OpenCode reads on top of the global
-// config; the global config folder stays where it is, and OpenCode never scans
-// a `plugins/` folder next to the `OPENCODE_CONFIG` file.
-function getActiveUserConfigPaths() {
-  return [
-    path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
-    path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
-  ];
-}
-
-function getActiveCustomConfigPath() {
-  return process.env.OPENCODE_CONFIG ? path.resolve(process.env.OPENCODE_CONFIG) : null;
-}
-
-function getPrimaryUserConfigPath() {
-  const [defaultPath, ...fallbackPaths] = getActiveUserConfigPaths();
-  for (const userPath of [defaultPath, ...fallbackPaths]) {
-    if (fs.existsSync(userPath)) {
-      return userPath;
-    }
-  }
-  return defaultPath;
-}
-
-function getProjectConfigPath(workingDirectory) {
-  if (!workingDirectory) return null;
-  const candidates = [
-    path.join(workingDirectory, 'opencode.json'),
-    path.join(workingDirectory, 'opencode.jsonc'),
-    path.join(workingDirectory, '.opencode', 'opencode.json'),
-    path.join(workingDirectory, '.opencode', 'opencode.jsonc'),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
-}
-
-function readPluginConfigLayers(workingDirectory) {
-  const customPath = getActiveCustomConfigPath();
-  const userPath = getPrimaryUserConfigPath();
-  const projectPath = getProjectConfigPath(workingDirectory);
-  const userLayer = readConfigLayer(userPath);
-  const projectLayer = readConfigLayer(projectPath);
-  const customLayer = readConfigLayer(customPath);
-  return {
-    userConfig: userLayer.config,
-    projectConfig: projectLayer.config,
-    customConfig: customLayer.config,
-    paths: {
-      userPath,
-      projectPath,
-      customPath,
-    },
-    layerErrors: [
-      userLayer.error && { path: userPath, code: userLayer.error.code, message: userLayer.error.message },
-      projectLayer.error && projectPath && { path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message },
-      customLayer.error && customPath && { path: customPath, code: customLayer.error.code, message: customLayer.error.message },
-    ].filter(Boolean),
-  };
-}
-
 function validateFileName(fileName) {
   if (typeof fileName !== 'string' || !fileName) {
     throw codedError('Plugin file name is required', 'INVALID_FILENAME');
@@ -154,17 +98,32 @@ function ensureProjectConfigPath(workingDirectory) {
 }
 
 /**
- * The config files OpenCode 2 takes plugins from, in its load order: the global
- * file, then `OPENCODE_CONFIG`, then the project file. Each one adds its own
- * entries; `OPENCODE_CONFIG` replaces none of the global ones.
+ * Every config file OpenCode 2 takes plugins from, in its load order: the
+ * global `opencode.json` and `opencode.jsonc`, then `OPENCODE_CONFIG`, then the
+ * files found walking up from the project folder. Each file adds its own
+ * entries; none replaces another's. A parent folder's file reaches every
+ * project below it, so it counts as user scope, like the global file.
  */
-function configSources(layers) {
-  const sources = [{ config: layers.userConfig, filePath: layers.paths.userPath, scope: AGENT_SCOPE.USER }];
-  if (layers.paths.customPath) {
-    sources.push({ config: layers.customConfig, filePath: layers.paths.customPath, scope: AGENT_SCOPE.USER });
+function configSources(layers, workingDirectory) {
+  const { userPath, userOverridePath, customPath } = layers.paths;
+  const projectFiles = getProjectConfigCandidates(workingDirectory);
+  const sources = [{ config: layers.userConfig, filePath: userPath, scope: AGENT_SCOPE.USER }];
+  if (userOverridePath) {
+    sources.push({ config: layers.userOverrideConfig, filePath: userOverridePath, scope: AGENT_SCOPE.USER });
   }
-  if (layers.paths.projectPath) {
-    sources.push({ config: layers.projectConfig, filePath: layers.paths.projectPath, scope: AGENT_SCOPE.PROJECT });
+  if (customPath) {
+    sources.push({ config: layers.customConfig, filePath: customPath, scope: AGENT_SCOPE.USER });
+  }
+  // A folder file that is also `OPENCODE_CONFIG` stays the user entry, so the
+  // list, edits and duplicate checks all see one declaration.
+  const seenFiles = new Set(sources.map((source) => canonicalPluginPath(source.filePath)));
+  for (const filePath of getFolderConfigPaths(workingDirectory)) {
+    if (seenFiles.has(canonicalPluginPath(filePath))) continue;
+    sources.push({
+      config: readConfigLayer(filePath).config,
+      filePath,
+      scope: projectFiles.includes(filePath) ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER,
+    });
   }
   return sources;
 }
@@ -187,10 +146,9 @@ function getPluginTarget(id, workingDirectory) {
   }
   const { scope, value: spec } = splitScopedValue(decoded.value);
   validateScope(scope);
-  const layers = readPluginConfigLayers(workingDirectory);
-  // Two user files can both declare the spec; the later one is the entry the
-  // list shows, so it is the one edited.
-  const source = configSources(layers).reverse().find((candidate) => (
+  // Two files can both declare the spec; the later one is the entry the list
+  // shows, so it is the one edited.
+  const source = configSources(readConfigLayers(workingDirectory), workingDirectory).reverse().find((candidate) => (
     candidate.scope === scope
     && readPluginList(candidate.config).some((item) => item.entry.package === spec)
   ));
@@ -312,13 +270,8 @@ function pluginArrayForWrite(config) {
 }
 
 function listPluginEntries(workingDirectory) {
-  const layers = readPluginConfigLayers(workingDirectory);
-  const seenSources = new Set();
-  const entries = configSources(layers).flatMap((source) => {
-    const sourcePath = canonicalPluginPath(source.filePath);
-    if (source.scope === AGENT_SCOPE.PROJECT && seenSources.has(sourcePath)) return [];
-    seenSources.add(sourcePath);
-    return readPluginList(source.config).map((item) => {
+  const entries = configSources(readConfigLayers(workingDirectory), workingDirectory).flatMap((source) => (
+    readPluginList(source.config).map((item) => {
       const entry = {
         id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
         spec: item.entry.package,
@@ -331,10 +284,10 @@ function listPluginEntries(workingDirectory) {
       };
       if (item.entry.options !== undefined) entry.options = item.entry.options;
       return entry;
-    });
-  });
-  // A spec in both the global file and `OPENCODE_CONFIG` shares one id; the
-  // `OPENCODE_CONFIG` entry is listed, matching `getPluginTarget`.
+    })
+  ));
+  // A spec in two files of one scope shares one id; the later file's entry is
+  // listed, matching `getPluginTarget`.
   return [...new Map(entries.map((entry) => [entry.id, entry])).values()];
 }
 
@@ -347,8 +300,8 @@ function createPluginEntry(entry, workingDirectory) {
   const scope = entry?.scope || AGENT_SCOPE.USER;
   validateScope(scope);
 
-  const layers = readPluginConfigLayers(workingDirectory);
-  const existing = configSources(layers).find((source) => (
+  const layers = readConfigLayers(workingDirectory);
+  const existing = configSources(layers, workingDirectory).find((source) => (
     source.scope === scope
     && readPluginList(source.config).some((item) => item.entry.package === spec)
   ));
@@ -356,8 +309,8 @@ function createPluginEntry(entry, workingDirectory) {
     throw codedError(`Plugin "${spec}" already exists`, 'ENTRY_EXISTS');
   }
 
-  let targetPath = getPrimaryUserConfigPath();
-  let config = {};
+  let targetPath;
+  let config;
   if (scope === AGENT_SCOPE.PROJECT) {
     targetPath = ensureProjectConfigPath(workingDirectory);
     config = fs.existsSync(targetPath) ? readConfigFile(targetPath) : {};

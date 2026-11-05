@@ -26,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -49,6 +50,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict: Record<I18nKey, string> = {
   'quota.family.zen': 'Zen モデル',
@@ -103,6 +113,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.liveActivity.usedSubagents': '{count} サブエージェントを使用',
   'sessions.sidebar.projectAction.active': 'プロジェクトアクション実行中',
   ...settingsDict,
+  ...selectionApprovalI18n.ja,
   'gitView.operation.title': 'Git 操作',
   'gitView.operation.recovery.storage': 'OpenChamber はここで Git 転送の状態を保存できません。サイトのストレージを許可して再読み込みしてください。それまで push と pull は一時停止します。',
   'gitView.operation.recovery.capacity': '未完了の Git 転送が多すぎます。新しく始める前に下のものを確認してください。',
@@ -213,6 +224,15 @@ export const dict: Record<I18nKey, string> = {
   ...workflowsI18n['ja'],
   ...sessionReferencesI18n['ja'],
   ...guestStatusViewI18n['ja'],
+  ...tooltipsDiffI18n['ja'],
+  ...tooltipsFilesI18n['ja'],
+  ...tooltipsGitI18n['ja'],
+  ...tooltipsTrackerI18n['ja'],
+  ...tooltipsWalkthroughI18n['ja'],
+  ...tooltipsTerminalBrowserI18n['ja'],
+  ...tooltipsWorkspaceI18n['ja'],
+  ...tooltipsPanelI18n['ja'],
+  ...tooltipsChatI18n['ja'],
   'terminalView.actions.attachSelection': '選択した出力を添付',
   'terminalView.actions.copySelection': '選択した出力をコピー',
   'terminalView.toast.selectionCopied': '出力をコピーしました',
@@ -799,7 +819,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.unread': '未読の更新',
   'sessions.sidebar.session.status.backgroundSubagent': 'サブエージェントがバックグラウンドで実行中',
   'sessions.sidebar.session.status.backgroundCommand': 'コマンドがバックグラウンドで実行中',
-  'sessions.sidebar.session.status.waitingOnPullRequest': 'プルリクエストを待機中',
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'チェックまたはレビューを待機中',
   'sessions.sidebar.session.status.pinned': 'ピン留めされたセッション',
   'sessions.sidebar.session.status.movingToWorktree': 'セッションを新しいworktreeへ移動中',
   'sessions.sidebar.session.status.permissionRequired': '権限が必要です',
@@ -1694,7 +1714,6 @@ export const dict: Record<I18nKey, string> = {
   'sidebarFilesTree.actions.addMenuTitle': '新規ファイル・フォルダー、またはアップロード',
   'sidebarFilesTree.actions.refreshTitle': '更新',
   'sidebarFilesTree.actions.collapseAllTitle': 'すべてのフォルダを折りたたむ',
-  'sidebarFilesTree.actions.fileMenuTitle': 'ファイルメニュー',
   'sidebarFilesTree.state.searching': '検索中...',
   'sidebarFilesTree.state.loading': '読み込み中...',
   'sidebarFilesTree.dialog.createFile.title': 'ファイルを作成',
@@ -1967,12 +1986,14 @@ export const dict: Record<I18nKey, string> = {
   'chat.autoReview.actions.dismiss': '閉じる',
   'chat.autoReview.toast.removeFailed': 'コードレビューを変更するためにサーバーに接続できませんでした。もう一度お試しください。',
   'chat.prWatch.title': 'プルリクエスト #{number} を待機中',
+  'chat.prWatch.mr.title': 'マージリクエスト !{number} を待機中',
+  'chat.prWatch.change.title': '変更 #{number} を待機中',
   'chat.prWatch.status.pending': 'チェック実行中',
   'chat.prWatch.status.passed': 'チェック成功',
   'chat.prWatch.status.failed': 'チェックが失敗しました',
   'chat.prWatch.status.waking': 'エージェントを起こしています',
   'chat.prWatch.actions.stop': '監視をやめる',
-  'chat.prWatch.toast.stopFailed': 'プルリクエストの監視をやめるためにサーバーに接続できませんでした。もう一度お試しください。',
+  'chat.prWatch.toast.stopFailed': '監視を停止するためにサーバーへ接続できませんでした。もう一度お試しください。',
   'chat.draftDirtyNotice.tooltip': 'このブランチにはコミットされていない変更があります。\n新しいセッションの変更と競合する可能性があります。先にコミットするか、別のワークツリーを使うとよいかもしれません。',
   'chat.draftDirtyNotice.indicatorAria': 'このディレクトリに未コミットの変更があります',
   'rightSidebar.contextNotesTodo.plan.defaultTitle': '計画',
@@ -3499,6 +3520,13 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.code.proposal': '提案',
   'markdownRenderer.code.actions.copyTitle': 'コードをコピー',
   'markdownRenderer.code.actions.copiedTitle': 'コピーしました',
+  'markdownRenderer.code.actions.runTitle': 'コマンドを実行します。エージェントは出力をもとに続行します',
+  'markdownRenderer.code.actions.stopTitle': 'コマンドを停止',
+  'markdownRenderer.code.run.startFailed': 'コマンドを開始できませんでした',
+  'markdownRenderer.code.run.running': '実行中',
+  'markdownRenderer.code.run.finished': '完了',
+  'markdownRenderer.code.run.failed': '終了コード {code}',
+  'markdownRenderer.code.run.stopped': '停止しました',
   'markdownRenderer.table.actions.copyTitle': 'テーブルをコピー',
   'markdownRenderer.code.actions.enableWrapTitle': '行折り返しを有効にする',
   'markdownRenderer.code.actions.disableWrapTitle': '行折り返しを無効にする',
@@ -3756,6 +3784,9 @@ export const dict: Record<I18nKey, string> = {
   'chat.dispatchedSession.showAnswer': '回答を表示',
   'chat.dispatchedSession.hideAnswer': '回答を隠す',
   'chat.dispatchedSession.open': 'セッションを開く',
+  'chat.fileOpenRequest.toast.description': '{session} で表示',
+  'chat.fileOpenRequest.toast.descriptionUntitled': '別のセッションで表示',
+  'chat.fileOpenRequest.toast.openSession': 'セッションを開く',
   'chat.revertPopover.staged': '取り消し: {count}件',
   "chat.revertPopover.toast.restoreFailed": "取り消したメッセージを復元できませんでした",
   'chat.workStatus.mcp.needsAuthHint': '設定 → MCP からこの MCP サーバーにサインインしてください。',

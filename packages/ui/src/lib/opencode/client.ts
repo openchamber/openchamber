@@ -1698,6 +1698,25 @@ class OpencodeService {
     )
   }
 
+  /** Adds a note to the agent's context that does not wake it. */
+  async addSessionNote(params: {
+    runtimeKey: string
+    sessionId: string
+    directory?: string | null
+    text: string
+    metadata: Metadata
+  }): Promise<void> {
+    this.assertRuntimeUnchanged(params.runtimeKey)
+    await call("session.synthetic", () =>
+      this.clientFor(params.directory).session.synthetic({
+        sessionID: params.sessionId,
+        text: params.text,
+        metadata: params.metadata,
+        resume: false,
+      }),
+    )
+  }
+
   /** Runs a shell command inside the session transcript. Returns the shell message id. */
   async shellSession(params: {
     runtimeKey?: string

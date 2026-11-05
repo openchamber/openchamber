@@ -16,7 +16,7 @@ let dom: Window;
 let root: Root;
 let host: HTMLDivElement;
 let restore: Array<() => void>;
-let searches: Array<{ query: string; type: string; toggled: boolean; resolve: (hits: ProjectFileSearchHit[]) => void }>;
+let searches: Array<{ query: string; type: string; toggled: boolean; signal?: AbortSignal; resolve: (hits: ProjectFileSearchHit[]) => void }>;
 let picked: string[];
 const globals = new Map<string, PropertyDescriptor | undefined>();
 const directory = '/mention-test';
@@ -74,7 +74,7 @@ beforeEach(async () => {
   useFileSearchStore.setState({
     invalidateDirectory: () => undefined,
     searchFiles: (_directory, query, _limit, options) => new Promise<ProjectFileSearchHit[]>((resolve) => {
-      searches.push({ query, type: options?.type ?? 'file', toggled: options?.includeHidden !== undefined, resolve });
+      searches.push({ query, type: options?.type ?? 'file', toggled: options?.includeHidden !== undefined, signal: options?.signal, resolve });
     }),
   });
   host = document.createElement('div');
@@ -272,6 +272,21 @@ test('an answer to an older query never shows as the newer one\'s', async () => 
 
   await answer('abc', ['src/abc.ts']);
   expect(rows()).toEqual(['src/abc.ts']);
+});
+
+test('a new letter stops the previous query\'s walk, and closing the list stops the last one', async () => {
+  await type('ab');
+  await settleDebounce();
+  const walkOf = (query: string) => searches.find((search) => search.query === query && search.toggled && search.type === 'file')?.signal;
+  expect(walkOf('ab')?.aborted).toBe(false);
+
+  await type('abc');
+  await settleDebounce();
+  expect(walkOf('ab')?.aborted).toBe(true);
+  expect(walkOf('abc')?.aborted).toBe(false);
+
+  await act(async () => root.render(<div />));
+  expect(walkOf('abc')?.aborted).toBe(true);
 });
 
 test('the keyboard keeps its row while results update, and Enter picks the row it shows', async () => {

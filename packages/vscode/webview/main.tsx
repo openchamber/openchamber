@@ -1261,6 +1261,11 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // VS Code loads no extensions.
+  if (pathname === '/api/quota/extensions') {
+    return new Response(JSON.stringify({ extensions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
   if (pathname === '/api/quota/providers') {
     try {
       const data = await sendBridgeMessage('api:quota:providers');

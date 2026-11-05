@@ -12,12 +12,13 @@ import { sessionLinkKey } from '@/lib/sessionLinks';
 import { SessionMentionChipsContext } from '../message/parts/sessionMentionChips';
 import { SessionMentionChipButton } from '../message/parts/SessionMentionChipButton';
 import { useUIStore } from '@/stores/useUIStore';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { parseAgentHref, parseAttachmentHref, parseSkillHref, INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, REFERENCE_CHIP_LABEL_CLASS, buildAgentMentionUrl } from '@/lib/messages/inlineMessageLinks';
 import { openAppLinkWithConfirmation } from '../appLinkConfirmation';
 import { useOpenChatLink } from '../useOpenChatLink';
 import { useMarkdownPresentation, type FileReferenceSource } from './MarkdownPresentationContext';
-import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile, useRevealMarkdownPath } from './markdownFileReferences';
+import { activateMarkdownFile, resolveMarkdownFile, useOpenMarkdownFile, useOpenTappedMarkdownFile, useRevealMarkdownPath } from './markdownFileReferences';
 import { localPathFromFileUrl } from '../fileReferenceParser';
 import { MarkdownMediaLinkContext, useMarkdownMedia } from './markdown-media-context';
 import { openMarkdownDocumentLink } from '@/components/views/files/previews/useMarkdownLocalAssets';
@@ -41,8 +42,18 @@ export function MarkdownInlineCode({ children, node: _node, ...props }: React.Co
   const raw = _node?.children.map((child) => child.type === 'text' ? child.value : '').join('') ?? '';
   const path = useConfirmedInlineFile(raw);
   const open = useOpenMarkdownFile();
+  const openTapped = useOpenTappedMarkdownFile();
+  const { directory, fileNavigation, fileReferences } = useMarkdownPresentation();
   const activate = (event: React.MouseEvent | React.KeyboardEvent) => {
     if (path) activateMarkdownFile(event, (external) => { void open(raw, path, external); });
+  };
+  // The phone keeps navigation without probes. The code stays plain until the
+  // tap: role="button" would make it unselectable and 36px tall (mobile.css).
+  const checksOnTap = fileNavigation && !fileReferences && resolveMarkdownFile(raw, directory) !== null;
+  const tap = (event: React.MouseEvent) => {
+    // A surrounding link, button or disclosure keeps its own tap.
+    if (event.currentTarget.closest('a, button, [role="button"], summary')) return;
+    activateMarkdownFile(event, () => { void openTapped(raw); });
   };
   return (
     <code
@@ -54,7 +65,7 @@ export function MarkdownInlineCode({ children, node: _node, ...props }: React.Co
       data-openchamber-file-path={path ?? undefined}
       role={path ? 'button' : undefined}
       tabIndex={path ? 0 : undefined}
-      onClick={path ? activate : undefined}
+      onClick={path ? activate : checksOnTap ? tap : undefined}
       onKeyDown={path ? activate : undefined}
     >
       {children}
@@ -241,17 +252,18 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
         {skill ? <span className={REFERENCE_CHIP_LABEL_CLASS}>{skill}</span> : children}
       </a>
       {showPreview && (
-        <Button
-          variant="ghost"
-          size="xs"
-          className="ms-1 align-middle"
-          data-export-ignore
-          title={t('terminalView.preview.openTitle')}
-          aria-label={t('terminalView.preview.open')}
-          onClick={() => useUIStore.getState().openContextPreview(directory, href)}
-        >
-          <Icon name="global" className="size-3.5" />
-        </Button>
+        <HoverTooltip label={t('terminalView.preview.openTitle')}>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="ms-1 align-middle"
+            data-export-ignore
+            aria-label={t('terminalView.preview.open')}
+            onClick={() => useUIStore.getState().openContextPreview(directory, href)}
+          >
+            <Icon name="global" className="size-3.5" />
+          </Button>
+        </HoverTooltip>
       )}
     </>
   );

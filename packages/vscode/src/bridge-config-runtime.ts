@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
+import { readMachineSetting } from './machine-settings';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -150,10 +151,7 @@ export async function handleConfigBridgeMessage(
   switch (type) {
     case 'api:config/opencode-resolution:get': {
       const debugInfo = ctx?.manager?.getDebugInfo();
-      const configuredFromWorkspace = vscode.workspace.getConfiguration('openchamber').get<string>('opencodeBinary');
-      const configured = typeof configuredFromWorkspace === 'string' && configuredFromWorkspace.trim().length > 0
-        ? configuredFromWorkspace.trim()
-        : null;
+      const configured = readMachineSetting('opencodeBinary').trim() || null;
       const resolved = debugInfo?.cliPath ?? null;
       const source = (() => {
         if (!resolved) return null;

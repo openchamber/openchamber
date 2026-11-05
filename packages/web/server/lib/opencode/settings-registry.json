@@ -376,6 +376,9 @@
     "workStatusSectionOrder": {
       "scope": "profile"
     },
+    "workStatusSectionOrderExplicit": {
+      "scope": "profile"
+    },
     "workStatusPanelEnabled": {
       "scope": "profile"
     },
@@ -441,6 +444,9 @@
       "scope": "profile"
     },
     "copyMessagesAsPlainText": {
+      "scope": "profile"
+    },
+    "selectionApprovalText": {
       "scope": "profile"
     },
     "showTurnChangedFiles": {

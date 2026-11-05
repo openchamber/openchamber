@@ -58,11 +58,13 @@ Activity indicators use `SessionActivityIndicator` in project and timeline rows,
 header tabs, switchers and collapsed aggregates. Each state is a static icon:
 the session's own run is `circle`, a pause held open by a background subagent
 is `robot`, one held open by a background command is `terminal`, an agent that
-ended its turn to wait on its pull request (`sync/pr-watch.ts`) is
-`git-pull-request` (all info color; `useSessionTurnActivity` in
-`sync/global-session-status.ts` decides, the session's own run first, then the
-subagent, the command, the pull request), and a finished unseen turn is
-`checkbox-circle` (success color). Collapsed aggregates show only running or
+ended its turn to wait on its pull request (`sync/pr-watch.ts`) is `circle`
+again, because a linked pull request already puts `git-pull-request` on the
+row, and only the tooltip tells it from a run (all info color;
+`useSessionTurnActivity` in `sync/global-session-status.ts` decides, the
+session's own run first, then the subagent, the command, the pull request), and
+a finished unseen turn is `checkbox-circle` (success color). Collapsed
+aggregates show only running or
 unread. The local Appearance preference `animatedActivityIndicators`
 is off by default. Enabling it swaps every running kind for a stepped spinner,
 even when the OS requests reduced motion; the unread icon stays. A permission

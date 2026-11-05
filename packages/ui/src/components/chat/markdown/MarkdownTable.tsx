@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useUIStore } from '@/stores/useUIStore';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { useMarkdownPresentation } from './MarkdownPresentationContext';
 import { cn } from '@/lib/utils';
@@ -225,22 +226,26 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
     <div ref={wrapper} data-streamdown="table-wrapper" data-table-wrap={wrap ? 'true' : 'false'} className="group flex flex-col">
       {!purpose && (
         <div data-streamdown="table-controls" data-export-ignore className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="xs"
-            className={wrap ? PRESSED_CLASS : undefined}
-            title={t(wrap ? 'markdownRenderer.table.actions.disableWrapTitle' : 'markdownRenderer.table.actions.enableWrapTitle')}
-            aria-pressed={wrap}
-            onClick={() => useUIStore.getState().setTableCellWrap(!wrap)}
-          >
-            <Icon name="text-wrap" className="size-3.5" />
-          </Button>
+          <HoverTooltip label={t(wrap ? 'markdownRenderer.table.actions.disableWrapTitle' : 'markdownRenderer.table.actions.enableWrapTitle')}>
+            <Button
+              variant="ghost"
+              size="xs"
+              className={wrap ? PRESSED_CLASS : undefined}
+              aria-label={t(wrap ? 'markdownRenderer.table.actions.disableWrapTitle' : 'markdownRenderer.table.actions.enableWrapTitle')}
+              aria-pressed={wrap}
+              onClick={() => useUIStore.getState().setTableCellWrap(!wrap)}
+            >
+              <Icon name="text-wrap" className="size-3.5" />
+            </Button>
+          </HoverTooltip>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="xs" title={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.table.actions.copyTitle')}>
-                <Icon name={copied ? 'check' : 'file-copy'} className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
+            <HoverTooltip label={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.table.actions.copyTitle')}>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" aria-label={t(copied ? 'markdownRenderer.code.actions.copiedTitle' : 'markdownRenderer.table.actions.copyTitle')}>
+                  <Icon name={copied ? 'check' : 'file-copy'} className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+            </HoverTooltip>
             <DropdownMenuContent align="end">
               {copyFormats.map((format) => (
                 <DropdownMenuItem key={format} onSelect={() => { void copy(format); }}>
@@ -250,11 +255,13 @@ export function MarkdownTable({ node, className, children, ...props }: React.Com
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="xs" title={t('markdownRenderer.table.actions.downloadTitle')}>
-                <Icon name="download" className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
+            <HoverTooltip label={t('markdownRenderer.table.actions.downloadTitle')}>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="xs" aria-label={t('markdownRenderer.table.actions.downloadTitle')}>
+                  <Icon name="download" className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+            </HoverTooltip>
             <DropdownMenuContent align="end">
               {downloadFormats.map((format) => (
                 <DropdownMenuItem key={format} onSelect={() => download(format)}>

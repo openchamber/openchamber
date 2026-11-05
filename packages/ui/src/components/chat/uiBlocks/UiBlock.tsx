@@ -1325,7 +1325,7 @@ function Details({ props }: NodeProps) {
   const value = useBlockProps(blockProps.Details, props);
   const [open, setOpen] = React.useState(false);
   const panelId = React.useId();
-  if (!value) return null;
+  if (!value || value.children.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
       <button
@@ -1394,13 +1394,13 @@ function Node({ value }: { value: BlockValue }) {
  * A block that could not be drawn: why, and its source folded away. Unfolded,
  * a long program filled the reply, and the reasons were nowhere.
  */
-function NotDrawn({ source, errors }: { source: string; errors: string[] }) {
+function NotDrawn({ source, errors, partial = false }: { source: string; errors: string[]; partial?: boolean }) {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const panelId = React.useId();
   return (
     <div className="flex flex-col gap-1 typography-meta">
-      <div className="text-[var(--status-error)]">{t('chat.uiBlock.invalid')}</div>
+      <div className={partial ? 'text-muted-foreground' : 'text-[var(--status-error)]'}>{t(partial ? 'chat.uiBlock.partial' : 'chat.uiBlock.invalid')}</div>
       {errors.map((error, index) => <div key={index} className="text-muted-foreground" dir="ltr">{error}</div>)}
       <button
         type="button"
@@ -1463,7 +1463,10 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
 }) {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
-  const parsed = React.useMemo(() => parseUiBlock(source, complete), [source, complete]);
+  // A broken page goes back to the agent, which draws it again, so only a
+  // reply, which has no such second try, draws what it can.
+  const salvage = host.kind === 'reply';
+  const parsed = React.useMemo(() => parseUiBlock(source, complete, salvage), [source, complete, salvage]);
   // The kit's variables (series colours, tones) land on the block's root before paint, and follow a theme switch.
   const blockRef = React.useRef<HTMLDivElement>(null);
   React.useInsertionEffect(addKitStyles, []);
@@ -1572,12 +1575,6 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
         return;
       }
-      // A reply's fallback Send answers no decision, so it sends without
-      // marking a button as chosen.
-      if (decisions.length === 0) {
-        sendReply(chosen);
-        return;
-      }
       // A press chooses; pressing the chosen button again clears the choice.
       const next = new Map(chosen);
       if (next.get(decision) === button) next.delete(decision);
@@ -1606,22 +1603,16 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
     />
   ) : !disabled ? <NoteToggle onOpen={() => setNoteOpen(true)} /> : null;
   const slot = slotPlace && noteElement ? { ...slotPlace, element: noteElement } : null;
-  const canSendChosen = host.kind === 'reply' && decisions.length > 0 && !sent && chosen.size > 0
-    && (chosen.size < decisions.length || failed);
-  // Only a press sends a form's fields, so a form the agent gave no button
-  // gets one: without it a waiting page could not be answered at all, and a
-  // reply's fields would reach the agent nowhere. It goes through the same
-  // press path, so a reply sends them as an answer with no picks.
-  const fieldsOnly = complete && decisions.length === 0 && (host.kind === 'page' || fields.length > 0);
-  // A reply's Send is its whole answer: an empty one says nothing and freezes
-  // the block, so it waits for a filled field and goes away once sent. A page
-  // keeps the button, which carries what was pressed.
-  const canSendFields = host.kind === 'page'
-    ? Boolean(host.submit || sent)
-    : Boolean(host.submit) && !sent && fields.some((field) => String(answerValues[field.name] ?? '').trim() !== '');
-  const sendButton = fieldsOnly && canSendFields
-    ? { label: (host.kind === 'page' ? host.answered?.button : null) ?? t('chat.uiBlock.send'), variant: 'primary' }
+  const canSendChosen = host.kind === 'reply' && !sent && chosen.size > 0 && (chosen.size < decisions.length || failed);
+  // Only a press answers a page, so a waiting form the agent gave no button
+  // gets one; without it the user could not answer at all.
+  const sendButton = host.kind === 'page' && complete && decisions.length === 0 && Boolean(host.submit || sent)
+    ? { label: host.answered?.button ?? t('chat.uiBlock.send'), variant: 'primary' }
     : null;
+  // Fields in a reply answer through a press too, and a block without a Button
+  // has no decision that would ever send them.
+  const replyForm = host.kind === 'reply' && complete && decisions.length === 0 && fields.length > 0 && Boolean(host.submit || sent);
+  const hasValue = Object.values(answerValues).some((value) => (Array.isArray(value) ? value.length > 0 : value.trim() !== ''));
   const fallback = <NotDrawn source={source} errors={notDrawnErrors ?? []} />;
   if (parsed.kind === 'invalid') return fallback;
   if (parsed.kind === 'empty') return null;
@@ -1641,10 +1632,20 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
           <div className="mt-2"><Button props={sendButton} /></div>
         </FormContext.Provider>
       ) : null}
+      {/* The button is the reply's whole answer, so once sent it goes away
+          and the Sent line stays alone. */}
+      {replyForm && !sent ? (
+        <div className="mt-2">
+          <UiButton type="button" className="w-fit" disabled={disabled || !hasValue} onClick={() => sendReply(chosen)}>
+            {t('chat.uiBlock.send')}
+          </UiButton>
+        </div>
+      ) : null}
       {/* A block that sends keeps one line for what happened, so the reply does not jump. */}
-      {host.kind === 'reply' && (decisions.length > 0 || fieldsOnly) && (host.submit || sent) ? (
+      {replyForm || (decisions.length > 0 && host.kind === 'reply' && (host.submit || sent)) ? (
         <div className="mt-1 flex min-h-6 items-center gap-2 typography-meta text-muted-foreground" aria-live="polite" data-export-ignore>
-          {failed && (canSendFields || canSendChosen) ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
+          {/* A failure is only worth naming while a retry is still possible. */}
+          {failed && (canSendChosen || (replyForm && hasValue)) ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
             : sent ? <span>{t('chat.uiBlock.sent')}</span>
               : chosen.size > 0 && decisions.length > 1
                 ? <span>{t('chat.uiBlock.chosenCount', { count: chosen.size, total: decisions.length })}</span>
@@ -1656,6 +1657,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
           ) : null}
         </div>
       ) : null}
+      {parsed.dropped.length > 0 ? <div className="mt-2"><NotDrawn source={source} errors={parsed.dropped} partial /></div> : null}
     </div>
   );
 }

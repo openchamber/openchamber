@@ -41,7 +41,7 @@ mock.module('@/hooks/useDurationTicker', () => ({ useWaitingBlink: () => '' }));
 mock.module('@/components/dictation/DictationWaveform', () => ({ DictationWaveform: () => null }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 mock.module('@/lib/shortcuts', () => ({ formatShortcutForDisplay: () => '', getEffectiveShortcutCombo: () => '' }));
-mock.module('@/components/ui/action-toolbar', () => ({ TooltipLabelWithShortcut: () => null }));
+mock.module('@/components/ui/action-toolbar', () => ({ ButtonTooltip: Passthrough, TooltipLabelWithShortcut: () => null }));
 const Passthrough = ({ children }: { children?: React.ReactNode }) => <>{children}</>;
 mock.module('@/components/ui/tooltip', () => ({ Tooltip: Passthrough, TooltipTrigger: Passthrough, TooltipContent: () => null }));
 

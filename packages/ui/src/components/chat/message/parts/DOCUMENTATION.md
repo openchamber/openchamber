@@ -69,7 +69,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
 
 - `ShownToolCard.tsx`
-  - What a call drawn in place of its row shows (`isShownInPlace` in `@/lib/opencode/tools`): the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the call's result envelope), the images a completed `image.generate` call saved (`generatedImagePaths`, drawn by `GeneratedImages.tsx` through the chat's Markdown media, so they load lazily and open in the gallery; each has a download above it that saves the file itself at full size through the same grant, with `saveFile.ts`, which a shown page's download uses too), the card of an `openchamber_secret` call (`requestedSecret`), else the page of an `openchamber_render` call. The user is meant to see all of them, so they are hoisted to the answer with the turn's pages when Activity is collapsed. A form or secret card that asked the user is hoisted only while it waits: once answered, answered in the chat instead, or stopped, it is a step like the question tool's card and folds with Activity (`getShownPages`). It was hoisted for good before, which left every answered form at full height above the reply.
+  - What a call drawn in place of its row shows (`isShownInPlace` in `@/lib/opencode/tools`): the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the call's result envelope), the images a completed `image.generate` call saved (`generatedImagePaths`, drawn by `GeneratedImages.tsx` through the chat's Markdown media, so they load lazily and open in the gallery; each has a download above it that saves the file itself at full size through the same grant, with `saveFile.ts`, which a shown page's download uses too), the card of an `openchamber_secret` call (`requestedSecret`), else the page of an `openchamber_render` call. The user is meant to see all of them, so they are hoisted to the answer with the turn's pages when Activity is collapsed. A form or secret card that asked the user is hoisted only while it waits: once answered, answered in the chat instead, or stopped, it is a step like the question tool's card and folds with Activity (`getShownPages`). It was hoisted for good before, which left every answered form at full height above the reply. A settled form right after text a collapsed Activity keeps in view stays out of the fold as one line saying how it was answered (`SettledAskLine`): with the form folded away, that text and the reply read as one passage with the question gone from between them.
 - `SecretRequestCard.tsx`
   - The card an agent asks for a secret on: label, reason, a masked field that password managers are told to skip, Save securely and Decline. The value goes to the server through `answerSecretRequest` (`@/lib/secretRequestAnswer`) and never into the call, so the card's state comes from the call's status and the `status` the plugin copies into its metadata; what this client sent shows until the call completes. A refused answer (answered elsewhere, turn ended) shows a toast and keeps the card. Once answered it folds to one line. The answer names the session's directory, so a card in an isolated space reaches the space's server, where the call waits and the agent's commands run. A card that waits is brought into view the way a waiting page is (`data-waiting-page`, `dispatchPageWaiting`).
   - The workflow card (`components/chat/workflows/WorkflowRunCard.tsx`) reads the run from the server's store, not from the call: the plan with its phases, the run's state, and Run and Don't run while it waits for approval, Stop while it runs, Resume after a failure or stop. The card is current after a reload and on every device; a run the server no longer has says so.
@@ -100,6 +100,27 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - Two text roles apply across blocks. Prose, including reasoning, tool markdown and subagent prompts, is upright sans at `--text-meta`. Code, including shell commands, tool parameters and text output, is mono with the code-block line height.
 
 ## Current important behavior
+
+### Why buttons in message rows use HoverTooltip
+
+A button that repeats in the transcript (a tool row's open action, a code
+block's copy and wrap, a table's toolbar) takes `HoverTooltip` from `ui/row-tooltip.tsx`, not
+`Tooltip`. A `Tooltip` keeps a root mounted per button, and the list mounts and
+unmounts these rows while scrolling, for a tooltip that shows at most once.
+`HoverTooltip` mounts it only while that one button is hovered or focused, and
+keeps the state in its own leaf, so a hover re-renders no row. It adds no DOM
+and needs no provider, so a Markdown block rendered for export is unchanged.
+
+### Why a collapsed user message shares two lines between text and context
+
+Each context item (a quote, a code comment, terminal output) collapses to one
+row, so a message with ten comments stayed ten rows tall, and with the sticky
+user header on those rows stayed over the chat. A collapsed message now gets
+two lines: the text takes one or two, and context rows get what is left
+(`contextPartsPastCollapse`). The rest waits behind the message's one show more
+link. The text wins because it is what the user typed. Lines follow the chat's
+width, so `UserTextPart` measures them before paint, and clamping the block by
+height would cut a row in half.
 
 ### Bidirectional prose
 
@@ -595,6 +616,14 @@ update, with the `shellID`, when the command starts.
 - File references use `markdown/markdownFileReferences.ts`, `MarkdownLink`
   and the code plugin's token metadata. Automatic confirmation runs through
   the bounded, cached stat queue after settlement and never on mobile.
+  On mobile, path-looking inline code looks like any other code and asks the
+  server only when tapped, without the cache: a file opens the drawer on Files,
+  a missing file shows a toast, and a failed request or a name several files
+  share shows a different toast (#6056). It carries no `role="button"`, which
+  would make it unselectable and 36px tall (`mobile.css`). A surrounding link,
+  button or disclosure keeps its tap, and a selection-ending tap opens nothing.
+  An answer that arrives after the code left the screen does nothing. Fenced
+  code stays inert on mobile.
   Code-path annotations are declarative; unconfirmed tokens stay code.
   Automatic probes skip emails, handles and digit-leading suffixes
   (`user@gmail.com`, `v1.2.3`, `backup.7z`); an `@` after a slash is a path

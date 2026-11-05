@@ -11,7 +11,9 @@ const directories = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
+  // A run saves itself once more after its report is sent, so a test that waits
+  // for the report ends with that save in flight. Retrying outlasts it.
+  await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })));
 });
 
 const waitFor = async (check, timeoutMs = 5_000) => {
@@ -128,7 +130,16 @@ describe('workflow runtime', () => {
   });
 
   it('keeps at most the concurrency limit of agents working', async () => {
-    const agents = fakeAgentSessions();
+    // The first agent holds its turn until the second starts, so a loaded machine
+    // cannot finish it early and leave only one working.
+    let secondStarted;
+    const overlap = new Promise((resolve) => { secondStarted = resolve; });
+    const agents = fakeAgentSessions({
+      duringTurn: async () => {
+        if (agents.started.length >= 2) secondStarted();
+        await overlap;
+      },
+    });
     const { runtime, act, finished } = await setup(agents, { maxConcurrentAgents: 2 });
     const { runId } = await act('workflow.run', { script: script("return parallel([1, 2, 3, 4, 5].map((n) => () => agent('n' + n)))") });
     await runtime.approve({ runId });

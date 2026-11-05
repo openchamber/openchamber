@@ -62,6 +62,7 @@ import {
     resolveRunningTaskChildSessionId,
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import {
     extractFirstChangedLineFromDiff,
@@ -646,17 +647,18 @@ const CopyToolOutputButton: React.FC<{ output: string }> = ({ output }) => {
     }, [output, t]);
 
     return (
-        <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
-            onClick={handleCopy}
-            onPointerDown={(event) => event.stopPropagation()}
-            aria-label={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-            title={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-        >
-            <Icon name={copied ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
-        </Button>
+        <HoverTooltip label={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}>
+            <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
+                onClick={handleCopy}
+                onPointerDown={(event) => event.stopPropagation()}
+                aria-label={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+            >
+                <Icon name={copied ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
+            </Button>
+        </HoverTooltip>
     );
 };
 
@@ -679,39 +681,42 @@ const JsonToolOutput: React.FC<{
     return (
         <div className="relative w-full min-w-0">
             <div className="absolute inset-e-0 top-0 z-10 flex items-center gap-1">
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                    onClick={(event) => handleJsonViewChange('summary', event)}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label={t('chat.toolPart.showNavigableJson')}
-                    title={t('chat.toolPart.showNavigableJson')}
-                >
-                    <Icon name="list-unordered" className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                    onClick={(event) => handleJsonViewChange('formatted', event)}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label={t('chat.toolPart.showFormattedJson')}
-                    title={t('chat.toolPart.showFormattedJson')}
-                >
-                    <Icon name="node-tree" className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
-                    onClick={(event) => handleJsonViewChange('raw', event)}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label={t('chat.toolPart.showRawJson')}
-                    title={t('chat.toolPart.showRawJson')}
-                >
-                    <Icon name="code-box" className="h-3.5 w-3.5" />
-                </Button>
+                <HoverTooltip label={t('chat.toolPart.showNavigableJson')}>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'summary' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('summary', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showNavigableJson')}
+                    >
+                        <Icon name="list-unordered" className="h-3.5 w-3.5" />
+                    </Button>
+                </HoverTooltip>
+                <HoverTooltip label={t('chat.toolPart.showFormattedJson')}>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'formatted' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('formatted', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showFormattedJson')}
+                    >
+                        <Icon name="node-tree" className="h-3.5 w-3.5" />
+                    </Button>
+                </HoverTooltip>
+                <HoverTooltip label={t('chat.toolPart.showRawJson')}>
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-6 w-6 rounded-md text-muted-foreground hover:text-foreground', jsonViewMode === 'raw' && 'bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]')}
+                        onClick={(event) => handleJsonViewChange('raw', event)}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={t('chat.toolPart.showRawJson')}
+                    >
+                        <Icon name="code-box" className="h-3.5 w-3.5" />
+                    </Button>
+                </HoverTooltip>
                 <CopyToolOutputButton output={renderedOutput} />
             </div>
             {jsonViewMode === 'summary' ? (
@@ -936,20 +941,21 @@ const OpenSubtaskButton: React.FC<{
     };
 
     return (
-        <button
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={handleOpen}
-            className={cn(
-                'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
-                'opacity-60 hover:opacity-100 focus-visible:opacity-100',
-            )}
-            style={{ color: 'var(--tools-icon)' }}
-            title={label}
-            aria-label={label}
-        >
-            <Icon name="external-link" className="h-3 w-3" />
-        </button>
+        <HoverTooltip label={label}>
+            <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={handleOpen}
+                className={cn(
+                    'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                    'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                )}
+                style={{ color: 'var(--tools-icon)' }}
+                aria-label={label}
+            >
+                <Icon name="external-link" className="h-3 w-3" />
+            </button>
+        </HoverTooltip>
     );
 };
 
@@ -1367,26 +1373,28 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                         iconClassName="size-4"
                                     />
                                 ) : null}
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                                    onClick={(event) => openEntryFile(entry, event)}
-                                    aria-label={t('chat.toolPart.openFileAtFirstChange')}
-                                    title={t('chat.toolPart.openFileAtFirstChange')}
-                                >
-                                    <Icon name="file-edit" className="size-4" />
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                                    onClick={(event) => openEntryDiff(entry, event)}
-                                    aria-label={t('chat.toolPart.openFileDiff')}
-                                    title={t('chat.toolPart.openFileDiff')}
-                                >
-                                    <Icon name="git-pull-request" className="size-4" />
-                                </Button>
+                                <HoverTooltip label={t('chat.toolPart.openFileAtFirstChange')}>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                        onClick={(event) => openEntryFile(entry, event)}
+                                        aria-label={t('chat.toolPart.openFileAtFirstChange')}
+                                    >
+                                        <Icon name="file-edit" className="size-4" />
+                                    </Button>
+                                </HoverTooltip>
+                                <HoverTooltip label={t('chat.toolPart.openFileDiff')}>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                                        onClick={(event) => openEntryDiff(entry, event)}
+                                        aria-label={t('chat.toolPart.openFileDiff')}
+                                    >
+                                        <Icon name="git-pull-request" className="size-4" />
+                                    </Button>
+                                </HoverTooltip>
                             </div>
                             {entry.renderMode === 'diff' ? (
                                 <DiffPreview
@@ -2002,19 +2010,20 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                     {displayName}
                                 </MinDurationShineText>
                                 {quickOpenTarget ? (
-                                    <button
-                                        type="button"
-                                        onClick={handleQuickOpen}
-                                        className={cn(
-                                            'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
-                                            'opacity-60 hover:opacity-100 focus-visible:opacity-100',
-                                        )}
-                                        style={{ color: 'var(--tools-icon)' }}
-                                        title={t('chat.toolPart.openFile')}
-                                        aria-label={t('chat.toolPart.openFile')}
-                                    >
-                                        <Icon name="external-link" className="h-3 w-3" />
-                                    </button>
+                                    <HoverTooltip label={t('chat.toolPart.openFile')}>
+                                        <button
+                                            type="button"
+                                            onClick={handleQuickOpen}
+                                            className={cn(
+                                                'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                                                'opacity-60 hover:opacity-100 focus-visible:opacity-100',
+                                            )}
+                                            style={{ color: 'var(--tools-icon)' }}
+                                            aria-label={t('chat.toolPart.openFile')}
+                                        >
+                                            <Icon name="external-link" className="h-3 w-3" />
+                                        </button>
+                                    </HoverTooltip>
                                 ) : null}
                                 {taskSessionId ? (
                                     <OpenSubtaskButton sessionId={taskSessionId} agent={subagentAgent(input)} isMobile={isMobile} />
@@ -2096,17 +2105,19 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                             // A labelled red action, the same one the composer's
                             // background commands strip offers. The negative
                             // margin keeps the header row at its text height.
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="xs"
-                                onClick={(event) => { event.stopPropagation(); header.stop?.onStop(); }}
-                                className="-my-0.5 flex-shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
-                                aria-label={header.stop.ariaLabel}
-                            >
-                                <Icon name="stop" className="size-3" />
-                                {t('chat.toolPart.background.stopLabel')}
-                            </Button>
+                            <HoverTooltip label={header.stop.ariaLabel}>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="xs"
+                                    onClick={(event) => { event.stopPropagation(); header.stop?.onStop(); }}
+                                    className="-my-0.5 flex-shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
+                                    aria-label={header.stop.ariaLabel}
+                                >
+                                    <Icon name="stop" className="size-3" />
+                                    {t('chat.toolPart.background.stopLabel')}
+                                </Button>
+                            </HoverTooltip>
                         ) : null}
                     </div>
                 )}

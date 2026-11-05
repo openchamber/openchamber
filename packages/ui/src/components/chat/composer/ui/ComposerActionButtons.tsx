@@ -61,6 +61,7 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
     const escapeKey = escapeStops ? formatShortcutForDisplay(getEffectiveShortcutCombo('abort_run', shortcutOverrides), '') : '';
     const abortShortcut = escapeKey ? `${escapeKey} ${escapeKey}` : undefined;
 
+    const sendText = sendLabel ?? t('chat.chatInput.actions.sendMessageAria');
     const sendButton = (
         <button
             type={isMobile ? 'button' : 'submit'}
@@ -79,20 +80,32 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label={sendLabel ?? t('chat.chatInput.actions.sendMessageAria')}
-            title={sendLabel}
+            aria-label={sendText}
         >
             <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
         </button>
     );
 
     if (!canAbort) {
-        return sendButton;
+        if (isMobile) return sendButton;
+        return (
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    {/* The span keeps the tooltip on a disabled button, which takes no pointer events. */}
+                    <span className="inline-flex">{sendButton}</span>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>{sendText}</TooltipContent>
+            </Tooltip>
+        );
     }
+
+    const followUpLabel = t(queuesFollowUp ? 'chat.chatInput.actions.queueMessageAria' : 'chat.chatInput.actions.sendMessageAria');
 
     return (
         <div className="relative">
             {hasContent ? (
+                <Tooltip>
+                <TooltipTrigger asChild>
                 <button
                     type="button"
                     disabled={!currentSessionId}
@@ -107,10 +120,13 @@ export const ComposerActionButtons = React.memo(function ComposerActionButtons(p
                         'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
                         currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
                     )}
-                    aria-label={t(queuesFollowUp ? 'chat.chatInput.actions.queueMessageAria' : 'chat.chatInput.actions.sendMessageAria')}
+                    aria-label={followUpLabel}
                 >
                     <Icon name="send-plane-2" className={cn(sendIconSizeClass, queuesFollowUp && '-rotate-90 rtl:rotate-90')} />
                 </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>{followUpLabel}</TooltipContent>
+                </Tooltip>
             ) : null}
             <Tooltip>
             <TooltipTrigger asChild>

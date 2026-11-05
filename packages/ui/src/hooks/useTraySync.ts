@@ -26,7 +26,7 @@ import {
 import { createSessionLineage } from '@/stores/sessionLineage';
 import { refreshTrayQuotas, useQuotaStore } from '@/stores/useQuotaStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { QUOTA_PROVIDERS, formatWindowLabel, formatQuotaWindowValueLabel } from '@/lib/quota';
+import { formatWindowLabel, formatQuotaWindowValueLabel, quotaProviderList } from '@/lib/quota';
 import { formatMessage, useI18nStore } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -198,13 +198,13 @@ const resolveSessionSubtitle = (
 const buildUsage = (): TrayUsage => {
   const { dictionary } = useI18nStore.getState();
   const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) => formatMessage(dictionary, key, params);
-  const { results, dropdownProviderIds, displayMode } = useQuotaStore.getState();
+  const { results, dropdownProviderIds, displayMode, extensionProviders } = useQuotaStore.getState();
   const mode: TrayUsage['mode'] = displayMode === 'remaining' ? 'remaining' : 'usage';
   if (!dropdownProviderIds.length) return { mode, groups: [] };
 
   const byProvider = new Map(results.map((result) => [result.providerId, result]));
   const groups: TrayUsageGroup[] = [];
-  for (const meta of QUOTA_PROVIDERS) {
+  for (const meta of quotaProviderList(extensionProviders)) {
     if (!dropdownProviderIds.includes(meta.id)) continue;
     const result = byProvider.get(meta.id);
     if (!result || result.configured !== true) continue;

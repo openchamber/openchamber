@@ -224,16 +224,20 @@ const Chip: React.FC<{ chip: GuestStatusChip }> = ({ chip }) => {
   }
   const url = chip.url;
   return (
-    <button
-      type="button"
-      title={url}
-      onClick={() => openUrl(url)}
-      dir="auto"
-      className={cn(className, 'transition-opacity hover:opacity-80', fallback && 'bg-[var(--interactive-hover)] text-muted-foreground hover:text-foreground')}
-      style={pillStyle(chip.tone)}
-    >
-      {chip.label}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => openUrl(url)}
+          dir="auto"
+          className={cn(className, 'transition-opacity hover:opacity-80', fallback && 'bg-[var(--interactive-hover)] text-muted-foreground hover:text-foreground')}
+          style={pillStyle(chip.tone)}
+        >
+          {chip.label}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>{url}</TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -286,23 +290,30 @@ const ActionButton: React.FC<Extract<GuestStatusAction, { kind: 'button' }>> = (
     return () => window.clearTimeout(timer);
   }, [armed]);
   return (
-    <Button
-      variant={variant === 'outline' ? 'outline' : variant === 'destructive' ? 'destructive' : 'ghost'}
-      size="xs"
-      disabled={disabled || busy.has(id)}
-      aria-busy={busy.has(id) || undefined}
-      onClick={() => {
-        if (confirm && !armed) {
-          setArmed(true);
-          return;
-        }
-        setArmed(false);
-        act({ id });
-      }}
-      className="max-w-[8rem]"
-    >
-      <span className="truncate">{armed && confirm ? confirm : label}</span>
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Button
+            variant={variant === 'outline' ? 'outline' : variant === 'destructive' ? 'destructive' : 'ghost'}
+            size="xs"
+            disabled={disabled || busy.has(id)}
+            aria-busy={busy.has(id) || undefined}
+            onClick={() => {
+              if (confirm && !armed) {
+                setArmed(true);
+                return;
+              }
+              setArmed(false);
+              act({ id });
+            }}
+            className="max-w-[8rem]"
+          >
+            <span className="truncate">{armed && confirm ? confirm : label}</span>
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>{armed && confirm ? confirm : label}</TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -311,13 +322,20 @@ const ActionSwitch: React.FC<Extract<GuestStatusAction, { kind: 'switch' }>> = (
   const choice = chosen.get(id);
   const current = choice === undefined ? checked : choice === 'on';
   return (
-    <Switch
-      aria-label={label}
-      checked={current}
-      disabled={disabled || busy.has(id)}
-      loading={busy.has(id)}
-      onCheckedChange={(next) => act({ id, value: next ? 'on' : 'off' })}
-    />
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Switch
+            aria-label={label}
+            checked={current}
+            disabled={disabled || busy.has(id)}
+            loading={busy.has(id)}
+            onCheckedChange={(next) => act({ id, value: next ? 'on' : 'off' })}
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -327,12 +345,19 @@ const ActionSelect: React.FC<Extract<GuestStatusAction, { kind: 'select' }>> = (
   const selected = options.find((option) => option.value === current);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className="max-w-[8rem] gap-1">
-          <span className="min-w-0 truncate">{selected?.label ?? current}</span>
-          <Icon name="arrow-down-s" className="size-3 shrink-0" />
-        </Button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="xs" aria-label={`${label}: ${selected?.label ?? current}`} disabled={disabled || busy.has(id)} className="max-w-[8rem] gap-1">
+                <span className="min-w-0 truncate">{selected?.label ?? current}</span>
+                <Icon name="arrow-down-s" className="size-3 shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent data-work-status-popup align="end" className="min-w-32">
         <DropdownMenuRadioGroup value={current} onValueChange={(next) => { if (next !== current) act({ id, value: next }); }}>
           {options.map((option) => (

@@ -32,6 +32,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
+import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
@@ -311,10 +312,12 @@ const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: Dis
                     maxHeightClassName: 'max-h-[60vh]',
                 }}
                 actions={(
-                    <Button type="button" variant="ghost" size="xs" onClick={handleOpen}>
-                        <Icon name="external-link" className="h-3.5 w-3.5" />
-                        {t('chat.dispatchedSession.open')}
-                    </Button>
+                    <HoverTooltip label={t('contextTooltips.chat.dispatchedOpen')}>
+                        <Button type="button" variant="ghost" size="xs" onClick={handleOpen}>
+                            <Icon name="external-link" className="h-3.5 w-3.5" />
+                            {t('chat.dispatchedSession.open')}
+                        </Button>
+                    </HoverTooltip>
                 )}
             />
         </NoticeRow>

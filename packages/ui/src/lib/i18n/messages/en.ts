@@ -25,6 +25,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
+import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
@@ -48,6 +49,15 @@ import { autocompleteScopeI18n } from './autocomplete-scope.i18n';
 import { workflowsI18n } from './workflows.i18n';
 import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
+import { tooltipsDiffI18n } from './tooltips-diff.i18n';
+import { tooltipsFilesI18n } from './tooltips-files.i18n';
+import { tooltipsGitI18n } from './tooltips-git.i18n';
+import { tooltipsTrackerI18n } from './tooltips-tracker.i18n';
+import { tooltipsWalkthroughI18n } from './tooltips-walkthrough.i18n';
+import { tooltipsTerminalBrowserI18n } from './tooltips-terminal-browser.i18n';
+import { tooltipsWorkspaceI18n } from './tooltips-workspace.i18n';
+import { tooltipsPanelI18n } from './tooltips-panel.i18n';
+import { tooltipsChatI18n } from './tooltips-chat.i18n';
 
 export const dict = {
   'quota.family.zen': 'Zen Models',
@@ -102,6 +112,7 @@ export const dict = {
   'chat.liveActivity.usedSubagents': 'Used {count} subagents',
   'sessions.sidebar.projectAction.active': 'Project action active',
   ...settingsDict,
+  ...selectionApprovalI18n.en,
   'gitView.operation.title': 'Git operation',
   'gitView.operation.recovery.storage': 'OpenChamber can\'t save the state of Git transfers here. Allow site storage and reload; pushing and pulling are paused until then.',
   'gitView.operation.recovery.capacity': 'Too many unfinished Git transfers are saved. Check the ones below before starting another.',
@@ -212,6 +223,15 @@ export const dict = {
   ...workflowsI18n['en'],
   ...sessionReferencesI18n['en'],
   ...guestStatusViewI18n['en'],
+  ...tooltipsDiffI18n['en'],
+  ...tooltipsFilesI18n['en'],
+  ...tooltipsGitI18n['en'],
+  ...tooltipsTrackerI18n['en'],
+  ...tooltipsWalkthroughI18n['en'],
+  ...tooltipsTerminalBrowserI18n['en'],
+  ...tooltipsWorkspaceI18n['en'],
+  ...tooltipsPanelI18n['en'],
+  ...tooltipsChatI18n['en'],
   'terminalView.actions.attachSelection': 'Attach selected output',
   'terminalView.actions.copySelection': 'Copy selected output',
   'terminalView.toast.selectionCopied': 'Output copied',
@@ -798,7 +818,7 @@ export const dict = {
   'sessions.sidebar.session.status.unread': 'Unread updates',
   'sessions.sidebar.session.status.backgroundSubagent': 'Subagent running in the background',
   'sessions.sidebar.session.status.backgroundCommand': 'Command running in the background',
-  'sessions.sidebar.session.status.waitingOnPullRequest': 'Waiting on a pull request',
+  'sessions.sidebar.session.status.waitingOnPullRequest': 'Waiting on checks or a review',
   'sessions.sidebar.session.status.pinned': 'Pinned session',
   'sessions.sidebar.session.status.movingToWorktree': 'Moving session to a new worktree',
   'sessions.sidebar.session.status.permissionRequired': 'Permission required',
@@ -1698,7 +1718,6 @@ export const dict = {
   'sidebarFilesTree.actions.addMenuTitle': 'New file, folder, or upload',
   'sidebarFilesTree.actions.refreshTitle': 'Refresh',
   'sidebarFilesTree.actions.collapseAllTitle': 'Collapse all folders',
-  'sidebarFilesTree.actions.fileMenuTitle': 'File menu',
   'sidebarFilesTree.state.searching': 'Searching...',
   'sidebarFilesTree.state.loading': 'Loading...',
   'sidebarFilesTree.dialog.createFile.title': 'Create File',
@@ -1962,12 +1981,14 @@ export const dict = {
   'chat.autoReview.actions.dismiss': 'Dismiss',
   'chat.autoReview.toast.removeFailed': 'Could not reach the server to change the code review. Try again.',
   'chat.prWatch.title': 'Waiting on pull request #{number}',
+  'chat.prWatch.mr.title': 'Waiting on merge request !{number}',
+  'chat.prWatch.change.title': 'Waiting on change #{number}',
   'chat.prWatch.status.pending': 'checks running',
   'chat.prWatch.status.passed': 'checks passed',
   'chat.prWatch.status.failed': 'a check failed',
   'chat.prWatch.status.waking': 'waking the agent',
   'chat.prWatch.actions.stop': 'Stop watching',
-  'chat.prWatch.toast.stopFailed': 'Could not reach the server to stop watching the pull request. Try again.',
+  'chat.prWatch.toast.stopFailed': 'Could not reach the server to stop watching. Try again.',
   'chat.draftDirtyNotice.tooltip': 'You have uncommitted changes on this branch.\nA new session could conflict with them. You may want to commit them first or use another worktree.',
   'chat.draftDirtyNotice.indicatorAria': 'Uncommitted changes in this directory',
   'diffView.hunk.label': 'Hunks',
@@ -3503,6 +3524,13 @@ export const dict = {
   'markdownRenderer.code.proposal': 'Proposal',
   'markdownRenderer.code.actions.copyTitle': 'Copy code',
   'markdownRenderer.code.actions.copiedTitle': 'Copied',
+  'markdownRenderer.code.actions.runTitle': 'Run command. The agent continues from its output',
+  'markdownRenderer.code.actions.stopTitle': 'Stop command',
+  'markdownRenderer.code.run.startFailed': 'Could not start the command',
+  'markdownRenderer.code.run.running': 'Running',
+  'markdownRenderer.code.run.finished': 'Finished',
+  'markdownRenderer.code.run.failed': 'Exit code {code}',
+  'markdownRenderer.code.run.stopped': 'Stopped',
   'markdownRenderer.table.actions.copyTitle': 'Copy table',
   'markdownRenderer.code.actions.enableWrapTitle': 'Enable line wrap',
   'markdownRenderer.code.actions.disableWrapTitle': 'Disable line wrap',
@@ -3735,6 +3763,9 @@ export const dict = {
   'chat.dispatchedSession.showAnswer': 'Show answer',
   'chat.dispatchedSession.hideAnswer': 'Hide answer',
   'chat.dispatchedSession.open': 'Open session',
+  'chat.fileOpenRequest.toast.description': 'Shown in {session}',
+  'chat.fileOpenRequest.toast.descriptionUntitled': 'Shown in another session',
+  'chat.fileOpenRequest.toast.openSession': 'Open session',
   'chat.revertPopover.staged': 'Reverted: {count}',
   "chat.revertPopover.toast.restoreFailed": "Couldn't restore the reverted messages",
   'chat.workStatus.mcp.needsAuthHint': 'Sign in to this MCP server from Settings → MCP.',

@@ -18,16 +18,18 @@ type SessionActivityIndicatorState = 'running' | 'workflow' | 'subagent' | 'shel
 const PRESENTATION = {
   running: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.active' },
   workflow: { icon: 'flow-chart', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.workflowRunning' },
-  subagent: { icon: 'robot', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },
+  subagent: { icon: 'robot-2', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },
   shell: { icon: 'terminal', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundCommand' },
-  pullRequest: { icon: 'git-pull-request', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.waitingOnPullRequest' },
+  pullRequest: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.waitingOnPullRequest' },
   unread: { icon: 'checkbox-circle', colorClass: 'text-status-success', labelKey: 'sessions.sidebar.session.status.unread' },
 } as const satisfies Record<SessionActivityIndicatorState, { icon: IconName; colorClass: string; labelKey: string }>;
 
 /**
- * Live-activity marker for one session row or aggregate. Each state has its
- * own static icon, so a row says why it is busy without motion; motion lives
- * in the 1 Hz elapsed counter (see faa9c243). The opt-in
+ * Live-activity marker for one session row or aggregate. Each state has a
+ * static icon, so a row says why it is busy without motion; motion lives in
+ * the 1 Hz elapsed counter (see faa9c243). Waiting on a pull request shares
+ * the running circle: a linked pull request already puts that icon on the row,
+ * and the tooltip names the wait. The opt-in
  * `animatedActivityIndicators` preference replaces every running kind with the
  * shared `Spinner` (four steps a second); the unread icon stays.
  */

@@ -153,7 +153,9 @@ only the note for such a row.
 Git, Changes, Walkthrough, pull requests and mobile Changes use the shared
 repository picker. Selection, discovery refresh and persistence belong to
 [`useGitStore`](../../stores/DOCUMENTATION.md#usegitstorets) and
-`useNestedGitDirectory`; diff rows do not change that selection.
+`useNestedGitDirectory`; diff rows do not change that selection. A changed-file
+chip falling back to Changed does (*Last turn scope*), since the chip names a
+file and only its own repository can show it.
 
 ## Find in changes
 
@@ -240,6 +242,15 @@ one attribute per moved
 control; the menu reads them when it opens and shows a check beside each view
 option that is on.
 
+### Why the changes list shares one tooltip and not a Tooltip per button
+
+The changes list is not virtualized below 1000 rows and keeps its stage,
+unstage and folder buttons mounted, so a Tooltip per button would mount
+thousands of them. `DelegatedTooltip` (`ui/row-tooltip.tsx`) listens on the
+list and shows the `data-row-tooltip` label of the button under the pointer.
+Its state stays in its own component because a re-render of `ChangesPanel`
+re-renders every row.
+
 ## Files toolbar
 
 The Files editor's row (`renderFileToolbar`, an `ActionToolbar`) has the actions
@@ -315,6 +326,28 @@ it; mobile Changes has no counts and reads it only in that scope. Outside the
 scope a running turn is not read, and its count shows as unknown until the
 turn ends. A failed read keeps its own error and retry, and another session's
 turn never shows while this one's loads.
+
+A changed-file chip under a reply opens Last turn, but the chip comes from the
+turn's tool calls and the scope from its snapshots, so they can disagree:
+snapshots are off, the project folder is no git repository (a repository nested
+in it still gets the edits), or a step took no snapshot. Each click therefore
+asks once (`pendingTurnDiffFile`, dropped when another session is on screen)
+whether the file is in the turn's diff. Until the list answers the session's
+current state the view shows loading; a failed read keeps its error and retry.
+A file that is there is expanded and scrolled to, on every click, since the
+chip's absolute path only matches the relative list through this request.
+A file that is not there opens Changed instead, in the repository holding the
+file, read afresh, expanded. A repository the picker drops again ends the
+attempt on the repository left on screen. Picking Last turn by hand asks
+nothing and stays there, empty or not. The phone's Changes surface
+(`apps/MobileChangesSurface.tsx`) answers the same way and opens the file's own
+diff screen, since it has no expanded list to scroll.
+
+### Why the click is a one-shot request and not derived from the tab
+
+A tab keeps its target across scope changes, so a tab opened from a chip and a
+tab where the person picked Last turn by hand look the same. Deriving the
+fallback from the tab would send that person back to Changed every time.
 
 ### Why the count waits for the turn to end outside the scope
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue } from './catalog';
+import { blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue, type UiBlockParse } from './catalog';
 
 const program = `root = Stack([note, flow])
 note = Callout("Routers rewrite **MAC** addresses", "info")
@@ -51,6 +51,46 @@ describe('parseUiBlock', () => {
   test('a chart series must carry one value per label', () => {
     expect(parseUiBlock('root = Stack([BarChart(["a", "b"], [Series("s", [10])])])', true).kind).toBe('invalid');
     expect(parseUiBlock('root = Stack([BarChart(["a", "b"], [Series("s", [10, 20])])])', true).kind).toBe('ready');
+  });
+
+  test('a key in a call is reported as a named argument, alone', () => {
+    const errorsOf = (source: string) => {
+      const parsed = parseUiBlock(source, true);
+      if (parsed.kind !== 'invalid') throw new Error(`expected invalid, got ${parsed.kind}`);
+      return parsed.errors;
+    };
+    expect(errorsOf('root = Stack([c])\nc = Choice("a", [{label: "A"}], label: "Pick one")')).toEqual(["Named arguments aren't supported: pass label by position"]);
+    expect(errorsOf('root = Stack([Badge(label: "x",\n  tone: "info")])')).toEqual(["Named arguments aren't supported: pass label, tone by position"]);
+    expect(errorsOf('root = Stack([Slider("b", 0, 10, step: 5)])')).toEqual(["Named arguments aren't supported: pass step by position"]);
+    expect(errorsOf('root = Stack([Badge("x", "info", tone: "error")])')).toEqual(["Named arguments aren't supported: pass tone by position"]);
+  });
+
+  test('a reply block that keeps its sound parts names the key under them', () => {
+    const parsed = parseUiBlock('root = Stack([Text("kept"), Badge("x", tone: "info")])', true, true);
+    if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${parsed.kind}`);
+    expect(parsed.dropped).toEqual(["Named arguments aren't supported: pass tone by position"]);
+  });
+
+  test('a form with a key stays invalid in a reply and names the key', () => {
+    expect(parseUiBlock('root = Stack([Choice("a", ["x"], label: "Pick")])', true, true)).toEqual({ kind: 'invalid', errors: ["Named arguments aren't supported: pass label by position"] });
+  });
+
+  test('a key the parser never read keeps the real error', () => {
+    expect(parseUiBlock('root = Stack([\n  // see Foo(bar, baz: 1)\n  missing\n])', true)).toEqual({ kind: 'invalid', errors: ['Undefined names: missing'] });
+    expect(parseUiBlock('Here is a form (simple, style: plain)\nroot = Stack([missing])', true)).toEqual({ kind: 'invalid', errors: ['Undefined names: missing'] });
+  });
+
+  test('a wrong closing bracket does not turn an object key into a named argument', () => {
+    const parsed = parseUiBlock('root = Stack([Choice("a", {label: "A"), description: "x"})])', true);
+    if (parsed.kind !== 'invalid') throw new Error(`expected invalid, got ${parsed.kind}`);
+    expect(parsed.errors.join('\n')).not.toContain('Named arguments');
+  });
+
+  test('object keys, strings and ternaries are not named arguments', () => {
+    expect(parseUiBlock('root = Stack([missing, Choice("a", [{label: "A"}], "Pick one")])', true)).toEqual({ kind: 'invalid', errors: ['Undefined names: missing'] });
+    expect(parseUiBlock('root = Stack([missing, Text("a, label: b")])', true)).toEqual({ kind: 'invalid', errors: ['Undefined names: missing'] });
+    expect(parseUiBlock('root = Stack([missing, Text(x ? y : "z")])', true)).toEqual({ kind: 'invalid', errors: ['Undefined names: missing, x, y'] });
+    expect(parseUiBlock('root = Stack([Text("a", "b")])', true)).toEqual({ kind: 'invalid', errors: ['Text: Text takes 1 arg(s), got 2 (1 excess dropped)'] });
   });
 
   test('Choice options take a label or a label with a description', () => {
@@ -145,6 +185,69 @@ describe('catalog additions', () => {
 
   test('a card with an empty title parses', () => {
     expect(parseUiBlock('root = Stack([Card("", [Text("no title")])])', true).kind).toBe('ready');
+  });
+});
+
+describe('a reply salvaging a block', () => {
+  const salvaged = (...lines: string[]) => parseUiBlock(lines.join('\n'), true, true);
+  const childNames = (parsed: UiBlockParse) => (parsed.kind === 'ready'
+    ? (blockProps.Stack.parse(blockNode.parse(parsed.root).props).children).map((child) => blockNode.parse(child).typeName)
+    : parsed.kind);
+  const dropped = (parsed: UiBlockParse) => (parsed.kind === 'ready' ? parsed.dropped : parsed.kind);
+
+  test('draws what is sound and names what it lost', () => {
+    const parsed = salvaged(
+      'root = Stack([chart, note])',
+      'chart = BarChart(["a", "b"], [Series("s", [1, 2])])',
+      'note = Callout()',
+    );
+    expect(childNames(parsed)).toEqual(['BarChart']);
+    expect(String(dropped(parsed))).toContain('Callout');
+  });
+
+  const survives: [string, string[]][] = [
+    ['an undefined name', ['root = Stack([a, gone])', 'a = Badge("ok")']],
+    ['an unused name', ['root = Stack([a])', 'a = Badge("ok")', 'b = Badge("left out")']],
+    ['an unknown component', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = Pie("x")']],
+    ['a chart with the wrong number of values', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = BarChart(["x", "y"], [Series("s", [1])])']],
+  ];
+  for (const [name, lines] of survives) {
+    test(`survives ${name}`, () => {
+      const parsed = salvaged(...lines);
+      expect(childNames(parsed)).toEqual(['Badge']);
+      expect(dropped(parsed)).toHaveLength(1);
+    });
+  }
+
+  test('keeps a whole block whole, with nothing dropped', () => {
+    expect(dropped(salvaged('root = Stack([Badge("ok")])'))).toEqual([]);
+  });
+
+  const refused: [string, string[]][] = [
+    ['a form that lost a part', ['root = Stack([c, d])', 'c = Choice("a", ["x"])', 'd = Callout()']],
+    ['a lost field', ['root = Stack([a, c])', 'a = Badge("ok")', 'c = Choice("a")']],
+    ['a lost button', ['root = Stack([a, b])', 'a = Badge("ok")', 'b = Button(1)']],
+    ['a form under a broken parent', ['root = Stack([a, c])', 'a = Badge("ok")', 'c = Card(1, [Choice("pick", ["A", "B"])])']],
+    ['a form left unused', ['root = Stack([a])', 'a = Badge("ok")', 'c = Choice("pick", ["A", "B"])']],
+    ['an expression over an undefined name', ['root = Stack([a, s])', 'a = Badge("ok")', 's = Stat("Revenue", missing * 100)']],
+    ['a block cut short', ['root = Stack([a])', 'a = Badge("no']],
+    ['a block with nothing left', ['root = Stack([d])', 'd = Callout()']],
+    ['no Stack root', ['root = Card("x", [Badge("ok")])']],
+  ];
+  for (const [name, lines] of refused) {
+    test(`refuses ${name}`, () => {
+      expect(salvaged(...lines).kind).toBe('invalid');
+    });
+  }
+
+  test('a page keeps the whole block invalid', () => {
+    expect(parseUiBlock('root = Stack([a, d])\na = Badge("ok")\nd = Callout()', true).kind).toBe('invalid');
+  });
+
+  test('a fold with nothing inside goes without a word, on a page and in a form too', () => {
+    const source = 'root = Stack([c, d])\nc = Choice("a", ["x"])\nd = Details("Method notes")';
+    expect(childNames(parseUiBlock(source, true))).toEqual(['Choice']);
+    expect(dropped(salvaged(source))).toEqual([]);
   });
 });
 
