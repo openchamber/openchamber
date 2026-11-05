@@ -26,6 +26,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import {
@@ -90,7 +91,8 @@ import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSession, useSessionStatus } from '@/sync/sync-context';
+import { useSessionSelector, useSessionStatus } from '@/sync/sync-context';
+import type { Session } from '@/lib/opencode/model';
 import { GuestPopover } from './GuestPopover';
 import { DockedPanelSurfaceContext, usePageColors } from '@/hooks/usePageColors';
 
@@ -162,6 +164,19 @@ const readCssVar = (name: string, fallback: string): string => {
   return value || fallback;
 };
 
+type FrameSessionFields = { id?: string; title?: string; model?: string; agent?: string };
+
+const frameSessionFields = (session: Session | undefined): FrameSessionFields => ({
+  id: session?.id,
+  title: session?.title,
+  model: guestSessionModelId(session?.model),
+  agent: session?.agent,
+});
+
+const sameFrameSessionFields = (left: FrameSessionFields, right: FrameSessionFields): boolean => (
+  left.id === right.id && left.title === right.title && left.model === right.model && left.agent === right.agent
+);
+
 export const PluginPane: React.FC<PluginPaneProps> = ({
   mode,
   surface = 'panel',
@@ -192,7 +207,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const statusContextKey = surface === 'status' ? directory : null;
   const actionItem = backgroundAction?.item;
   const currentSessionId = actionItem && 'sessionId' in actionItem ? actionItem.sessionId : selectedSessionId;
-  const session = useSession(currentSessionId, directory || undefined);
+  // Only what a frame hears: the record itself changes on every streamed step.
+  const session = useSessionSelector(currentSessionId, directory || undefined, frameSessionFields, sameFrameSessionFields);
   const sessionStatus = useSessionStatus(currentSessionId ?? '', directory || undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const [activePopover, setActivePopover] = React.useState<{ request: GuestPopoverRequest; position: GuestPopoverPosition; entry: string; directory: string; activation: GuestPopoverActivation } | null>(null);
@@ -233,7 +249,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           id: session?.id ?? currentSessionId,
           title: session?.title ?? (actionItem && 'sessionTitle' in actionItem ? actionItem.sessionTitle : undefined),
           busy: sessionBusy,
-          model: guestSessionModelId(session?.model),
+          model: session?.model,
           agent: session?.agent,
         }
         : null,
@@ -328,7 +344,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         : surface === 'file' ? fileEditorEntry
         : surface === 'dialog' && guest.attachEntry ? guest.attachEntry : guest.entry ?? null
     : null);
-  const { src, srcDoc, status: frameStatus, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
+  const { src, srcDoc, status: frameStatus, retry: retryFrame, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
     guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled, origins: approvedOrigins, reuseDocument: surface === 'block',
   });
 
@@ -508,12 +524,14 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     if (!popoverHost && !popover) closeActivePopover('owner');
   }, [closeActivePopover, directory, frameKey, popover, popoverHost]);
 
+  const hasIntegration = Boolean(guest?.integration);
   React.useEffect(() => {
-    if (!guest?.integration) {
+    if (!guest || !hasIntegration) {
       return;
     }
     void refreshOauth(guest.id);
-  }, [guest?.id, guest?.integration, refreshOauth]);
+    // A new package version may want another account; a reparsed catalog row may not.
+  }, [guest?.id, guest?.revision, hasIntegration, refreshOauth]);
 
   React.useEffect(() => {
     if (guest && !guestEnabled) {
@@ -689,7 +707,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         toast: (request) => {
           // Full pause: a disabled guest must not spam host toasts while the frame tears down.
           if (!guestEnabledRef.current) return;
-          showGuestToast(request);
+          showGuestToast(request, guestIdRef.current);
         },
         // Local addresses (a dev server, a container port) open in the browser panel, like chat links.
         openUrl: (url) => openGuestUrl(
@@ -1054,8 +1072,13 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
   if (!guest || (!src && !srcDoc)) {
     return (
-      <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-        {t(guest && frameStatus === 'loading' ? 'common.loading' : 'contextPanel.plugin.loadFailed')}
+      <div className="flex h-full items-center justify-center gap-3 px-6 text-sm text-muted-foreground">
+        {guest && frameStatus === 'loading'
+          ? t('common.loading')
+          : t(surface === 'block' ? 'contextPanel.plugin.blockLoadFailed' : 'contextPanel.plugin.loadFailed')}
+        {guest && frameStatus === 'error' ? (
+          <Button type="button" variant="outline" size="sm" onClick={retryFrame}>{t('terminalView.actions.tryAgain')}</Button>
+        ) : null}
       </div>
     );
   }

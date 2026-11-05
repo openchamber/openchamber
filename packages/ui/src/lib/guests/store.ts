@@ -33,7 +33,20 @@ export const useGuestsStore = create<GuestsState>((set, get) => ({
   },
   replaceCatalog: (guests, runtimeKey, unreadable = []) => {
     if (get().runtimeKey !== runtimeKey) return;
-    set({ status: 'ready', guests, unreadable, failure: null });
+    const current = get();
+    // The catalog does not carry update offers: one stays while its version does.
+    const offered = new Map(current.guests.flatMap((guest) => (guest.update ? [[guest.id, guest] as const] : [])));
+    const next = guests.map((guest) => {
+      const known = offered.get(guest.id);
+      const sameCopy = known?.version === guest.version && known?.source === guest.source
+        && JSON.stringify(known?.origin) === JSON.stringify(guest.origin);
+      return known?.update && !guest.update && sameCopy ? { ...guest, update: known.update } : guest;
+    });
+    // Every row in the app reads this list: a reload that found nothing new changes nothing.
+    const same = current.status === 'ready' && current.failure === null
+      && JSON.stringify(next) === JSON.stringify(current.guests)
+      && JSON.stringify(unreadable) === JSON.stringify(current.unreadable);
+    if (!same) set({ status: 'ready', guests: next, unreadable, failure: null });
   },
   applyUpdates: (updates, runtimeKey) => {
     if (get().runtimeKey !== runtimeKey) return;
