@@ -4,6 +4,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestActionsWhere, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestAction } from '@/lib/guests/run-action';
@@ -539,7 +540,7 @@ const FileRow: React.FC<FileRowProps> = ({
             void runGuestAction(entry, { kind: 'file', action: entry.action.id, directory: root || null, path: node.path, isDirectory: isDir }, t);
           }}
         >
-          <Icon name={entry.icon} className="me-2 size-4" /> {entry.action.label}
+          <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-2 size-4" /> {entry.action.label}
         </Item>
       ))}
       {isDir && (canCreateFile || canCreateFolder || canUploadHere) && (

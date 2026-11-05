@@ -34,6 +34,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ActionToolbar } from '@/components/ui/action-toolbar';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -423,7 +424,7 @@ const FileRow: React.FC<FileRowProps> = ({
             void runGuestAction(entry, { kind: 'file', action: entry.action.id, directory: root || null, path: node.path, isDirectory: isDir }, t);
           }}
         >
-          <Icon name={entry.icon} className="me-2 h-4 w-4" /> {entry.action.label}
+          <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-2 h-4 w-4" /> {entry.action.label}
         </Item>
       ))}
       {isDir && (canCreateFile || canCreateFolder || canUploadHere) && (

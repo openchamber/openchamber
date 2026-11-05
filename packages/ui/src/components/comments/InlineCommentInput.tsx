@@ -14,6 +14,7 @@ import { useCommentImagePaste } from './useCommentImagePaste';
 import { useCommentFieldPicker } from './useCommentFieldPicker';
 import { useCommentEnterSubmit } from './useCommentEnterSubmit';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestActionsWhere } from '@/lib/guests/actions';
 import { runGuestAction } from '@/lib/guests/run-action';
@@ -332,7 +333,7 @@ export function InlineCommentInput({
                       ...(lineRange.side ? { side: lineRange.side } : {}),
                     }, t)}
                   >
-                    <Icon name={entry.icon} className="size-4" />
+                    <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={6}>{entry.action.label}</TooltipContent>

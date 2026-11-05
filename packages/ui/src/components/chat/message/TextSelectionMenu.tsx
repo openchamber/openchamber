@@ -30,6 +30,7 @@ import {
 } from '../composer/comment/MobileCommentComposerContext';
 import { SelectionApprovalButton } from './SelectionApprovalButton';
 import { GUEST_ITEM_MESSAGE_TEXT_MAX } from '@openchamber/sdk';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { guestActionsWhere, type GuestActionEntry } from '@/lib/guests/actions';
 import { runGuestAction } from '@/lib/guests/run-action';
@@ -1009,7 +1010,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
                 )}
                 type="button"
               >
-                <Icon name={entry.icon} className="h-5 w-5 flex-shrink-0" />
+                <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="h-5 w-5 flex-shrink-0" />
                 <span className="min-w-0 whitespace-normal">{entry.action.label}</span>
               </button>
             ))}

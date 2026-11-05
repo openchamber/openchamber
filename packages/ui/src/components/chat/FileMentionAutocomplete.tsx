@@ -34,6 +34,9 @@ import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSel
 import { useHeightMorph } from '@/lib/motion/useSizeMorph';
 import { guestsOfferMentions, searchGuestMentions, type GuestMention } from '@/lib/guests/mentions';
 import { useGuestsStore } from '@/lib/guests/store';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 
 /** Subagents listed before the user types; the rest are a keystroke away. */
 const AGENTS_SHOWN_WITHOUT_QUERY = 6;
@@ -55,6 +58,16 @@ type MentionRows = {
   results: FileMentionHit[];
   sessions: Session[];
   extensions: GuestMention[];
+};
+
+/** The extension's own mark, so a row says whose it is before it is read. */
+const ExtensionMentionIcon = ({ guestId }: { guestId: string }) => {
+  const icon = useGuestsStore((state) => state.guests.find((guest) => guest.id === guestId)?.icon) ?? '';
+  const iconSrc = React.useMemo(
+    () => guestPackageIconSrc(guestId, icon, getRuntimeUrlResolver().authenticatedAsset),
+    [guestId, icon],
+  );
+  return <GuestIcon icon={resolveGuestIconName(icon)} iconSrc={iconSrc} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
 };
 
 const mentionRowIds = ({ agents, recentFiles, results, sessions, extensions }: MentionRows): string[] => [
@@ -760,7 +773,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                   onClick={() => onExtensionMentionSelect?.(mention)}
                   onMouseMove={() => { setSelectedIndex(rowIndex); }}
                 >
-                  <Icon name="apps" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <ExtensionMentionIcon guestId={mention.guestId} />
                   <span className="max-w-[60%] shrink-0 truncate font-medium">{mention.title}</span>
                   <AutocompleteRowDetail description={mention.subtitle ?? mention.label} />
                 </div>
