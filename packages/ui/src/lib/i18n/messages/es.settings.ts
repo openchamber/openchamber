@@ -1119,6 +1119,8 @@ export const settingsDict = {
   "settings.openchamber.sessionRetention.tooltip": "Archiva o elimina sesiones no archivadas según su última actividad. Conserva las 5 sesiones más recientes, la sesión abierta, las sesiones en ejecución y las compartidas. Las sesiones archivadas se conservan. Una sesión principal se conserva si eliminarla también eliminaría una sesión secundaria protegida.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Habilitar limpieza automática",
   "settings.openchamber.sessionRetention.field.enableAutoCleanup": "Habilitar limpieza automática",
+  "settings.openchamber.sessionRetention.field.includeInWork": "Incluir sesiones «En curso»",
+  "settings.openchamber.sessionRetention.field.includeInWorkInfo": "Las sesiones del bloque «En curso» se conservan hasta que las marcas como hechas. Activa esta opción para que caduquen como cualquier otra sesión. Las sesiones ancladas siempre se conservan.",
   "settings.openchamber.sessionRetention.field.retentionPeriod": "Periodo de retención",
   "settings.openchamber.sessionRetention.field.retentionPeriodAria": "Período de retención en días",
   "settings.openchamber.sessionRetention.field.days": "días",

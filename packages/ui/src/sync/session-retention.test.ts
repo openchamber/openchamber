@@ -7,7 +7,7 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from './session-ui-store';
 import { replaceGlobalSessionStatusById } from './global-session-status';
-import { buildSessionRetentionCandidates, isSessionKeptByUser, runSessionRetentionCleanup, useSessionRetentionRunStore } from './session-retention';
+import { buildSessionRetentionCandidates, inWorkKeepsSessions, isSessionKeptByUser, runSessionRetentionCleanup, useSessionRetentionRunStore } from './session-retention';
 
 const now = Date.now();
 const day = 86_400_000;
@@ -35,7 +35,10 @@ beforeEach(() => {
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
   useSessionUIStore.setState({ currentSessionId: null, isLoading: false });
   replaceGlobalSessionStatusById(new Map());
-  useUIStore.setState({ autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'delete', sessionRetentionOnlyArchived: false, autoDeleteLastRunAt: 0 });
+  useUIStore.setState({
+    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'delete', sessionRetentionOnlyArchived: false, autoDeleteLastRunAt: 0,
+    sessionWorkEnabled: true, sessionRetentionIncludeInWork: false,
+  });
   spyOn(useGlobalSessionsStore.getState(), 'loadSessions').mockImplementation(async () => {
     const state = useGlobalSessionsStore.getState();
     return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
@@ -61,14 +64,20 @@ describe('retention eligibility', () => {
     })).toEqual(['old']);
   });
 
-  test('keeps pinned and In work sessions however old they are', () => {
+  test('keeps pinned sessions, and In work sessions while the In work block keeps them', () => {
     const pinned = session('pinned', { metadata: { openchamber: { pinned: { at: 1 } } } });
-    const inWork = session('in-work', { metadata: { openchamber: { work: { state: 'open', openedAt: 1, openedBy: 'user' } } } });
+    const inWork = session('in-work', { metadata: { openchamber: { work: { state: 'open', openedAt: 1, openedBy: 'auto' } } } });
     const doneWork = session('done-work', { metadata: { openchamber: { work: { state: 'done', openedAt: 1, openedBy: 'user', doneAt: 2 } } } });
-    expect(buildSessionRetentionCandidates({
+    const eligible = (workKeeps: boolean) => buildSessionRetentionCandidates({
       sessions: [...recent, session('old'), pinned, inWork, doneWork], cutoffDays: 30, currentSessionId: null,
-      action: 'archive', activeSessionIds: new Set(), isKept: isSessionKeptByUser, now,
-    }).sort()).toEqual(['done-work', 'old']);
+      action: 'archive', activeSessionIds: new Set(), isKept: (item) => isSessionKeptByUser(item, new Set(), workKeeps), now,
+    }).sort();
+    expect(eligible(true)).toEqual(['done-work', 'old']);
+    expect(eligible(false)).toEqual(['done-work', 'in-work', 'old']);
+    expect(inWorkKeepsSessions({ sessionWorkEnabled: true, sessionRetentionIncludeInWork: false })).toBe(true);
+    expect(inWorkKeepsSessions({ sessionWorkEnabled: true, sessionRetentionIncludeInWork: true })).toBe(false);
+    // Without sessions in work nobody sees the block or can press Done.
+    expect(inWorkKeepsSessions({ sessionWorkEnabled: false, sessionRetentionIncludeInWork: false })).toBe(false);
   });
 
   test('protects every ancestor of a recent or archived child from cascade deletion', () => {
@@ -195,6 +204,22 @@ describe('retention execution', () => {
     expect(useGlobalSessionsStore.getState().entityById.has('parent')).toBe(true);
   });
 
+  test('takes In work sessions only while retention includes them, rechecked before each request', async () => {
+    const work = { metadata: { openchamber: { work: { state: 'open', openedAt: 1, openedBy: 'auto' } } } };
+    seed([session('first', work), session('second', work)]);
+    expect((await runSessionRetentionCleanup({ force: true })).skippedReason).toBe('no-candidates');
+
+    useUIStore.setState({ sessionRetentionIncludeInWork: true });
+    const remove = spyOn(opencodeClient, 'deleteSession').mockImplementation(async () => {
+      useUIStore.setState({ sessionRetentionIncludeInWork: false });
+      return true;
+    });
+    const result = await runSessionRetentionCleanup({ force: true });
+    expect(result.completedIds).toHaveLength(1);
+    expect(result.failedIds).toEqual([]);
+    expect(remove.mock.calls).toHaveLength(1);
+  });
+
   test('stops at a runtime switch without reconciling the destination or its cooldown', async () => {
     seed([session('first'), session('second')]);
     const remove = spyOn(opencodeClient, 'deleteSession').mockImplementation(async () => {
@@ -257,6 +282,14 @@ describe('archived-only retention', () => {
       session('unarchived'),
       session('restored', { time: { created: 1, updated: 2, archived: 0 } }),
     ])).toEqual(['old-archive']);
+  });
+
+  test('deletes archived sessions whose metadata still carries open work, which no block lists', () => {
+    const staleWork = archived('stale-work', { metadata: { openchamber: { work: { state: 'open', openedAt: 1, openedBy: 'auto' } } } });
+    expect(buildSessionRetentionCandidates({
+      sessions: [...recentArchived, staleWork], cutoffDays: 30, currentSessionId: null,
+      action: 'delete', onlyArchived: true, activeSessionIds: new Set(), isKept: (item) => isSessionKeptByUser(item, new Set(), true), now,
+    })).toEqual(['stale-work']);
   });
 
   test('preserves the five most recently archived sessions even when all are expired', () => {

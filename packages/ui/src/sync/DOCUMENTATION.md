@@ -769,7 +769,13 @@ Both modes preserve the five most recent sessions in the selected scope, ranked
 by that scope's retention timestamp, plus the selected session, shared sessions,
 sessions with observed live activity, and sessions the user keeps: pinned on this
 client (pins live in local storage, so another device does not see them) or in
-the In work block. Parents with an attached `/btw` conversation also stay,
+the In work block. The opt-in `sessionRetentionIncludeInWork` setting lets
+retention take In work sessions too, the same way for Archive and Delete, and
+with sessions in work turned off (`sessionWorkEnabled`) the block keeps
+nothing. An archived session is never in the block, so open work left in its
+metadata does not keep it. Pins keep their sessions either way; `inWorkKeepsSessions` is the one
+rule the Settings preview, the candidate list and the recheck before each
+request share. Parents with an attached `/btw` conversation also stay,
 because the canonical archive/delete actions remove that temporary fork.
 Sessions outside the selected scope remain protected. Because
 OpenCode cascades deletion, every ancestor of a retained session is protected
@@ -780,6 +786,17 @@ blocks deletion of its ancestors while unrelated sessions continue.
 Cleanup uses the canonical archive/delete actions, including confirmed `404`
 deletion, persisted-state cleanup and runtime guards. Settings shares the run
 state and shows loading or fetch failure separately from an eligible count.
+
+### Why In work sessions stay unless the user includes them
+
+The In work block is work the user has not closed, and Done is how they release
+a session, so cleanup leaves it alone by default. Every sent message opens work,
+so someone who never presses Done would have every session protected; the
+opt-in lets them clean those up. A split between work a message opened and work
+tracked by hand was rejected: a session already in work offers no Track, so the
+user could not move it from one kind to the other. Without sessions in work
+nobody sees the block or can press Done, so stale work metadata protects
+nothing.
 
 ### Live cross-directory session/status view
 

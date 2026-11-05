@@ -1151,6 +1151,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': 'يؤرشف الجلسات غير المؤرشفة أو يحذفها بناءً على آخر نشاط. يحتفظ بآخر 5 جلسات، والجلسة المفتوحة، والجلسات قيد التشغيل، والجلسات المشتركة. تُحفظ الجلسات المؤرشفة. يُحتفظ بالجلسة الأم إذا كان حذفها سيحذف أيضًا جلسة فرعية محمية.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'تفعيل التنظيف التلقائي',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'تفعيل التنظيف التلقائي',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'تضمين الجلسات «قيد العمل»',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'تبقى الجلسات في قسم «قيد العمل» حتى تعلّمها كمنجزة. فعّل هذا الخيار لتنتهي صلاحيتها مثل أي جلسة أخرى. تبقى الجلسات المثبّتة دائمًا.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'مدة الاحتفاظ',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'مدة الاحتفاظ بالأيام',
   'settings.openchamber.sessionRetention.field.days': 'أيام',

@@ -1119,6 +1119,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': '根据最后活动时间归档或删除未归档的会话。保留最近 5 个会话、当前打开的会话、运行中的会话和已分享的会话。已归档的会话会保留。如果删除父会话会同时删除受保护的子会话，则保留父会话。',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '启用自动清理',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': '启用自动清理',
+  'settings.openchamber.sessionRetention.field.includeInWork': '包含“进行中”的会话',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '“进行中”区块里的会话会一直保留，直到将其标记为完成。开启后，它们会像其他会话一样过期。已置顶的会话始终保留。',
   'settings.openchamber.sessionRetention.field.retentionPeriod': '保留时长',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': '按天设置保留时长',
   'settings.openchamber.sessionRetention.field.days': '天',

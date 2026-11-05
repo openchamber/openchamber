@@ -1119,6 +1119,8 @@ export const settingsDict = {
   "settings.openchamber.sessionRetention.tooltip": "Архівує або видаляє неархівовані сесії за часом останньої активності. Зберігає 5 найновіших сесій, відкриту сесію, сесії в роботі та сесії з публічним посиланням. Архівні сесії зберігаються. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Увімкнути автоматичне очищення",
   "settings.openchamber.sessionRetention.field.enableAutoCleanup": "Увімкнути автоматичне очищення",
+  "settings.openchamber.sessionRetention.field.includeInWork": "Включати сесії «В роботі»",
+  "settings.openchamber.sessionRetention.field.includeInWorkInfo": "Сесії в блоці «В роботі» зберігаються, доки ви не позначите їх готовими. Увімкніть, щоб вони очищалися, як і будь-які інші сесії. Закріплені сесії зберігаються завжди.",
   "settings.openchamber.sessionRetention.field.retentionPeriod": "Період зберігання",
   "settings.openchamber.sessionRetention.field.retentionPeriodAria": "Термін зберігання в днях",
   "settings.openchamber.sessionRetention.field.days": "днів",
