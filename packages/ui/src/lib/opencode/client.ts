@@ -356,7 +356,7 @@ const toOpenCodeDirectory = (directory: string): string =>
 type RuntimeOpencodeClientConfig = {
   baseUrl: string
   directory?: string
-  /** Read-request timeout in ms. Overridable so tests can use short value. */
+  /** Read-request timeout in ms, except usage stats, which keep their own deadline. Overridable so tests can use short value. */
   requestTimeoutMs?: number
 }
 
