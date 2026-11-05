@@ -45,7 +45,10 @@ async function createQuotePopoverFixture() {
     cacheDir: path.join(fixture, '.vite'),
     css: { postcss: repo },
     resolve: { alias: { '@': path.join(repo, 'packages/ui/src'), '@openchamber/sdk': path.join(repo, 'packages/sdk/src/index.ts') } },
-    optimizeDeps: { noDiscovery: true, include: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', 'clsx', 'tailwind-merge'] },
+    // Discovery is off, so a CJS package in the fixture's graph must be
+    // listed here: served raw it has no named exports and the page dies at
+    // boot. The base-ui tooltip closure pulls in use-sync-external-store.
+    optimizeDeps: { noDiscovery: true, include: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', 'clsx', 'tailwind-merge', '@base-ui/react/tooltip'] },
     server: { host: '127.0.0.1', port: 0, fs: { allow: [repo, fixture] } },
   });
   try {
@@ -106,14 +109,14 @@ async function assertQuotePopoverBounds(client, url) {
     for (const direction of ['ltr', 'rtl']) {
       for (const left of [12, width - 28]) {
         await evaluate(`window.renderSavedQuote(${left}, ${JSON.stringify(direction)})`);
-        await until(`!!document.querySelector('button[title="Edit comment"]')`);
+        await until(`!!document.querySelector('button[aria-label="Edit comment"]')`);
         await assertFits(`${width}px ${direction} saved preview`);
         for (let edit = 0; edit < 2; edit++) {
-          await click('button[title="Edit comment"]');
+          await click('button[aria-label="Edit comment"]');
           await until('document.querySelector("textarea")?.value === "Short"');
           await assertFits(`${width}px ${direction} edit ${edit + 1}`);
-          await click('button[title="Save comment"]');
-          await until(`!!document.querySelector('button[title="Edit comment"]')`);
+          await click('button[aria-label="Save comment"]');
+          await until(`!!document.querySelector('button[aria-label="Edit comment"]')`);
           await assertFits(`${width}px ${direction} saved edit ${edit + 1}`);
         }
       }
