@@ -14,6 +14,7 @@ import { TurnFold, TurnPagesRow } from './components/LiveTurnActivity';
 import { useTurnFoldContexts } from './components/useTurnFold';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './components/liveActivityContext';
 import { MessageSliceContext } from './message/messageSliceContext';
+import type { Part } from '@/lib/opencode/model';
 import { PendingWorkflowApprovals } from './workflows/PendingWorkflowApprovals';
 import { getTurnsWithLaterAssistant } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
@@ -22,6 +23,16 @@ import { buildHistoryEntries, findFirstVisibleMessageId, type TimelineEntry } fr
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { buildTimelineRows, type TimelineRow } from './lib/turns/timelineRows';
+import {
+    planToolActivity,
+    runningBackgroundToolIds,
+    toolActivityParts,
+    useLiveToolTail,
+    ToolActivityPlanContext,
+    type ToolActivityPlan,
+} from './lib/turns/toolActivityGrouping';
+import { useBackgroundShellsStore } from '@/sync/background-shells';
+import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalization';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { useUIStore } from '@/stores/useUIStore';
@@ -48,6 +59,7 @@ import {
 const EMPTY_STATIC_ENTRY_MESSAGES: ChatMessageEntry[] = [];
 const EMPTY_UNGROUPED_MESSAGE_IDS = new Set<string>();
 const EMPTY_ROW_MESSAGE_IDS: readonly string[] = [];
+const EMPTY_ACTIVITY_PARTS: Part[] = [];
 
 // --- Timeline virtualization (@legendapp/list) -----------------------------
 // The timeline is a single virtualized list on every surface: history turns
@@ -470,11 +482,13 @@ const TurnRow = React.memo(({
         if (message) {
             content = (
                 <MessageSliceContext.Provider value={row.slice}>
-                    {row.final ? (
-                        <LiveFinalActivityContext.Provider value={foldContexts.finalContext}>
-                            {renderMessage(message)}
-                        </LiveFinalActivityContext.Provider>
-                    ) : renderMessage(message)}
+                    <ToolActivityPlanContext.Provider value={row.underFold ? null : row.toolActivityPlan}>
+                        {row.final ? (
+                            <LiveFinalActivityContext.Provider value={foldContexts.finalContext}>
+                                {renderMessage(message)}
+                            </LiveFinalActivityContext.Provider>
+                        ) : renderMessage(message)}
+                    </ToolActivityPlanContext.Provider>
                 </MessageSliceContext.Provider>
             );
         }
@@ -898,6 +912,14 @@ const TimelineList = React.memo(({
 TimelineList.displayName = 'TimelineList';
 
 
+type CachedToolActivityPlan = {
+    messages: readonly ChatMessageEntry[];
+    tail: ReadonlySet<string> | undefined;
+    runningShells: ReadonlyMap<string, unknown>;
+    activeSessionIds: ReadonlySet<string>;
+    plan: ToolActivityPlan;
+};
+
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     sessionKey,
     messages,
@@ -1100,16 +1122,64 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
     }, [historyEntries, trailingStreamingEntry]);
 
+    // The live tail of the turn that is running: its newest calls stay rows of
+    // their own until more work arrives, then at most as many fold into the
+    // group as arrived. Static turns are settled and fold everything.
+    const runningShells = useBackgroundShellsStore((state) => state.byId);
+    const activeSessionIds = useGlobalSessionStatusStore((state) => state.activeSessionIds);
+    const streamingActivityParts = React.useMemo(
+        () => (streamingTurn ? toolActivityParts(streamingTurn.assistantMessages, showReasoningTraces) : EMPTY_ACTIVITY_PARTS),
+        [showReasoningTraces, streamingTurn],
+    );
+    const streamingToolTail = useLiveToolTail(
+        streamingTurn?.turnId ?? '',
+        streamingActivityParts,
+        sessionIsWorking && Boolean(streamingTurn),
+    );
+
+    // A plan belongs to a turn's content, not to a render pass: a settled turn
+    // keeps its plan while the live turn streams, so its rows keep their
+    // identity and mount once.
+    const toolActivityPlanCacheRef = React.useRef<Map<string, CachedToolActivityPlan>>(new Map());
+    const toolActivityPlans = React.useMemo(() => {
+        const plans = new Map<string, ToolActivityPlan>();
+        const cache = new Map<string, CachedToolActivityPlan>();
+        for (const entry of allEntries) {
+            if (entry.kind !== 'turn') continue;
+            const { turn } = entry;
+            const live = entry === trailingStreamingEntry;
+            const tail = live ? streamingToolTail : undefined;
+            const previous = toolActivityPlanCacheRef.current.get(turn.turnId);
+            if (previous
+                && previous.messages === turn.assistantMessages
+                && previous.tail === tail
+                && previous.runningShells === runningShells
+                && previous.activeSessionIds === activeSessionIds) {
+                cache.set(turn.turnId, previous);
+                plans.set(turn.turnId, previous.plan);
+                continue;
+            }
+            const parts = live ? streamingActivityParts : toolActivityParts(turn.assistantMessages, showReasoningTraces);
+            const runningBackground = runningBackgroundToolIds(parts, runningShells, activeSessionIds);
+            const plan = planToolActivity(parts, false, false, tail, runningBackground);
+            cache.set(turn.turnId, { messages: turn.assistantMessages, tail, runningShells, activeSessionIds, plan });
+            plans.set(turn.turnId, plan);
+        }
+        toolActivityPlanCacheRef.current = cache;
+        return plans;
+    }, [activeSessionIds, allEntries, runningShells, showReasoningTraces, streamingActivityParts, streamingToolTail, trailingStreamingEntry]);
+
     const previousRowsRef = React.useRef<RenderRow[]>([]);
     const rows = React.useMemo(() => streamPerfMeasure('ui.message_list.render_rows_ms', () => {
         const next = buildTimelineRows(allEntries, {
             collapsedActivity: !defaultActivityExpanded,
             expandedTurns: turnExpansion,
             showReasoningTraces,
+            toolActivityPlans,
         }, previousRowsRef.current);
         previousRowsRef.current = next;
         return next;
-    }), [allEntries, defaultActivityExpanded, showReasoningTraces, turnExpansion]);
+    }), [allEntries, defaultActivityExpanded, showReasoningTraces, toolActivityPlans, turnExpansion]);
 
     // The prompt rows the list keeps on top while their turn scrolls under them.
     const stickyRowIndices = React.useMemo(() => {

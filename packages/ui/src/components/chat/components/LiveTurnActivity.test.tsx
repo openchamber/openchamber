@@ -22,6 +22,13 @@ import { TurnFold, TurnPagesRow } from './LiveTurnActivity';
 import { useTurnFoldContexts } from './useTurnFold';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './liveActivityContext';
 import { buildTimelineRows } from '../lib/turns/timelineRows';
+import {
+    advanceLiveToolTail,
+    planToolActivity,
+    toolActivityParts,
+    ToolActivityPlanContext,
+    type ToolActivityPlan,
+} from '../lib/turns/toolActivityGrouping';
 import { MessageSliceContext } from '../message/messageSliceContext';
 import { useWorkflowRunsStore } from '@/lib/workflows/store';
 import type { WorkflowRun } from '@/lib/workflows/model';
@@ -98,15 +105,18 @@ function turn(messages: ChatMessageEntry[]): TurnRecord {
 }
 
 // The rows a turn under a fold becomes in the list, drawn the way MessageList draws them.
-function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
+function TurnRows({ record, retired, expanded, onToggle, renderMessage, collapsedActivity = true, plan }: {
     record: TurnRecord;
     retired: boolean;
     expanded: boolean;
     onToggle: () => void;
     renderMessage: (message: ChatMessageEntry) => React.ReactNode;
+    collapsedActivity?: boolean;
+    plan?: ToolActivityPlan;
 }) {
     const rows = buildTimelineRows([{ kind: 'turn', key: 'turn', turn: record, isLastTurn: true, hasLaterAssistant: retired }], {
-        collapsedActivity: true, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+        collapsedActivity, expandedTurns: new Map([[record.turnId, expanded]]), showReasoningTraces: true,
+        toolActivityPlans: plan ? new Map([[record.turnId, plan]]) : undefined,
     }, []);
     const finalMessageId = rows.find((row) => row.kind === 'turn-fold')?.finalMessageId;
     const { hoistedPages, finalContext } = useTurnFoldContexts(record, retired, expanded, finalMessageId);
@@ -121,19 +131,23 @@ function TurnRows({ record, retired, expanded, onToggle, renderMessage }: {
             const message = record.assistantMessages.find((candidate) => candidate.info.id === row.messageId);
             if (!message) return null;
             return <MessageSliceContext.Provider key={row.key} value={row.slice}>
-                {row.final ? <LiveFinalActivityContext.Provider value={finalContext}>{renderMessage(message)}</LiveFinalActivityContext.Provider> : renderMessage(message)}
+                <ToolActivityPlanContext.Provider value={row.underFold ? null : row.toolActivityPlan}>
+                    {row.final ? <LiveFinalActivityContext.Provider value={finalContext}>{renderMessage(message)}</LiveFinalActivityContext.Provider> : renderMessage(message)}
+                </ToolActivityPlanContext.Provider>
             </MessageSliceContext.Provider>;
         })}
     </LiveTurnHoistedPagesContext.Provider>;
 }
 
-function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn }: {
+function Harness({ record, retired = false, changedFiles, isLatestTurn = true, onCopyMessage, onCopyTurn, collapsedActivity = true, plan }: {
     record: TurnRecord;
     retired?: boolean;
     changedFiles?: TurnChangedFile[];
     isLatestTurn?: boolean;
     onCopyMessage?: (messageId: string) => boolean;
     onCopyTurn?: () => Promise<boolean>;
+    collapsedActivity?: boolean;
+    plan?: ToolActivityPlan;
 }) {
     const [expanded, setExpanded] = React.useState(false);
     const renderMessage = (message: ChatMessageEntry) => (
@@ -160,7 +174,8 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true, o
             <SyncProvider sdk={sdk} directory="/project">
                 <I18nProvider>
                     <TurnRows record={record} retired={retired} expanded={expanded}
-                        onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage} />
+                        onToggle={() => setExpanded((value) => !value)} renderMessage={renderMessage}
+                        collapsedActivity={collapsedActivity} plan={plan} />
                 </I18nProvider>
             </SyncProvider>
         </ThemeSystemContext.Provider>
@@ -184,6 +199,7 @@ describe('live Activity with the real message body', () => {
             Node: win.Node, NodeList: win.NodeList, Element: win.Element, HTMLElement: win.HTMLElement, SVGElement: win.SVGElement,
             HTMLAnchorElement: win.HTMLAnchorElement,
             MutationObserver: win.MutationObserver, ResizeObserver: win.ResizeObserver,
+            CustomEvent: win.CustomEvent, Event: win.Event,
             requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win),
             getComputedStyle: win.getComputedStyle.bind(win), IS_REACT_ACT_ENVIRONMENT: true,
         };
@@ -590,5 +606,184 @@ describe('live Activity with the real message body', () => {
         await act(async () => changedFilesToggle()?.click());
         expect(container.textContent).toContain('file-4.ts');
         expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(0);
+    });
+
+    test('groups completed calls across messages and leaves the running call as its own row', async () => {
+        if (readPart.type !== 'tool') throw new Error('Expected tool fixture');
+        const first = assistant('progress', [text('intro', 'Checking the source'), readPart], 'tool-calls');
+        const secondRead = { ...readPart, id: 'second', callID: 'second', messageID: 'next' };
+        const running: Part = {
+            ...readPart, id: 'running', callID: 'running', messageID: 'next',
+            state: { status: 'running', input: { filePath: '/project/live.ts' }, time: { start: 1 } },
+        };
+        const record = turn([first, assistant('next', [secondRead, running], 'tool-calls')]);
+        const plan = planToolActivity(toolActivityParts(record.assistantMessages, true), false);
+        await act(async () => root.render(<Harness record={record} collapsedActivity={false} plan={plan} />));
+        const group = container.querySelector<HTMLDetailsElement>('details[data-tool-activity-group]');
+        expect(group?.open).toBe(false);
+        expect(group?.querySelector('summary')?.textContent).toContain('read × 2');
+        expect(container.textContent).toContain('Checking the source');
+        expect(container.textContent).toContain('live.ts');
+        expect(group?.contains(container.querySelector('[title="/project/live.ts"]'))).toBe(false);
+        await act(async () => { if (group) group.open = true; });
+        expect(group?.open).toBe(true);
+    });
+
+    test('keeps the live row in place after its call finishes and folds it once another call arrives', async () => {
+        if (readPart.type !== 'tool') throw new Error('Expected tool fixture');
+        const first = assistant('progress', [readPart, { ...readPart, id: 'second', callID: 'second' }], 'tool-calls');
+        const running: Part = { ...readPart, id: 'live', callID: 'live', messageID: 'next', state: { status: 'running', input: { filePath: '/project/live.ts' }, time: { start: 3 } } };
+        const completed: Part = { ...running, state: { status: 'completed', input: { filePath: '/project/live.ts' }, output: 'done', time: { start: 3, end: 4 } } };
+        const later: Part = { ...running, id: 'later', callID: 'later', messageID: 'later', state: { status: 'running', input: { filePath: '/project/later.ts' }, time: { start: 5 } } };
+        const withLive = turn([first, assistant('next', [running])]);
+        let tail = advanceLiveToolTail({ turnId: 'turn', ids: [], visible: new Set() }, withLive.turnId, toolActivityParts(withLive.assistantMessages, true), true);
+        await act(async () => root.render(<Harness record={withLive} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(withLive.assistantMessages, true), false, false, tail.visible)} />));
+        const group = container.querySelector<HTMLDetailsElement>('details[data-tool-activity-group]');
+        const row = container.querySelector('[data-fixture-message="next"]');
+        expect(group?.querySelector('summary')?.textContent).toContain('read × 2');
+        expect(row?.textContent).toContain('live.ts');
+
+        const settled = turn([first, assistant('next', [completed], 'tool-calls')]);
+        tail = advanceLiveToolTail(tail, settled.turnId, toolActivityParts(settled.assistantMessages, true), true);
+        await act(async () => root.render(<Harness record={settled} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(settled.assistantMessages, true), false, false, tail.visible)} />));
+        expect(container.querySelector('details[data-tool-activity-group]')).toBe(group);
+        expect(container.querySelector('[data-fixture-message="next"]')).toBe(row);
+        expect(row?.textContent).toContain('live.ts');
+        expect(group?.querySelector('summary')?.textContent).toContain('read × 2');
+
+        const nextTurn = turn([first, assistant('next', [completed], 'tool-calls'), assistant('later', [later])]);
+        tail = advanceLiveToolTail(tail, nextTurn.turnId, toolActivityParts(nextTurn.assistantMessages, true), true);
+        await act(async () => root.render(<Harness record={nextTurn} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(nextTurn.assistantMessages, true), false, false, tail.visible)} />));
+        expect(container.querySelector('details[data-tool-activity-group]')).toBe(group);
+        expect(group?.querySelector('summary')?.textContent).toContain('read × 3');
+        expect(container.textContent).toContain('later.ts');
+    });
+
+    test('shows no group header for one finished call, even with a running call below', async () => {
+        if (readPart.type !== 'tool') throw new Error('Expected tool fixture');
+        const first = assistant('progress', [text('intro', 'Checking'), readPart], 'tool-calls');
+        const running: Part = { ...readPart, id: 'live', callID: 'live', messageID: 'next', state: { status: 'running', input: { filePath: '/project/live.ts' }, time: { start: 3 } } };
+        const completed: Part = { ...running, state: { status: 'completed', input: { filePath: '/project/live.ts' }, output: 'done', time: { start: 3, end: 4 } } };
+        const withLive = turn([first, assistant('next', [running])]);
+        let tail = advanceLiveToolTail({ turnId: 'turn', ids: [], visible: new Set() }, withLive.turnId, toolActivityParts(withLive.assistantMessages, true), true);
+        await act(async () => root.render(<Harness record={withLive} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(withLive.assistantMessages, true), false, false, tail.visible)} />));
+        expect(container.querySelectorAll('details[data-tool-activity-group]')).toHaveLength(0);
+        expect(container.textContent).toContain('live.ts');
+
+        // The lone finished call keeps its row until more work arrives.
+        const settled = turn([first, assistant('next', [completed], 'tool-calls')]);
+        tail = advanceLiveToolTail(tail, settled.turnId, toolActivityParts(settled.assistantMessages, true), true);
+        await act(async () => root.render(<Harness record={settled} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(settled.assistantMessages, true), false, false, tail.visible)} />));
+        expect(container.querySelectorAll('details[data-tool-activity-group]')).toHaveLength(0);
+        expect(container.textContent).toContain('live.ts');
+
+        // The next call folds the finished one into a group.
+        const later: Part = { ...completed, id: 'later', callID: 'later', messageID: 'later', state: { status: 'running', input: { filePath: '/project/later.ts' }, time: { start: 5 } } };
+        const next = turn([first, assistant('next', [completed], 'tool-calls'), assistant('later', [later])]);
+        tail = advanceLiveToolTail(tail, next.turnId, toolActivityParts(next.assistantMessages, true), true);
+        await act(async () => root.render(<Harness record={next} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(next.assistantMessages, true), false, false, tail.visible)} />));
+        const groups = container.querySelectorAll('details[data-tool-activity-group]');
+        expect(groups).toHaveLength(1);
+        expect(groups[0].querySelector('summary')?.textContent).toContain('read × 2');
+        expect(container.textContent).toContain('later.ts');
+    });
+
+    test('lists every tool without an ellipsis when the group is wide with many kinds', async () => {
+        if (readPart.type !== 'tool') throw new Error('Expected tool fixture');
+        const names = ['write', 'read', 'edit', 'glob', 'grep', 'shell'];
+        const parts = names.map((name) => ({ ...readPart, id: name, callID: name, tool: name, messageID: name }));
+        const messages = parts.map((part) => assistant(part.messageID, [part], 'tool-calls'));
+        const record = turn(messages);
+        await act(async () => root.render(<Harness record={record} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(record.assistantMessages, true), false)} />));
+        const summary = container.querySelector('details[data-tool-activity-group] summary');
+        expect(summary).not.toBeNull();
+        expect(summary?.textContent?.startsWith('6 Tool Calls')).toBe(true);
+        expect(/6 Tool Calls\s/.test(summary?.textContent ?? '')).toBe(true);
+        expect(summary?.textContent).not.toContain('Tool Calls ·');
+        expect(summary?.querySelector('.tabular-nums')?.textContent).toBe('6');
+        for (const name of names) expect(summary?.textContent).toContain(name);
+        expect(summary?.textContent).not.toContain('…');
+        expect(summary?.querySelector('.truncate')).toBeNull();
+    });
+
+    test('keeps a group open when earlier calls are revealed above it', async () => {
+        if (readPart.type !== 'tool') throw new Error('Expected tool fixture');
+        const first = { ...readPart, id: 'group-a', callID: 'group-a', messageID: 'group' };
+        const second = { ...readPart, id: 'group-b', callID: 'group-b', messageID: 'group' };
+        const grouped = turn([assistant('group', [first, second], 'tool-calls')]);
+        await act(async () => root.render(<Harness record={grouped} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(grouped.assistantMessages, true), false)} />));
+        const details = container.querySelector<HTMLDetailsElement>('details[data-tool-activity-group]');
+        expect(details?.open).toBe(false);
+        await act(async () => {
+            if (!details) return;
+            details.open = true;
+            details.dispatchEvent(new Event('toggle'));
+        });
+        expect(details?.open).toBe(true);
+
+        const earlier = { ...readPart, id: 'earlier', callID: 'earlier', messageID: 'earlier' };
+        const record = turn([assistant('earlier', [earlier], 'tool-calls'), assistant('group', [first, second], 'tool-calls')]);
+        await act(async () => root.render(<Harness record={record} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(record.assistantMessages, true), false)} />));
+        const after = container.querySelector<HTMLDetailsElement>('details[data-tool-activity-group]');
+        expect(after?.querySelector('summary')?.textContent).toContain('read × 3');
+        expect(after?.open).toBe(true);
+    });
+
+    test('groups a background shell once its job is no longer running', async () => {
+        if (readPart.type !== 'tool') throw new Error('Expected tool fixture');
+        const call = (id: string): Part => ({ ...readPart, id, callID: id, messageID: id });
+        const background: Part = {
+            ...readPart, id: 'bg', callID: 'bg', tool: 'shell', messageID: 'bg',
+            state: { status: 'completed', input: {}, output: '', metadata: { status: 'running', shellID: 'sh-1' }, time: { start: 1, end: 2 } },
+        };
+        const parts = [call('r1'), background, call('r2'), call('r3')];
+        const record = turn([assistant('m', parts, 'tool-calls')]);
+        const activity = toolActivityParts(record.assistantMessages, true);
+        await act(async () => root.render(<Harness record={record} collapsedActivity={false}
+            plan={planToolActivity(activity, false, false, undefined, new Set(['bg']))} />));
+        const whileRunning = [...container.querySelectorAll('details[data-tool-activity-group] summary')]
+            .map((summary) => summary.textContent ?? '');
+        expect(whileRunning.some((text) => text.includes('read × 2'))).toBe(true);
+        expect(whileRunning.some((text) => text.includes('shell'))).toBe(false);
+
+        await act(async () => root.render(<Harness record={record} collapsedActivity={false}
+            plan={planToolActivity(activity, false, false, undefined, new Set())} />));
+        const finished = [...container.querySelectorAll('details[data-tool-activity-group] summary')]
+            .map((summary) => summary.textContent ?? '');
+        expect(finished).toHaveLength(1);
+        expect(finished[0]).toContain('4 Tool Calls');
+        expect(finished[0]).toContain('shell');
+    });
+
+    test('releases transcript follow when a group opens', async () => {
+        if (readPart.type !== 'tool') throw new Error('Expected tool fixture');
+        const record = turn([assistant('a', [
+            { ...readPart, id: 'a', callID: 'a', messageID: 'a' },
+            { ...readPart, id: 'b', callID: 'b', messageID: 'b' },
+        ], 'tool-calls')]);
+        await act(async () => root.render(<Harness record={record} collapsedActivity={false}
+            plan={planToolActivity(toolActivityParts(record.assistantMessages, true), false)} />));
+        const summary = container.querySelector<HTMLElement>('details[data-tool-activity-group] summary');
+        expect(summary).not.toBeNull();
+        let expands = 0;
+        const listener = () => { expands += 1; };
+        container.addEventListener('openchamber:row-expand', listener);
+        await act(async () => {
+            // Activation inputs run before the details opens, unlike `toggle`.
+            summary?.dispatchEvent(new window.Event('pointerdown', { bubbles: true }));
+            summary?.click();
+        });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        container.removeEventListener('openchamber:row-expand', listener);
+        expect(expands).toBeGreaterThanOrEqual(1);
     });
 });

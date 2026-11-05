@@ -2,6 +2,7 @@ import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 import { answerChunkCuts } from './answerChunks';
 import { getLiveFinalMessage, getShownPages, hasLiveActivity } from './liveActivity';
+import { EMPTY_TOOL_ACTIVITY_PLAN, type ToolActivityPlan } from './toolActivityGrouping';
 import type { TimelineEntry } from './timelineEntries';
 import type { ChatMessageEntry } from './types';
 
@@ -45,6 +46,8 @@ export type TimelineRow =
         slice: MessageSlice | null;
         /** The turn's final answer under a fold (collapsed activity mode). */
         final: boolean;
+        /** The turn's tool-call groups; an empty plan groups nothing. */
+        toolActivityPlan: ToolActivityPlan;
     } & TurnRowFields);
 
 type TurnRowFields = {
@@ -64,6 +67,8 @@ export type TimelineRowsOptions = {
     collapsedActivity: boolean;
     expandedTurns: ReadonlyMap<string, boolean>;
     showReasoningTraces: boolean;
+    /** Each turn's tool-call groups, keyed by turn id (`toolActivityGrouping.ts`). */
+    toolActivityPlans?: ReadonlyMap<string, ToolActivityPlan>;
 };
 
 const isMessageCompleted = (message: ChatMessageEntry): boolean => (
@@ -101,6 +106,7 @@ const sliceKey = (cut: TextCut) => `${cut.partId}:${cut.offset}`;
 
 const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[] => {
     const { turn } = entry;
+    const toolActivityPlan = options.toolActivityPlans?.get(turn.turnId) ?? EMPTY_TOOL_ACTIVITY_PLAN;
     const underFold = options.collapsedActivity && hasLiveActivity(turn, options.showReasoningTraces);
     const finalMessage = underFold ? getLiveFinalMessage(turn.assistantMessages) : undefined;
     const fields = { entry, underFold, finalMessageId: finalMessage?.info.id, gapBelow: false };
@@ -109,7 +115,7 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
         const messageId = message.info.id;
         const cuts = messageCuts(message, options.showReasoningTraces);
         if (cuts.length === 0) {
-            rows.push({ kind: 'turn-message', key: `step:${messageId}`, ...fields, messageId, slice: null, final });
+            rows.push({ kind: 'turn-message', key: `step:${messageId}`, ...fields, messageId, slice: null, final, toolActivityPlan });
             return;
         }
         cuts.forEach((cut, index) => {
@@ -121,10 +127,11 @@ const turnRows = (entry: TurnEntry, options: TimelineRowsOptions): TimelineRow[]
                 messageId,
                 slice: from ? { from, to: cut, index, count: cuts.length + 1 } : { to: cut, index, count: cuts.length + 1 },
                 final,
+                toolActivityPlan,
             });
         });
         const last = cuts[cuts.length - 1];
-        rows.push({ kind: 'turn-message', key: `step:${messageId}:${sliceKey(last)}`, ...fields, messageId, slice: { from: last, index: cuts.length, count: cuts.length + 1 }, final });
+        rows.push({ kind: 'turn-message', key: `step:${messageId}:${sliceKey(last)}`, ...fields, messageId, slice: { from: last, index: cuts.length, count: cuts.length + 1 }, final, toolActivityPlan });
     };
 
     if (underFold) {
@@ -166,7 +173,9 @@ const isSameRow = (previous: TimelineRow, next: TimelineRow): boolean => {
     if (previous.kind === 'ungrouped' || next.kind === 'ungrouped') return true;
     if (previous.gapBelow !== next.gapBelow || previous.underFold !== next.underFold || previous.finalMessageId !== next.finalMessageId) return false;
     if (previous.kind === 'turn-message' && next.kind === 'turn-message') {
-        return previous.messageId === next.messageId && previous.final === next.final && isSameSlice(previous.slice, next.slice);
+        return previous.messageId === next.messageId && previous.final === next.final
+            && previous.toolActivityPlan === next.toolActivityPlan
+            && isSameSlice(previous.slice, next.slice);
     }
     return true;
 };

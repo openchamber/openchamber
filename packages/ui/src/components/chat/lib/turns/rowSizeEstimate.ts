@@ -2,6 +2,7 @@ import type { Part } from '@/lib/opencode/model';
 import { isShownInPlace } from '@/lib/opencode/tools';
 import { filterVisibleParts, isEmptyTextPart } from '../../message/partUtils';
 import { getShownPages, isSettledAsk, type ShownPart } from './liveActivity';
+import { isToolActivityGroupOpen } from './toolActivityGrouping';
 import type { TimelineRow } from './timelineRows';
 import type { ChatMessageEntry } from './types';
 
@@ -154,6 +155,17 @@ const messageRowHeight = (row: TurnRowOf<'turn-message'>, metrics: RowSizeMetric
         } else if (part.type === 'tool' && isShownInPlace(part.tool, part.state)) {
             if (!hoisted.some((page) => page.id === part.id)) height += SHOWN_PAGE_PX;
         } else if (part.type === 'tool') {
+            // A folded group is one header line; open, it draws its calls. A
+            // row under a fold groups per message instead (no plan context).
+            const planned = row.underFold ? undefined : row.toolActivityPlan.get(part.id);
+            if (planned) {
+                if (!planned.first) continue;
+                height += metrics.lineHeight;
+                if (isToolActivityGroupOpen(planned.parts)) {
+                    for (const groupedPart of planned.parts) height += toolHeight(groupedPart, metrics);
+                }
+                continue;
+            }
             height += toolHeight(part, metrics);
         } else {
             height += metrics.lineHeight;

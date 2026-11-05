@@ -55,6 +55,8 @@ import { Icon } from "@/components/icon/Icon";
 import { formatTimestampForDisplay } from './timeFormat';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool } from './parts/toolRenderUtils';
+import { ToolActivityGroup } from './parts/ToolActivityGroup';
+import { isGroupableTool, ToolActivityPlanContext } from '../lib/turns/toolActivityGrouping';
 import { ShownPartCard, ShownToolCard } from './parts/ShownToolCard';
 import { isShownInPlace } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
@@ -1243,6 +1245,7 @@ const AssistantMessageBody = React.memo(({
     extraActions,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
+    const toolActivityPlan = React.useContext(ToolActivityPlanContext);
     const chatSurfaceMode = useChatSurfaceMode();
     const streamPhase = _streamPhase;
     void _allowAnimation;
@@ -1717,6 +1720,40 @@ const AssistantMessageBody = React.memo(({
         // A working turn with Activity collapsed shows only its latest rows;
         // the first rows of the message it cuts into are left out here.
         let rowsToSkip = activityRowSkip?.messageId === messageId ? activityRowSkip.rows : 0;
+        // One call's row, drawn the same inside a group and on its own.
+        const renderToolRow = (toolPart: ToolPartType) => {
+            const toolName = toolPart.tool?.toLowerCase() ?? '';
+            return (
+                <FadeInOnReveal key={`tool-${toolPart.id}`}>
+                    {isExpandableTool(toolName) ? (
+                        <ToolPart
+                            part={toolPart}
+                            isExpanded={expandedTools.has(toolPart.id)}
+                            onToggle={onToggleTool}
+                            isMobile={isMobile}
+                            alwaysShowActions={alwaysShowMessageActions}
+                            onShowPopup={onShowPopup}
+                            animateTailText={false}
+                        />
+                    ) : (
+                        <StaticToolRow
+                            toolName={toolName}
+                            activities={[
+                                {
+                                    id: toolPart.id,
+                                    turnId: '',
+                                    messageId: toolPart.messageID,
+                                    partIndex: 0,
+                                    part: toolPart,
+                                    kind: 'tool' as const,
+                                },
+                            ]}
+                            animateTailText={false}
+                        />
+                    )}
+                </FadeInOnReveal>
+            );
+        };
         // A slice starts at a part or inside a text, and ends at or inside
         // another (or the same) one; the parts outside it are other rows'.
         let sliceStarted = !slice?.from;
@@ -1830,7 +1867,6 @@ const AssistantMessageBody = React.memo(({
 
             if (part.type === 'tool') {
                 const toolPart = part as ToolPartType;
-                const toolName = toolPart.tool?.toLowerCase() ?? '';
 
                 // A session notice that landed during this step (see
                 // `attachSyntheticContext`) draws as its own info row.
@@ -1861,44 +1897,47 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
-                // Expandable tools: bash, edit, write, task, question — individual rows
-                if (isExpandableTool(toolName)) {
-                    rendered.push(
-                        <FadeInOnReveal key={`tool-${toolPart.id}`}>
-                            <ToolPart
-                                part={toolPart}
-                                isExpanded={expandedTools.has(toolPart.id)}
-                                onToggle={onToggleTool}
-                                isMobile={isMobile}
-                                alwaysShowActions={alwaysShowMessageActions}
-                                onShowPopup={onShowPopup}
-                                animateTailText={false}
-                            />
-                        </FadeInOnReveal>
-                    );
-                    i++;
+                // A planned group draws every call it holds here, in its first
+                // part's message, so a run crossing messages folds once.
+                const planned = toolActivityPlan?.get(toolPart.id);
+                if (planned) {
+                    if (planned.first) {
+                        rendered.push(
+                            <ToolActivityGroup key={`tool-group-${toolPart.id}`} parts={planned.parts} partial={planned.partial}>
+                                {planned.parts.map(renderToolRow)}
+                            </ToolActivityGroup>,
+                        );
+                    }
+                    i += 1;
                     continue;
                 }
 
-                // Static tools: one row per tool call (no grouping)
-                rendered.push(
-                    <FadeInOnReveal key={`static-tools-${toolPart.id}`}>
-                        <StaticToolRow
-                            toolName={toolName}
-                            activities={[
-                                {
-                                    id: toolPart.id,
-                                    turnId: '',
-                                    messageId,
-                                    partIndex: 0,
-                                    part: toolPart,
-                                    kind: 'tool' as const,
-                                },
-                            ]}
-                            animateTailText={false}
-                        />
-                    </FadeInOnReveal>
-                );
+                // Outside a turn's plan (a folded Activity, an ungrouped list)
+                // a message still folds its own consecutive finished calls.
+                if (!toolActivityPlan && isGroupableTool(toolPart)) {
+                    const group: ToolPartType[] = [];
+                    let end = i;
+                    while (end < visibleParts.length) {
+                        const candidate = visibleParts[end];
+                        if (candidate.type !== 'tool' || !isGroupableTool(candidate)) break;
+                        group.push(candidate);
+                        end += 1;
+                    }
+                    // One finished call stays a direct row; a running call below
+                    // it gets its own row instead of wrapping the pair.
+                    if (group.length > 1) {
+                        rendered.push(
+                            <ToolActivityGroup key={`tool-group-${toolPart.id}`} parts={group}
+                                partial={Boolean(activityRowSkip?.messageId === messageId && activityRowSkip.rows > 0)}>
+                                {group.map(renderToolRow)}
+                            </ToolActivityGroup>,
+                        );
+                        i = end;
+                        continue;
+                    }
+                }
+
+                rendered.push(renderToolRow(toolPart));
                 i++;
                 continue;
             }
@@ -1937,6 +1976,7 @@ const AssistantMessageBody = React.memo(({
         effectiveStreamPhase,
         showReasoningTraces,
         slice,
+        toolActivityPlan,
         turnGroupingContext,
         visibleParts,
     ]);

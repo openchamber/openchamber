@@ -68,6 +68,40 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - `lib/turns/liveActivity.ts` owns final-answer and interruption boundaries.
   - `lib/turns/liveActivitySummary.ts` derives the report from tool results.
 
+- `ToolActivityGroup.tsx`
+  - Folds consecutive completed tool calls. Running, interactive,
+    page, attachment-bearing, and still-running background shell or
+    subagent calls retain their own rows; a background call settles as
+    `completed` while its job keeps running, so only the live shell or subagent
+    status tells it apart. Once that job ends, the call joins a group like any
+    other finished call.
+  - `lib/turns/toolActivityGrouping.ts` plans a turn's runs across message
+    boundaries; `MessageList` builds the plan and hands it to a message row
+    through `ToolActivityPlanContext`. `MessageBody` draws the group at its
+    first call and skips the same parts in the messages that follow, so a run
+    that spans steps folds once. A single finished call stays a direct row,
+    also when a running call follows it; only two or more consecutive finished
+    calls get a group header.
+  - The header reads `8 Tool Calls (1 failed) write · read · edit × 2`; its
+    count and label use the locale's plural form, the failure count is red, and
+    the tool list is secondary text that wraps rather than truncating. A count
+    prefixed with `+` is a lower bound where a folded Activity hides earlier
+    rows.
+  - The disclosure survives a remount, a change of the row that owns it, and
+    parts joining or being trimmed: a logical group id, carried by every part
+    seen in the group, holds the open state. It is released on `pointerdown`,
+    `keydown` (Enter/Space) and `click` before the disclosure opens, so the
+    transcript stops following the end before its content grows.
+  - While the latest turn is working, its visible tool tail keeps a call on
+    screen when its result arrives. New calls replace up to the same number of
+    completed tail rows; parallel calls that are still running stay visible.
+    Text, a page, a question, a stopped turn or the end of the turn ends this
+    tail. The state is local to the mounted list and follows the live session
+    status; historical records alone never establish that a turn is working.
+  - `lib/turns/rowSizeEstimate.ts` counts a folded group as one header line and
+    an open one as its calls, so a long tool run placed above the reader does
+    not shift the viewport by the height it no longer has.
+
 - `ShownToolCard.tsx`
   - What a call drawn in place of its row shows (`isShownInPlace` in `@/lib/opencode/tools`): the run a completed `workflow.run` call proposed (`proposedWorkflowRunId`, read from the call's result envelope), the images a completed `image.generate` call saved (`generatedImagePaths`, drawn by `GeneratedImages.tsx` through the chat's Markdown media, so they load lazily and open in the gallery; each has a download above it that saves the file itself at full size through the same grant, with `saveFile.ts`, which a shown page's download uses too), the card of an `openchamber_secret` call (`requestedSecret`), else the page of an `openchamber_render` call. The user is meant to see all of them, so they are hoisted to the answer with the turn's pages when Activity is collapsed. A form or secret card that asked the user is hoisted only while it waits: once answered, answered in the chat instead, or stopped, it is a step like the question tool's card and folds with Activity (`getShownPages`). It was hoisted for good before, which left every answered form at full height above the reply. A settled form right after text a collapsed Activity keeps in view stays out of the fold as one line saying how it was answered (`SettledAskLine`): with the form folded away, that text and the reply read as one passage with the question gone from between them.
 - `SecretRequestCard.tsx`
@@ -427,8 +461,9 @@ was removed; a stored `chatRenderMode: 'sorted'` reads as Collapsed Activity
 (`lib/settings/parsers.ts`, `parseActivityRenderMode`). Expanded preserves the
 timeline without a turn disclosure. Collapsed adds one Activity header after
 completion or interruption while preserving the original rows, their order, and
-their individual controls. It adds no tool subgroups, side line, height cap, or
-inner scroller. Subagent calls alone do not make a turn collapsible.
+their individual controls. Consecutive finished tool calls can fold into a
+subgroup. It adds no side line, height cap, or inner scroller. Subagent calls
+alone do not make a turn collapsible.
 
 The active turn has its Activity header from the first step. Folded, it shows
 only the latest 7 rows (a text, a reasoning block or a tool call each;

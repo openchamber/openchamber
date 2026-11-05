@@ -3,6 +3,12 @@ import type { AssistantMessage, Metadata, Part, ReasoningPart, TextPart, ToolPar
 import { projectTurnRecords } from './projectTurnRecords';
 import { estimateTimelineRowSize, type RowSizeMetrics } from './rowSizeEstimate';
 import { buildTimelineRows, type TimelineRow } from './timelineRows';
+import {
+    planToolActivity,
+    setToolActivityGroupOpen,
+    toolActivityParts,
+    trackToolActivityGroup,
+} from './toolActivityGrouping';
 import type { TimelineEntry } from './timelineEntries';
 import type { ChatMessageEntry } from './types';
 
@@ -49,6 +55,30 @@ test('reasoning shown and each tool add a line', () => {
         assistant('answer', [text('done', 'Done.')]),
     ]);
     expect(estimateTimelineRowSize(messageRow(rows, 'step'), metrics)).toBe(108);
+});
+
+test('a folded run is one header line, and an opened one adds its calls', () => {
+    const turn = projectTurnRecords([
+        { info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 } }, parts: [text('prompt', 'Explain')] },
+        assistant('step', [tool('a', 'read'), tool('b', 'grep')]),
+        assistant('answer', [text('done', 'Done.')]),
+    ]).turns[0]!;
+    const entry: TimelineEntry = { kind: 'turn', key: `turn:${turn.turnId}`, turn, isLastTurn: true };
+    const plan = planToolActivity(toolActivityParts(turn.assistantMessages, true), false);
+    const first = plan.get('a');
+    const rows = buildTimelineRows([entry], {
+        collapsedActivity: false, expandedTurns: new Map(), showReasoningTraces: true,
+        toolActivityPlans: new Map([[turn.turnId, plan]]),
+    }, []);
+    const step = messageRow(rows, 'step');
+    const groupId = trackToolActivityGroup(first!.parts);
+    setToolActivityGroupOpen(groupId, false);
+    expect(estimateTimelineRowSize(step, metrics)).toBe(36);
+
+    setToolActivityGroupOpen(groupId, true);
+    expect(estimateTimelineRowSize(step, metrics)).toBe(108);
+    setToolActivityGroupOpen(groupId, false);
+    expect(estimateTimelineRowSize(step, metrics)).toBe(36);
 });
 
 test('a patch across many files grows with the rows of files it lists', () => {
