@@ -199,6 +199,8 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 | `readSettings()` | nothing | The fields of `contributes.integration.settings`, the `secret` ones included |
 | `needsConfiguration(message)` | nothing | Shows `message` on the extension's card until cleared with `null` |
 
+A service sends at most 60 prompts an hour, counting starts, sends and retries, and sets its status at most 30 times a minute. Panel events stop at 30 a second and 256,000 characters a second. Past a limit the call answers 429 and does nothing.
+
 `sessionControl` shows in the approval dialog as its own line, and `content: true` adds `transcript`. A failed session call answers what the session service told the caller, never its internals.
 
 ## Running with nobody asking
