@@ -1,6 +1,6 @@
 # Extension gallery
 
-Fourteen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Fifteen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |

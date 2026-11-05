@@ -587,6 +587,20 @@ export const ContextSurfacePanes: React.FC = () => {
   // The header slot goes to the pane on screen in its zone only.
   const headerSlotFor = (zone: ContextZone, active: boolean): HTMLElement | null => (active ? headerSlots[zone] : null);
 
+
+  // A tab restored from the last run starts its page the first time it shows:
+  // an extension nobody looked at this run runs nothing. After that it stays
+  // mounted, which keeps the page's state while another tab is in front.
+  const [seenPluginTabs, setSeenPluginTabs] = React.useState<ReadonlySet<string>>(() => new Set());
+  const newlyShownPluginTabs = pluginTabs.filter((tab) => {
+    if (seenPluginTabs.has(tab.id)) return false;
+    const zone = zoneFor(tab.mode);
+    return zone.isOpen && zone.activeTab?.id === tab.id;
+  });
+  if (newlyShownPluginTabs.length > 0) {
+    setSeenPluginTabs(new Set([...seenPluginTabs, ...newlyShownPluginTabs.map((tab) => tab.id)]));
+  }
+
   return (
     <>
       {hasFileTabs ? (
@@ -738,6 +752,7 @@ export const ContextSurfacePanes: React.FC = () => {
       {pluginTabs.map((tab) => {
         if (!isPluginContextPanelMode(tab.mode)) return null;
         const pluginZone = zoneFor(tab.mode);
+        if (!seenPluginTabs.has(tab.id)) return null;
         // A shared-surface extension's picture is drawn by the host and
         // mounted only while shown, so an unwatched surface holds no socket
         // and its service can idle out. Its own page, when it has one, is
