@@ -195,7 +195,7 @@ Twoja strona wie o sesji tylko wtedy, gdy ta jest otwarta. Twoja usługa może w
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-Cztery zdarzenia to `turn-finished` (agent skończył i na nic nie czeka: nie działa żaden subagent, nie ma otwartego uprawnienia ani pytania, nie ma kroku celu), `turn-failed`, `permission-asked` i `question-asked`. Tura zatrzymana przez użytkownika nie wysyła nic. Zatwierdzenie rozszerzenia jest subskrypcją; okno zatwierdzania wymienia zdarzenia pod wierszem usługi. Bez `content` usługa dostaje same identyfikatory: sesję, folder jej projektu i elementy, które użytkownik do niej dołączył. Z `"content": true` manifest prosi też o uprawnienie, które użytkownik widzi jako osobny wiersz, **Czytać, co agent mówi w tle**, a każde zdarzenie niesie końcową odpowiedź agenta, pola pytania albo szczegóły uprawnienia.
+Zdarzenia to `turn-started`, `session-created`, `session-archived`, `session-deleted`, `turn-finished` (agent skończył i na nic nie czeka: nie działa żaden subagent, nie ma otwartego uprawnienia ani pytania, nie ma kroku celu), `turn-failed`, `permission-asked` i `question-asked`. Tura zatrzymana przez użytkownika nie wysyła nic. Zatwierdzenie rozszerzenia jest subskrypcją; okno zatwierdzania wymienia zdarzenia pod wierszem usługi. Bez `content` usługa dostaje same identyfikatory: sesję, folder jej projektu i elementy, które użytkownik do niej dołączył. Z `"content": true` manifest prosi też o uprawnienie, które użytkownik widzi jako osobny wiersz, **Czytać, co agent mówi w tle**, a każde zdarzenie niesie końcową odpowiedź agenta, pola pytania albo szczegóły uprawnienia.
 
 Każde zdarzenie przychodzi jako jedno `POST /session-events` z tokenem bearer usługi. Odczytaj je przez `readSessionEventRequest` i odpowiedz `{ "ok": true }`:
 
@@ -215,6 +215,62 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 Wysyłane są zdarzenia ze wszystkich projektów; porównaj `event.project.directory` z własnymi ustawieniami, a na resztę odpowiadaj `{ "ok": true }`. Dostarczanie jest co najwyżej jednokrotne i w kolejności, po jednym żądaniu naraz; nieudana odpowiedź odrzuca Twoje zdarzenia na 30 sekund, a po przestoju OpenChamber lub Twojej usługi nic nie jest wysyłane ponownie. Usługa nie potrzebuje do tego panelu. Przykład `session-events-log` zapisuje każde zdarzenie do pliku.
+
+## Wywoływanie OpenChamber z usługi
+
+Usługa może działać bez otwartego okna. `createServiceHost` to jej droga powrotna do OpenChamber:
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`, `sessions.send`, `sessions.retry` i `sessions.status` wymagają `contributes.sessionControl`, które użytkownik zatwierdza jako osobny wiersz. `sessions.lastReply` wymaga `sessionControl: { content: true }`. `setInstructions` wymaga `contributes.instructions` i uzupełnia to, co czytają agenci, w jednym folderze albo, z `null`, wszędzie.
+
+`emit` dociera do Twoich otwartych ramek przez `host.onServiceEvent`, więc panel nie musi już odpytywać usługi. Nic nie jest wysyłane ponownie, dlatego ramka otwarta później najpierw odczytuje bieżący stan. `readSettings` daje usłudze ustawienia integracji razem z polami `secret`, a `needsConfiguration` pokazuje komunikat na karcie rozszerzenia.
+
+## Działanie bez niczyjej prośby
+
+Usługa startuje przy pierwszym żądaniu, a usługa z rolą zatrzymuje się, gdy jest bezczynna. `service.keepRunning: true` uruchamia ją razem z OpenChamber i przywraca, gdy się zatrzyma. `service.schedule` budzi ją według harmonogramu:
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+Jedno uruchomienie to jedno `POST /schedule`. Odczytaj je przez `readServiceScheduleRequest` i odpowiedz 200. Uruchomienie pominięte, gdy OpenChamber nie działał, przepada. Usługa, która potrzebuje zdarzeń z zewnątrz, utrzymuje własne połączenie albo odpytuje źródło.
+
+## Wiersze w menu @
+
+`contributes.mentions: { label }` dodaje sekcję do menu `@` pola czatu. Twoja usługa odpowiada na `POST /mentions/search` w ciągu 2 sekund, zwracając `{ items: [{ id, title, subtitle?, url? }] }`, a na `POST /mentions/resolve`, zwracając `{ text }` dla wiersza wybranego przez użytkownika. Tekst trafia do agenta razem z wiadomością, a użytkownik widzi chip. Wolna usługa nie dodaje wierszy i nigdy nie wstrzymuje plików; wiersz, którego nie da się odczytać, nie zostawia chipa i informuje o tym.
+
+## Bloki na czacie
+
+`contributes.blocks` dodaje komponenty, które agenci mogą pisać w bloku UI. Każdy z nich rysuje Twoja własna strona, w tej samej piaskownicy i z tymi samymi uprawnieniami co Twój panel.
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+Agent pisze `JiraIssue("OPE-1")`, a Twoja strona odczytuje wywołanie:
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+Wywołaj `host.setHeight(px)`, gdy treść zmieni rozmiar. Do 4 komponentów na rozszerzenie, ponieważ każda sygnatura to tekst, który czyta każda sesja.
+
+Argumenty pisze model, więc tekst ze strony internetowej lub zgłoszenia może nimi sterować. Traktuj je jako niezaufane i nie rób niczego z efektami ubocznymi, dopóki użytkownik nie kliknie.
 
 ## Kanały powiadomień
 

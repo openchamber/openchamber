@@ -195,7 +195,7 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-事件有四种。`turn-finished` 表示智能体已经完成并且不再等待任何东西，没有运行中的子智能体，没有未答复的权限或问题，也没有目标步骤。另外三种是 `turn-failed`、`permission-asked` 和 `question-asked`。用户停止的一轮对话不发送任何事件。批准扩展就是订阅，对话框会在服务那一行下方列出这些事件。没有 `content` 时服务只收到标识符，即会话、它的项目目录和用户附加到它的条目。设为 `"content": true` 时，清单还会请求一项权限，用户会看到它单独占一行，**在后台读取代理所说的内容**。此时每个事件都带有智能体的最终回答、问题的字段或权限的详情。
+事件有 `turn-started`、`session-created`、`session-archived`、`session-deleted`、`turn-finished`、`turn-failed`、`permission-asked` 和 `question-asked`。`turn-finished` 表示智能体已经完成并且不再等待任何东西，没有运行中的子智能体，没有未答复的权限或问题，也没有目标步骤。用户停止的一轮对话不发送任何事件。批准扩展就是订阅，对话框会在服务那一行下方列出这些事件。没有 `content` 时服务只收到标识符，即会话、它的项目目录和用户附加到它的条目。设为 `"content": true` 时，清单还会请求一项权限，用户会看到它单独占一行，**在后台读取代理所说的内容**。此时每个事件都带有智能体的最终回答、问题的字段或权限的详情。
 
 每个事件以一次带服务 bearer 令牌的 `POST /session-events` 到达。用 `readSessionEventRequest` 读取并回答 `{ "ok": true }`。
 
@@ -215,6 +215,62 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 每个项目的事件都会发送。把 `event.project.directory` 与你自己的设置比较，其余的回答 `{ "ok": true }` 即可。投递至多一次、按顺序进行，一次只发一个请求。回答失败会让你的事件被丢弃 30 秒，OpenChamber 或你的服务停机期间的事件不会重放。服务不需要面板来做这件事。示例 `session-events-log` 把每个事件记录到一个文件中。
+
+## 从服务调用 OpenChamber
+
+服务可以在没有打开任何窗口时行动。`createServiceHost` 是它回到 OpenChamber 的途径：
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`、`sessions.send`、`sessions.retry` 和 `sessions.status` 需要 `contributes.sessionControl`，用户会把它作为单独一行批准。`sessions.lastReply` 需要 `sessionControl: { content: true }`。`setInstructions` 需要 `contributes.instructions`，用于补充智能体读取的内容，范围是一个文件夹，或者传 `null` 时覆盖所有位置。
+
+`emit` 通过 `host.onServiceEvent` 到达你打开的框架，因此面板不必再轮询。事件不会重放，所以之后才打开的框架要先读取当前状态。`readSettings` 把集成的设置交给服务，包括 `secret` 字段，`needsConfiguration` 则在扩展的卡片上显示一条消息。
+
+## 无人请求时运行
+
+服务在收到第一个请求时启动，承担角色的服务在空闲时停止。`service.keepRunning: true` 让它随 OpenChamber 启动，并在停止后恢复运行。`service.schedule` 按时间唤醒它：
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+一次运行就是一次 `POST /schedule`。用 `readServiceScheduleRequest` 读取并回答 200。OpenChamber 停机期间错过的运行不会补上。需要外部事件的服务要自己保持连接或进行轮询。
+
+## @ 菜单中的行
+
+`contributes.mentions: { label }` 会在聊天框的 `@` 菜单中添加一个分区。你的服务要在 2 秒内用 `{ items: [{ id, title, subtitle?, url? }] }` 回答 `POST /mentions/search`，并针对用户选中的行用 `{ text }` 回答 `POST /mentions/resolve`。文本随消息发送给智能体，用户会看到一个标签。响应慢的服务不会添加任何行，也不会阻塞文件列表；无法读取的行不会留下标签，并会给出提示。
+
+## 聊天中的块
+
+`contributes.blocks` 添加智能体可以写入 UI 块的组件。每个组件都由你自己的页面绘制，使用与面板相同的沙箱和相同的权限。
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+智能体写下 `JiraIssue("OPE-1")`，你的页面读取这次调用：
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+内容大小变化时调用 `host.setHeight(px)`。每个扩展最多 4 个组件，因为每个签名都是每个会话要读取的文本。
+
+参数由模型写入，所以网页或工单中的文本可能左右它们。请把它们视为不可信内容，在用户点击之前不要执行任何有副作用的操作。
 
 ## 通知渠道
 

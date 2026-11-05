@@ -219,7 +219,7 @@ Uw pagina weet alleen van een sessie zolang die open is. Uw service kan meer wet
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-De vier gebeurtenissen zijn `turn-finished` (de agent is klaar en wacht op niets: geen lopende subagent, geen openstaande toestemming of vraag, geen doelstap), `turn-failed`, `permission-asked` en `question-asked`. Een beurt die de gebruiker heeft gestopt, stuurt niets. De goedkeuring van de extensie is het abonnement; het toestemmingsvenster toont de gebeurtenissen onder de regel van de service. Zonder `content` krijgt de service alleen identificatiegegevens: de sessie, de projectmap en de items die de gebruiker eraan heeft gekoppeld. Met `"content": true` vraagt het manifest ook om een recht dat de gebruiker als eigen regel ziet, **Lezen wat de agent op de achtergrond zegt**, en draagt elke gebeurtenis het eindantwoord van de agent, de velden van de vraag of de details van de toestemming.
+De gebeurtenissen zijn `turn-started`, `session-created`, `session-archived`, `session-deleted`, `turn-finished` (de agent is klaar en wacht op niets: geen lopende subagent, geen openstaande toestemming of vraag, geen doelstap), `turn-failed`, `permission-asked` en `question-asked`. Een beurt die de gebruiker heeft gestopt, stuurt niets. De goedkeuring van de extensie is het abonnement; het toestemmingsvenster toont de gebeurtenissen onder de regel van de service. Zonder `content` krijgt de service alleen identificatiegegevens: de sessie, de projectmap en de items die de gebruiker eraan heeft gekoppeld. Met `"content": true` vraagt het manifest ook om een recht dat de gebruiker als eigen regel ziet, **Lezen wat de agent op de achtergrond zegt**, en draagt elke gebeurtenis het eindantwoord van de agent, de velden van de vraag of de details van de toestemming.
 
 Elke gebeurtenis komt aan als één `POST /session-events` met de bearer van de service. Lees hem met `readSessionEventRequest` en antwoord met `{ "ok": true }`:
 
@@ -239,6 +239,62 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 De gebeurtenissen van elk project worden verstuurd. Vergelijk `event.project.directory` met uw eigen instellingen en antwoord voor de rest met `{ "ok": true }`. Bezorging gebeurt hoogstens één keer en in volgorde, één verzoek tegelijk. Een mislukt antwoord laat uw gebeurtenissen 30 seconden vallen, en niets wordt opnieuw verstuurd nadat OpenChamber of uw service niet bereikbaar was. De service heeft hiervoor geen paneel nodig. Het voorbeeld `session-events-log` schrijft elke gebeurtenis naar een bestand.
+
+## OpenChamber aanroepen vanuit uw service
+
+Een service kan handelen zonder dat er een venster open is. `createServiceHost` is de weg terug naar OpenChamber:
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`, `sessions.send`, `sessions.retry` en `sessions.status` hebben `contributes.sessionControl` nodig, dat de gebruiker als eigen regel goedkeurt. `sessions.lastReply` heeft `sessionControl: { content: true }` nodig. `setInstructions` heeft `contributes.instructions` nodig en vult aan wat agents lezen, in één map of, met `null`, overal.
+
+`emit` bereikt uw open frames via `host.onServiceEvent`, zodat een paneel niet meer hoeft te pollen. Niets wordt opnieuw verstuurd, dus een frame dat later opent, leest eerst de huidige status. `readSettings` geeft de service de instellingen van de integratie, inclusief `secret`-velden, en `needsConfiguration` toont een bericht op de kaart van de extensie.
+
+## Draaien zonder dat iemand erom vraagt
+
+Een service start bij het eerste verzoek, en de service van een rol stopt bij inactiviteit. `service.keepRunning: true` start hem samen met OpenChamber en brengt hem terug als hij stopt. `service.schedule` wekt hem volgens een schema:
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+Een run is één `POST /schedule`. Lees hem met `readServiceScheduleRequest` en antwoord met 200. Een run die is gemist terwijl OpenChamber niet draaide, vervalt. Een service die externe gebeurtenissen nodig heeft, houdt een eigen verbinding open of pollt.
+
+## Rijen in het @-menu
+
+`contributes.mentions: { label }` voegt een sectie toe aan het `@`-menu van het chatveld. Uw service beantwoordt `POST /mentions/search` binnen 2 seconden met `{ items: [{ id, title, subtitle?, url? }] }` en `POST /mentions/resolve` met `{ text }` voor de rij die de gebruiker kiest. De tekst gaat met het bericht naar de agent, en de gebruiker ziet een chip. Een trage service voegt geen rijen toe en houdt de bestanden nooit op; een rij die niet gelezen kan worden, laat geen chip achter en meldt dat.
+
+## Blokken in de chat
+
+`contributes.blocks` voegt componenten toe die agents in een UI-blok kunnen schrijven. Uw eigen pagina tekent elk daarvan, in dezelfde sandbox en met dezelfde rechten als uw paneel.
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+De agent schrijft `JiraIssue("OPE-1")`, en uw pagina leest de aanroep:
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+Roep `host.setHeight(px)` aan wanneer de inhoud van grootte verandert. Maximaal 4 componenten per extensie, omdat elke handtekening tekst is die elke sessie leest.
+
+De argumenten worden door een model geschreven, dus tekst van een webpagina of ticket kan ze sturen. Behandel ze als onbetrouwbaar en doe niets met neveneffecten totdat de gebruiker klikt.
 
 ## Meldingskanalen
 

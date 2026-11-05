@@ -110,7 +110,7 @@ Een paneel tonen en de huidige sessie lezen vereist geen toestemming. Voor hande
 | `files` | bestanden in het geopende project lezen en schrijven via `readFile`, `writeFile`, `listDir` en `stat` met een relatief pad |
 | `model` | eenmalig tekst genereren met het Small Model via `generate`, buiten een sessie |
 
-Zes rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt en `transcript` als `sessionEvents` om `content` vraagt. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge) en [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen).
+Negen rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt, `transcript` als `sessionEvents` of `sessionControl` om `content` vraagt, `sessionControl` als uw service op sessies inwerkt, `instructions` als die aanvult wat agents lezen, en `skills` als u `contributes.skills` opgeeft, een map in het pakket met skills die elke agent bereiken zolang de extensie aanstaat. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge), [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen) en [OpenChamber aanroepen](/nl/sdk/host/#openchamber-aanroepen-vanuit-uw-service).
 
 Bij installatie ziet de gebruiker de volledige lijst en kan die goedkeuren of de extensie verwijderen. Vraagt een nieuwe versie meer, dan verschijnt het venster opnieuw. Een aanroep waarvoor een nog niet goedgekeurd recht nodig is, faalt met `NOT_GRANTED`.
 

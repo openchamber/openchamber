@@ -235,7 +235,7 @@ Your page only knows about a session while it is open. Your service can know mor
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-The four events are `turn-finished` (the agent is done and waits for nothing: no running subagent, no open permission or question, no goal step), `turn-failed`, `permission-asked` and `question-asked`. A turn the user stopped sends nothing. Approving the extension is the subscription; the dialog lists the events under the service line. Without `content` the service gets identifiers only: the session, its project directory, the items the user linked to it. With `"content": true` the manifest also asks for a permission the user sees as its own line, **Read what the agent says in the background**, and each event carries the agent's final answer, the question's fields or the permission's detail.
+The events are `turn-started`, `session-created`, `session-archived`, `session-deleted`, `turn-finished` (the agent is done and waits for nothing: no running subagent, no open permission or question, no goal step), `turn-failed`, `permission-asked` and `question-asked`. A turn the user stopped sends nothing. Approving the extension is the subscription; the dialog lists the events under the service line. Without `content` the service gets identifiers only: the session, its project directory, the items the user linked to it. With `"content": true` the manifest also asks for a permission the user sees as its own line, **Read what the agent says in the background**, and each event carries the agent's final answer, the question's fields or the permission's detail.
 
 Each event arrives as one `POST /session-events` with the service bearer. Read it with `readSessionEventRequest` and answer `{ "ok": true }`:
 
@@ -255,6 +255,62 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 Every project's events are sent; compare `event.project.directory` with your own settings and answer `{ "ok": true }` for the rest. Delivery is at most once and in order, one request at a time; a failed answer drops your events for 30 seconds, and nothing is replayed after OpenChamber or your service was down. The service needs no panel for this. The `session-events-log` example journals every event to a file.
+
+## Calling OpenChamber from your service
+
+A service can act with no window open. `createServiceHost` is its way back:
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`, `sessions.send`, `sessions.retry` and `sessions.status` need `contributes.sessionControl`, which the user approves as its own line. `sessions.lastReply` needs `sessionControl: { content: true }`. `setInstructions` needs `contributes.instructions` and adds to what agents read, in one folder or, with `null`, everywhere.
+
+`emit` reaches your open frames through `host.onServiceEvent`, so a panel stops polling. Nothing replays, so a frame that opens later reads the current state first. `readSettings` gives the service the integration's settings, `secret` fields included, and `needsConfiguration` shows a message on the extension's card.
+
+## Running with nobody asking
+
+A service starts on the first request, and a role's service stops when idle. `service.keepRunning: true` starts it with OpenChamber and brings it back when it stops. `service.schedule` wakes it on a clock:
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+A run is one `POST /schedule`. Read it with `readServiceScheduleRequest` and answer 200. A run missed while OpenChamber was down is gone. A service that needs outside events holds its own connection or polls.
+
+## Rows in the @ menu
+
+`contributes.mentions: { label }` adds a section to the composer's `@` menu. Your service answers `POST /mentions/search` with `{ items: [{ id, title, subtitle?, url? }] }`, within 2 seconds, and `POST /mentions/resolve` with `{ text }` for the row the user picks. The text goes to the agent with the message, and the user sees a chip. A slow service adds no rows and never holds the files back; a row that cannot be read leaves no chip and says so.
+
+## Blocks in the chat
+
+`contributes.blocks` adds components agents can write in a UI block. Your own page draws each one, in the same sandbox and with the same grants as your panel.
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+The agent writes `JiraIssue("OPE-1")`, and your page reads the call:
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+Call `host.setHeight(px)` when the content changes size. Up to 4 components per extension, since every signature is text each session reads.
+
+The arguments are written by a model, so text from a web page or a ticket can steer them. Treat them as untrusted, and do nothing with side effects until the user clicks.
 
 ## Notification channels
 

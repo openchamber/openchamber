@@ -195,7 +195,7 @@ const result = await host.serviceRequest({ method: "GET", path: "/containers" })
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-イベントは 4 つです。`turn-finished` はエージェントが作業を終え、何も待っていない状態です。実行中のサブエージェントも、未応答の許可や質問も、ゴールのステップもありません。ほかに `turn-failed`、`permission-asked`、`question-asked` があります。ユーザーが停止したターンは何も送りません。拡張機能を承認することが購読にあたり、ダイアログはサービスの行の下にイベントを列挙します。`content` がなければ、サービスは識別子だけを受け取ります。セッション、そのプロジェクトのディレクトリ、ユーザーがそのセッションに添付した項目です。`"content": true` にするとマニフェストは権限も求め、ユーザーには **バックグラウンドでエージェントの発言を読む** という独立した行として表示されます。このとき各イベントには、エージェントの最終回答、質問のフィールド、または許可の詳細が付きます。
+イベントは `turn-started`、`session-created`、`session-archived`、`session-deleted`、`turn-finished`、`turn-failed`、`permission-asked`、`question-asked` です。`turn-finished` はエージェントが作業を終え、何も待っていない状態です。実行中のサブエージェントも、未応答の許可や質問も、ゴールのステップもありません。ユーザーが停止したターンは何も送りません。拡張機能を承認することが購読にあたり、ダイアログはサービスの行の下にイベントを列挙します。`content` がなければ、サービスは識別子だけを受け取ります。セッション、そのプロジェクトのディレクトリ、ユーザーがそのセッションに添付した項目です。`"content": true` にするとマニフェストは権限も求め、ユーザーには **バックグラウンドでエージェントの発言を読む** という独立した行として表示されます。このとき各イベントには、エージェントの最終回答、質問のフィールド、または許可の詳細が付きます。
 
 各イベントは、サービスの bearer トークンを付けた 1 回の `POST /session-events` として届きます。`readSessionEventRequest` で読み取り、`{ "ok": true }` を返します。
 
@@ -215,6 +215,62 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 すべてのプロジェクトのイベントが送られます。`event.project.directory` を自分の設定と比較し、それ以外には `{ "ok": true }` を返してください。配信は最大 1 回で順序どおり、同時に 1 リクエストずつです。応答に失敗すると 30 秒間イベントが破棄され、OpenChamber またはサービスが停止していた間のイベントは再送されません。この用途にサービスのパネルは不要です。`session-events-log` の例は、すべてのイベントをファイルに記録します。
+
+## サービスから OpenChamber を呼び出す
+
+サービスはウィンドウが開いていなくても動作できます。`createServiceHost` は、サービスから OpenChamber へ戻る経路です。
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`、`sessions.send`、`sessions.retry`、`sessions.status` には `contributes.sessionControl` が必要で、ユーザーはこれを独立した行として承認します。`sessions.lastReply` には `sessionControl: { content: true }` が必要です。`setInstructions` には `contributes.instructions` が必要で、エージェントが読む内容に、1 つのフォルダー単位で、または `null` を渡してすべての場所に追加します。
+
+`emit` は `host.onServiceEvent` を通じて開いているフレームに届くので、パネルはポーリングをやめられます。再送はないため、あとから開いたフレームは最初に現在の状態を読み取ります。`readSettings` はインテグレーションの設定を `secret` フィールドも含めてサービスに渡し、`needsConfiguration` は拡張機能のカードにメッセージを表示します。
+
+## 誰からも呼ばれなくても動かす
+
+サービスは最初のリクエストで起動し、ロールを持つサービスはアイドル状態になると停止します。`service.keepRunning: true` にすると OpenChamber と一緒に起動し、停止しても再起動します。`service.schedule` は時刻に合わせてサービスを起こします。
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+1 回の実行は 1 回の `POST /schedule` です。`readServiceScheduleRequest` で読み取り、200 を返します。OpenChamber が停止している間に逃した実行は失われます。外部のイベントが必要なサービスは、自分で接続を保持するかポーリングします。
+
+## @ メニューの行
+
+`contributes.mentions: { label }` は、チャット欄の `@` メニューにセクションを追加します。サービスは `POST /mentions/search` に 2 秒以内に `{ items: [{ id, title, subtitle?, url? }] }` を返し、`POST /mentions/resolve` にはユーザーが選んだ行に対して `{ text }` を返します。テキストはメッセージと一緒にエージェントに届き、ユーザーにはチップが表示されます。遅いサービスは行を追加せず、ファイルの表示を止めることもありません。読み取れない行はチップを残さず、その旨を表示します。
+
+## チャット内のブロック
+
+`contributes.blocks` は、エージェントが UI ブロックに書けるコンポーネントを追加します。各コンポーネントは、パネルと同じサンドボックスと同じ権限で、あなたのページが描画します。
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+エージェントが `JiraIssue("OPE-1")` と書くと、ページはその呼び出しを読み取ります。
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+内容のサイズが変わったら `host.setHeight(px)` を呼び出します。コンポーネントは拡張機能ごとに最大 4 つです。すべてのシグネチャが、各セッションの読むテキストになるためです。
+
+引数はモデルが書くので、ウェブページやチケットのテキストに左右されることがあります。信頼できない入力として扱い、副作用のある処理はユーザーがクリックするまで行わないでください。
 
 ## 通知チャネル
 

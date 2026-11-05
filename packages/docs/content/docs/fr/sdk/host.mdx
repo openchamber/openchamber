@@ -195,7 +195,7 @@ Votre page ne connaît une session que pendant qu'elle est ouverte. Votre servic
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-Les quatre événements sont `turn-finished` (l'agent a terminé et n'attend rien : aucun sous-agent en cours, aucune permission ou question ouverte, aucune étape d'objectif), `turn-failed`, `permission-asked` et `question-asked`. Un tour arrêté par l'utilisateur n'envoie rien. Approuver l'extension vaut abonnement ; la boîte de dialogue liste les événements sous la ligne du service. Sans `content`, le service ne reçoit que des identifiants : la session, le répertoire de son projet, les éléments que l'utilisateur lui a liés. Avec `"content": true`, le manifeste demande aussi une permission que l'utilisateur voit comme une ligne à part, **Lire ce que dit l'agent en arrière-plan**, et chaque événement porte la réponse finale de l'agent, les champs de la question ou le détail de la permission.
+Les événements sont `turn-started`, `session-created`, `session-archived`, `session-deleted`, `turn-finished` (l'agent a terminé et n'attend rien : aucun sous-agent en cours, aucune permission ou question ouverte, aucune étape d'objectif), `turn-failed`, `permission-asked` et `question-asked`. Un tour arrêté par l'utilisateur n'envoie rien. Approuver l'extension vaut abonnement ; la boîte de dialogue liste les événements sous la ligne du service. Sans `content`, le service ne reçoit que des identifiants : la session, le répertoire de son projet, les éléments que l'utilisateur lui a liés. Avec `"content": true`, le manifeste demande aussi une permission que l'utilisateur voit comme une ligne à part, **Lire ce que dit l'agent en arrière-plan**, et chaque événement porte la réponse finale de l'agent, les champs de la question ou le détail de la permission.
 
 Chaque événement arrive sous la forme d'un `POST /session-events` avec le bearer du service. Lisez-le avec `readSessionEventRequest` et répondez `{ "ok": true }` :
 
@@ -215,6 +215,62 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 Les événements de chaque projet sont envoyés ; comparez `event.project.directory` avec vos propres réglages et répondez `{ "ok": true }` pour les autres. La livraison se fait au plus une fois et dans l'ordre, une requête à la fois ; une réponse en échec abandonne vos événements pendant 30 secondes, et rien n'est rejoué après une indisponibilité d'OpenChamber ou de votre service. Le service n'a pas besoin de panneau pour cela. L'exemple `session-events-log` journalise chaque événement dans un fichier.
+
+## Appeler OpenChamber depuis votre service
+
+Un service peut agir sans aucune fenêtre ouverte. `createServiceHost` est son chemin de retour vers OpenChamber :
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`, `sessions.send`, `sessions.retry` et `sessions.status` nécessitent `contributes.sessionControl`, que l'utilisateur approuve sur une ligne à part. `sessions.lastReply` nécessite `sessionControl: { content: true }`. `setInstructions` nécessite `contributes.instructions` et complète ce que lisent les agents, dans un dossier ou, avec `null`, partout.
+
+`emit` atteint vos frames ouvertes via `host.onServiceEvent`, ce qui évite à un panneau d'interroger le service en boucle. Rien n'est rejoué, donc une frame ouverte plus tard lit d'abord l'état actuel. `readSettings` donne au service les réglages de l'intégration, champs `secret` compris, et `needsConfiguration` affiche un message sur la carte de l'extension.
+
+## Fonctionner sans que personne ne le demande
+
+Un service démarre à la première requête, et le service d'un rôle s'arrête quand il est inactif. `service.keepRunning: true` le démarre avec OpenChamber et le relance quand il s'arrête. `service.schedule` le réveille selon un horaire :
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+Une exécution correspond à un `POST /schedule`. Lisez-la avec `readServiceScheduleRequest` et répondez 200. Une exécution manquée pendant qu'OpenChamber était arrêté est perdue. Un service qui a besoin d'événements extérieurs garde sa propre connexion ou interroge la source.
+
+## Lignes dans le menu @
+
+`contributes.mentions: { label }` ajoute une section au menu `@` de la zone de chat. Votre service répond à `POST /mentions/search` avec `{ items: [{ id, title, subtitle?, url? }] }` en 2 secondes au plus, et à `POST /mentions/resolve` avec `{ text }` pour la ligne choisie par l'utilisateur. Le texte part vers l'agent avec le message, et l'utilisateur voit une puce. Un service lent n'ajoute aucune ligne et ne retient jamais les fichiers ; une ligne illisible ne laisse aucune puce et le signale.
+
+## Blocs dans le chat
+
+`contributes.blocks` ajoute des composants que les agents peuvent écrire dans un bloc d'interface. Votre propre page dessine chacun d'eux, dans le même bac à sable et avec les mêmes autorisations que votre panneau.
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+L'agent écrit `JiraIssue("OPE-1")`, et votre page lit l'appel :
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+Appelez `host.setHeight(px)` quand la taille du contenu change. Jusqu'à 4 composants par extension, car chaque signature est du texte que chaque session lit.
+
+Les arguments sont écrits par un modèle, donc du texte provenant d'une page web ou d'un ticket peut les orienter. Traitez-les comme non fiables, et ne faites rien qui ait des effets de bord avant que l'utilisateur clique.
 
 ## Canaux de notification
 

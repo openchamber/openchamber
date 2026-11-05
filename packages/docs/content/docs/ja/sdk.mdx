@@ -110,7 +110,7 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 | `files` | 開いているプロジェクト内のファイルを読み書きする(相対パス付きの `readFile`、`writeFile`、`listDir`、`stat`) |
 | `model` | セッションの外で、ユーザーの Small Model による一回限りのテキスト生成を行う(`generate`) |
 
-さらに 6 つが自動で追加されます。`integration` を宣言すると `network`、`service` を宣言すると `service`、`filesystem` パターンを宣言すると `filesystem`、`origins` を宣言すると `origins`、セッションのアクションがメッセージを求めると `conversation`([アクション、コマンド、バッジ](#アクションコマンドバッジ) を参照)、`sessionEvents` が `content` を求めると `transcript` です([セッションイベント](/sdk/host/#セッションイベント) を参照)。
+さらに 9 つが自動で追加されます。`integration` を宣言すると `network`、`service` を宣言すると `service`、`filesystem` パターンを宣言すると `filesystem`、`origins` を宣言すると `origins`、セッションのアクションがメッセージを求めると `conversation`([アクション、コマンド、バッジ](#アクションコマンドバッジ) を参照)、`sessionEvents` または `sessionControl` が `content` を求めると `transcript`([セッションイベント](/sdk/host/#セッションイベント) を参照)、サービスがセッションを操作すると `sessionControl`([OpenChamber の呼び出し](/sdk/host/#サービスから-openchamber-を呼び出す) を参照)、エージェントが読む内容に追加すると `instructions`、`contributes.skills` を宣言すると `skills` です。`contributes.skills` はパッケージ内のスキルのフォルダーで、拡張機能がオンの間、すべてのエージェントに届きます。
 
 ユーザーは拡張機能をインストールするときに一覧を一度だけ見て、承認するか拡張機能を削除するかを選びます。新しいバージョンがより多くを求める場合、ダイアログが再び表示されます。ユーザーが承認していない権限を必要とする呼び出しは `NOT_GRANTED` で失敗します。
 

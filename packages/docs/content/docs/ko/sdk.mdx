@@ -110,7 +110,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 | `files` | 열린 프로젝트 안의 파일 읽고 쓰기(상대 경로를 쓰는 `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | 세션 밖에서 사용자의 Small Model로 일회성 텍스트 생성(`generate`) |
 
-여섯 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`([작업, 명령, 배지](#작업-명령-배지) 참고), `sessionEvents`가 `content`를 요청하면 `transcript`입니다([세션 이벤트](/sdk/host/#세션-이벤트) 참고).
+아홉 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`([작업, 명령, 배지](#작업-명령-배지) 참고), `sessionEvents`나 `sessionControl`이 `content`를 요청하면 `transcript`([세션 이벤트](/sdk/host/#세션-이벤트) 참고), 서비스가 세션을 다루면 `sessionControl`([OpenChamber 호출](/sdk/host/#서비스에서-openchamber-호출하기) 참고), 에이전트가 읽는 내용에 추가하면 `instructions`, `contributes.skills`를 선언하면 `skills`입니다. `contributes.skills`는 패키지 안의 스킬 폴더로, 확장이 켜져 있는 동안 모든 에이전트에게 전달됩니다.
 
 사용자는 확장을 설치할 때 전체 목록을 한 번 보고, 승인하거나 확장을 제거합니다. 새 버전이 더 많은 권한을 요구하면 대화상자가 다시 나타납니다. 사용자가 승인하지 않은 권한이 필요한 호출은 `NOT_GRANTED`로 실패합니다.
 
