@@ -829,6 +829,12 @@ const applyDraftTargetSelectionDefaults = (
     || previousDraft.selectedProjectId !== draft.selectedProjectId
   const applyDefaults = () => {
     if (!projectChanged) return
+    // A chat has no project of its own; the config store reads the Chats scope
+    // from the directory being activated.
+    if (draft.target !== 'project') {
+      useConfigStore.getState().applyDefaultModelAgentSelection()
+      return
+    }
     const currentProject = selectedProject?.path
       ? useProjectsStore.getState().projects.find((project) => normalizePath(project.path) === normalizePath(selectedProject.path))
       : undefined

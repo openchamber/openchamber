@@ -46,8 +46,8 @@ const setup = async ({ withProject = true, chatsInProject = false, chatsAvailabl
         return session;
       },
       prompt: vi.fn(async (input) => { prompts.push(input); return { id: 'msg_1' }; }),
-      switchModel: async () => {},
-      switchAgent: async () => {},
+      switchModel: vi.fn(async () => {}),
+      switchAgent: vi.fn(async () => {}),
       list: async ({ directory } = {}) => ({ data: sessions.filter((session) => !directory || session.location.directory === directory) }),
       active: async () => ({}),
     },
@@ -56,8 +56,15 @@ const setup = async ({ withProject = true, chatsInProject = false, chatsAvailabl
       .map((prompt, index) => ({ id: `msg_${index}`, type: 'user', text: prompt.text, time: { created: index + 1 } })) }) },
     command: { list: async () => ({ data: [] }) },
     config: { get: async () => [] },
-    model: { list: async () => ({ data: [{ providerID: 'test', id: 'model', variants: [] }] }) },
-    agent: { list: async () => ({ data: [{ id: 'build', mode: 'primary' }, { id: 'plan', mode: 'primary' }] }) },
+    model: { list: async () => ({ data: [
+      { providerID: 'test', id: 'model', variants: [] },
+      { providerID: 'test', id: 'chats-model', variants: [{ id: 'low' }, { id: 'high' }] },
+    ] }) },
+    agent: { list: async () => ({ data: [
+      { id: 'build', mode: 'primary' },
+      { id: 'plan', mode: 'primary' },
+      { id: 'review', mode: 'primary' },
+    ] }) },
   };
   const dependencies = {
     chatsScope: chatsAvailable ? chatsScope : null,
@@ -118,6 +125,42 @@ describe('agent session destinations', () => {
     expect(events[0].projectID).toBeUndefined();
     expect(result).toMatchObject({ model: { providerID: 'test', modelID: 'model' }, agent: 'build', promptDispatched: true });
     expect(events[0]).toMatchObject({ model: { providerID: 'test', modelID: 'model' }, agent: 'build' });
+  });
+
+  it.each([false, true])('uses the Chats defaults ahead of the global and project defaults (symlink root %s)', async (symlinkRoot) => {
+    const { service, projectPath, settings } = await setup({ chatsInProject: true, symlinkRoot });
+    settings.defaultModel = 'test/model';
+    settings.defaultVariant = 'low';
+    settings.defaultAgent = 'build';
+    settings.chatsDefaultModel = 'test/chats-model';
+    settings.chatsDefaultVariant = 'high';
+    settings.chatsDefaultAgent = 'plan';
+    settings.projects[0].defaultModel = 'test/project-model';
+    settings.projects[0].defaultAgent = 'review';
+
+    const result = await service.execute('session.create', { projectId: CHATS_SCOPE_PUBLIC_ID, prompt: 'Plan the week' }, projectPath);
+
+    expect(result).toMatchObject({
+      model: { providerID: 'test', modelID: 'chats-model' },
+      agent: 'plan',
+      variant: 'high',
+      promptDispatched: true,
+    });
+  });
+
+  it.each([false, true])('uses the Chats defaults for a prompt sent to an empty chat (symlink root %s)', async (symlinkRoot) => {
+    const { sessionService, settings, client } = await setup({ symlinkRoot });
+    settings.chatsDefaultModel = 'test/chats-model';
+    settings.chatsDefaultAgent = 'plan';
+
+    const created = await sessionService.create({ projectId: CHATS_SCOPE_PUBLIC_ID });
+    await sessionService.send(created.sessionId, { directory: created.directory, prompt: 'Hello' });
+
+    expect(client.session.switchModel).toHaveBeenLastCalledWith({
+      sessionID: created.sessionId,
+      model: { providerID: 'test', id: 'chats-model' },
+    });
+    expect(client.session.switchAgent).toHaveBeenLastCalledWith({ sessionID: created.sessionId, agent: 'plan' });
   });
 
   it('offers Chats and creates distinct chats from a project, with prompts and readable sessions', async () => {

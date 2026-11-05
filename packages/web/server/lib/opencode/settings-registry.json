@@ -655,6 +655,15 @@
     "defaultAgent": {
       "scope": "profile"
     },
+    "chatsDefaultModel": {
+      "scope": "profile"
+    },
+    "chatsDefaultVariant": {
+      "scope": "profile"
+    },
+    "chatsDefaultAgent": {
+      "scope": "profile"
+    },
     "smallModelUseDefault": {
       "scope": "profile"
     },

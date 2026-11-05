@@ -1891,7 +1891,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   readSessionDefaults: async (projectID) => {
     const settings = await readSettingsFromDiskMigrated();
     const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;
-    return resolveSessionDefaults({ settings, project });
+    return resolveSessionDefaults({ settings, project, chats: scheduledChatsScope.toStorageID(projectID) === scheduledChatsScope.id });
   },
   listProjects: async () => {
     const settings = await readSettingsFromDiskMigrated();

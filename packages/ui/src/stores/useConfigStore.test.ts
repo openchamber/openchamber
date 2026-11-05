@@ -271,6 +271,7 @@ const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 const { useUIStore } = await import('@/stores/useUIStore');
+const { ensureChatsRootDirectory } = await import('@/lib/chatDirectories');
 
 describe('useConfigStore provider persistence', () => {
   beforeEach(() => {
@@ -332,6 +333,9 @@ describe('useConfigStore provider persistence', () => {
       settingsDefaultAgent: undefined,
       settingsDefaultModel: undefined,
       settingsDefaultVariant: undefined,
+      chatsDefaultAgent: undefined,
+      chatsDefaultModel: undefined,
+      chatsDefaultVariant: undefined,
       agents: [],
       agentModelSelections: {},
       opencodeDefaultAgent: undefined,
@@ -551,6 +555,151 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().activeDirectoryKey).toBe(worktree);
     expect(useConfigStore.getState().currentAgentName).toBe('review');
+  });
+
+  const chatsDirectory = '/workspace/.config/openchamber/chats/2026-11-06/session-a';
+
+  const useDistinctDefaults = async () => {
+    await ensureChatsRootDirectory();
+    persistedOpenChamberSettings = {
+      defaultModel: 'shared/global-model',
+      defaultVariant: 'low',
+      defaultAgent: 'build',
+      chatsDefaultModel: 'shared/chats-model',
+      chatsDefaultVariant: 'high',
+      chatsDefaultAgent: 'plan',
+    };
+    projectsState.projects[0] = {
+      ...projectsState.projects[0],
+      defaultModel: 'shared/project-model',
+      defaultVariant: 'low',
+      defaultAgent: 'review',
+    };
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('shared')],
+      models: [
+        model('shared', 'global-model', ['low']),
+        model('shared', 'chats-model', ['low', 'high']),
+        model('shared', 'project-model', ['low']),
+      ],
+      default: { providerID: 'shared', id: 'global-model' },
+    });
+    liveAgents = [testAgent('build'), testAgent('plan'), testAgent('review')];
+    await useConfigStore.getState().loadSessionDefaults();
+  };
+
+  test('chats defaults beat the global and project defaults in the Chats directory', async () => {
+    await useDistinctDefaults();
+
+    await useConfigStore.getState().activateDirectory(chatsDirectory);
+    expect(useConfigStore.getState()).toMatchObject({
+      activeDirectoryKey: chatsDirectory,
+      currentProviderId: 'shared',
+      currentModelId: 'chats-model',
+      currentVariant: 'high',
+      currentAgentName: 'plan',
+    });
+
+    await useConfigStore.getState().activateDirectory(DIRECTORY);
+    expect(useConfigStore.getState()).toMatchObject({
+      currentModelId: 'project-model',
+      currentAgentName: 'review',
+    });
+  });
+
+  test('a Chats agent applies when no Chats model is set', async () => {
+    await ensureChatsRootDirectory();
+    persistedOpenChamberSettings = { defaultAgent: 'build', chatsDefaultAgent: 'plan' };
+    liveAgents = [testAgent('build'), testAgent('plan')];
+    getProvidersForConfigImpl = async () => providerResponse('shared', 'model');
+    await useConfigStore.getState().loadSessionDefaults();
+
+    await useConfigStore.getState().activateDirectory(chatsDirectory);
+
+    expect(useConfigStore.getState().currentAgentName).toBe('plan');
+  });
+
+  test('loading settings while the Chats directory is active shows its agent without waiting for the catalog', async () => {
+    await ensureChatsRootDirectory();
+    persistedOpenChamberSettings = { defaultAgent: 'build', chatsDefaultAgent: 'plan' };
+    useConfigStore.setState({
+      activeDirectoryKey: chatsDirectory,
+      currentAgentName: 'build',
+      selectionSource: 'auto',
+      agentSelectionSource: 'auto',
+    });
+
+    await useConfigStore.getState().loadSessionDefaults();
+
+    expect(useConfigStore.getState().currentAgentName).toBe('plan');
+  });
+
+  test('an externally cleared Chats agent falls back to the global agent on the next load', async () => {
+    await ensureChatsRootDirectory();
+    persistedOpenChamberSettings = { defaultAgent: 'build', chatsDefaultAgent: 'plan' };
+    useConfigStore.setState({
+      activeDirectoryKey: chatsDirectory,
+      currentAgentName: 'build',
+      selectionSource: 'auto',
+      agentSelectionSource: 'auto',
+    });
+    await useConfigStore.getState().loadSessionDefaults();
+    expect(useConfigStore.getState().currentAgentName).toBe('plan');
+
+    persistedOpenChamberSettings = { defaultAgent: 'build' };
+    useConfigStore.getState().setSettingsDefaultModel(undefined);
+    await useConfigStore.getState().loadSessionDefaults();
+
+    expect(useConfigStore.getState().currentAgentName).toBe('build');
+  });
+
+  test('a cleared Chats default follows the global session default', async () => {
+    await useDistinctDefaults();
+    persistedOpenChamberSettings = { defaultModel: 'shared/global-model', defaultVariant: 'low', defaultAgent: 'build' };
+    useConfigStore.getState().setChatsDefaultModel(undefined);
+    useConfigStore.getState().setChatsDefaultVariant(undefined);
+    useConfigStore.getState().setChatsDefaultAgent(undefined);
+    await useConfigStore.getState().loadSessionDefaults();
+
+    const selection = await useConfigStore.getState().resolveDirectoryDefaultSelection(chatsDirectory);
+    expect(selection).toMatchObject({
+      agentName: 'build',
+      providerId: 'shared',
+      modelId: 'global-model',
+      variant: 'low',
+    });
+    expect(useConfigStore.getState().getDefaultVariantForModel('shared', 'global-model', chatsDirectory)).toBe('low');
+  });
+
+  test('a pending chat draft does not take the active project defaults', async () => {
+    persistedOpenChamberSettings = {
+      defaultModel: 'shared/global-model',
+      chatsDefaultModel: 'shared/chats-model',
+    };
+    projectsState.projects[0] = { ...projectsState.projects[0], defaultModel: 'shared/project-model' };
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('shared')],
+      models: [model('shared', 'global-model'), model('shared', 'chats-model'), model('shared', 'project-model')],
+      default: { providerID: 'shared', id: 'global-model' },
+    });
+    await useConfigStore.getState().loadSessionDefaults();
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      selectionSource: 'auto',
+      agentSelectionSource: 'auto',
+    });
+    const previousDraft = useSessionUIStore.getState().newSessionDraft;
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      newSessionDraft: { draftId: 7, open: true, target: 'chat', directoryOverride: null, parentID: null },
+    });
+
+    try {
+      useConfigStore.getState().applyDefaultModelAgentSelection();
+      expect(useConfigStore.getState().currentModelId).toBe('global-model');
+    } finally {
+      useSessionUIStore.setState({ newSessionDraft: previousDraft });
+    }
   });
 
   test('image models stay out of the chat catalog, and an image-only provider is kept for Settings', async () => {

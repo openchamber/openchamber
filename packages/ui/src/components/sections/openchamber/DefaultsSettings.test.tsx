@@ -20,11 +20,16 @@ type ConfigState = {
   setSettingsDefaultModel: () => void;
   setSettingsDefaultVariant: () => void;
   setSettingsDefaultAgent: () => void;
+  setChatsDefaultModel: (model: string | undefined) => void;
+  setChatsDefaultVariant: (variant: string | undefined) => void;
+  setChatsDefaultAgent: (agent: string | undefined) => void;
   selectionSource: 'auto';
   agentSelectionSource: 'auto';
   agents: Array<{ name: string; model?: { providerID: string; id: string } }>;
   currentAgentName: string | undefined;
 };
+
+const chatsSetterCalls: string[] = [];
 
 const configState: ConfigState = {
   providers: [],
@@ -37,6 +42,9 @@ const configState: ConfigState = {
   setSettingsDefaultModel: () => undefined,
   setSettingsDefaultVariant: () => undefined,
   setSettingsDefaultAgent: () => undefined,
+  setChatsDefaultModel: (model) => { chatsSetterCalls.push(`model:${model}`); },
+  setChatsDefaultVariant: (variant) => { chatsSetterCalls.push(`variant:${variant}`); },
+  setChatsDefaultAgent: (agent) => { chatsSetterCalls.push(`agent:${agent}`); },
   selectionSource: 'auto',
   agentSelectionSource: 'auto',
   agents: [],
@@ -59,6 +67,7 @@ const updateCalls: Array<Partial<DesktopSettings>> = [];
 
 mock.module('@/stores/useConfigStore', () => ({
   useConfigStore: <T,>(selector: (state: ConfigState) => T): T => selector(configState),
+  selectProvidersForDirectory: () => configState.providers,
 }));
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: <T,>(selector: (state: typeof settingsState) => T): T => selector(settingsState),
@@ -125,7 +134,9 @@ mock.module('@/components/sections/agents/ModelSelector', () => ({
   ),
 }));
 mock.module('@/components/sections/commands/AgentSelector', () => ({
-  AgentSelector: () => <button type="button">agent</button>,
+  AgentSelector: ({ agentName, onChange }: { agentName: string; onChange: (agentName: string) => void }) => (
+    <button type="button" onClick={() => onChange('plan')}>{agentName}</button>
+  ),
 }));
 mock.module('@/components/sections/shared/SettingsInfoHint', () => ({
   SettingsInfoHint: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
@@ -414,5 +425,50 @@ describe('DefaultsSettings', () => {
     expect(updateCalls.some((call) => (
       call.walkthroughModelOverride === 'sidecar/other' && call.walkthroughModelVariant === ''
     ))).toBe(true);
+  });
+
+  test('saves Chats defaults under their own keys', async () => {
+    savedSettings = {
+      defaultModel: 'sidecar/model',
+      defaultVariant: 'high',
+      chatsDefaultModel: 'sidecar/chats',
+      chatsDefaultVariant: 'low',
+      chatsDefaultAgent: 'build',
+    };
+    configState.providers = [{
+      id: 'sidecar',
+      models: [
+        { id: 'model', variants: { high: true } },
+        { id: 'chats', variants: { low: true } },
+      ],
+    }];
+    chatsSetterCalls.length = 0;
+
+    await act(async () => {
+      root.render(<DefaultsSettings />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const chatsModelButton = Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'sidecar/chats');
+    await act(async () => {
+      chatsModelButton?.click();
+      await Promise.resolve();
+    });
+    expect(updateCalls.some((call) => (
+      call.chatsDefaultModel === 'sidecar/chats' && call.chatsDefaultVariant === ''
+    ))).toBe(true);
+    expect(chatsSetterCalls).toContain('model:sidecar/chats');
+
+    const chatsAgentButton = Array.from(host.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent === 'build');
+    await act(async () => {
+      chatsAgentButton?.click();
+      await Promise.resolve();
+    });
+    expect(updateCalls.some((call) => call.chatsDefaultAgent === 'plan')).toBe(true);
+    expect(chatsSetterCalls).toContain('agent:plan');
+    expect(updateCalls.some((call) => 'defaultModel' in call || 'defaultAgent' in call)).toBe(false);
   });
 });

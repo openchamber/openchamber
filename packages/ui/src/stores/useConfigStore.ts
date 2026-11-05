@@ -23,7 +23,7 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
 import { isSpaceDirectory } from "@/lib/spaces/space-route";
-import { resolveChatsRootDirectory } from "@/lib/chatDirectories";
+import { isChatDirectoryPath, resolveChatsRootDirectory } from "@/lib/chatDirectories";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier";
 import { readRememberedEffort, rememberEffort, resolveEffortChoice, type EffortChoice } from "@/lib/modelEfforts";
@@ -57,6 +57,9 @@ interface OpenChamberDefaults {
     defaultModel?: string;
     defaultVariant?: string;
     defaultAgent?: string;
+    chatsDefaultModel?: string;
+    chatsDefaultVariant?: string;
+    chatsDefaultAgent?: string;
     autoCreateWorktree?: boolean;
     gitmojiEnabled?: boolean;
     defaultFileViewerPreview?: boolean;
@@ -102,13 +105,15 @@ let openChamberDefaultsCache: {
     request: Promise<OpenChamberDefaults | null>;
 } | null = null;
 let openChamberDefaultsUserRevision = 0;
+let openChamberChatsDefaultsUserRevision = 0;
 
 const invalidateOpenChamberDefaultsCache = (): void => {
     openChamberDefaultsCache = null;
 };
 
-const recordOpenChamberDefaultsChange = (): void => {
-    openChamberDefaultsUserRevision += 1;
+const recordOpenChamberDefaultsChange = (kind: 'sessions' | 'chats' = 'sessions'): void => {
+    if (kind === 'chats') openChamberChatsDefaultsUserRevision += 1;
+    else openChamberDefaultsUserRevision += 1;
     invalidateOpenChamberDefaultsCache();
 };
 
@@ -140,12 +145,18 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
     const defaultModel = data.defaultModel?.trim() ?? '';
     const defaultVariant = data.defaultVariant?.trim() ?? '';
     const defaultAgent = data.defaultAgent?.trim() ?? '';
+    const chatsDefaultModel = data.chatsDefaultModel?.trim() ?? '';
+    const chatsDefaultVariant = data.chatsDefaultVariant?.trim() ?? '';
+    const chatsDefaultAgent = data.chatsDefaultAgent?.trim() ?? '';
     const zenModel = data.zenModel ?? '';
 
     return {
         defaultModel: defaultModel.length > 0 ? defaultModel : undefined,
         defaultVariant: defaultVariant.length > 0 ? defaultVariant : undefined,
         defaultAgent: defaultAgent.length > 0 ? defaultAgent : undefined,
+        chatsDefaultModel: chatsDefaultModel.length > 0 ? chatsDefaultModel : undefined,
+        chatsDefaultVariant: chatsDefaultVariant.length > 0 ? chatsDefaultVariant : undefined,
+        chatsDefaultAgent: chatsDefaultAgent.length > 0 ? chatsDefaultAgent : undefined,
         autoCreateWorktree: data.autoCreateWorktree,
         gitmojiEnabled: data.gitmojiEnabled,
         defaultFileViewerPreview: data.defaultFileViewerPreview,
@@ -1069,8 +1080,21 @@ const getProjectDefaultsForConfigDirectory = (directory: string | null | undefin
     if (!configDirectory) {
         return {};
     }
+    // New chats take their own defaults; everything else keeps the project's.
+    if (isChatDirectoryPath(configDirectory)) return readChatsDefaults();
+    // A chat draft activates the chats root after it opens. Until then the
+    // previous directory must not hand its project defaults to the draft.
     if (isChatDraftOpen() && toDirectoryKey(configDirectory) === useConfigStore.getState().activeDirectoryKey) return {};
     return readProjectDefaults(configDirectory);
+};
+
+const readChatsDefaults = (): ProjectDefaults => {
+    const state = useConfigStore.getState();
+    return {
+        projectDefaultAgent: normalizeOptionalString(state.chatsDefaultAgent),
+        projectDefaultModel: normalizeOptionalString(state.chatsDefaultModel),
+        projectDefaultVariant: normalizeOptionalString(state.chatsDefaultVariant),
+    };
 };
 
 const readProjectDefaults = (configDirectory: string): ProjectDefaults => {
@@ -1311,6 +1335,9 @@ subscribeRuntimeEndpointChanged((detail) => {
         settingsDefaultModel: undefined,
         settingsDefaultVariant: undefined,
         settingsDefaultAgent: undefined,
+        chatsDefaultModel: undefined,
+        chatsDefaultVariant: undefined,
+        chatsDefaultAgent: undefined,
         settingsDefaultsLoaded: false,
         settingsZenModel: undefined,
         selectionSource: 'auto',
@@ -1587,6 +1614,10 @@ interface ConfigStore {
     settingsDefaultsLoaded: boolean;
     settingsDefaultVariant: string | undefined;
     settingsDefaultAgent: string | undefined;
+    // Defaults for new chats, ahead of the session defaults above.
+    chatsDefaultModel: string | undefined;
+    chatsDefaultVariant: string | undefined;
+    chatsDefaultAgent: string | undefined;
     // OpenCode server's own `default_agent` config field (name of a primary agent), used as a
     // fallback when our own settingsDefaultAgent is unset. Sourced from sync config.
     opencodeDefaultAgent: string | undefined;
@@ -1717,6 +1748,9 @@ interface ConfigStore {
     setSettingsDefaultModel: (model: string | undefined) => void;
     setSettingsDefaultVariant: (variant: string | undefined) => void;
     setSettingsDefaultAgent: (agent: string | undefined) => void;
+    setChatsDefaultModel: (model: string | undefined) => void;
+    setChatsDefaultVariant: (variant: string | undefined) => void;
+    setChatsDefaultAgent: (agent: string | undefined) => void;
     setSettingsAutoCreateWorktree: (enabled: boolean) => void;
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
     setSettingsDefaultFileViewerPreview: (enabled: boolean) => void;
@@ -1918,6 +1952,9 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsDefaultsLoaded: false,
                 settingsDefaultVariant: undefined,
                 settingsDefaultAgent: undefined,
+                chatsDefaultModel: undefined,
+                chatsDefaultVariant: undefined,
+                chatsDefaultAgent: undefined,
                 opencodeDefaultAgent: undefined,
                 opencodeDefaultModel: undefined,
                 settingsAutoCreateWorktree: false,
@@ -2827,11 +2864,8 @@ export const useConfigStore = create<ConfigStore>()(
 
                 getDefaultVariantForModel: (providerId: string, modelId: string, directory?: string | null) => {
                     const state = get();
-                    const configDirectory = directory ? normalizeConfigPath(directory) : null;
                     return resolveConfiguredDefaultVariant({
-                        ...(configDirectory
-                            ? readProjectDefaults(configDirectory)
-                            : getProjectDefaultsForConfigDirectory(fromDirectoryKey(state.activeDirectoryKey))),
+                        ...getProjectDefaultsForConfigDirectory(directory ?? fromDirectoryKey(state.activeDirectoryKey)),
                         settingsDefaultModel: state.settingsDefaultModel,
                         settingsDefaultVariant: state.settingsDefaultVariant,
                     }, providerId, modelId);
@@ -2942,17 +2976,22 @@ export const useConfigStore = create<ConfigStore>()(
                 loadSessionDefaults: async () => {
                     const runtimeContext = captureConfigRuntimeContext();
                     const revision = openChamberDefaultsUserRevision;
+                    const chatsRevision = openChamberChatsDefaultsUserRevision;
                     const defaults = await fetchOpenChamberDefaults(runtimeContext);
                     if (!isConfigRuntimeContextCurrent(runtimeContext) || !defaults) return false;
 
                     set((state) => {
                         const edited = revision !== openChamberDefaultsUserRevision;
+                        const chatsEdited = chatsRevision !== openChamberChatsDefaultsUserRevision;
                         const next: Partial<ConfigStore> = {
                             configRuntimeKey: runtimeContext.runtimeKey,
                             settingsDefaultsLoaded: true,
                             settingsDefaultModel: edited ? state.settingsDefaultModel : defaults.defaultModel,
                             settingsDefaultVariant: edited ? state.settingsDefaultVariant : defaults.defaultVariant,
                             settingsDefaultAgent: edited ? state.settingsDefaultAgent : defaults.defaultAgent,
+                            chatsDefaultModel: chatsEdited ? state.chatsDefaultModel : defaults.chatsDefaultModel,
+                            chatsDefaultVariant: chatsEdited ? state.chatsDefaultVariant : defaults.chatsDefaultVariant,
+                            chatsDefaultAgent: chatsEdited ? state.chatsDefaultAgent : defaults.chatsDefaultAgent,
                             settingsAutoCreateWorktree: defaults.autoCreateWorktree ?? false,
                             settingsGitmojiEnabled: defaults.gitmojiEnabled ?? false,
                             settingsDefaultFileViewerPreview: defaults.defaultFileViewerPreview ?? true,
@@ -2968,8 +3007,12 @@ export const useConfigStore = create<ConfigStore>()(
                             sttLanguage: defaults.sttLanguage ?? state.sttLanguage,
                             sttCorrectTranscript: defaults.sttCorrectTranscript ?? state.sttCorrectTranscript,
                         };
-                        if (!useSessionUIStore.getState().currentSessionId && state.selectionSource === 'auto' && state.agentSelectionSource === 'auto' && next.settingsDefaultAgent) {
-                            next.currentAgentName = next.settingsDefaultAgent;
+                        const activeDirectory = fromDirectoryKey(state.activeDirectoryKey);
+                        const scopedAgent = isChatDirectoryPath(activeDirectory)
+                            ? normalizeOptionalString(next.chatsDefaultAgent)
+                            : getProjectDefaultsForConfigDirectory(activeDirectory).projectDefaultAgent;
+                        if (!useSessionUIStore.getState().currentSessionId && state.selectionSource === 'auto' && state.agentSelectionSource === 'auto' && (scopedAgent || next.settingsDefaultAgent)) {
+                            next.currentAgentName = scopedAgent ?? next.settingsDefaultAgent;
                         }
                         return next;
                     });
@@ -3857,7 +3900,7 @@ export const useConfigStore = create<ConfigStore>()(
                     const resolved = resolveDefaultAgentModelSelection({
                         agents: isActive ? state.agents : (snapshot?.agents ?? []),
                         providers: isActive ? state.providers : (snapshot?.providers ?? []),
-                        ...readProjectDefaults(configDirectory),
+                        ...getProjectDefaultsForConfigDirectory(configDirectory),
                         settingsDefaultAgent: state.settingsDefaultAgent,
                         settingsDefaultModel: state.settingsDefaultModel,
                         settingsDefaultVariant: state.settingsDefaultVariant,
@@ -4048,6 +4091,23 @@ export const useConfigStore = create<ConfigStore>()(
                      recordOpenChamberDefaultsChange();
                      set({ settingsDefaultAgent: agent });
                      if (!useSessionUIStore.getState().currentSessionId) get().applyDefaultModelAgentSelection();
+                 },
+
+                 // Defaults for new chats only. Rewriting the open composer here
+                 // could replace a pick made in a project draft.
+                 setChatsDefaultModel: (model: string | undefined) => {
+                     recordOpenChamberDefaultsChange('chats');
+                     set({ chatsDefaultModel: model });
+                 },
+
+                 setChatsDefaultVariant: (variant: string | undefined) => {
+                     recordOpenChamberDefaultsChange('chats');
+                     set({ chatsDefaultVariant: variant });
+                 },
+
+                 setChatsDefaultAgent: (agent: string | undefined) => {
+                     recordOpenChamberDefaultsChange('chats');
+                     set({ chatsDefaultAgent: agent });
                  },
 
                 setSettingsAutoCreateWorktree: (enabled: boolean) => {

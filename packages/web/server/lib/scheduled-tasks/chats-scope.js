@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createProjectIdFromPath } from '../projects/project-id.js';
@@ -16,10 +17,29 @@ export const CHATS_SCOPE_PUBLIC_ID = 'openchamber:chats';
 export const createChatsScope = (chatsRoot) => {
   const root = path.resolve(chatsRoot);
   const id = createProjectIdFromPath(root);
+  const isWithin = (outer, inner) => {
+    const relative = path.relative(outer, inner);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  };
+  // Validated session directories are real paths, while the configured root can
+  // sit behind a symlink. Compare in both spellings.
+  let canonicalRoot = null;
 
   const contains = (directory) => {
-    const relative = path.relative(root, path.resolve(directory));
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    const target = path.resolve(directory);
+    if (isWithin(root, target)) return true;
+    if (canonicalRoot === null) {
+      try {
+        canonicalRoot = realpathSync(root);
+      } catch {
+        return false;
+      }
+    }
+    try {
+      return isWithin(canonicalRoot, realpathSync(target));
+    } catch {
+      return false;
+    }
   };
 
   // Same layout the UI uses for a new chat: <root>/<yyyy-mm-dd>/session-<uuid>.

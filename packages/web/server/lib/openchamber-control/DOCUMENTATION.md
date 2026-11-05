@@ -251,7 +251,9 @@ other.
   does not exist yet, and its start folder mirrors that one. Git work (carrying
   changes, removal) stays on the worktree root.
 - Default agents resolve from the owning project before global settings and
-  OpenCode defaults. Directory-based requests identify the project before
+  OpenCode defaults. A request in the Chats scope, by project id or by a
+  directory under the Chats root, takes the Chats defaults in the project's
+  place. Directory-based requests identify the project before
   creating a worktree; existing linked worktrees resolve through Git's primary
   worktree root. Send/fork fallback uses that same owner. Configured model IDs
   and effort preferences survive missing catalog entries rather than silently

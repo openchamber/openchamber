@@ -576,6 +576,10 @@ export const SETTINGS_REGISTRY = {
   defaultModel: field({ scope: 'profile', parse: parseNonEmptyString }),
   defaultVariant: field({ scope: 'profile', parse: parseNonEmptyString }),
   defaultAgent: field({ scope: 'profile', parse: parseNonEmptyString }),
+  // New chats outside any project. Unset values follow the session defaults.
+  chatsDefaultModel: field({ scope: 'profile', parse: parseNonEmptyString }),
+  chatsDefaultVariant: field({ scope: 'profile', parse: parseNonEmptyString }),
+  chatsDefaultAgent: field({ scope: 'profile', parse: parseNonEmptyString }),
   smallModelUseDefault: field({ scope: 'profile', parse: parseBoolean }),
   smallModelOverride: field({ scope: 'profile', parse: parseNonEmptyString }),
   smallModelVariant: field({ scope: 'profile', parse: parseNonEmptyString }),

@@ -201,6 +201,18 @@ const resolveProjectDefaults = (settings, directory, projectId) => {
   };
 };
 
+/** A new chat takes the Chats defaults; anything else takes its project's. */
+const resolveScopeDefaults = (settings, directory, projectId, chatsScope) => {
+  if (projectId === CHATS_SCOPE_PUBLIC_ID || (directory && chatsScope?.contains(directory))) {
+    return {
+      defaultAgent: asNonEmptyString(settings?.chatsDefaultAgent),
+      defaultModel: asNonEmptyString(settings?.chatsDefaultModel),
+      defaultVariant: asNonEmptyString(settings?.chatsDefaultVariant),
+    };
+  }
+  return resolveProjectDefaults(settings, directory, projectId);
+};
+
 /**
  * One snapshot for this directory. Unknown catalogues can validate an explicit
  * choice permissively, but cannot establish the defaults for a new session.
@@ -832,7 +844,7 @@ export const createOpenChamberSessionService = (dependencies) => {
           && await isAutoReady().catch(() => false);
         const defaults = resolveDefaultSelection({
           ...inputs,
-          projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+          projectDefaults: resolveScopeDefaults(inputs.settings, directory, projectId, chatsScope),
           autoAvailable,
           requireDefaultAgent: !agent,
         });
@@ -856,7 +868,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         const inputs = await readSelectionInputs();
         variant = resolveSelectionVariant({
           settings: inputs.settings,
-          projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+          projectDefaults: resolveScopeDefaults(inputs.settings, directory, projectId, chatsScope),
           agents: inputs.agents,
           agentName: agent,
           models: inputs.models,

@@ -16,4 +16,15 @@ describe('resolveSessionDefaults', () => {
       .toEqual({ providerID: null, modelID: null, variant: null, agent: null });
     expect(resolveSessionDefaults({ settings: { defaultModel: 'no-slash' }, project: null }).modelID).toBeNull();
   });
+
+  it('takes the Chats defaults ahead of the global ones for a Chats task', () => {
+    const settings = {
+      defaultModel: 'anthropic/claude-sonnet-5', defaultVariant: 'low', defaultAgent: 'build',
+      chatsDefaultModel: 'openai/gpt-6', chatsDefaultVariant: 'high', chatsDefaultAgent: 'plan',
+    };
+    expect(resolveSessionDefaults({ settings, project: null, chats: true }))
+      .toEqual({ providerID: 'openai', modelID: 'gpt-6', variant: 'high', agent: 'plan' });
+    expect(resolveSessionDefaults({ settings: { defaultModel: 'anthropic/claude-sonnet-5' }, project: null, chats: true }))
+      .toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5', variant: null, agent: null });
+  });
 });

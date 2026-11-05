@@ -541,6 +541,17 @@ entry is not a request to replace a user's choice. Directory snapshots retain
 the effort override separately from its inherited value, including explicit
 `Default`. Fresh drafts inherit their project's effort before the global one.
 
+Chats defaults (`chatsDefaultAgent`, `chatsDefaultModel`, `chatsDefaultVariant`)
+take the project's place for a directory inside the managed Chats root. They
+precede the global session defaults and follow the same cascade after that.
+Every scope read (`loadAgents`, `loadProviders`, `loadSessionDefaults`,
+`applyOpenCodeConfigDefaults`, `resolveDirectoryDefaultSelection`,
+`getDefaultVariantForModel`) goes through `getProjectDefaultsForConfigDirectory`,
+so a project's defaults never reach a chat and a chat's never reach a project.
+A chat draft activates the Chats root after it opens; until that activation the
+draft keeps the global fallback, and the post-activation continuation applies
+the Chats scope. Editing a Chats default changes the next draft only.
+
 A session started from outside the composer (the Plan/Todo send dialog, and a
 new worktree session it creates) starts on the defaults of the directory it
 runs in. `resolveDirectoryDefaultSelection(directory)` runs the same cascade on

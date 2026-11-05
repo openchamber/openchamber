@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 
 import { isOverviewFeatureAvailable } from '../overview/feature-flag.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
-import { asNonEmptyString } from '../shared/guards.js';
+import { asNonEmptyString, isString } from '../shared/guards.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
 
@@ -818,6 +818,11 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.defaultAgent === 'string') {
       const trimmed = candidate.defaultAgent.trim();
       result.defaultAgent = trimmed.length > 0 ? trimmed : undefined;
+    }
+    for (const key of ['chatsDefaultModel', 'chatsDefaultVariant', 'chatsDefaultAgent']) {
+      if (isString(candidate[key])) {
+        result[key] = asNonEmptyString(candidate[key]) ?? undefined;
+      }
     }
     if (typeof candidate.smallModelUseDefault === 'boolean') {
       result.smallModelUseDefault = candidate.smallModelUseDefault;

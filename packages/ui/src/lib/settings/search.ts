@@ -606,6 +606,20 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['agent', 'new sessions'],
   },
   {
+    id: 'sessions.chats-default-model',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.field.model',
+    descriptionKey: 'settings.openchamber.defaults.chatsTitle',
+    keywords: ['model', 'provider', 'chats', 'chat', 'new chats', 'thinking', 'reasoning', 'variant'],
+  },
+  {
+    id: 'sessions.chats-default-agent',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.defaults.field.agent',
+    descriptionKey: 'settings.openchamber.defaults.chatsTitle',
+    keywords: ['agent', 'chats', 'chat', 'new chats'],
+  },
+  {
     id: 'sessions.deletion-dialog',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.field.showDeletionDialog',
