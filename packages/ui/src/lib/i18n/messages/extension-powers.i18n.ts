@@ -1,6 +1,7 @@
 /** Extension services that act on their own, and what they add to agents — merged into each locale's settings dictionary. */
 export const extensionPowersI18n = {
   en: {
+    'chat.draftPresets.newExtension.label': 'Build an extension',
     'settings.extensions.dialog.later': 'Not now',
     'settings.extensions.service.failed': 'Its service stopped working. Disable the extension and enable it again.',
     'chat.chatInput.toast.guestRemoved': 'This extension was removed. Add it again in Settings → Extensions.',
@@ -34,6 +35,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Extensions',
   },
   nl: {
+    'chat.draftPresets.newExtension.label': 'Extensie bouwen',
     'settings.extensions.dialog.later': 'Niet nu',
     'settings.extensions.service.failed': 'De service werkt niet meer. Schakel de extensie uit en schakel deze weer in.',
     'chat.chatInput.toast.guestRemoved': 'Deze extensie is verwijderd. Voeg deze opnieuw toe in Instellingen → Extensies.',
@@ -67,6 +69,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Extensies',
   },
   de: {
+    'chat.draftPresets.newExtension.label': 'Erweiterung bauen',
     'settings.extensions.dialog.later': 'Nicht jetzt',
     'settings.extensions.service.failed': 'Der Dienst funktioniert nicht mehr. Deaktiviere die Erweiterung und aktiviere sie wieder.',
     'chat.chatInput.toast.guestRemoved': 'Diese Erweiterung wurde entfernt. Füge sie unter Einstellungen → Erweiterungen wieder hinzu.',
@@ -100,6 +103,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Erweiterungen',
   },
   fr: {
+    'chat.draftPresets.newExtension.label': 'Créer une extension',
     'settings.extensions.dialog.later': 'Pas maintenant',
     'settings.extensions.service.failed': 'Son service a cessé de fonctionner. Désactivez l\'extension, puis activez-la de nouveau.',
     'chat.chatInput.toast.guestRemoved': 'Cette extension a été retirée. Ajoutez-la de nouveau dans Réglages → Extensions.',
@@ -133,6 +137,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Extensions',
   },
   es: {
+    'chat.draftPresets.newExtension.label': 'Crear una extensión',
     'settings.extensions.dialog.later': 'Ahora no',
     'settings.extensions.service.failed': 'Su servicio dejó de funcionar. Desactiva la extensión y vuelve a activarla.',
     'chat.chatInput.toast.guestRemoved': 'Esta extensión se quitó. Vuelve a añadirla en Ajustes → Extensiones.',
@@ -166,6 +171,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Extensiones',
   },
   ja: {
+    'chat.draftPresets.newExtension.label': '拡張機能を作る',
     'settings.extensions.dialog.later': '後で',
     'settings.extensions.service.failed': 'サービスが動作しなくなりました。拡張機能を無効にしてから、もう一度有効にしてください。',
     'chat.chatInput.toast.guestRemoved': 'この拡張機能は削除されました。設定 → 拡張機能でもう一度追加してください。',
@@ -199,6 +205,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': '拡張機能',
   },
   'pt-BR': {
+    'chat.draftPresets.newExtension.label': 'Criar uma extensão',
     'settings.extensions.dialog.later': 'Agora não',
     'settings.extensions.service.failed': 'O serviço parou de funcionar. Desative a extensão e ative-a novamente.',
     'chat.chatInput.toast.guestRemoved': 'Esta extensão foi removida. Adicione-a novamente em Configurações → Extensões.',
@@ -232,6 +239,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Extensões',
   },
   uk: {
+    'chat.draftPresets.newExtension.label': 'Створити розширення',
     'settings.extensions.dialog.later': 'Не зараз',
     'settings.extensions.service.failed': 'Сервіс перестав працювати. Вимкніть розширення й увімкніть його знову.',
     'chat.chatInput.toast.guestRemoved': 'Це розширення видалено. Додайте його знову в Налаштування → Розширення.',
@@ -265,6 +273,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Розширення',
   },
   ko: {
+    'chat.draftPresets.newExtension.label': '확장 만들기',
     'settings.extensions.dialog.later': '나중에',
     'settings.extensions.service.failed': '서비스가 작동을 멈췄습니다. 확장을 사용 안 함으로 설정한 다음 다시 사용으로 설정하세요.',
     'chat.chatInput.toast.guestRemoved': '이 확장은 제거되었습니다. 설정 → 확장에서 다시 추가하세요.',
@@ -298,6 +307,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': '확장',
   },
   pl: {
+    'chat.draftPresets.newExtension.label': 'Zbuduj rozszerzenie',
     'settings.extensions.dialog.later': 'Nie teraz',
     'settings.extensions.service.failed': 'Usługa przestała działać. Wyłącz rozszerzenie i włącz je ponownie.',
     'chat.chatInput.toast.guestRemoved': 'To rozszerzenie zostało usunięte. Dodaj je ponownie w Ustawienia → Rozszerzenia.',
@@ -331,6 +341,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Rozszerzenia',
   },
   'zh-CN': {
+    'chat.draftPresets.newExtension.label': '创建扩展',
     'settings.extensions.dialog.later': '暂不',
     'settings.extensions.service.failed': '它的服务已停止工作。请禁用扩展，然后重新启用。',
     'chat.chatInput.toast.guestRemoved': '此扩展已被移除。请在设置 → 扩展中重新添加。',
@@ -364,6 +375,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': '扩展',
   },
   'zh-TW': {
+    'chat.draftPresets.newExtension.label': '建立擴充功能',
     'settings.extensions.dialog.later': '暫不',
     'settings.extensions.service.failed': '它的服務已停止運作。請停用擴充功能，然後重新啟用。',
     'chat.chatInput.toast.guestRemoved': '此擴充功能已移除。請在設定 → 擴充功能中重新新增。',
@@ -397,6 +409,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': '擴充功能',
   },
   tr: {
+    'chat.draftPresets.newExtension.label': 'Uzantı oluştur',
     'settings.extensions.dialog.later': 'Şimdi değil',
     'settings.extensions.service.failed': 'Hizmeti çalışmayı durdurdu. Uzantıyı devre dışı bırakın ve yeniden etkinleştirin.',
     'chat.chatInput.toast.guestRemoved': 'Bu uzantı kaldırıldı. Ayarlar → Uzantılar\'dan yeniden ekleyin.',
@@ -430,6 +443,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'Uzantılar',
   },
   ar: {
+    'chat.draftPresets.newExtension.label': 'إنشاء إضافة',
     'settings.extensions.dialog.later': 'ليس الآن',
     'settings.extensions.service.failed': 'توقفت خدمتها عن العمل. عطّل الإضافة ثم فعّلها مرة أخرى.',
     'chat.chatInput.toast.guestRemoved': 'أُزيلت هذه الإضافة. أضفها مرة أخرى من الإعدادات → الإضافات.',
@@ -463,6 +477,7 @@ export const extensionPowersI18n = {
     'chat.selection.extensionActions': 'الامتدادات',
   },
   he: {
+    'chat.draftPresets.newExtension.label': 'יצירת הרחבה',
     'settings.extensions.dialog.later': 'לא עכשיו',
     'settings.extensions.service.failed': 'השירות הפסיק לעבוד. יש להשבית את ההרחבה ולהפעיל אותה שוב.',
     'chat.chatInput.toast.guestRemoved': 'ההרחבה הזו הוסרה. אפשר להוסיף אותה שוב בהגדרות ← הרחבות.',

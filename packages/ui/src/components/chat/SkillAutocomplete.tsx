@@ -7,7 +7,7 @@ import { useComposerConfigDirectory } from '@/hooks/useComposerConfigDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
-import { AutocompleteLoadingRow, AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
+import { AutocompleteLoadingRow, AutocompleteRowDetail, type AutocompleteScope } from './composer/ui/AutocompleteRowParts';
 import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 import { rankSkillAutocompleteItems } from './skillAutocompleteItems';
 import { useHeightMorph } from '@/lib/motion/useSizeMorph';
@@ -31,6 +31,12 @@ interface SkillAutocompleteProps {
   onClose: () => void;
   style?: React.CSSProperties;
 }
+
+/** Our authoring skill is delivered as a skill on disk, but it comes with the app. */
+const skillRowScope = (skill: SkillInfo): AutocompleteScope => {
+  if (skill.name === 'openchamber-extensions') return 'openchamber';
+  return skill.scope === 'project' ? 'project' : 'user';
+};
 
 export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, SkillAutocompleteProps>(({
   searchQuery,
@@ -146,7 +152,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
         }}
       >
         <span className="max-w-[60%] shrink-0 truncate font-semibold">{skill.name}</span>
-        <AutocompleteRowDetail scope={skill.scope === 'project' ? 'project' : 'user'} description={skill.description} />
+        <AutocompleteRowDetail scope={skillRowScope(skill)} description={skill.description} />
       </div>
     );
   };

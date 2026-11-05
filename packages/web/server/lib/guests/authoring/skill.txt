@@ -12,7 +12,7 @@ The person asking rarely knows where an extension can reach. Your job is to find
 
 ## Steps
 
-1. **Design.** Read *Choose where it lives* and pick the points that fit. Tell the user the plan in a few plain lines: what they will see, where, and when it needs them. Ask only what the request leaves open, at most: private or public, and a value you cannot guess (an account, a URL). Done when the plan is stated. If the user said to proceed without questions, state it and go on.
+1. **Design.** Read *Choose where it lives* and pick the points that fit. Tell the user the plan in a few plain lines: what they will see, where, and when it needs them. With no request yet, ask what they want it to do, in one question, and stop. Otherwise ask only what the request leaves open, at most: private or public, and a value you cannot guess (an account, a URL). Done when the plan is stated. If the user said to proceed without questions, state it and go on.
 2. **Create.** Use the folder the user named, else `~/openchamber-extensions/<id>`, never the project they are working in. Run `bun init -y`, then `bun add @openchamber/sdk`. Write `package.json` from *Manifest*, then the code from the recipes. Everything you need is in this file and the two reference files under *Where to read more*: start writing, and open those only for a detail you miss. Build what the plan says and stop there, because each extra feature is one more thing the user has to approve and maintain.
 3. **Build.** Bundle every page script and the service:
    ```sh
