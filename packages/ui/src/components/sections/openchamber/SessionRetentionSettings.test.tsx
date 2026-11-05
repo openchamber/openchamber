@@ -25,7 +25,9 @@ mock.module('@/components/sections/shared/SettingsSection', () => ({
   SettingsFieldRow: ({ settingsItem, info }: { settingsItem?: string; info?: React.ReactNode }) => (
     settingsItem === 'sessions.retention-only-archived' ? <p>{info}</p> : null
   ),
-  SettingsCheckboxRow: ({ settingsItem }: { settingsItem?: string }) => <i data-settings-item={settingsItem} />,
+  SettingsCheckboxRow: ({ settingsItem, disabled }: { settingsItem?: string; disabled?: boolean }) => (
+    <i data-settings-item={settingsItem} aria-disabled={disabled} />
+  ),
   SettingsChipGroup: () => null,
   SETTINGS_ICON_BUTTON_CLASS: '',
   SETTINGS_NUMBER_INPUT_CLASS: '',
@@ -64,5 +66,15 @@ describe('include In work checkbox', () => {
     state.sessionWorkEnabled = false;
     expect(render()).not.toContain('data-settings-item="sessions.retention-include-in-work"');
     state.sessionWorkEnabled = true;
+  });
+
+  test('stays visible but disabled with the archived target', () => {
+    const render = () => renderToStaticMarkup(<I18nProvider><SessionRetentionSettings /></I18nProvider>);
+    const checkbox = '<i data-settings-item="sessions.retention-include-in-work" aria-disabled="true">';
+    state.sessionRetentionOnlyArchived = true;
+    expect(render()).toContain(checkbox);
+    state.sessionRetentionOnlyArchived = false;
+    expect(render()).not.toContain(checkbox);
+    expect(render()).toContain('data-settings-item="sessions.retention-include-in-work"');
   });
 });

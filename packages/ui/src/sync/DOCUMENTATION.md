@@ -766,21 +766,20 @@ Turning it off leaves Delete selected and makes Archive available again. The
 setting uses the instance settings registry across web, desktop, VS Code and mobile.
 
 Both modes preserve the five most recent sessions in the selected scope, ranked
-by that scope's retention timestamp, plus the selected session, shared sessions,
-sessions with observed live activity, and sessions the user keeps: pinned on this
-client (pins live in local storage, so another device does not see them) or in
+by that scope's retention timestamp, plus the selected session,
+sessions with observed live activity, and sessions the user keeps: pinned or in
 the In work block. The opt-in `sessionRetentionIncludeInWork` setting lets
 retention take In work sessions too, the same way for Archive and Delete, and
 with sessions in work turned off (`sessionWorkEnabled`) the block keeps
 nothing. An archived session is never in the block, so open work left in its
-metadata does not keep it. Pins keep their sessions either way; `inWorkKeepsSessions` is the one
+metadata does not keep it, and Settings disables the opt-in for that target. Pins keep their sessions either way; `inWorkKeepsSessions` is the one
 rule the Settings preview, the candidate list and the recheck before each
 request share. Parents with an attached `/btw` conversation also stay,
 because the canonical archive/delete actions remove that temporary fork.
 Sessions outside the selected scope remain protected. Because
 OpenCode cascades deletion, every ancestor of a retained session is protected
 too. Eligible deletions run children first and recheck current selection,
-activity, sharing, age, and child membership before each request. A failed child
+activity, age, and child membership before each request. A failed child
 blocks deletion of its ancestors while unrelated sessions continue.
 
 Cleanup uses the canonical archive/delete actions, including confirmed `404`
