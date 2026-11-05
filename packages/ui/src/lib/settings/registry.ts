@@ -460,6 +460,7 @@ export const SETTINGS_REGISTRY = {
   streamingAutoFollowEnabled: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: uiStore('streamingAutoFollowEnabled', (v) => useUIStore.getState().setStreamingAutoFollowEnabled(v)) }),
   collapsibleThinkingBlocks: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('collapsibleThinkingBlocks', (v) => useUIStore.getState().setCollapsibleThinkingBlocks(v)) }),
   expandReasoningWhileStreaming: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('expandReasoningWhileStreaming', (v) => useUIStore.getState().setExpandReasoningWhileStreaming(v)) }),
+  expandReasoningByDefault: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('expandReasoningByDefault', (v) => useUIStore.getState().setExpandReasoningByDefault(v)) }),
   showTextJustificationActivity: field({ scope: 'profile', parse: parseBoolean }),
   /** Legacy chat mode that `activityRenderMode` absorbs at parse time. */
   chatRenderMode: field({ scope: 'profile', parse: parseOneOf(['sorted', 'live']) }),

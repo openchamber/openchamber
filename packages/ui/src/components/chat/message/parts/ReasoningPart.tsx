@@ -514,6 +514,7 @@ const ReasoningPart = React.memo(({
     streamPhase,
 }: ReasoningPartProps) => {
     const expandWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
+    const expandByDefault = useUIStore((state) => state.expandReasoningByDefault);
     const revealRequest = useReasoningReveal(messageId);
     const partWithText = part as PartWithText;
     const rawText = partWithText.text || partWithText.content || '';
@@ -549,6 +550,7 @@ const ReasoningPart = React.memo(({
             time={time}
             isStreaming={isStreaming}
             expandWhileStreaming={expandWhileStreaming}
+            defaultExpanded={expandByDefault}
             revealRequest={revealRequest}
             reasoningMessageId={messageId}
         />

@@ -121,6 +121,8 @@ const MessagesTab: React.FC = () => {
   const setCollapsibleThinkingBlocks = useUIStore((state) => state.setCollapsibleThinkingBlocks);
   const expandReasoningWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
   const setExpandReasoningWhileStreaming = useUIStore((state) => state.setExpandReasoningWhileStreaming);
+  const expandReasoningByDefault = useUIStore((state) => state.expandReasoningByDefault);
+  const setExpandReasoningByDefault = useUIStore((state) => state.setExpandReasoningByDefault);
   const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
   const setShowToolFileIcons = useUIStore((state) => state.setShowToolFileIcons);
   const showTurnChangedFiles = useUIStore((state) => state.showTurnChangedFiles);
@@ -197,6 +199,17 @@ const MessagesTab: React.FC = () => {
               label={t('settings.openchamber.visual.field.expandReasoningWhileStreaming')}
               ariaLabel={t('settings.openchamber.visual.field.expandReasoningWhileStreamingAria')}
               info={t('settings.openchamber.visual.field.expandReasoningWhileStreamingInfo')}
+              className={NESTED_OPTION_CLASS}
+            />
+          ) : null}
+          {/* Only a collapsible block can be folded by the reader. */}
+          {showReasoningTraces && collapsibleThinkingBlocks ? (
+            <SettingsCheckboxRow
+              checked={expandReasoningByDefault}
+              onChange={setExpandReasoningByDefault}
+              label={t('settings.openchamber.visual.field.expandReasoningByDefault')}
+              ariaLabel={t('settings.openchamber.visual.field.expandReasoningByDefaultAria')}
+              info={t('settings.openchamber.visual.field.expandReasoningByDefaultInfo')}
               className={NESTED_OPTION_CLASS}
             />
           ) : null}

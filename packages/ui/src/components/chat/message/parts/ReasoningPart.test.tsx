@@ -16,6 +16,7 @@ import { I18nProvider } from '@/lib/i18n';
 import ReasoningPart, { ReasoningTimelineBlock } from './ReasoningPart';
 import type { StreamPhase } from '../types';
 import { onRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { useUIStore } from '@/stores/useUIStore';
 
 // Bun does not implement Vite's asset-query imports. Preserve the real asset
 // URL while keeping the renderer and worker client modules unchanged.
@@ -316,6 +317,40 @@ describe('ReasoningPart streaming gating (issue #2020)', () => {
 
     expect(markup).toContain(BUSY_INDICATOR);
     expect(markup).toContain('aria-expanded="false"');
+  });
+
+  test('completed reasoning starts expanded when the reader asked for it', async () => {
+    // The setting reaches the block as `defaultExpanded`, which keeps it open
+    // after the turn ends until the reader folds it. A client root is needed
+    // here: server rendering reads the store's initial state.
+    const dom = installDomStub();
+    const root = createRoot(dom.container);
+    useUIStore.setState({ expandReasoningByDefault: true });
+
+    try {
+      await act(async () => {
+        root.render(
+          <TestProviders>
+            <ReasoningPart
+              part={makeReasoningPart({ start: 1_000, end: 2_000 })}
+              messageId="msg_2020"
+              streamPhase="completed"
+            />
+          </TestProviders>,
+        );
+      });
+
+      const header = dom.container.querySelector<HTMLElement>('[role="button"][aria-expanded]');
+      expect(header?.getAttribute('aria-expanded')).toBe('true');
+      expect(dom.container.innerHTML).toContain('data-message-text-export-source');
+      expect(dom.container.textContent).toContain(SHORT_REASONING);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      useUIStore.setState({ expandReasoningByDefault: false });
+      dom.restore();
+    }
   });
 
   test('live in-progress reasoning opens while it streams when the setting asks for it', () => {

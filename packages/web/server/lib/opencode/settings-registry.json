@@ -401,6 +401,9 @@
     "expandReasoningWhileStreaming": {
       "scope": "profile"
     },
+    "expandReasoningByDefault": {
+      "scope": "profile"
+    },
     "showTextJustificationActivity": {
       "scope": "profile"
     },
