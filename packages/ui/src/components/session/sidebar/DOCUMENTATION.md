@@ -587,8 +587,9 @@ the same Mark all as read.
   its project too never collides; collapse and Show more state stay keyed by
   the group and are shared.
 - Grouped by time, all-projects mode replaces the project headers with one
-  `timeline` zone: project-root drafts first, then every work Pinned and In
-  work do not list, by the lifecycle order of its latest session, then the
+  `timeline` zone: the projects' root folders first (see "Where a work
+  files"), then project-root drafts, then every work Pinned, In work and the
+  folders do not list, by the lifecycle order of its latest session, then the
   worktrees nobody has started a session in. It is virtualized, so it has no
   reveal limit, and ends with the statuses a project header would show for
   projects it lists nothing for (one loading line, one line per failed
@@ -704,8 +705,39 @@ the folder store and the server file it with the same assign and unassign
 changes as a session. A filed worktree renders inside its folder, one level
 deeper, and nowhere else under the project; filed into a folder that is gone,
 it stays under the project. The work row's menu (the "⋯" button and a right-click on the row show the
-same items) files it (Move to folder);
+same items) files it (Move to folder), a new folder included;
 dragging a worktree onto a folder is not offered.
+
+### Where a work files
+
+Filing follows where a row lives. A session of the project root, a lane of a
+run and a chat file in the root's or the Chats folders. A session inside a
+worktree or a space is part of that work, which files whole, so the root's
+folders are not offered to it, in the menu, a drag or a selection: filed there
+it stayed in the worktree and left an empty folder. `folderOwnerKeyOf` in the
+row model gives such a session the worktree's own owner key
+(`getWorkFolderOwnerKey`), which only the folders inside that worktree carry;
+older data can hold these, and they stay usable. The selection scope stays the
+project, so a selection can still span a project and its worktrees; its folder
+action takes what files in the project and leaves the rest.
+
+Move to folder shows on every session row but the archive's: under a project,
+in Chats and with Detailed rows, and in the sections and the list by time. There the folder
+row may be off screen or not drawn at all, so a new folder is named in
+`folders/NewFolderDialog.tsx` instead of in place. A section reaches folders through the
+Folder condition (`sections/DOCUMENTATION.md`). The list by time draws every
+project's root folders first, as a file manager lists folders before files,
+with the project's name on the row while several projects are registered: what
+they hold leaves the flat list, which stays ordered by recency. A search lists
+it flat again. The project header's menu makes an empty folder. The phone neither
+files nor makes folders: its swipes have no room for it (maintainer,
+2026-11-05).
+
+A session or worktree a section took out of its project stays a member of its
+folder (`memberCount` on the folder row) and comes back there when it leaves
+the section: the rule is the section's own ("Also show in work under
+projects" keeps it in the folder as well). The folder then reads as empty, with no
+chevron, while its saved collapse stays and its delete dialog counts the members.
 
 ## Locations and detailed rows
 

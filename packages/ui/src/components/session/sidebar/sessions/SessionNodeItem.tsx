@@ -47,6 +47,8 @@ import { useSessionHoverPrefetch } from '../list/useSessionPrefetch';
 import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
+import { requestNewFolder } from '../folders/newFolderRequest';
+import { getWorkFolderScope } from './sessionFolderIdentity';
 import { useSessionRowOrderRegistry } from './sessionRowOrder';
 import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
 import { useSessionRowMenuState } from './useSessionRowMenuState';
@@ -1413,32 +1415,46 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         </SessionMenuItemHint>
       ) : null}
 
-      {sessionDirectory && !archivedBucket && !isTimelineRow && hasFolderMutationAuthority ? (() => {
-        // Folders are flat per project: list folders from every scope of the
-        // owning project (root + all worktrees) so sessions can be filed
-        // across worktrees. Each action targets the folder's owning scope,
-        // and moving between scopes clears the previous membership first.
+      {sessionDirectory && !archivedBucket && hasFolderMutationAuthority ? (() => {
+        // A session files where its row lives: the project root's folders, or
+        // those of its own worktree, which itself files whole. Every other
+        // scope is read only to find and clear an older membership.
+        const workScope = getWorkFolderScope(folderOwnerKey);
         const scopes: string[] = [];
         const pushScope = (candidate: string | null | undefined) => {
           const normalized = normalizePath(candidate ?? null);
           if (normalized && !scopes.includes(normalized)) scopes.push(normalized);
         };
-        if (sessionProjectId && !isVSCode) {
-          const project = useProjectsStore.getState().projects.find((entry) => entry.id === sessionProjectId);
-          const projectRoot = normalizePath(project?.path ?? null);
-          pushScope(projectRoot);
-          if (projectRoot) {
-            (useSessionUIStore.getState().availableWorktreesByProject.get(projectRoot) ?? [])
-              .forEach((worktree) => pushScope(worktree.path));
-          }
+        const project = sessionProjectId && !isVSCode
+          ? useProjectsStore.getState().projects.find((entry) => entry.id === sessionProjectId)
+          : undefined;
+        const projectRoot = normalizePath(project?.path ?? null);
+        if (workScope) pushScope(workScope);
+        else if (projectRoot) pushScope(projectRoot);
+        else {
+          pushScope(getChatsRootFromDirectory(sessionDirectory));
+          pushScope(sessionDirectory);
         }
-        pushScope(getChatsRootFromDirectory(sessionDirectory));
+        const offeredScopes = [...scopes];
+        pushScope(projectRoot);
         pushScope(sessionDirectory);
-        const folderEntries = scopes.flatMap((scope) =>
+        if (projectRoot) {
+          (useSessionUIStore.getState().availableWorktreesByProject.get(projectRoot) ?? [])
+            .forEach((worktree) => pushScope(worktree.path));
+        }
+        const allEntries = scopes.flatMap((scope) =>
           getFoldersForScope(scope).map((folder) => ({ scope, folder })));
-        const currentEntry = folderEntries.find(({ scope, folder }) =>
+        const currentEntry = allEntries.find(({ scope, folder }) =>
           getSessionFolderId(scope, session.id) === folder.id) ?? null;
-        const defaultScope = scopes[0] ?? sessionDirectory;
+        const folderEntries = allEntries.filter((entry) => offeredScopes.includes(entry.scope) || entry === currentEntry);
+        const defaultScope = offeredScopes[0] ?? sessionDirectory;
+        const fileInNewFolder = (folderId: string): void => {
+          for (const scope of scopes) {
+            if (scope !== defaultScope) removeSessionFromFolder(scope, session.id);
+          }
+          addSessionToFolder(defaultScope, folderId, session.id);
+        };
+        if (workScope && folderEntries.length === 0) return null;
         return (
           <>
             <Separator />
@@ -1469,19 +1485,25 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                     );
                   })
                 )}
-                <Separator />
-                <Item onClick={() => {
-                   const newFolder = createFolderAndStartRename(defaultScope);
-                   if (!newFolder) return;
-                   pendingFolderCreateRef.current = true;
-                  for (const scope of scopes) {
-                    if (scope !== defaultScope) removeSessionFromFolder(scope, session.id);
-                  }
-                  addSessionToFolder(defaultScope, newFolder.id, session.id);
-                }}>
-                  <Icon name="add" className="me-1 h-4 w-4" />
-                  {t('sessions.sidebar.folders.newFolderEllipsis')}
-                </Item>
+                {!workScope ? <>
+                  <Separator />
+                  <Item onClick={() => {
+                    if (isZoneRow) {
+                      requestNewFolder({
+                        projectLabel: project?.label?.trim() || (project ? formatDirectoryName(project.path, null) : null),
+                        create: (name) => fileInNewFolder(useSessionFoldersStore.getState().createFolder(defaultScope, name).id),
+                      });
+                      return;
+                    }
+                    const newFolder = createFolderAndStartRename(defaultScope);
+                    if (!newFolder) return;
+                    pendingFolderCreateRef.current = true;
+                    fileInNewFolder(newFolder.id);
+                  }}>
+                    <Icon name="add" className="me-1 h-4 w-4" />
+                    {t('sessions.sidebar.folders.newFolderEllipsis')}
+                  </Item>
+                </> : null}
                 {currentEntry ? (
                   <Item onClick={() => { removeSessionFromFolder(currentEntry.scope, session.id); }} className="text-destructive focus:text-destructive">
                     <Icon name="close" className="me-1 h-4 w-4" />

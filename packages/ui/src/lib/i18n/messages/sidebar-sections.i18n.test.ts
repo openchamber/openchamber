@@ -12,7 +12,7 @@ const SHARED_WITH_ENGLISH = new Map(Object.entries({
   ja: new Set(['sessions.sidebar.sections.link.issue']),
   'pt-BR': new Set(['sessions.sidebar.sections.template.prs', 'sessions.sidebar.sections.kind.worktree', 'sessions.sidebar.sections.link.pr', 'sessions.sidebar.sections.link.issue', 'sessions.sidebar.sections.matchWorksSingle']),
   uk: new Set(['sessions.sidebar.sections.kind.worktree', 'sessions.sidebar.sections.link.pr', 'sessions.sidebar.sections.link.issue']),
-  pl: new Set(['sessions.sidebar.sections.link.plan', 'sessions.sidebar.sections.kind.worktree', 'sessions.sidebar.sections.link.pr']),
+  pl: new Set(['sessions.sidebar.sections.link.plan', 'sessions.sidebar.sections.kind.worktree', 'sessions.sidebar.sections.link.pr', 'sessions.sidebar.sections.category.folders']),
   tr: new Set(['sessions.sidebar.sections.link.plan', 'sessions.sidebar.sections.kind.worktree', 'sessions.sidebar.sections.link.pr', 'sessions.sidebar.sections.link.issue']),
   he: new Set(['sessions.sidebar.sections.kind.worktree', 'sessions.sidebar.sections.link.issue']),
 }));

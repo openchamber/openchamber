@@ -1,5 +1,6 @@
 import React from 'react';
 import { MobilePinToSheet } from '@/apps/mobileSidebar/MobilePinToSheet';
+import { NewFolderDialog } from './sidebar/folders/NewFolderDialog';
 import { NewPinListDialog } from './sidebar/sections/NewPinListDialog';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
@@ -776,6 +777,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       />
 
       <NewPinListDialog />
+      <NewFolderDialog />
       {mobileVariant ? <MobilePinToSheet /> : null}
 
     </div>

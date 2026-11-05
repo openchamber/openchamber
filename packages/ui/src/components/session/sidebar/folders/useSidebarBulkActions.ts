@@ -148,8 +148,11 @@ export const useSidebarBulkActions = (args: Args) => {
     return resolveSelectionFolderScopes(derivedSelectionScope, getFolderScopesForProject);
   }, [derivedSelectionScope, getFolderScopesForProject]);
 
+  // The project root's folders, first in project order: a worktree's own
+  // folders hold only that worktree's sessions.
   const bulkScopeFolders = React.useMemo(() => {
-    return selectionFolderScopes.flatMap((scope) => foldersMap[scope] ?? []);
+    const rootScope = selectionFolderScopes[0];
+    return rootScope ? foldersMap[rootScope] ?? [] : [];
   }, [foldersMap, selectionFolderScopes]);
 
   const resolveFolderScope = React.useCallback((folderId: string): string | null => {
@@ -323,6 +326,7 @@ export const useSidebarBulkActions = (args: Args) => {
     bulkScopeIsArchived,
     derivedSelectionScope,
     bulkScopeFolders,
+    bulkCanMoveToFolder: folderSelectionIds.length > 0,
     bulkCanRemoveFromFolder,
     handleToggleSelectionMode,
     handleExitSelectionMode,

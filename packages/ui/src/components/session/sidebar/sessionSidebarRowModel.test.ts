@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
+import { getWorkFolderOwnerKey } from './sessions/sessionFolderIdentity';
 import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
@@ -119,7 +120,7 @@ describe('buildSessionSidebarRowModel', () => {
     expect(childRow).toMatchObject({
       projectId: 'project-a',
       ownerProjectId: 'project-b',
-      ownerKey: 'project-b',
+      ownerKey: getWorkFolderOwnerKey('/project-b/worktree'),
       selectionScopeKey: 'project-b',
     });
   });

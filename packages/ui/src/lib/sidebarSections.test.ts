@@ -8,7 +8,7 @@ import {
 } from './sidebarSections';
 
 const facts = (overrides: Partial<SidebarWorkFacts> = {}): SidebarWorkFacts => ({
-  kind: 'session', projectId: 'p1', pin: null, inWork: false, done: false, running: false, needsAnswer: false,
+  kind: 'session', projectId: 'p1', folderId: null, pin: null, inWork: false, done: false, running: false, needsAnswer: false,
   unread: false, failed: false, looksDone: false, hasPr: false, hasIssue: false, hasTrackerItem: false, hasPlan: false, hasGoal: false, lastActivityAt: 0, texts: [], scheduled: false, ...overrides,
 });
 
@@ -33,6 +33,24 @@ describe('sidebarSectionsSchema', () => {
     const mine = sections.find((entry) => entry.id === 'mine');
     expect(mine).toMatchObject({ kind: 'custom', name: 'Mine', grouping: 'time', claims: false, hideWhenEmpty: true });
     expect(mine?.kind === 'custom' ? mine.filter.states : null).toEqual(['running']);
+  });
+
+  test('a section keeps the folders it asks for, and a group of projects drops them', () => {
+    const sections = sidebarSectionsSchema.parse([
+      { kind: 'custom', id: 'mine', name: 'Mine', filter: { folders: ['f1', 'f1', 7] } },
+      { kind: 'custom', id: 'clients', name: 'Clients', grouping: 'project', filter: { folders: ['f1'] } },
+    ]);
+    const mine = sections.find((entry) => entry.id === 'mine');
+    const clients = sections.find((entry) => entry.id === 'clients');
+    expect(mine?.kind === 'custom' ? mine.filter.folders : null).toEqual(['f1']);
+    expect(clients?.kind === 'custom' ? clients.filter.folders : null).toEqual([]);
+  });
+
+  test('a folder condition matches the works filed there', () => {
+    const filter = { ...EMPTY_SIDEBAR_SECTION_FILTER, folders: ['f1'] };
+    expect(matchesSidebarSectionFilter(filter, facts({ folderId: 'f1' }), 0)).toBe(true);
+    expect(matchesSidebarSectionFilter(filter, facts({ folderId: 'f2' }), 0)).toBe(false);
+    expect(matchesSidebarSectionFilter(filter, facts(), 0)).toBe(false);
   });
 
   test('a group of projects keeps only its projects', () => {

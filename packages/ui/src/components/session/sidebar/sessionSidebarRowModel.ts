@@ -7,7 +7,7 @@ import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { buildGroupRenderDescriptors } from './projects/sessionProjectRender';
 import { normalizeFolderRoots, selectFolderIdsForProjection, selectFolderRootNodes, type BlockingBadgeSessionScope } from './sessions/sessionNodeItemUtils';
-import { getAuthoritativeSessionFolderOwnerKey, getSessionFolderIdentityKey, getSessionFolderOwnerKey, getSessionFolderScopes, isArchivedFolderScope } from './sessions/sessionFolderIdentity';
+import { getAuthoritativeSessionFolderOwnerKey, getGroupFolderOwnerKey, getSessionFolderIdentityKey, getSessionFolderScopes, getWorkFolderOwnerKey, isArchivedFolderScope } from './sessions/sessionFolderIdentity';
 import type { SessionRowOrderEntry } from './sessions/sessionRowOrder';
 import { computeSessionTreeGuides, type SessionTreeGuide } from './sessions/sessionTreeGeometry';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
@@ -104,7 +104,7 @@ export type SessionSidebarRow =
   // `detailed`: such a worktree work drawn in two lines, as the detailed zone
   // rows around it are.
   | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; forceExpanded: boolean; empty: boolean; allSessions: readonly Session[]; depth: number; mixed: boolean; detailed: boolean })
-  | (RowBase & { kind: 'folder-header'; depth: number; group: SessionGroup; folder: SessionFolder; displayName: string; scopeKey: string; scopeDirectory: string | null; ownerKey: string | null; nodes: readonly SessionNode[]; activityNodes: readonly SessionNode[]; projectId: string | null; archived: boolean; collapsed: boolean; forceExpanded: boolean; empty: boolean; deleteSessions: readonly Session[]; subFolderCount: number; dropEnabled: boolean })
+  | (RowBase & { kind: 'folder-header'; depth: number; group: SessionGroup; folder: SessionFolder; displayName: string; scopeKey: string; scopeDirectory: string | null; ownerKey: string | null; nodes: readonly SessionNode[]; activityNodes: readonly SessionNode[]; projectId: string | null; archived: boolean; collapsed: boolean; forceExpanded: boolean; empty: boolean; deleteSessions: readonly Session[]; subFolderCount: number; memberCount: number; dropEnabled: boolean; mixed: boolean })
   // `ownsWork`: the row is a work of its own, so it offers Track / Done.
   // What nests under a session, a lane of a run and a session of a worktree
   // work belong to the work above them, which tracks and finishes them all.
@@ -477,7 +477,8 @@ type ListedEntry = SidebarEntry | WorktreeEntry;
 const isWorktreeEntry = (entry: ListedEntry): entry is WorktreeEntry => 'listedWorktree' in entry;
 
 /** Where a group's rows go: under its project, in a zone, or inside a folder. */
-type GroupPlacement = { keyPrefix: string; depth: number; mixed: boolean };
+// `foldersOnly` draws a group's folders alone: the list by time holds its works.
+type GroupPlacement = { keyPrefix: string; depth: number; mixed: boolean; foldersOnly?: boolean };
 const PROJECT_PLACEMENT: GroupPlacement = { keyPrefix: '', depth: 0, mixed: false };
 
 export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): SessionSidebarRowModel => {
@@ -498,7 +499,18 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   // too (the collection then passes no moved sets). Search lists every zone
   // session once, in its zone, so its count and rows agree.
   const isMovedToZone = (sessionId: string): boolean => movedSessionIds.has(sessionId) || (search && inZone.has(sessionId));
+  // Worktrees filed in a folder that a section lists right now, by member id.
+  const movedFolderMembers = new Set<string>();
   let searchMatchCount = 0;
+  const runIndex = args.runIndex ?? EMPTY_MULTI_RUN_INDEX;
+  // A lane of a run lists under the project root wherever it runs, so it files
+  // like the root's sessions.
+  const folderOwnerKeyOf = (session: Session): string | null => {
+    const owner = args.sessionOwnerById.get(session.id);
+    return owner && owner.kind !== 'project' && !runIndex.runKeyBySessionId.has(session.id)
+      ? getWorkFolderOwnerKey(owner.scopeDirectory)
+      : getAuthoritativeSessionFolderOwnerKey(session, owner);
+  };
 
   const authoritativeRoots = [
     ...args.authoritativeSections.flatMap((section) => section.groups.flatMap((group) => group.sessions)),
@@ -510,7 +522,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const node = authorityStack.pop();
     if (!node) continue;
     sessionById.set(node.session.id, node.session);
-    const folderOwnerKey = getAuthoritativeSessionFolderOwnerKey(node.session, args.sessionOwnerById.get(node.session.id));
+    const folderOwnerKey = folderOwnerKeyOf(node.session);
     if (folderOwnerKey) folderOwnerKeyBySessionId.set(node.session.id, folderOwnerKey);
     authorityStack.push(...node.children);
   }
@@ -550,7 +562,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     // a run), so none of the rows is a work of its own.
     insideWork?: boolean;
   };
-  const runIndex = args.runIndex ?? EMPTY_MULTI_RUN_INDEX;
   const appendRun = (entry: RunEntry, options: AppendOptions): void => {
     const expansionKey = runExpansionKey(options.renderContext, entry.run.key);
     // A run opens to its lanes wherever it is listed, as any work does.
@@ -611,10 +622,13 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         ? 'mixed-compact'
         : options.renderContext;
       const sessionOwner = args.sessionOwnerById.get(current.node.session.id);
-      const ownerKey = getAuthoritativeSessionFolderOwnerKey(current.node.session, sessionOwner)
+      const ownerKey = folderOwnerKeyOf(current.node.session)
         ?? folderOwnerKeyBySessionId.get(current.node.session.id)
         ?? null;
-      const selectionScopeKey = options.selectionScopeKey === null ? null : ownerKey;
+      // A selection spans the project, its worktrees included.
+      const selectionScopeKey = options.selectionScopeKey === null
+        ? null
+        : getAuthoritativeSessionFolderOwnerKey(current.node.session, sessionOwner) ?? ownerKey;
       // Whether its subsessions show, for a row that has some: the sidebar
       // animates the change like a header's.
       const expanded = search || args.expandedParents.has(expandedKey(rowContext, options.archived, current.node.session.id));
@@ -706,7 +720,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const selectionPoolOffset = selectionDescendantIds.length;
     selectionDescendantIds.push(...indexed.preorderIds);
     for (const [id, session] of indexed.sessionsById) sessionById.set(id, session);
-    const ownerKey = getSessionFolderOwnerKey(projectId, group.directory);
+    const ownerKey = getGroupFolderOwnerKey(projectId, group);
     const storedCollapsed = !search && args.collapsedGroups.has(groupKey);
     // A worktree, space or archive header is a tree node of its own: its
     // folders and sessions sit one level under it. The project root group has
@@ -815,6 +829,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const folderEmpty = groupLoaded && entry.nodes.length === 0 && folderWorktrees.length === 0 && (childFolders.get(identity)?.length ?? 0) === 0;
       const folderCollapsed = !search && !folderEmpty && args.collapsedFolders.has(entry.folder.id);
       const deleteSessions = folderSessionsByIdentity.get(identity) ?? [];
+      // What a section listing it took out still belongs here and comes back.
+      const movedMembers = entry.folder.sessionIds.filter((memberId) => isMovedToZone(memberId) || movedFolderMembers.has(memberId)).length;
       // A collapsed parent hides child folders too. Reuse their indexed session
       // coverage, retaining tree roots so unread-subtask rules remain intact.
       const activityNodes = folderCollapsed && !group.isArchivedBucket
@@ -832,7 +848,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         ownerKey, nodes: entry.nodes, activityNodes, projectId, archived: group.isArchivedBucket === true,
         collapsed: folderCollapsed, forceExpanded: search, empty: folderEmpty,
         deleteSessions,
-        subFolderCount: childFolders.get(identity)?.length ?? 0, dropEnabled,
+        subFolderCount: childFolders.get(identity)?.length ?? 0,
+        memberCount: entry.nodes.length + folderWorktrees.length + movedMembers, dropEnabled, mixed: placement.mixed,
       });
       if (ownerKey) folderDropTargets.push(Object.freeze({ rowKey: folderKey, scopeKey: entry.scopeKey, folderId: entry.folder.id, ownerKey, enabled: dropEnabled }));
       if (folderCollapsed) return;
@@ -845,6 +862,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       for (const child of childFolders.get(identity) ?? []) appendFolder(child, displayName);
     };
     for (const folder of roots) appendFolder(folder, '');
+    if (placement.foldersOnly) return;
 
     const sessionBatchSize = projectId ? args.sessionBatchSize : undefined;
     const initialLimit = limits?.initial ?? sessionBatchSize ?? (args.hideDirectoryControls ? 10 : SESSIONS_INITIAL_LIMIT);
@@ -1115,6 +1133,27 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const sections = args.singleProjectMode ? selectedSection ? [selectedSection] : [] : args.sections;
 
   /**
+   * Worktrees filed into a folder of the project root render inside it, and
+   * only there; one filed into a folder that is gone stays under the project.
+   * A search lists them as plain worktrees: folders show only where their own
+   * sessions match.
+   */
+  const collectFiledWorktrees = (descriptors: ReturnType<typeof buildGroupRenderDescriptors>): Map<string, WorktreeInFolder> => {
+    const worktreesByMemberId = new Map<string, WorktreeInFolder>();
+    const rootGroup = search ? undefined : descriptors.find((descriptor) => descriptor.group.isMain)?.group;
+    const rootFolderMembers = new Set(rootGroup
+      ? getSessionFolderScopes(rootGroup).flatMap(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).flatMap((folder) => folder.sessionIds))
+      : []);
+    for (const descriptor of descriptors) {
+      const memberId = isGroupWork(descriptor.group) ? worktreeFolderMemberId(descriptor.group.directory) : null;
+      if (!memberId || !rootFolderMembers.has(memberId)) continue;
+      if (movedGroupKeys.has(descriptor.groupKey)) movedFolderMembers.add(memberId);
+      else worktreesByMemberId.set(memberId, { group: descriptor.group, groupKey: descriptor.groupKey });
+    }
+    return worktreesByMemberId;
+  };
+
+  /**
    * Project headers with their works, under a caption when something lists
    * above them: "Projects", or the name of a group of projects the user made.
    */
@@ -1146,21 +1185,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: section.project.id }));
       }
       if (projectCollapsed) continue;
-      // Worktrees filed into a folder of the project root render inside it, and
-      // only there; one filed into a folder that is gone stays under the project.
-      // A search lists them as plain worktrees: folders show only where their
-      // own sessions match.
-      const worktreesByMemberId = new Map<string, WorktreeInFolder>();
-      const rootGroup = search ? undefined : descriptors.find((descriptor) => descriptor.group.isMain)?.group;
-      const rootFolderMembers = new Set(rootGroup
-        ? getSessionFolderScopes(rootGroup).flatMap(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).flatMap((folder) => folder.sessionIds))
-        : []);
-      for (const descriptor of descriptors) {
-        const memberId = isGroupWork(descriptor.group) ? worktreeFolderMemberId(descriptor.group.directory) : null;
-        if (memberId && rootFolderMembers.has(memberId) && !movedGroupKeys.has(descriptor.groupKey)) {
-          worktreesByMemberId.set(memberId, { group: descriptor.group, groupKey: descriptor.groupKey });
-        }
-      }
+      const worktreesByMemberId = collectFiledWorktrees(descriptors);
       const filedGroupKeys = new Set([...worktreesByMemberId.values()].map((entry) => entry.groupKey));
       // A worktree is a work like any other of the project: it is listed among
       // the root's works rather than in a block after them. Only a project with
@@ -1198,15 +1223,31 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       // One list of every other work of every project, most recent first, under
       // one zone header. It is virtualized, so it reveals all of them at once.
       const entries = timeEntries.filter(matchesSearch);
-      if (entries.length > 0) {
+      // Folders lead the list, as folders lead files in a file manager, in the
+      // projects' order. A search lists each match flat, by time.
+      const foldered = search ? [] : args.sections.flatMap((section) => {
+        const rootGroup = section.groups.find((group) => group.isMain);
+        const hasFolders = rootGroup && !excluded?.has(section.project.id)
+          && getSessionFolderScopes(rootGroup).some(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).length > 0);
+        return hasFolders ? [{ section, rootGroup }] : [];
+      });
+      if (entries.length > 0 || foldered.length > 0) {
         const collapsed = appendActivityHeader('timeline');
-        if (!collapsed) appendWorkEntries(entries, 'activity:timeline');
+        if (!collapsed) {
+          for (const { section, rootGroup } of foldered) {
+            const filedWorktrees = collectFiledWorktrees(buildGroupRenderDescriptors(section, { mainWorkspaceOnly: false }));
+            appendGroup(rootGroup, `${section.project.id}:${rootGroup.id}`, section.project.id, true, undefined, {
+              keyPrefix: 'activity:timeline:', depth: 0, mixed: args.sections.length > 1, foldersOnly: true,
+            }, filedWorktrees);
+          }
+          appendWorkEntries(entries, 'activity:timeline');
+        }
       }
       // The list has no project headers to hold a load status, so it closes
       // with one line per distinct status of a project it lists nothing for,
       // as a project header would: one while any loads, and one per failure,
       // whose Retry reloads that directory or the global list.
-      if (!search && !(entries.length > 0 && args.collapsedActivities.has('timeline'))) {
+      if (!search && !((entries.length > 0 || foldered.length > 0) && args.collapsedActivities.has('timeline'))) {
         const listedProjects = new Set(timeEntries.map((entry) => entry.kind === 'session' ? entry.item.projectId : entry.projectId));
         const shown = new Set<string>();
         for (const section of args.sections) {
