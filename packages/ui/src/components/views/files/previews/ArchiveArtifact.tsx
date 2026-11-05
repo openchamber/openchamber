@@ -3,6 +3,7 @@ import { unzip, unzipSync, type UnzipFileInfo } from 'fflate';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from '@/components/icon/Icon';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -89,9 +90,11 @@ export const ArchiveArtifact: React.FC<{
       <ArtifactMetaBar
         items={[t('filesView.artifact.archive.files', { count: state.entries.length }), formatArtifactSize(sizeBytes), opened?.entry.name ?? '']}
         actions={opened ? (
-          <Button type="button" variant="ghost" size="sm" aria-label={t('filesView.artifact.archive.back')} title={t('filesView.artifact.archive.back')} onClick={() => setOpened(null)}>
-            <Icon name="arrow-left" className="size-4" />
-          </Button>
+          <ButtonTooltip label={t('filesView.artifact.archive.back')}>
+            <Button type="button" variant="ghost" size="sm" aria-label={t('filesView.artifact.archive.back')} onClick={() => setOpened(null)}>
+              <Icon name="arrow-left" className="size-4" />
+            </Button>
+          </ButtonTooltip>
         ) : actions}
       />
       {tooLarge ? <div className="p-3 typography-ui text-muted-foreground">{t('filesView.artifact.archive.entryTooLarge')}</div> : null}
@@ -116,9 +119,11 @@ export const ArchiveArtifact: React.FC<{
           <ContentState
             title={opened.entry.name}
             actions={(
-              <Button type="button" variant="outline" size="sm" onClick={() => Object.assign(document.createElement('a'), { href: opened.url, download: opened.entry.name.split('/').pop() }).click()}>
-                {t('filesView.editor.saveFile')}
-              </Button>
+              <ButtonTooltip label={t('contextTooltips.files.downloadCopy')}>
+                <Button type="button" variant="outline" size="sm" onClick={() => Object.assign(document.createElement('a'), { href: opened.url, download: opened.entry.name.split('/').pop() }).click()}>
+                  {t('filesView.editor.saveFile')}
+                </Button>
+              </ButtonTooltip>
             )}
           />
         )}

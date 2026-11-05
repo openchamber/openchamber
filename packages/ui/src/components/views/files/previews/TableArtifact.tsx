@@ -4,7 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { UiBlock } from '@/components/chat/uiBlocks/UiBlock';
 import { QuoteCommentMenu } from '@/components/comments/QuoteCommentMenu';
 import { Icon } from '@/components/icon/Icon';
-import { PRESSED_CLASS } from '@/components/ui/action-toolbar';
+import { ButtonTooltip, PRESSED_CLASS } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import {
   ContextMenu,
@@ -761,34 +761,36 @@ export const TableGrid: React.FC<{
                 }}
               />
             ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-pressed={searchOpen}
-              aria-label={t('filesView.artifact.table.search')}
-              title={t('filesView.artifact.table.search')}
-              className={searchOpen ? PRESSED_CLASS : undefined}
-              onClick={() => {
-                if (searchOpen) setQuery('');
-                setSearchOpen(!searchOpen);
-              }}
-            >
-              <Icon name="search" className="size-4" />
-            </Button>
-            {selectionChart ? (
+            <ButtonTooltip label={t('filesView.artifact.table.search')}>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                aria-pressed={chartOpen}
-                aria-label={t('filesView.artifact.table.chart')}
-                title={t('filesView.artifact.table.chart')}
-                className={chartOpen ? PRESSED_CLASS : undefined}
-                onClick={() => setChartOpen(!chartOpen)}
+                aria-pressed={searchOpen}
+                aria-label={t('filesView.artifact.table.search')}
+                className={searchOpen ? PRESSED_CLASS : undefined}
+                onClick={() => {
+                  if (searchOpen) setQuery('');
+                  setSearchOpen(!searchOpen);
+                }}
               >
-                <Icon name="bar-chart-2" className="size-4" />
+                <Icon name="search" className="size-4" />
               </Button>
+            </ButtonTooltip>
+            {selectionChart ? (
+              <ButtonTooltip label={t('filesView.artifact.table.chart')}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={chartOpen}
+                  aria-label={t('filesView.artifact.table.chart')}
+                  className={chartOpen ? PRESSED_CLASS : undefined}
+                  onClick={() => setChartOpen(!chartOpen)}
+                >
+                  <Icon name="bar-chart-2" className="size-4" />
+                </Button>
+              </ButtonTooltip>
             ) : null}
             {actions}
           </>

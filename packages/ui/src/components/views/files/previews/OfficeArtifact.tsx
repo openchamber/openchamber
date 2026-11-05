@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { QuoteCommentMenu } from '@/components/comments/QuoteCommentMenu';
 import { Icon } from '@/components/icon/Icon';
+import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -236,7 +237,11 @@ const WorkbookView: React.FC<{
     return (
       <ContentState
         title={t('filesView.artifact.office.unreadable')}
-        actions={<Button type="button" variant="outline" size="sm" onClick={onChangedOnDisk}>{t('filesView.artifact.state.retry')}</Button>}
+        actions={(
+          <ButtonTooltip label={t('contextTooltips.files.retryFile')}>
+            <Button type="button" variant="outline" size="sm" onClick={onChangedOnDisk}>{t('filesView.artifact.state.retry')}</Button>
+          </ButtonTooltip>
+        )}
       />
     );
   }
@@ -278,15 +283,22 @@ const WorkbookView: React.FC<{
       actions={(
         <>
           {saveStatus === 'failed' ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => enqueue(async () => { await persist(latest.current); })}>
-              {t('filesView.artifact.state.retry')}
-            </Button>
+            <ButtonTooltip label={t('contextTooltips.files.retrySave')}>
+              <Button type="button" variant="outline" size="sm" onClick={() => enqueue(async () => { await persist(latest.current); })}>
+                {t('filesView.artifact.state.retry')}
+              </Button>
+            </ButtonTooltip>
           ) : null}
           {sheets.length > 1 ? (
             <Select value={String(selected)} onValueChange={(value) => setSelected(Number(value))}>
-              <SelectTrigger className="w-fit max-w-48" aria-label={t('filesView.artifact.office.sheet')}>
-                <SelectValue>{sheet.name}</SelectValue>
-              </SelectTrigger>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <SelectTrigger className="w-fit max-w-48" aria-label={t('filesView.artifact.office.sheet')}>
+                    <SelectValue>{sheet.name}</SelectValue>
+                  </SelectTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.files.chooseSheet')}</TooltipContent>
+              </Tooltip>
               <SelectContent>
                 {sheets.map((entry, index) => (
                   <SelectItem key={index} value={String(index)}>{entry.name}</SelectItem>

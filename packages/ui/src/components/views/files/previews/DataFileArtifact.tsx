@@ -1,10 +1,11 @@
 import React from 'react';
 
-import { PRESSED_CLASS } from '@/components/ui/action-toolbar';
+import { ButtonTooltip, PRESSED_CLASS } from '@/components/ui/action-toolbar';
 import { Button } from '@/components/ui/button';
 import { ContentLoadingState } from '@/components/ui/content-state';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { getFileExtension, isDataFile } from '@/lib/toolHelpers';
 import { BinaryArtifact } from './BinaryArtifact';
@@ -88,9 +89,13 @@ const SqliteView: React.FC<{ path: string; database: string; tables: string[]; s
             }}
           />
           <div className="flex items-center gap-2">
-            <Button type="button" size="sm" onClick={() => void show(query)} disabled={!query.trim() || running}>{t('filesView.artifact.data.run')}</Button>
+            <ButtonTooltip label={t('contextTooltips.files.runQuery')}>
+              <Button type="button" size="sm" onClick={() => void show(query)} disabled={!query.trim() || running}>{t('filesView.artifact.data.run')}</Button>
+            </ButtonTooltip>
             <span className="min-w-0 flex-1 truncate typography-meta text-[color:var(--status-error)]" title={error}>{error}</span>
-            <Button type="button" variant="ghost" size="sm" onClick={closeQuery}>{t('settings.common.actions.cancel')}</Button>
+            <ButtonTooltip label={t('contextTooltips.files.closeQuery')}>
+              <Button type="button" variant="ghost" size="sm" onClick={closeQuery}>{t('settings.common.actions.cancel')}</Button>
+            </ButtonTooltip>
           </div>
         </div>
       ) : null}
@@ -109,12 +114,19 @@ const SqliteView: React.FC<{ path: string; database: string; tables: string[]; s
           onSort={result && result.totalRows > result.rows.length ? (sort) => void show(shownQuery.current, sort) : undefined}
           actions={(
             <>
-              <Button type="button" variant="ghost" size="sm" aria-pressed={queryOpen} className={queryOpen ? PRESSED_CLASS : undefined} onClick={() => (queryOpen ? closeQuery() : setQueryOpen(true))}>{t('filesView.artifact.data.query')}</Button>
+              <ButtonTooltip label={t('contextTooltips.files.writeQuery')}>
+                <Button type="button" variant="ghost" size="sm" aria-pressed={queryOpen} className={queryOpen ? PRESSED_CLASS : undefined} onClick={() => (queryOpen ? closeQuery() : setQueryOpen(true))}>{t('filesView.artifact.data.query')}</Button>
+              </ButtonTooltip>
               {tables.length > 1 ? (
                 <Select value={table} onValueChange={(value) => setTable(String(value))}>
-                  <SelectTrigger className="w-fit max-w-48" aria-label={t('filesView.artifact.data.table')}>
-                    <SelectValue>{table}</SelectValue>
-                  </SelectTrigger>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <SelectTrigger className="w-fit max-w-48" aria-label={t('filesView.artifact.data.table')}>
+                        <SelectValue>{table}</SelectValue>
+                      </SelectTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={6}>{t('contextTooltips.files.chooseTable')}</TooltipContent>
+                  </Tooltip>
                   <SelectContent>
                     {tables.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
                   </SelectContent>
