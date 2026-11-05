@@ -79,6 +79,7 @@
     "packages/sdk": {
       "entry": [
         "src/index.ts",
+        "scripts/check-guest.ts",
         "src/ui/index.ts",
         "src/schemas.ts",
         "src/**/*.{test,spec}.ts",

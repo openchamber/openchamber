@@ -616,6 +616,17 @@ type PendingDesktopSessionLink = { sessionId: string; messageId: string | null; 
  * host (`?host=<id>`) carries that host's runtime key. Taking them removes
  * them; outside the desktop local page there are none.
  */
+/** Install links that launched the app, before any window could listen. */
+export const takePendingDesktopExtensionInstalls = async (): Promise<string[]> => {
+  if (!isDesktopShell()) return [];
+  try {
+    const parsed = z.array(z.string()).safeParse(await invokeDesktop('desktop_take_pending_extension_installs'));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+};
+
 export const takePendingDesktopSessionLinks = async (): Promise<PendingDesktopSessionLink[]> => {
   if (!isDesktopShell() || !isDesktopLocalOriginActive()) return [];
   try {

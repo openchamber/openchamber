@@ -179,13 +179,26 @@ export const encodeBasicCredential = (username, token) => Buffer.from(`${usernam
 
 export const guestRedirectUri = (origin, guestId) => `${origin.replace(/\/+$/, '')}/api/guests/${guestId}/oauth/callback`;
 
-/** With `integration`, `hasClient` is false for a client entered for endpoints the package no longer names. */
-export const toPublicGuestAuth = (entry, integration) => ({
-  connected: Boolean(entry?.accessToken),
-  account: typeof entry?.account === 'string' ? entry.account : '',
-  hasClient: integration ? Boolean(usableClientCredentials(entry, integration).clientId) : Boolean(entry?.clientId),
-  settings: entry?.settings && typeof entry.settings === 'object' ? { ...entry.settings } : {},
-});
+/**
+ * With `integration`, `hasClient` is false for a client entered for endpoints
+ * the package no longer names, and a `secret` field's value stays here: it is
+ * named in `secretsSet` when one is stored, and only the service reads it.
+ */
+export const toPublicGuestAuth = (entry, integration) => {
+  const stored = entry?.settings && typeof entry.settings === 'object' ? entry.settings : {};
+  const declared = integration?.settings ?? [];
+  const secretIds = new Set(declared.filter((field) => field.secret).map((field) => field.id));
+  // Only a field the package declares now and does not mark secret: a value
+  // stored while it was a secret stays here after an update stops declaring it.
+  const publicIds = new Set(declared.filter((field) => !field.secret).map((field) => field.id));
+  return {
+    connected: Boolean(entry?.accessToken),
+    account: typeof entry?.account === 'string' ? entry.account : '',
+    hasClient: integration ? Boolean(usableClientCredentials(entry, integration).clientId) : Boolean(entry?.clientId),
+    settings: Object.fromEntries(Object.entries(stored).filter(([key]) => publicIds.has(key))),
+    secretsSet: Object.keys(stored).filter((key) => secretIds.has(key) && stored[key]),
+  };
+};
 
 const readAccountLabel = (payload, name) => {
   if (!isPlainObject(payload) || typeof name !== 'string' || name === '') {

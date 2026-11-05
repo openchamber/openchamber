@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
-import { GUEST_REQUEST_TIMEOUT_MS, type GuestMessageItem } from '@openchamber/sdk';
+import type { GuestMessageItem } from '@openchamber/sdk';
 import { toast } from 'sonner';
 import { Window } from 'happy-dom';
 
@@ -9,7 +9,7 @@ import type { GuestActionEntry } from './actions';
 import { useGuestDialogStore } from './dialog-store';
 import { useGuestItemStore } from './item-store';
 import { parseGuestCatalogJson } from './parse';
-import { runGuestAction, useGuestActionHostStore } from './run-action';
+import { ACTION_TIMEOUT_MS, runGuestAction, useGuestActionHostStore } from './run-action';
 import { useGuestsStore } from './store';
 import { runGuestSessionAction } from './session-action';
 import type { SessionMessageRecord } from '@/lib/exportSession';
@@ -99,6 +99,18 @@ describe('guest action execution', () => {
     expect(useGuestActionHostStore.getState().requests).toEqual([]);
   });
 
+  test('a second click on the same target waits for the first', async () => {
+    const first = runGuestAction(entry, item, t);
+    await runGuestAction(entry, item, t);
+    expect(useGuestActionHostStore.getState().requests).toHaveLength(1);
+    currentRequest().complete({ ok: true });
+    await first;
+    const again = runGuestAction(entry, item, t);
+    expect(useGuestActionHostStore.getState().requests).toHaveLength(1);
+    currentRequest().complete({ ok: true });
+    await again;
+  });
+
   test('legacy actions still open the declared dialog', async () => {
     const action = { ...entry.action, mode: undefined };
     const legacy = { ...entry, action, guest: { ...entry.guest, actions: [action] } };
@@ -157,10 +169,11 @@ describe('guest action execution', () => {
   });
 
   test('a silent frame times out and releases its execution', async () => {
+    Object.assign(globalThis, { requestAnimationFrame: (run: () => void) => setTimeout(run, 0) });
     await runGuestAction(entry, item, t);
     expect(useGuestActionHostStore.getState().requests).toEqual([]);
     expect(errors.mock.calls.length).toBe(1);
-  }, GUEST_REQUEST_TIMEOUT_MS + 5_000);
+  }, ACTION_TIMEOUT_MS + 5_000);
 
   test('session actions distinguish failed history from empty history and discard runtime changes during loading', async () => {
     const dom = new Window();

@@ -11,7 +11,7 @@ import {
   resolveGuestPackageRoot,
   toPublicGuest,
 } from './catalog.js';
-import { stopGuestService } from './service.js';
+import { forgetServiceFailure, stopGuestService } from './service.js';
 import { cloneGitRepository, isHttpsZipUrl, isPublicHostname, parseGitInstallUrl, publicAddressesOf } from './clone.js';
 import { isReservedBuiltInId } from './builtins.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
@@ -417,6 +417,7 @@ export const uninstallGuest = async (id, persistPath, { preserveStorageId = fals
     return { paths: kept, sources, gitOrigins, capabilityGrants, capabilityScopes, disabledGuests, serviceSocketOverrides, storageIds };
   });
   await stopGuestService(id);
+  forgetServiceFailure(id);
   await removeGuestStorage(persistPath, id);
   if (removedRoot && isCopiedGuestRoot(removedRoot, persistPath)) {
     await fs.rm(removedRoot, { recursive: true, force: true });

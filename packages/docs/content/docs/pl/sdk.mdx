@@ -38,7 +38,7 @@ Wskaż `main.js` w `index.html` zwykłym `<script src="main.js"></script>`.
 
 OpenChamber odczytuje manifest i pokazuje okno z listą tego, o co rozszerzenie prosi (zobacz [Uprawnienia](#uprawnienia)). Zatwierdź, a Twoja ikona pojawi się na pasku bocznym. Kliknij ją i Twoja strona się załaduje.
 
-Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub pliku zip. Tylko instalacja z git może się aktualizować: podnieś `version` w `package.json`, wypchnij zmiany, a OpenChamber zaproponuje aktualizację, gdy użytkownik następnym razem otworzy Ustawienia → Rozszerzenia. `#tag` albo `#branch` w adresie URL przypina, co jest śledzone. Te są kopiowane do folderu danych OpenChamber i uruchamiane z tej kopii, więc dostarczaj zbudowane pliki, a nie `node_modules` ani źródła TypeScript. Usunięcie rozszerzenia usuwa kopię. Instalacja z folderu działa bezpośrednio z Twojego folderu, więc możesz edytować, przebudowywać i przeładowywać.
+Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub pliku zip. Tylko instalacja z git może się aktualizować: podnieś `version` w `package.json`, wypchnij zmiany, a OpenChamber sprawdzi to wkrótce po otwarciu i co kilka godzin, powiadomi użytkownika raz i zaproponuje aktualizację w Ustawienia → Rozszerzenia. Link do `openchamber://extensions/install?url=<encoded repository URL>` na dowolnej stronie otwiera aplikację desktopową z tym repozytorium w oknie dodawania, więc możesz zaoferować przycisk instalacji. `#tag` albo `#branch` w adresie URL przypina, co jest śledzone. Te są kopiowane do folderu danych OpenChamber i uruchamiane z tej kopii, więc dostarczaj zbudowane pliki, a nie `node_modules` ani źródła TypeScript. Usunięcie rozszerzenia usuwa kopię. Instalacja z folderu działa bezpośrednio z Twojego folderu, więc możesz edytować, przebudowywać i przeładowywać.
 
 ## Manifest
 
@@ -49,13 +49,11 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
 
 `engines.openchamber` jest opcjonalne. Podaj najstarszą wersję OpenChamber, z którą działa Twoje rozszerzenie, jako `1.24.0` lub `>=1.24.0`. Starsze wersje odmówią instalacji zamiast zawieść później.
 
-`contributes.panel` opisuje wpis na pasku bocznym. `id` jest w kebab-case i musi być unikalne wśród zainstalowanych rozszerzeń. `icon` to nazwa ikony Remixicon (`RiWindowLine` staje się `window`) albo plik SVG w Twoim folderze, na przykład `icon.svg`. `entry` to plik HTML w Twoim folderze; pomiń je w rozszerzeniu, które deklaruje tylko `tools` (zobacz [Twoje narzędzia w czacie](#twoje-narzędzia-w-czacie)).
+`id`, `name` i `icon` identyfikują rozszerzenie. `id` jest w kebab-case i musi być unikalne wśród zainstalowanych rozszerzeń. `icon` to nazwa ikony Remixicon (`RiWindowLine` staje się `window`) albo plik SVG w Twoim folderze, na przykład `icon.svg`. `contributes.panel` to panel rozszerzenia na pasku bocznym: jego `entry` to plik HTML w Twoim folderze. Rozszerzenie bez panelu na pasku bocznym pomija `panel`. Starsze pakiety trzymają `id`, `name` i `icon` w `panel` i to nadal działa.
 
 `contributes.attach` jest opcjonalne. Dodaje Twoje rozszerzenie do menu + obok pola czatu, żeby użytkownik mógł wybrać zadanie i dołączyć je do sesji.
 
@@ -89,7 +87,7 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` otwiera w oknie osobną Twoją stronę, żeby wybór nie musiał dzielić kodu z panelem na pasku bocznym
 - bez tego klucza rozszerzenie nie pojawia się w tym menu
 
-`ctx.surface` ma wartość `panel`, `dialog`, `page` lub `status`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
+`ctx.surface` ma wartość `panel`, `dialog`, `page`, `status` lub `block`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
 
 `contributes.page: true` udostępnia panel na pełnym ekranie w menu Strony rozszerzeń nad listą sesji. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `panel.entry` jest wymagane, a izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
 
@@ -110,7 +108,7 @@ Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko
 | `files` | odczyt i zapis plików w otwartym projekcie (`readFile`, `writeFile`, `listDir`, `stat` ze ścieżką względną) |
 | `model` | jednorazowe generowanie tekstu za pomocą Small Model użytkownika (`generate`), poza jakąkolwiek sesją |
 
-Sześć kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)), oraz `transcript`, gdy `sessionEvents` prosi o `content` (zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji)).
+Dziewięć kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)), `transcript`, gdy `sessionEvents` lub `sessionControl` prosi o `content` (zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji)), `sessionControl`, gdy Twoja usługa działa na sesjach (zobacz [Wywoływanie OpenChamber](/sdk/host/#wywoływanie-openchamber-z-usługi)), `instructions`, gdy uzupełnia to, co czytają agenci, oraz `skills`, gdy deklarujesz `contributes.skills`, folder pakietu ze skillami, które docierają do każdego agenta, dopóki rozszerzenie jest włączone.
 
 Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją zatwierdza, albo usuwa rozszerzenie. Jeśli nowa wersja prosi o więcej, okno pojawia się ponownie. Wywołanie, które wymaga niezatwierdzonego uprawnienia, kończy się błędem `NOT_GRANTED`.
 
@@ -156,7 +154,7 @@ Co wysyła każdy `scheme`:
 | `"bearer"` | `Authorization: Bearer <token>` | API dokumentuje token bearer lub personal access token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API dokumentuje HTTP Basic auth z nazwą użytkownika (często e-mail) i tokenem API; karta prosi o oba, a `usernameLabel` nazywa pierwsze pole |
 
-`settings` dodaje do karty zwykłe pola tekstowe. Ich wartości trafiają do `ctx.settings`.
+`settings` dodaje do karty zwykłe pola tekstowe. Ich wartości trafiają do `ctx.settings`. Pole z `"secret": true` jest maskowane na karcie i nigdy nie trafia na stronę; Twoja usługa odczytuje je przez `readSettings()`.
 
 ## Pliki
 
@@ -263,6 +261,8 @@ Poza paskiem bocznym i menu + rozszerzenie może pojawić się w trzech kolejnyc
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` przyjmuje też `selection` (tekst zaznaczony w wiadomości), `file` (wiersz w Files) i `diff` (zaznaczone wiersze pliku lub diffa). Ich elementy mają `kind` o tej samej nazwie: `selection` zawiera tekst, `file` ścieżkę, `diff` ścieżkę i zakres wierszy. Przy zaznaczeniu `display` określa, jak wygląda akcja: `label` (domyślnie), `icon` z etykietą w podpowiedzi albo `both`.
 
 Akcja na wiadomości otwiera Twoje rozszerzenie z `ctx.item` o `kind: "message"`: id i tytuł sesji, folder projektu, id wiadomości, jej rola i tekst. Akcja na sesji otwiera je z `kind: "session"` oraz id, tytułem i folderem sesji. Dodaj `"payload": ["messages"]`, a element niesie też całą rozmowę, od najstarszej wiadomości, ten sam tekst, który daje eksport do Markdown. To wymaga uprawnienia `conversation`, które użytkownik widzi jako osobny wiersz w oknie zgody. `item.action` mówi, którą pozycję kliknięto.
 

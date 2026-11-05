@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Conta o período de retenção a partir do arquivamento. As sessões expiradas são excluídas.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Conta o período de retenção a partir da última atividade da sessão. As sessões expiradas são arquivadas.',
@@ -2660,6 +2661,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n['pt-BR'],
   ...thirdPartyIntegrationI18n['pt-BR'],
   ...extensionCatalogI18n['pt-BR'],
+  ...extensionPowersI18n['pt-BR'],
   ...guestIntegrationsI18n['pt-BR'],
   ...extensionsSettingsI18n['pt-BR'],
   ...settingsLayoutI18n['pt-BR'],

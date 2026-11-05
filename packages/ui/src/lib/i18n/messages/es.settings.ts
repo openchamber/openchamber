@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Cuenta el periodo de retención desde el archivado. Las sesiones caducadas se eliminan.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Cuenta el periodo de retención desde la última actividad de la sesión. Las sesiones caducadas se archivan.',
@@ -2660,6 +2661,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.es,
   ...thirdPartyIntegrationI18n.es,
   ...extensionCatalogI18n.es,
+  ...extensionPowersI18n.es,
   ...guestIntegrationsI18n.es,
   ...extensionsSettingsI18n.es,
   ...settingsLayoutI18n.es,

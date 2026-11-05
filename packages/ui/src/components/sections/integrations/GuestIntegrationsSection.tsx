@@ -371,6 +371,8 @@ export const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ gues
                 controlClassName="w-full max-w-none"
               >
                 <Input
+                  type={field.secret ? 'password' : undefined}
+                  placeholder={field.secret && status?.secretsSet.includes(field.id) ? t('settings.integrations.guest.secret.saved') : undefined}
                   value={settings[field.id] ?? ''}
                   onChange={(event) => {
                     setSettings((current) => ({ ...current, [field.id]: event.target.value }));

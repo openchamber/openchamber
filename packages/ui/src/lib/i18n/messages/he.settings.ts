@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'תקופת השמירה נספרת מרגע ההעברה לארכיון. הפעלות שפג תוקפן נמחקות.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'תקופת השמירה נספרת מהפעילות האחרונה בהפעלה. הפעלות שפג תוקפן מועברות לארכיון.',
@@ -2693,6 +2694,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.he,
   ...thirdPartyIntegrationI18n.he,
   ...extensionCatalogI18n.he,
+  ...extensionPowersI18n.he,
   ...guestIntegrationsI18n.he,
   ...extensionsSettingsI18n.he,
   ...settingsLayoutI18n.he,

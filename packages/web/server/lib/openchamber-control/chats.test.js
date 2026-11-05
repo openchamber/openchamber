@@ -97,6 +97,16 @@ describe('agent session destinations', () => {
     }));
   });
 
+  it('names the extension on the session only when the server says so', async () => {
+    const { sessionService, projectPath, client } = await setup();
+    await sessionService.create({ directory: projectPath }, { startedByExtension: 'desk' });
+    expect(client.session.create).toHaveBeenLastCalledWith(expect.objectContaining({
+      metadata: { openchamber: { startedByExtension: 'desk' } },
+    }));
+    await sessionService.create({ directory: projectPath, startedByExtension: 'forged' });
+    expect(client.session.create.mock.lastCall[0].metadata).toBeUndefined();
+  });
+
   it('creates a chat when there are no registered projects or caller directory', async () => {
     const { service, chatsScope } = await setup({ withProject: false });
     expect((await service.execute('projects.list')).projects).toEqual([

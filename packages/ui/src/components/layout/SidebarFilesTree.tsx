@@ -34,11 +34,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ActionToolbar } from '@/components/ui/action-toolbar';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDraftSpaceTarget } from '@/lib/spaces/useDraftSpaceTarget';
 import { panelContentDirectory } from '@/lib/spaces/space-creation-requests';
 import { SpacePreparing } from '@/components/session/spaces/SpacePreparing';
+import { guestActionsWhere, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -287,9 +291,11 @@ interface FileRowProps {
   onMoveDragChange: (source: FileTreeEntry | null) => void;
   onSetMoveDropTarget: (path: string | null) => void;
   onMoveDrop: (source: FileTreeEntry, targetDirectory: string) => void;
+  guestActions: GuestActionEntry[];
 }
 
 const FileRow: React.FC<FileRowProps> = ({
+  guestActions,
   node,
   root,
   isExpanded,
@@ -355,6 +361,8 @@ const FileRow: React.FC<FileRowProps> = ({
     setContextMenuOpen(true);
   }, []);
 
+  const fileActions = guestActionsWhere(guestActions, 'file');
+
   const renderMenuItems = ({
     Item,
     Separator,
@@ -407,6 +415,18 @@ const FileRow: React.FC<FileRowProps> = ({
           <Icon name="external-link" className="me-2 h-4 w-4" /> {t('sidebarFilesTree.menu.openInDefaultApp')}
         </Item>
       )}
+      {fileActions.length > 0 && <Separator />}
+      {fileActions.map((entry) => (
+        <Item
+          key={`${entry.guest.id}:${entry.action.id}`}
+          onClick={(e: React.MouseEvent) => {
+            e.stopPropagation();
+            void runGuestAction(entry, { kind: 'file', action: entry.action.id, directory: root || null, path: node.path, isDirectory: isDir }, t);
+          }}
+        >
+          <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-2 h-4 w-4" /> {entry.action.label}
+        </Item>
+      ))}
       {isDir && (canCreateFile || canCreateFolder || canUploadHere) && (
         <>
           <Separator />
@@ -626,6 +646,7 @@ const areFileRowPropsEqual = (prev: FileRowProps, next: FileRowProps): boolean =
   && prev.onMoveDragChange === next.onMoveDragChange
   && prev.onSetMoveDropTarget === next.onSetMoveDropTarget
   && prev.onMoveDrop === next.onMoveDrop
+  && prev.guestActions === next.guestActions
 );
 
 const MemoizedFileRow = React.memo(FileRow, areFileRowPropsEqual);
@@ -651,6 +672,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
   visibleRef.current = visible;
   const { t } = useI18n();
   const { files, runtime } = useRuntimeAPIs();
+  const guestActions = useGuestActions();
   const isBrowserClient = isBrowserClientRuntime(runtime.platform);
   const root = normalizePath(currentDirectory.trim());
   const panelRoot = normalizePath(panelDirectory.trim());
@@ -1650,6 +1672,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean; currentDirectory: st
         onMoveDragChange={handleMoveDragChange}
         onSetMoveDropTarget={setMoveDropTarget}
         onMoveDrop={handleMoveDrop}
+        guestActions={guestActions}
       />
     );
   };

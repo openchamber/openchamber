@@ -74,7 +74,23 @@ export type SessionSnapshot = {
  * Which host chrome mounted this iframe. Not `openSurface`. `status` is the
  * extension's section in the chat's Work Status panel.
  */
-export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status' | 'file' | 'popover';
+export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status' | 'file' | 'popover' | 'block';
+
+/**
+ * The call a `block` surface draws: the component's name and its arguments as
+ * the agent wrote them. A model wrote them, so text from a page or a ticket
+ * can steer them: treat them as untrusted, and do nothing with side effects
+ * until the user clicks.
+ */
+export type GuestBlockCall = {
+  name: string;
+  args: Record<string, string>;
+  /** What this frame answered the agent with (`answerBlock`), kept across a reload; `null` before that. */
+  answered: string | null;
+};
+
+/** Characters of the text a block's frame answers the agent with. */
+export const GUEST_BLOCK_ANSWER_MAX = 2_000;
 
 export type GuestConnection = {
   connected: boolean;
@@ -226,6 +242,8 @@ export type HostReadyContext = {
    * opened from the rail icon or the composer + menu.
    */
   item: GuestItem | null;
+  /** The call this frame draws; present only on the `block` surface. */
+  block?: GuestBlockCall;
   /** Present only in the host-created child frame for an active popover. */
   popover?: GuestPopoverContext;
   /** Optional capabilities advertised by a newer host. Absent remains compatible with older hosts. */
@@ -277,10 +295,43 @@ export type GuestSessionItem = {
   truncated?: boolean;
 };
 
-export type GuestItem = AttachIssueRequest | GuestMessageItem | GuestSessionItem;
+/** A `contributes.actions` entry with `where: "selection"` ran on text selected in a message. */
+export type GuestSelectionItem = {
+  kind: 'selection';
+  action: string;
+  sessionId: string;
+  directory: string | null;
+  messageId: string;
+  /** The selected text as Markdown, capped at `GUEST_ITEM_MESSAGE_TEXT_MAX`. */
+  text: string;
+};
+
+/** A `contributes.actions` entry with `where: "file"` ran on a row of the Files view. */
+export type GuestFileItem = {
+  kind: 'file';
+  action: string;
+  directory: string | null;
+  /** Absolute path. */
+  path: string;
+  isDirectory: boolean;
+};
+
+/** A `contributes.actions` entry with `where: "diff"` ran on selected lines of a file or a diff. */
+export type GuestDiffItem = {
+  kind: 'diff';
+  action: string;
+  directory: string | null;
+  /** The file as the view names it, relative to the project when it can be. */
+  path: string;
+  startLine: number;
+  endLine: number;
+  side?: 'additions' | 'deletions';
+};
+
+export type GuestItem = AttachIssueRequest | GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem;
 
 /** The captured target of a background action. Delivered once through `onAction`, not `onItem`. */
-export type GuestActionItem = GuestMessageItem | GuestSessionItem;
+export type GuestActionItem = GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem;
 
 export type ActionResultPayload = { ok: true } | { ok: false; error: string };
 
@@ -294,7 +345,7 @@ export const isGuestSessionItem = (item: GuestItem | null): item is GuestSession
 
 /** The composer chip: what the guest handed to `attach`, with `text` filled from the chip. */
 export const isGuestAttachItem = (item: GuestItem | null): item is AttachIssueRequest => (
-  item !== null && item.kind !== 'message' && item.kind !== 'session'
+  item !== null && (item.kind === undefined || item.kind === 'issue' || item.kind === 'pull')
 );
 
 /** What the host asks a guest that declared `contributes.commands` when the user submits `/name args`. */
@@ -626,6 +677,8 @@ export type HostConnectionMessage = Envelope & { type: 'connection'; payload: { 
 export type HostSettingsMessage = Envelope & { type: 'settings'; payload: { settings: GuestSettings } };
 export type HostSessionLifecycleMessage = Envelope & { type: 'session-lifecycle'; payload: SessionLifecycleEvent };
 export type HostItemMessage = Envelope & { type: 'item'; payload: { item: GuestItem | null } };
+/** What the extension's service sent its frames (`emit`). */
+type HostServiceEventMessage = Envelope & { type: 'service-event'; payload: { topic: string; data: JsonValue } };
 export type HostStatusControlEventMessage = Envelope & { type: 'status-control-event'; payload: GuestStatusControlEvent };
 export type HostPopoverClosedMessage = Envelope & { type: 'popover-closed'; payload: GuestPopoverClosedEvent };
 /** Host → guest request. The guest answers with `resolve-result` carrying the same `id`. */
@@ -656,6 +709,7 @@ export type HostMessage =
   | HostSettingsMessage
   | HostSessionLifecycleMessage
   | HostItemMessage
+  | HostServiceEventMessage
   | HostStatusControlEventMessage
   | HostPopoverClosedMessage
   | HostResolveMessage
@@ -674,6 +728,7 @@ export type GuestHelloMessage = Envelope & { type: 'hello' };
 export type GuestToastMessage = GuestCall<'toast', ToastRequest>;
 export type GuestOpenUrlMessage = GuestCall<'open-url', { url: string }>;
 export type GuestOpenSurfaceMessage = GuestCall<'open-surface', { surfaceId: string }>;
+export type GuestBlockAnswerMessage = GuestCall<'block-answer', { text: string }>;
 export type GuestClipboardWriteMessage = GuestCall<'clipboard-write', { text: string }>;
 export type GuestComposeMessage = GuestCall<'compose', ComposeRequest>;
 export type GuestAttachMessage = GuestCall<'attach', AttachIssueRequest>;
@@ -732,6 +787,7 @@ export type GuestMessage =
   | GuestToastMessage
   | GuestOpenUrlMessage
   | GuestOpenSurfaceMessage
+  | GuestBlockAnswerMessage
   | GuestClipboardWriteMessage
   | GuestComposeMessage
   | GuestAttachMessage
@@ -801,7 +857,7 @@ export const isGenerateResult = (
 const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'workspace',
   'shells',
-  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action',
+  'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action', 'service-event',
   'status-control-event', 'popover-closed',
   'file-open', 'file-snapshot', 'file-saved',
   'generate-late',

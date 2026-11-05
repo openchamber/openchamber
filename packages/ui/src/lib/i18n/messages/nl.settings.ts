@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Telt de bewaartermijn vanaf het archiveren. Verlopen sessies worden verwijderd.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Telt de bewaartermijn vanaf de laatste activiteit van de sessie. Verlopen sessies worden gearchiveerd.',
@@ -2650,6 +2651,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.nl,
   ...thirdPartyIntegrationI18n.nl,
   ...extensionCatalogI18n.nl,
+  ...extensionPowersI18n.nl,
   ...guestIntegrationsI18n.nl,
   ...extensionsSettingsI18n.nl,
   ...settingsLayoutI18n.nl,

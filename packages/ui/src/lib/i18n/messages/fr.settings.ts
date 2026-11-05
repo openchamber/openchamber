@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'La durée de conservation commence à l\'archivage. Les sessions expirées sont supprimées.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont archivées.',
@@ -2660,6 +2661,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.fr,
   ...thirdPartyIntegrationI18n.fr,
   ...extensionCatalogI18n.fr,
+  ...extensionPowersI18n.fr,
   ...guestIntegrationsI18n.fr,
   ...extensionsSettingsI18n.fr,
   ...settingsLayoutI18n.fr,

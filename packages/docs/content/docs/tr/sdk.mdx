@@ -38,7 +38,7 @@ Paketleme komutu Bun üzerinde çalışır. Bun yoksa esbuild'i ya da başka bir
 
 OpenChamber manifesti okur ve eklentinin ne istediğini listeleyen bir pencere gösterir (bkz. [Yetenekler](#yetenekler)). Onaylayın, simgeniz şeritte belirir. Tıklayın, sayfanız yüklenir.
 
-Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https bağlantısı da ekleyebilirsiniz. Yalnızca git kurulumu güncellenebilir: `package.json` içindeki `version` değerini yükseltip push edin; kullanıcı Ayarlar → Uzantılar sayfasını bir sonraki açışında OpenChamber güncellemeyi sunar. URL'deki `#tag` ya da `#branch` neyi izleyeceğini sabitler. Bunlar OpenChamber'ın veri klasörüne kopyalanır ve o kopyadan çalışır; bu yüzden `node_modules` veya TypeScript kaynaklarını değil, derlenmiş dosyaları yayınlayın. Eklentiyi kaldırmak kopyayı siler. Klasörden kurulum doğrudan sizin klasörünüzden çalışır; düzenleyip yeniden derleyip yeniden yükleyebilirsiniz.
+Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https bağlantısı da ekleyebilirsiniz. Yalnızca git kurulumu güncellenebilir: `package.json` içindeki `version` değerini yükseltip push edin; OpenChamber açıldıktan kısa süre sonra ve birkaç saatte bir denetler, kullanıcıya bir kez haber verir ve güncellemeyi Ayarlar → Uzantılar sayfasında sunar. Herhangi bir sayfadaki `openchamber://extensions/install?url=<encoded repository URL>` bağlantısı, masaüstü uygulamasını bu depo ekleme iletişim kutusunda hazır olacak şekilde açar; böylece bir kurulum düğmesi sunabilirsiniz. URL'deki `#tag` ya da `#branch` neyi izleyeceğini sabitler. Bunlar OpenChamber'ın veri klasörüne kopyalanır ve o kopyadan çalışır; bu yüzden `node_modules` veya TypeScript kaynaklarını değil, derlenmiş dosyaları yayınlayın. Eklentiyi kaldırmak kopyayı siler. Klasörden kurulum doğrudan sizin klasörünüzden çalışır; düzenleyip yeniden derleyip yeniden yükleyebilirsiniz.
 
 ## Manifest
 
@@ -49,13 +49,11 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
 
 `engines.openchamber` isteğe bağlıdır. Eklentinizin çalıştığı en eski OpenChamber sürümünü `1.24.0` veya `>=1.24.0` biçiminde yazın. Daha eski sürümler sonradan hata vermek yerine kurulumu reddeder.
 
-`contributes.panel` şerit girişini tanımlar. `id` kebab-case olmalı ve kurulu eklentiler arasında benzersiz olmalıdır. `icon` bir Remixicon adı (`RiWindowLine` için `window`) ya da klasörünüzdeki bir SVG dosyasıdır, örneğin `icon.svg`. `entry` klasörünüzdeki HTML dosyasıdır; yalnızca `tools` tanımlayan bir eklentide bunu atlayın (bkz. [Sohbetteki araçlarınız](#sohbetteki-araçlarınız)).
+`id`, `name` ve `icon` eklentiyi adlandırır. `id` kebab-case olmalı ve kurulu eklentiler arasında benzersiz olmalıdır. `icon` bir Remixicon adı (`RiWindowLine` için `window`) ya da klasörünüzdeki bir SVG dosyasıdır, örneğin `icon.svg`. `contributes.panel` eklentinin şeritteki panelidir: `entry` değeri klasörünüzdeki HTML dosyasıdır. Şeritte paneli olmayan bir eklenti `panel` alanını atlar. Eski paketler `id`, `name` ve `icon` alanlarını `panel` içinde tutar ve bu çalışmaya devam eder.
 
 `contributes.attach` isteğe bağlıdır. Eklentinizi sohbet kutusunun yanındaki + menüsüne ekler; kullanıcı buradan bir görev seçip oturuma iliştirebilir.
 
@@ -89,7 +87,7 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` pencerede size ait ayrı bir sayfa açar; böylece seçicinin şerit paneliyle kod paylaşması gerekmez
 - atlarsanız eklenti o menüde görünmez
 
-`ctx.surface`, `panel`, `dialog`, `page` veya `status` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
+`ctx.surface`, `panel`, `dialog`, `page`, `status` veya `block` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
 
 `contributes.page: true`, paneli oturum listesinin üstündeki Uzantı sayfaları menüsünden tam ekran açılabilir yapar. `{ "entry": "panel/page.html", "title": "Board" }` ayrı HTML ve isteğe bağlı başlık kullanır. `panel.entry` zorunludur; yalıtım ve izinler aynıdır. Sayfayı yalnızca kullanıcı açar. Yenileme, duraklatma, kaldırma veya sunucu değiştirme sayfayı kapatır.
 
@@ -110,7 +108,7 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | kullanıcının Small Model'iyle tek seferlik metin üretimi (`generate`), herhangi bir oturumun dışında |
 
-Altı tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)) ve `sessionEvents` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)).
+Dokuz tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)), `sessionEvents` veya `sessionControl` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)), servisiniz oturumlar üzerinde işlem yaptığında `sessionControl` (bkz. [OpenChamber'ı çağırma](/sdk/host/#openchamberı-servisinizden-çağırma)), ajanların okuduklarına ekleme yaptığında `instructions` ve `contributes.skills` tanımladığınızda `skills`. `contributes.skills`, eklenti açıkken her ajana ulaşan skill'lerin bulunduğu bir paket klasörüdür.
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
 
@@ -156,7 +154,7 @@ Her `scheme` ne gönderir:
 | `"bearer"` | `Authorization: Bearer <token>` | API bearer veya personal access token belgeliyorsa |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API kullanıcı adı (çoğunlukla e-posta) ve API token'ı ile HTTP Basic auth belgeliyorsa; kart ikisini de sorar ve `usernameLabel` ilk alanı adlandırır |
 
-`settings` karta düz metin alanları ekler. Değerleri `ctx.settings` içinde gelir.
+`settings` karta düz metin alanları ekler. Değerleri `ctx.settings` içinde gelir. `"secret": true` olan bir alan kartta maskelenir ve hiçbir sayfaya ulaşmaz; servisiniz onu `readSettings()` ile okur.
 
 ## Dosyalar
 
@@ -263,6 +261,8 @@ Sayfanız `ctx.surface` değerini `file` olarak görür. Dosya diskte değişti�
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` ayrıca `selection` (bir mesajda seçilen metin), `file` (Files içindeki bir satır) ve `diff` (bir dosyanın veya diff'in seçili satırları) değerlerini de alır. Bunların öğeleri aynı adda bir `kind` taşır: `selection` metni, `file` yolu, `diff` yolu ve satır aralığını içerir. Seçimde, `display` eylemin nasıl görüneceğini belirler: `label` (varsayılan), `label` metni ipucu olan `icon` veya `both`.
 
 Bir mesaj eylemi, eklentinizi `kind: "message"` olan bir `ctx.item` ile açar: oturum id'si ve başlığı, proje dizini, mesaj id'si, rolü ve metni. Bir oturum eylemi ise `kind: "session"` ile, oturum id'si, başlığı ve dizini ile açar. `"payload": ["messages"]` ekleyin, öğe tüm konuşmayı da taşır, en eskisi önce olmak üzere, Markdown dışa aktarmanın ürettiği metnin aynısı. Bu, kullanıcının onay iletişim kutusunda ayrı bir satır olarak gördüğü `conversation` yeteneğini gerektirir. `item.action` hangi girdiye tıklandığını söyler.
 

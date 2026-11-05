@@ -38,7 +38,7 @@ bunx openchamber-guest-bundle panel/main.ts panel/main.js
 
 OpenChamber がマニフェストを読み、拡張機能が求めているものの一覧をダイアログで表示します([権限](#権限) を参照)。承認すると、レールにアイコンが現れます。クリックするとページが読み込まれます。
 
-ローカルの `.zip` や、git リポジトリまたは zip ファイルへの https リンクも追加できます。更新できるのは git からのインストールだけです。`package.json` の `version` を上げてプッシュすると、ユーザーが次に 設定 → 拡張機能 を開いたときに OpenChamber が更新を提案します。URL の `#tag` や `#branch` で、どれを追従するかを固定できます。これらは OpenChamber のデータフォルダにコピーされ、そのコピーから実行されます。そのため `node_modules` や TypeScript のソースではなく、ビルド済みファイルを同梱してください。拡張機能を削除するとコピーも消えます。フォルダからのインストールはそのフォルダから直接動くので、編集、再ビルド、再読み込みができます。
+ローカルの `.zip` や、git リポジトリまたは zip ファイルへの https リンクも追加できます。更新できるのは git からのインストールだけです。`package.json` の `version` を上げてプッシュすると、OpenChamber は起動の直後と数時間ごとに確認し、ユーザーに一度だけ知らせて、設定 → 拡張機能 で更新を提案します。任意のページに `openchamber://extensions/install?url=<encoded repository URL>` へのリンクを置くと、そのリポジトリが追加ダイアログに入った状態でデスクトップアプリが開くので、インストールボタンを用意できます。URL の `#tag` や `#branch` で、どれを追従するかを固定できます。これらは OpenChamber のデータフォルダにコピーされ、そのコピーから実行されます。そのため `node_modules` や TypeScript のソースではなく、ビルド済みファイルを同梱してください。拡張機能を削除するとコピーも消えます。フォルダからのインストールはそのフォルダから直接動くので、編集、再ビルド、再読み込みができます。
 
 ## マニフェスト
 
@@ -49,13 +49,11 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 
 `engines.openchamber` は任意です。拡張機能が動作する最も古い OpenChamber のバージョンを、`1.24.0` または `>=1.24.0` の形で指定します。古いビルドは、後で失敗する代わりにインストール自体を拒否します。
 
-`contributes.panel` はレールの項目を記述します。`id` は kebab-case で、インストール済みの拡張機能の中で一意でなければなりません。`icon` は Remixicon の名前(`RiWindowLine` なら `window`)か、フォルダ内の SVG ファイル(`icon.svg` など)です。`entry` はフォルダ内の HTML ファイルです。`tools` だけを宣言する拡張機能では省略してください([チャットに表示されるあなたのツール](#チャットに表示されるあなたのツール) を参照)。
+`id`、`name`、`icon` で拡張機能を識別します。`id` は kebab-case で、インストール済みの拡張機能の中で一意でなければなりません。`icon` は Remixicon の名前(`RiWindowLine` なら `window`)か、フォルダ内の SVG ファイル(`icon.svg` など)です。`contributes.panel` はレールに表示される拡張機能のパネルで、その `entry` はフォルダ内の HTML ファイルです。レールのパネルがない拡張機能では `panel` を省略します。古いパッケージでは `id`、`name`、`icon` が `panel` の中にありますが、引き続き動作します。
 
 `contributes.attach` は任意です。チャット欄の横にある + メニューに拡張機能を追加し、ユーザーがタスクを選んでセッションに添付できるようにします。
 
@@ -89,7 +87,7 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` はあなたの別ページをウィンドウで開くので、選択画面がレールのパネルとコードを共有する必要がなくなる
 - 省略すると拡張機能はそのメニューに出ない
 
-`ctx.surface` は `panel`、`dialog`、`page`、`status` のいずれかです。添付項目をクリックすると、そのデータが `ctx.item` に入り、それ以外は `null` です。
+`ctx.surface` は `panel`、`dialog`、`page`、`status`、`block` のいずれかです。添付項目をクリックすると、そのデータが `ctx.item` に入り、それ以外は `null` です。
 
 `contributes.page: true` を指定すると、セッション一覧の上にある拡張機能のページメニューから全画面で開けます。`{ "entry": "panel/page.html", "title": "Board" }` で別の HTML と任意のタイトルを指定できます。`panel.entry` は必須で、サンドボックスと権限は共通です。ページを開くのはユーザーだけです。再読み込み、一時停止、削除、サーバー切り替えで閉じます。
 
@@ -110,7 +108,7 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 | `files` | 開いているプロジェクト内のファイルを読み書きする(相対パス付きの `readFile`、`writeFile`、`listDir`、`stat`) |
 | `model` | セッションの外で、ユーザーの Small Model による一回限りのテキスト生成を行う(`generate`) |
 
-さらに 6 つが自動で追加されます。`integration` を宣言すると `network`、`service` を宣言すると `service`、`filesystem` パターンを宣言すると `filesystem`、`origins` を宣言すると `origins`、セッションのアクションがメッセージを求めると `conversation`([アクション、コマンド、バッジ](#アクションコマンドバッジ) を参照)、`sessionEvents` が `content` を求めると `transcript` です([セッションイベント](/sdk/host/#セッションイベント) を参照)。
+さらに 9 つが自動で追加されます。`integration` を宣言すると `network`、`service` を宣言すると `service`、`filesystem` パターンを宣言すると `filesystem`、`origins` を宣言すると `origins`、セッションのアクションがメッセージを求めると `conversation`([アクション、コマンド、バッジ](#アクションコマンドバッジ) を参照)、`sessionEvents` または `sessionControl` が `content` を求めると `transcript`([セッションイベント](/sdk/host/#セッションイベント) を参照)、サービスがセッションを操作すると `sessionControl`([OpenChamber の呼び出し](/sdk/host/#サービスから-openchamber-を呼び出す) を参照)、エージェントが読む内容に追加すると `instructions`、`contributes.skills` を宣言すると `skills` です。`contributes.skills` はパッケージ内のスキルのフォルダーで、拡張機能がオンの間、すべてのエージェントに届きます。
 
 ユーザーは拡張機能をインストールするときに一覧を一度だけ見て、承認するか拡張機能を削除するかを選びます。新しいバージョンがより多くを求める場合、ダイアログが再び表示されます。ユーザーが承認していない権限を必要とする呼び出しは `NOT_GRANTED` で失敗します。
 
@@ -156,7 +154,7 @@ CDN のフォントや画像、公開 API など、ページが直接必要と�
 | `"bearer"` | `Authorization: Bearer <token>` | API が bearer トークンまたは personal access token を記載している |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API がユーザー名 (多くはメール) と API トークンによる HTTP Basic 認証を記載している。カードは両方を尋ね、`usernameLabel` が最初の欄のラベルになる |
 
-`settings` はカードにプレーンテキストの入力欄を追加します。その値は `ctx.settings` に届きます。
+`settings` はカードにプレーンテキストの入力欄を追加します。その値は `ctx.settings` に届きます。`"secret": true` を指定したフィールドはカード上でマスクされ、ページには届きません。サービスは `readSettings()` で読み取ります。
 
 ## ファイル
 
@@ -263,6 +261,8 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` には `selection` (メッセージ内で選択したテキスト)、`file` (Files の行)、`diff` (ファイルや diff の選択した行) も指定できます。これらの項目には同じ名前の `kind` が付きます。`selection` にはテキスト、`file` にはパス、`diff` にはパスと行の範囲が入ります。選択範囲では、`display` でアクションの表示方法を指定します。`label` (デフォルト)、ラベルをツールチップにする `icon`、または `both` です。
 
 メッセージのアクションは、`kind: "message"` の `ctx.item` を付けて拡張機能を開きます。中身はセッションの id とタイトル、プロジェクトのフォルダ、メッセージの id、そのロールとテキストです。セッションのアクションは `kind: "session"` と、セッションの id、タイトル、フォルダを付けて開きます。`"payload": ["messages"]` を加えると、項目には会話全体も古い順で含まれます。Markdown エクスポートが出力するのと同じテキストです。これには `conversation` 権限が必要で、ユーザーには承認ダイアログで別の行として表示されます。`item.action` でどの項目がクリックされたかが分かります。
 

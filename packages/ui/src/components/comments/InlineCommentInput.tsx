@@ -13,6 +13,11 @@ import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useCommentImagePaste } from './useCommentImagePaste';
 import { useCommentFieldPicker } from './useCommentFieldPicker';
 import { useCommentEnterSubmit } from './useCommentEnterSubmit';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestActionsWhere } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -94,6 +99,7 @@ export function InlineCommentInput({
 }: InlineCommentInputProps) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
+  const lineActions = guestActionsWhere(useGuestActions(), 'diff');
   const [text, setText] = React.useState(initialText);
   const [addingToReview, setAddingToReview] = React.useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -308,6 +314,31 @@ export function InlineCommentInput({
               {fileLabel ? <span className="min-w-0 truncate font-medium text-foreground" title={fileLabel}>{baseName(fileLabel)}</span> : null}
               {rangeLabel ? <span className="shrink-0 whitespace-nowrap">{rangeLabel}</span> : null}
             </span>
+            {fileLabel && lineRange ? lineActions.map((entry) => (
+              <Tooltip key={`${entry.guest.id}:${entry.action.id}`}>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 shrink-0 text-muted-foreground"
+                    aria-label={entry.action.label}
+                    onClick={() => void runGuestAction(entry, {
+                      kind: 'diff',
+                      action: entry.action.id,
+                      directory: resolveEffectiveDirectory() || null,
+                      path: fileLabel,
+                      startLine: lineRange.start,
+                      endLine: lineRange.end,
+                      ...(lineRange.side ? { side: lineRange.side } : {}),
+                    }, t)}
+                  >
+                    <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6}>{entry.action.label}</TooltipContent>
+              </Tooltip>
+            )) : null}
             {suggestionCode ? (
               <Tooltip>
                 <TooltipTrigger asChild>

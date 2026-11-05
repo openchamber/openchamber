@@ -7,7 +7,7 @@ import {
   connectHost,
   HostRequestError,
   isGuestMessageItem,
-  isGuestSessionItem,
+  isGuestAttachItem, isGuestSessionItem,
   type AttachIssueRequest,
   type GuestMessageItem,
   type GuestSessionItem,
@@ -212,7 +212,7 @@ host.onItem((item) => {
     renderMessageAction(item);
   } else if (isGuestSessionItem(item)) {
     renderSessionAction(item);
-  } else if (item) {
+  } else if (isGuestAttachItem(item)) {
     renderDetails(item);
   } else {
     renderPicker();

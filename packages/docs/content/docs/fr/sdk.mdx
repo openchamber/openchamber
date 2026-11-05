@@ -38,7 +38,7 @@ Faites pointer `index.html` vers `main.js` avec un `<script src="main.js"></scri
 
 OpenChamber lit le manifeste et affiche une boîte de dialogue qui liste ce que l'extension demande (voir [Capacités](#capacités)). Approuvez, et votre icône apparaît dans la barre latérale. Cliquez dessus et votre page se charge.
 
-Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git ou un fichier zip. Seule une installation git peut se mettre à jour : montez `version` dans `package.json`, poussez, et OpenChamber propose la mise à jour la prochaine fois que l'utilisateur ouvre Paramètres → Extensions. Un `#tag` ou `#branch` dans l'URL fixe ce qu'elle suit. Ceux-ci sont copiés dans le dossier de données d'OpenChamber et exécutés depuis cette copie, donc livrez les fichiers construits, pas `node_modules` ni les sources TypeScript. Supprimer l'extension supprime la copie. Une installation depuis un dossier s'exécute directement depuis votre dossier, vous pouvez donc modifier, reconstruire et recharger.
+Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git ou un fichier zip. Seule une installation git peut se mettre à jour : montez `version` dans `package.json`, poussez, et OpenChamber vérifie peu après son ouverture et toutes les quelques heures, prévient l'utilisateur une fois et propose la mise à jour dans Paramètres → Extensions. Un lien vers `openchamber://extensions/install?url=<encoded repository URL>` sur n'importe quelle page ouvre l'application de bureau avec ce dépôt dans la boîte de dialogue d'ajout, vous pouvez donc proposer un bouton d'installation. Un `#tag` ou `#branch` dans l'URL fixe ce qu'elle suit. Ceux-ci sont copiés dans le dossier de données d'OpenChamber et exécutés depuis cette copie, donc livrez les fichiers construits, pas `node_modules` ni les sources TypeScript. Supprimer l'extension supprime la copie. Une installation depuis un dossier s'exécute directement depuis votre dossier, vous pouvez donc modifier, reconstruire et recharger.
 
 ## Manifeste
 
@@ -49,13 +49,11 @@ Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git o
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git o
 
 `engines.openchamber` est optionnel. Indiquez la version d'OpenChamber la plus ancienne avec laquelle votre extension fonctionne, sous la forme `1.24.0` ou `>=1.24.0`. Les versions plus anciennes refusent de l'installer au lieu d'échouer plus tard.
 
-`contributes.panel` décrit l'entrée dans la barre latérale. `id` est en kebab-case et doit être unique parmi les extensions installées. `icon` est un nom Remixicon (`RiWindowLine` devient `window`) ou un fichier SVG dans votre dossier, comme `icon.svg`. `entry` est le fichier HTML dans votre dossier ; omettez-le pour une extension qui ne déclare que `tools` (voir [Vos outils dans le chat](#vos-outils-dans-le-chat)).
+`id`, `name` et `icon` nomment l'extension. `id` est en kebab-case et doit être unique parmi les extensions installées. `icon` est un nom Remixicon (`RiWindowLine` devient `window`) ou un fichier SVG dans votre dossier, comme `icon.svg`. `contributes.panel` est le panneau de l'extension dans la barre latérale : son `entry` est le fichier HTML dans votre dossier. Une extension sans panneau dans la barre latérale omet `panel`. Les anciens paquets gardent `id`, `name` et `icon` dans `panel`, et cela continue de fonctionner.
 
 `contributes.attach` est optionnel. Il ajoute votre extension au menu + à côté de la zone de chat, pour que l'utilisateur puisse choisir une tâche et l'attacher à une session.
 
@@ -89,7 +87,7 @@ Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git o
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` ouvre dans la fenêtre une page séparée à vous, pour que le sélecteur n'ait pas à partager de code avec le panneau de la barre latérale
 - sans cette clé, l'extension n'apparaît pas dans ce menu
 
-`ctx.surface` vaut `panel`, `dialog`, `page` ou `status`. Un clic sur un élément attaché place ses données dans `ctx.item`, sinon cette valeur est `null`.
+`ctx.surface` vaut `panel`, `dialog`, `page`, `status` ou `block`. Un clic sur un élément attaché place ses données dans `ctx.item`, sinon cette valeur est `null`.
 
 `contributes.page: true` propose votre panneau en plein écran dans le menu Pages des extensions au-dessus des sessions. `{ "entry": "panel/page.html", "title": "Board" }` utilise un HTML distinct et un titre facultatif. `panel.entry` reste obligatoire, avec le même bac à sable et les mêmes permissions. Seul l'utilisateur ouvre la page. Recharger, mettre en pause, supprimer ou changer de serveur la ferme.
 
@@ -110,7 +108,7 @@ Dessiner un panneau et lire la session en cours ne demandent aucune permission. 
 | `files` | lire et écrire des fichiers dans le projet ouvert (`readFile`, `writeFile`, `listDir`, `stat` avec un chemin relatif) |
 | `model` | génération de texte ponctuelle avec le Small Model de l'utilisateur (`generate`), en dehors de toute session |
 
-Six autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `filesystem` quand vous déclarez des motifs `filesystem`, `origins` quand vous déclarez `origins`, `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)), et `transcript` quand `sessionEvents` demande `content` (voir [Événements de session](/sdk/host/#événements-de-session)).
+Neuf autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `filesystem` quand vous déclarez des motifs `filesystem`, `origins` quand vous déclarez `origins`, `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)), `transcript` quand `sessionEvents` ou `sessionControl` demande `content` (voir [Événements de session](/sdk/host/#événements-de-session)), `sessionControl` quand votre service agit sur des sessions (voir [Appeler OpenChamber](/sdk/host/#appeler-openchamber-depuis-votre-service)), `instructions` quand il complète ce que lisent les agents, et `skills` quand vous déclarez `contributes.skills`, un dossier du paquet contenant des skills qui atteignent chaque agent tant que l'extension est active.
 
 L'utilisateur voit la liste complète une seule fois, à l'installation de l'extension, et l'approuve ou supprime l'extension. Si une nouvelle version demande davantage, la boîte de dialogue réapparaît. Un appel qui a besoin d'une capacité non approuvée par l'utilisateur échoue avec `NOT_GRANTED`.
 
@@ -156,7 +154,7 @@ Ce que chaque `scheme` envoie :
 | `"bearer"` | `Authorization: Bearer <token>` | l'API documente un token bearer ou un personal access token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | l'API documente HTTP Basic auth avec un nom d'utilisateur (souvent un e-mail) et un token d'API ; la carte demande les deux, et `usernameLabel` nomme le premier champ |
 
-`settings` ajoute des champs texte simples à la carte. Leurs valeurs arrivent dans `ctx.settings`.
+`settings` ajoute des champs texte simples à la carte. Leurs valeurs arrivent dans `ctx.settings`. Un champ avec `"secret": true` est masqué sur la carte et n'atteint jamais une page ; votre service le lit avec `readSettings()`.
 
 ## Fichiers
 
@@ -263,6 +261,8 @@ Au-delà de la barre latérale et du menu +, une extension peut apparaître à t
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` accepte aussi `selection` (texte sélectionné dans un message), `file` (une ligne dans Files) et `diff` (lignes sélectionnées d'un fichier ou d'un diff). Leurs éléments portent un `kind` du même nom : `selection` contient le texte, `file` le chemin, `diff` le chemin et la plage de lignes. Sur une sélection, `display` indique comment l'action s'affiche : `label` (la valeur par défaut), `icon` avec le libellé comme infobulle, ou `both`.
 
 Une action de message ouvre votre extension avec un `ctx.item` de `kind: "message"` : l'id et le titre de la session, le dossier du projet, l'id du message, son rôle et son texte. Une action de session l'ouvre avec `kind: "session"` et l'id, le titre et le dossier de la session. Ajoutez `"payload": ["messages"]` et l'élément porte aussi toute la conversation, du plus ancien au plus récent, le même texte que produit l'export Markdown. Cela demande la capacité `conversation`, que l'utilisateur voit comme une ligne à part dans la boîte de dialogue d'approbation. `item.action` vous dit quelle entrée a été cliquée.
 

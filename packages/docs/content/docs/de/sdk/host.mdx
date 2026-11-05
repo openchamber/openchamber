@@ -28,7 +28,7 @@ Das ist kein einmaliger Mount-Callback. Mounte die UI und registriere Abonnement
 | `locale` | das Sprach-Tag der App |
 | `directory` | aktuelles Projektverzeichnis oder `null` |
 | `session` | `{ id, title, busy }` oder `null`. Fehlt der Titel, steht dort die Session-ID. `busy` ist der Live-Status. `model` und `agent` (der OpenCode-Agent) erscheinen, wenn die Session sie hat. |
-| `surface` | `panel` in der Leiste, `dialog` im Anhängen-Fenster, `page` im Vollbild, `status` im Work-Status-Panel, `file` als Datei-Editor in Files |
+| `surface` | `panel` in der Leiste, `dialog` im Anhängen-Fenster, `page` im Vollbild, `status` im Work-Status-Panel, `file` als Datei-Editor in Files, `block` in einem UI-Block im Chat |
 | `item` | wofür diese Oberfläche geöffnet wurde, oder `null`: der angehängte Eintrag, den der Nutzer angeklickt hat (dieselben Felder, die du an `attach` übergeben hast, einschließlich `data`), eine Nachricht (`kind: "message"`) oder eine Session (`kind: "session"`) aus einer deiner deklarierten Aktionen. Siehe [Aktionen](/sdk/#aktionen-befehle-und-das-badge). |
 | `connection` | `{ connected, account }` für deine Integration |
 | `settings` | Werte der Felder, die du in `integration.settings` deklariert hast |
@@ -195,7 +195,7 @@ Deine Seite weiß nur von einer Sitzung, solange sie offen ist. Dein Dienst kann
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-Die vier Ereignisse sind `turn-finished` (der Agent ist fertig und wartet auf nichts: kein laufender Subagent, keine offene Erlaubnis oder Frage, kein Goal-Schritt), `turn-failed`, `permission-asked` und `question-asked`. Ein Zug, den der Nutzer gestoppt hat, schickt nichts. Die Freigabe der Erweiterung ist das Abonnement; der Dialog listet die Ereignisse unter der Zeile des Dienstes auf. Ohne `content` bekommt der Dienst nur Kennungen: die Sitzung, ihr Projektverzeichnis, die Einträge, die der Nutzer mit ihr verknüpft hat. Mit `"content": true` fordert das Manifest zusätzlich eine Berechtigung an, die der Nutzer als eigene Zeile sieht, **Lesen, was der Agent im Hintergrund sagt**, und jedes Ereignis trägt die endgültige Antwort des Agenten, die Felder der Frage oder die Details der Erlaubnis.
+Die Ereignisse sind `turn-started`, `session-created`, `session-archived`, `session-deleted`, `turn-finished` (der Agent ist fertig und wartet auf nichts: kein laufender Subagent, keine offene Erlaubnis oder Frage, kein Goal-Schritt), `turn-failed`, `permission-asked` und `question-asked`. Ein Zug, den der Nutzer gestoppt hat, schickt nichts. Die Freigabe der Erweiterung ist das Abonnement; der Dialog listet die Ereignisse unter der Zeile des Dienstes auf. Ohne `content` bekommt der Dienst nur Kennungen: die Sitzung, ihr Projektverzeichnis, die Einträge, die der Nutzer mit ihr verknüpft hat. Mit `"content": true` fordert das Manifest zusätzlich eine Berechtigung an, die der Nutzer als eigene Zeile sieht, **Lesen, was der Agent im Hintergrund sagt**, und jedes Ereignis trägt die endgültige Antwort des Agenten, die Felder der Frage oder die Details der Erlaubnis.
 
 Jedes Ereignis kommt als ein `POST /session-events` mit dem Bearer-Token des Dienstes an. Lies es mit `readSessionEventRequest` und antworte mit `{ "ok": true }`:
 
@@ -215,6 +215,71 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 Die Ereignisse jedes Projekts werden geschickt; vergleiche `event.project.directory` mit deinen eigenen Einstellungen und antworte für den Rest mit `{ "ok": true }`. Die Zustellung erfolgt höchstens einmal und in Reihenfolge, eine Anfrage nach der anderen; eine fehlgeschlagene Antwort verwirft deine Ereignisse für 30 Sekunden, und nichts wird nachgeliefert, nachdem OpenChamber oder dein Dienst nicht erreichbar war. Der Dienst braucht dafür kein Panel. Das Beispiel `session-events-log` schreibt jedes Ereignis in eine Datei.
+
+## OpenChamber aus deinem Dienst aufrufen
+
+Ein Dienst kann handeln, ohne dass ein Fenster offen ist. `createServiceHost` ist sein Weg zurück zu OpenChamber:
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`, `sessions.send`, `sessions.retry` und `sessions.status` brauchen `contributes.sessionControl`, das der Nutzer als eigene Zeile freigibt. `sessions.lastReply` braucht `sessionControl: { content: true }`. `setInstructions` braucht `contributes.instructions` und ergänzt, was Agenten lesen, in einem Ordner oder, mit `null`, überall.
+
+`emit` erreicht deine offenen Frames über `host.onServiceEvent`, sodass ein Panel nicht mehr pollen muss. Nichts wird nachgeliefert, also liest ein später geöffneter Frame zuerst den aktuellen Zustand. `readSettings` gibt dem Dienst die Einstellungen der Integration einschließlich der `secret`-Felder, und `needsConfiguration` zeigt eine Meldung auf der Karte der Erweiterung.
+
+## Laufen, ohne dass jemand fragt
+
+Ein Dienst startet bei der ersten Anfrage, und der Dienst einer Rolle stoppt im Leerlauf. `service.keepRunning: true` startet ihn mit OpenChamber und holt ihn zurück, wenn er stoppt. `service.schedule` weckt ihn nach Zeitplan:
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+Ein Lauf ist ein `POST /schedule`. Lies ihn mit `readServiceScheduleRequest` und antworte mit 200. Ein Lauf, der verpasst wird, während OpenChamber nicht läuft, entfällt. Ein Dienst, der externe Ereignisse braucht, hält seine eigene Verbindung oder pollt.
+
+## Zeilen im @-Menü
+
+`contributes.mentions: { label }` fügt dem `@`-Menü des Chatfelds einen Abschnitt hinzu. Dein Dienst beantwortet `POST /mentions/search` innerhalb von 2 Sekunden mit `{ items: [{ id, title, subtitle?, url? }] }` und `POST /mentions/resolve` mit `{ text }` für die Zeile, die der Nutzer auswählt. Der Text geht mit der Nachricht an den Agenten, und der Nutzer sieht einen Chip. Ein langsamer Dienst fügt keine Zeilen hinzu und hält die Dateien nie auf; eine Zeile, die sich nicht lesen lässt, hinterlässt keinen Chip und meldet das.
+
+## Blöcke im Chat
+
+`contributes.blocks` fügt Komponenten hinzu, die Agenten in einen UI-Block schreiben können. Deine eigene Seite zeichnet jede davon, in derselben Sandbox und mit denselben Berechtigungen wie dein Panel.
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+Der Agent schreibt `JiraIssue("OPE-1")`, und deine Seite liest den Aufruf:
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+Rufe `host.setHeight(px)` aus einem `ResizeObserver` auf deinem Wurzelelement auf. Der Frame füllt seine Box ohne Padding, füge also dein eigenes hinzu. Bis zu 4 Komponenten pro Erweiterung, denn jede Signatur ist Text, den jede Sitzung liest.
+
+Ein Block kann dem Agenten antworten, so wie es ein Button in einem Block tut. Rufe `host.answerBlock(text)` bei einem Klick auf: Der Agent bekommt den Text und startet seinen nächsten Zug. Pro Block gibt es eine Antwort, und `block.answered` enthält sie nach einem Neuladen, zeichne den Block dann also als beantwortet.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
+
+Setze `"answers": true` bei einer Komponente, die das tut. Agenten werden angewiesen, mit ihr statt mit der eingebauten Auswahl zu fragen, wenn ihre Beschreibung passt, und eine Seite, die auf eine Antwort wartet, lässt ihren Senden-Button weg. Unter einem solchen Block bietet OpenChamber dasselbe Notizfeld wie bei seinen eigenen Formularen an: Der Agent liest die Notiz zusammen mit deiner Antwort, und eine Notiz allein ist ebenfalls eine Antwort.
+
+Die Argumente schreibt ein Modell, also kann Text von einer Webseite oder aus einem Ticket sie steuern. Behandle sie als nicht vertrauenswürdig und tu nichts mit Nebenwirkungen, bis der Nutzer klickt.
 
 ## Benachrichtigungskanäle
 

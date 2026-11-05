@@ -42,6 +42,7 @@ Bundle with the SDK helper from the guest folder (`--node` targets Node for the 
 ```bash
 bunx openchamber-guest-bundle panel/main.ts panel/main.js
 bunx openchamber-guest-bundle --node service/main.ts service/main.js
+bunx openchamber-guest-check   # says what the host would refuse
 ```
 
 Zip or folder for install should include at least: `package.json`, `panel/index.html`, `panel/main.js`, and any declared `icon.svg` / `service/main.js`. Skip `node_modules` and TypeScript sources. Zip and git installs land in `{dataDir}/extensions/{id}`. See also `[GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md)`.
@@ -76,6 +77,8 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 | `onPopoverClosed(listener)` | `{ id, reason }` | Dismissal of this frame's anchored popover. Events go to the owner, are not replayed, and identify the opening being closed |
 | `onLateGenerateResult(listener)` | `LateGenerateResult` | A `generate` answer that came after the frame that asked was gone (the user closed the panel, switched project, or the frame reloaded). `{ request, ok: true, result: { text } }` or `{ request, ok: false, code, error }`; `request` is what that frame sent. Each one goes to one frame of the same extension, surface and project in the same window, once. Requires `features.lateGenerateResults`; see Late generate answers below |
 | `onResolve(handler)`           | `{ command, args }` → `Promise<AttachIssueRequest \| null>` | Answers a `contributes.commands` slash command. Return the chip to attach, `null` for nothing (the user sees a short notice), or throw (the message reaches the user). One handler at a time |
+| `onBlock(listener)` | `GuestBlockCall` | The call a `block` frame draws: `{ name, args, answered }`. Replays, and again once answered. The arguments are written by a model: treat them as untrusted |
+| `onServiceEvent(listener)` | `{ topic, data }` | What the extension's service sent with `emit`. Nothing replays: read the current state from the service first |
 | `onAction(handler)` | `GuestActionItem` → `void \| Promise<void>` | Runs a `mode: "background"` message or session action. Register synchronously after `connectHost`. Await every operation; the frame is removed when the handler settles. Throw to report an error. One handler at a time; returns an unsubscribe function |
 | `onFileOpen(listener)` | `FileEditorDocument` | File editors only: `{ path, name, readOnly, encoding: 'text', content }` or `{ ..., encoding: 'binary', bytes }` (a `Uint8Array`) of the file this frame edits. Replays the last file; the same file pushed again is not repeated. Registering also sends Cmd/Ctrl+S inside the frame to the host's save |
 | `onFileSnapshot(handler)` | `'save' \| 'handoff'` → `FileEditorSnapshot \| Promise<FileEditorSnapshot>` | File editors only: return the whole edited file (`{ content, version }` for a text editor, `{ bytes, version }` for a binary one) and a version of the state it came from. `save` writes it; `handoff` moves it into the host's source view. Throwing fails that save. One handler at a time |
@@ -92,10 +95,10 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 | `locale`       | `string`                 | Host language tag                                                                        |
 | `directory`    | `string                  | null`                                                                                    |
 | `session`      | snapshot or `null`       | Title falls back to `id`. `busy` is live status. `model` is `providerID/id` when present |
-| `surface` | `'panel' \| 'dialog' \| 'page' \| 'background' \| 'status' \| 'file' \| 'popover'` | Where the host mounted this frame |
+| `surface` | `'panel' \| 'dialog' \| 'page' \| 'background' \| 'status' \| 'file' \| 'popover' \| 'block'` | Where the host mounted this frame |
 | `popover` | optional `{ id, data }` | Present in a host-created popover frame. `data` is bounded JSON from the owning frame |
 | `connection`   | `{ connected, account }` | Integration link state                                                                   |
-| `settings`     | `Record<string, string>` | Declared keys only                                                                       |
+| `settings`     | `Record<string, string>` | Declared keys only, without `secret` fields                                                                       |
 | `item`         | `GuestItem               | null`                                                                                    | Set when the user clicked this guest's chip on the composer, or ran one of this guest's `contributes.actions`. Narrow with `isGuestMessageItem` / `isGuestSessionItem` / `isGuestAttachItem` |
 
 
@@ -105,7 +108,7 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 
 `applyHostReady` exposes the computed colors as `--primary-text`, `--success-text`, `--warning-text`, `--error-text`, and `--info-text`, with matching `--oc-*-text` aliases. These are required theme fields. Apply each `onReady` snapshot to update them when the theme changes.
 
-`GuestItem` is `AttachIssueRequest | GuestMessageItem | GuestSessionItem`:
+`GuestItem` is `AttachIssueRequest | GuestMessageItem | GuestSessionItem | GuestSelectionItem | GuestFileItem | GuestDiffItem`:
 
 ```ts
 type GuestMessageItem = {
@@ -299,6 +302,10 @@ The host keeps the file. It hands you the text (`onFileOpen`), asks for the edit
 `dismiss: true` adds OK. `persistent: true` disables automatic expiry and always adds OK regardless of `dismiss`, so every persistent toast can be closed. Omitted or false `persistent` retains the host's usual duration.
 
 Copy leaves the toast open, reports success on the button, and shows a retryable error when the clipboard fails. OK dismisses only its own toast. Buttons use the host's locale and clipboard helper. They retain only the supplied text and toast identity, work after guest disposal or a runtime switch, and never call back into the extension. The `toast` promise resolves after display acknowledgement, without waiting for a click. Web and desktop use the same behavior; extension support on other runtimes is unchanged.
+
+### Blocks in the chat
+
+`contributes.blocks` adds components agents write in a UI block, drawn by your page with the grants of your panel. `host.onBlock` gives the call. `host.setHeight` sizes the frame, up to `GUEST_BLOCK_HEIGHT_MAX`. Set `answers: true` on a component that answers: agents are told to ask with it, a waiting page adds no Send button, and the block offers a note the agent reads with the answer; a note alone also answers, with `answered` holding its text. `host.answerBlock(text)`, called from a click, hands the agent `text` as a block's button does and starts its next turn; one answer per block, up to `GUEST_BLOCK_ANSWER_MAX` characters, and `answered` shows it after a reload. Without a click, or on a block that cannot take an answer, it rejects with `HOST_REJECTED`.
 
 ### Background actions
 
@@ -505,13 +512,11 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.22.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "capabilities": ["prompt", "sessions", "files", "shells"],
       "filesystem": ["~/.config/opencode/opencode.json", "/tmp/acme/**"],
@@ -534,13 +539,13 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 | `version`             | Semver required on install (`1.0.0`)                                                                                                                                                 |
 | `apiVersion`          | Must be `1`                                                                                                                                                                          |
 | `engines.openchamber` | Optional. Only `1.22.0` or `>=1.22.0`. Older host → `host-too-old`                                                                                                                   |
-| `panel.id`            | kebab-case                                                                                                                                                                           |
-| `panel.icon`          | Remixicon kebab name (`window`) **or** package `.svg` path. Remixicon needs no file. An `.svg` path must exist on disk or install fails (`invalid-manifest`). No URLs/absolute paths |
+| `id`, `name`, `icon`  | Beside `contributes`. Older packages keep them in `panel`, and that still works. `id` is kebab-case                                                                                                                                                                           |
+| `icon`                | Remixicon kebab name (`window`) **or** package `.svg` path. Remixicon needs no file. An `.svg` path must exist on disk or install fails (`invalid-manifest`). No URLs/absolute paths |
 | `panel.entry` | Optional visible-panel HTML path inside the package. No `..`, absolute path, or URL. Its scripts must be built. Omitting it removes the rail icon and visible views; `background.entry` can still run code. With neither entry, only `tools` plus package identity/version/engines are allowed. `hasGuestPage` means a visible panel, not background execution |
 | `background.entry` | Optional package-local `.html` path. Loaded on demand for background actions and slash commands, preferred over `panel.entry` for these calls. Adds no rail icon. The file and its built scripts must exist. Malformed declarations are `invalid-background` |
 | `attach`              | `true` / `"panel"` → + menu opens rail; `"dialog"` → host window; omit/`false` → off menus. Object form `{ "mode": "panel" \| "dialog", "entry"?: "panel/attach.html" }`: `entry` (dialog only, same path rules as `panel.entry`, must exist with built scripts) is the page the dialog loads instead of `panel.entry` |
 | `capabilities`        | Optional list of `prompt`, `sessions`, `files`, `model`, `shells`. `files` is read **and** write inside the open project; `model` is `generate`; `shells` is the running-shell methods. Approved once at install                     |
-| `actions` | Optional, 1–8 entries, unique kebab-case `id`, `label` 1–40 chars, optional `icon` with the `panel.icon` rules, `where: "message" \| "session"`, optional `mode: "open" \| "background"`. Message actions may narrow `roles` to `["user"]` / `["assistant"]`, default both. Session actions may request `payload: ["messages"]`, adding the `conversation` capability. Invalid shape is `invalid-actions`. Default `open` mode opens the guest with `ready.item`, using the attach dialog for `attach: "dialog"` and the rail otherwise. `background` calls `onAction` in a temporary hidden frame; see Background actions above |
+| `actions` | Optional, 1–8 entries, unique kebab-case `id`, `label` 1–40 chars, optional `icon` with the `panel.icon` rules, `where: "message" \| "session" \| "selection" \| "file" \| "diff"`, optional `display: "label" \| "icon" \| "both"` on a selection, optional `mode: "open" \| "background"`. Message actions may narrow `roles` to `["user"]` / `["assistant"]`, default both. Session actions may request `payload: ["messages"]`, adding the `conversation` capability. Invalid shape is `invalid-actions`. Default `open` mode opens the guest with `ready.item`, using the attach dialog for `attach: "dialog"` and the rail otherwise. `background` calls `onAction` in a temporary hidden frame; see Background actions above |
 | `commands`            | Optional, 1–8 entries, unique `name` matching `/^[a-z][a-z0-9-]{0,23}$/`, optional `description` 1–80 chars (`invalid-commands`). `/name args` in the chat box calls `onResolve` instead of the model and attaches what it returns. A name the composer already has (built-in, OpenCode command, skill) is ignored with a console warning |
 | `tools`               | Optional, 1–16 entries that say how the extension's tool calls look in the chat. `match` is the full tool name OpenCode reports (`mcp.jira.search`, `jira_search`), 1–128 chars of `[A-Za-z0-9_.:-]`, with `*` allowed once at the end as a suffix wildcard (`mcp.jira.*`). Optional `name` (1–40, the header title when `title` is absent or renders empty), `icon` (Remixicon name or package `.svg` path, same rules as `panel.icon`; the SVG is drawn in the text colour at the glyph size), `title` / `subtitle` templates (1–200, `{input.path}` / `{output.path}` / `{metadata.path}` placeholders, a missing path renders empty, values are cut at 200), `output` `"auto"` (default) \| `"text"` \| `"json"` \| `"markdown"` \| `"code"` \| `"table"`, `language` (code only), `columns` (table only, 1–16 dotted paths; rows are the output array or `output.items`). Bad shape is `invalid-tools`. An exact `match` beats a wildcard from any extension; among equals the first extension wins. Only an enabled, fully approved extension's rules apply |
 | `fileEditors`         | Optional, 1–8 editors: unique kebab-case `id`, `title` 1–60 chars, `match` 1–16 file-name patterns (no `/`, not only wildcards), `entry` package `.html` with built scripts, optional `content` `"text"` (default) or `"binary"` (`invalid-file-editors`). See File editors above |
@@ -622,6 +627,8 @@ A service with `provides: ["tracker"]` is a work item tracker next to Linear, de
 
 A service with `provides: ["quota"]` is a usage provider next to the built-in ones, described by `contributes.quota`. OpenChamber lists it from the manifest, asks it for usage the way it asks a built-in, one `usage.read` per refresh at `POST /quota` (`QUOTA_PROVIDER_PATH`, deadline `QUOTA_PROVIDER_TIMEOUT_MS`), with `input.credentials` holding the credential OpenCode stores for each listed provider (`QuotaProviderCredential`) and nothing else; parse the body with `readQuotaProviderRequest` and answer `{ ok, data }` with the result a built-in computes (`QuotaProviderUsageData`: `ok`, `configured`, `error`, `planLabel`, `usage.windows` and `usage.models` of `QuotaProviderWindow`) or `{ ok: false, error }` (`QuotaProviderResult`). OpenChamber derives the remaining share and the formatted strings itself. The host's answer schema is `quotaProviderSchemasV1` in `@openchamber/sdk/schemas`. Full contract in [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md#usage-provider-provides-quota); reference: `examples/quota-provider`.
 
+A service calls OpenChamber on its own through `createServiceHost({ env: process.env })`: `sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.lastReply`, `setInstructions`, `emit`, `readSettings`, `needsConfiguration`. `service.keepRunning` keeps it up with nobody asking, and `service.schedule` wakes it on a clock at `POST /schedule`; parse the body with `readServiceScheduleRequest`. `contributes.mentions` adds its rows to the composer's `@` menu through `MENTIONS_SEARCH_PATH` and `MENTIONS_RESOLVE_PATH`. Full contract in [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md#calling-openchamber).
+
 A service whose manifest declares `contributes.sessionEvents` is told what happens in the user's sessions: OpenChamber posts one request per subscribed event (`turn-finished`, `turn-failed`, `permission-asked`, `question-asked`) to `POST /session-events` (`SESSION_EVENTS_PATH`), from every project, whether or not a window is open. Parse the body with `readSessionEventRequest` (`GuestSessionEventRequest`: `event` with identifiers, and `content` only when the user approved the `transcript` capability that `content: true` asks for) and answer `{ ok: true }` or `{ ok: false, error }` (`GuestSessionEventResult`). Filter on `event.project.directory` yourself. Limits are the `SESSION_EVENT*` constants; the host's answer schema is `sessionEventResultSchema` in `@openchamber/sdk/schemas`. Full contract in [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md#session-events-contributessessionevents); reference: `examples/session-events-log`.
 
 A service with `surface: true` shows a live picture in the extension's rail panel: the host pulls frames from `GET /surface/frame`, draws them, sends the user's input to `POST /surface/input`, and owns who is in control (nobody, the agent, the user). Paths, event types, and the `readSurface*` parsers are exported from `@openchamber/sdk`; contract in [GUEST_SERVICES.md](https://github.com/openchamber/openchamber/blob/main/packages/sdk/GUEST_SERVICES.md#shared-surface-surface-true).
@@ -642,7 +649,7 @@ Frozen on `apiVersion` 1 — named in docs, no host hole yet:
 
 - Host-side `issues.search` / `issues.get` (guest draws the list; chip is `attach`)
 - Public OAuth broker
-- Keyboard shortcuts, raw git remotes, magic prompts
+- Keyboard shortcuts for commands, raw git remotes, magic prompts
 - Second `host.provider` beyond Linear
 - Arbitrary filesystem access from the page (only the open project with `files`, or declared `contributes.filesystem` globs), terminal, pairing, or host React components. A declared `service` is outside these limits: it is a process with the user's rights and no sandbox
 - Network access from the page. Pages run under a Content Security Policy: scripts, styles, images, fonts, media and workers come from the package itself or `data:`/`blob:`, and `fetch` reaches only the package's own files. Ship fonts and images inside the package. To talk to an outside service, use `request` (the integration's `apiOrigin`) or declare up to 8 https origins in `contributes.origins`, for example `"origins": ["https://fonts.example.com"]`. The user approves that list at install, and again when an update adds to it. Approved origins are open to `fetch`, images, fonts, styles and media, never to scripts or workers. A `fetch` whose response you read also needs that server to allow CORS for the `null` origin, since the page's origin is opaque

@@ -28,6 +28,7 @@ export const KNOWLEDGE_ENTRY_KEYS = {
   memory: 'openchamber.memory',
   guidance: 'openchamber.guidance',
   responseStyle: 'openchamber.response-style',
+  extensions: 'openchamber.extensions',
 };
 
 /** Budget for each entry; anything past it is cut, loudly. */
@@ -278,7 +279,7 @@ const buildGuidance = ({ linking, naming, rendering, secrets, workflows, directT
  * away; a key left out keeps what the session holds, which is what a branch
  * that could not be read means.
  */
-export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction }) => {
+export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, naming = false, rendering = false, secrets = false, workflows = false, directTools = true, checkout = null, responseStyleInstruction, extensions }) => {
   const entries = {
     [KNOWLEDGE_ENTRY_KEYS.pinned]: truncate(buildPinnedBlock({ notes, plans })),
     [KNOWLEDGE_ENTRY_KEYS.memory]: truncate(buildMemoryBlock(memory)),
@@ -287,6 +288,8 @@ export const buildKnowledgeEntries = ({ notes, plans, memory, linking = false, n
   if (responseStyleInstruction !== undefined) {
     entries[KNOWLEDGE_ENTRY_KEYS.responseStyle] = (responseStyleInstruction ?? '').trim();
   }
+  // Absent when the catalog could not be read: the session keeps what it holds.
+  if (extensions !== undefined) entries[KNOWLEDGE_ENTRY_KEYS.extensions] = truncate(extensions);
   // The branch is told while the agent has the tool, whose worktree move is
   // the one thing it can do about a busy branch.
   if (!linking) entries[KNOWLEDGE_ENTRY_KEYS.checkout] = '';
@@ -319,6 +322,9 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
     // Whether the managed tools run through Code Mode's catalog rather than
     // as direct tools.
     areAgentToolsInCodeMode = async () => false,
+    // `(directory)`: what active extensions add for this session, or null when
+    // that cannot be told. Reads no process, since every send waits on it.
+    readExtensionInstructions = async () => '',
     // Pins live in OpenChamber's own session metadata store.
     readSessionMetadata = null,
     persistSessionMetadata = null,
@@ -489,6 +495,7 @@ export const createSessionKnowledgeRuntime = (dependencies) => {
       const entries = buildKnowledgeEntries({
         ...await collect(directory, readPins(session)),
         responseStyleInstruction,
+        extensions: await readExtensionInstructions(directory).catch(() => null) ?? undefined,
       });
       const writes = await Promise.allSettled(Object.entries(entries).map(([key, text]) => (text
         ? instructionEntries.put(sessionId, directory, key, text)

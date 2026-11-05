@@ -61,7 +61,7 @@ const RESULT_MAX = 4_096;
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
 /** Proxy failures that mean "not a subscriber right now", never a broken service. */
 const INELIGIBLE_CODES = new Set(['NO_SERVICE', 'DISABLED', 'CANCELLED']);
-const ANNOUNCEMENT_EVENTS = new Set(['session.idle', 'session.error', 'permission.asked', 'form.created', 'openchamber:page-waiting']);
+const ANNOUNCEMENT_EVENTS = new Set(['session.idle', 'session.error', 'permission.asked', 'form.created', 'openchamber:page-waiting', 'session.created', 'session.deleted', 'session.status', 'openchamber:session-archived']);
 
 const isText = (value) => typeof value === 'string' && value.length > 0;
 
@@ -188,6 +188,8 @@ export const createExtensionSessionEvents = ({
   const lastTerminalAt = new Map();
   /** Per session: its parent id, for events that carry no content. */
   const parentCache = new Map();
+  /** Sessions whose running turn was announced, so the repeated status of one turn is one event. */
+  const busySessions = new Map();
   /** Per guest: its ordered queue and backoff. */
   const queues = new Map();
 
@@ -296,7 +298,8 @@ export const createExtensionSessionEvents = ({
     return guests.filter((guest) => isSessionEventSubscriber(guest) && guest.sessionEvents.events.includes(type));
   };
 
-  const holdsTranscript = (guest) => guest.capabilityGrants.includes('transcript');
+  // `transcript` also covers `sessionControl.content`; this subscription asks on its own.
+  const holdsTranscript = (guest) => guest.sessionEvents.content === true && guest.capabilityGrants.includes('transcript');
 
   /**
    * Builds the event once for every subscriber of `type` and queues one
@@ -634,6 +637,20 @@ export const createExtensionSessionEvents = ({
     });
   };
 
+  /** One of the events with nothing to it but the session; content is its title. */
+  const onLifecycle = async (type, payload, directory, admitted) => {
+    if (!admitted) return undefined;
+    const subscribers = await subscribersFor(type);
+    if (subscribers.length === 0) return undefined;
+    return announce({
+      type,
+      payload,
+      directory,
+      subscribers,
+      contentOf: async (record) => ({ type, sessionTitle: titleOf(record) }),
+    });
+  };
+
   const reportFailure = (error) => {
     warn('[session-events] an event could not be handled:', error?.message ?? error);
   };
@@ -643,8 +660,10 @@ export const createExtensionSessionEvents = ({
     const props = payload?.properties;
     switch (type) {
       case 'session.idle':
+        busySessions.delete(sessionIdOf(payload));
         return onIdle(payload, directory, admitted);
       case 'session.error':
+        busySessions.delete(sessionIdOf(payload));
         return onError(payload, directory, admitted);
       case 'permission.asked':
         return onPermissionAsked(payload, directory, admitted);
@@ -653,12 +672,31 @@ export const createExtensionSessionEvents = ({
       case 'session.status': {
         // A new turn started: its end is announced however soon it follows the last one.
         const sessionId = sessionIdOf(payload);
-        if (sessionId && props?.status?.type === 'busy') lastTerminalAt.delete(sessionId);
-        return undefined;
+        if (!sessionId) return undefined;
+        if (props?.status?.type === 'idle') busySessions.delete(sessionId);
+        if (props?.status?.type !== 'busy') return undefined;
+        lastTerminalAt.delete(sessionId);
+        // A status repeats through a turn; `busySessions` keeps one event for each.
+        if (busySessions.has(sessionId)) return undefined;
+        bound(busySessions);
+        busySessions.set(sessionId, true);
+        return onLifecycle('turn-started', payload, directory, admitted);
       }
-      case 'session.updated':
-      case 'session.patched':
+      case 'session.created':
+        return onLifecycle('session-created', payload, directory, admitted);
       case 'session.deleted': {
+        const id = props?.info?.id ?? props?.sessionID;
+        const prepared = await onLifecycle('session-deleted', payload, directory, admitted);
+        if (isText(id)) {
+          parentCache.delete(id);
+          busySessions.delete(id);
+        }
+        return prepared;
+      }
+      case 'openchamber:session-archived':
+        return Number.isFinite(props?.archivedAt) ? onLifecycle('session-archived', payload, directory, admitted) : undefined;
+      case 'session.updated':
+      case 'session.patched': {
         const id = props?.info?.id ?? props?.sessionID;
         if (isText(id)) parentCache.delete(id);
         return undefined;

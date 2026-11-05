@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { OPENCHAMBER_SDK_API_VERSION } from './api-version.ts';
 import { clampStatusSectionHeight, hasGuestPage, requestedGuestCapabilities, toPublicNotifications, toPublicQuota, toPublicSessionEvents, toPublicSourceControl, resolveAttachEntry, resolveStatusSectionEntry, resolveStatusSectionSource, resolveAttachMode, resolveIntegrationApi, toPublicIntegration, type OpenChamberContributes, isOpenCodeProviderId, isTrackerUrlTemplate, toPublicTracker } from './manifest.ts';
+import type { JsonValue } from './contract.ts';
 import { parseManifest, parseManifestJson } from './parse.ts';
 
 const validBlock = {
@@ -779,7 +780,40 @@ describe('parseManifest', () => {
   });
 });
 
+describe('an extension without a panel', () => {
+  const block = { apiVersion: 1, id: 'desk', name: 'Desk', icon: 'robot-2', contributes: { tools: [{ match: 'desk_*' }] } };
+
+  test('names itself beside contributes, in both document forms', () => {
+    const bare = parseManifestJson(JSON.stringify(block));
+    const wrapped = parseManifestJson(JSON.stringify({ name: 'pkg', version: '1.0.0', openchamber: block }));
+    for (const parsed of [bare, wrapped]) {
+      expect(parsed).toMatchObject({ ok: true, manifest: { contributes: { panel: { id: 'desk', name: 'Desk', icon: 'robot-2' } } } });
+    }
+  });
+
+  test('keeps a rail page declared in panel', () => {
+    const parsed = parseManifestJson(JSON.stringify({ ...block, contributes: { panel: { entry: 'index.html' } } }));
+    expect(parsed).toMatchObject({ ok: true, manifest: { contributes: { panel: { id: 'desk', entry: 'index.html' } } } });
+  });
+
+  test('an older package with everything in panel reads the same', () => {
+    const { id, name, icon, contributes } = block;
+    const parsed = parseManifestJson(JSON.stringify({ apiVersion: 1, contributes: { ...contributes, panel: { id, name, icon } } }));
+    expect(parsed).toEqual(parseManifestJson(JSON.stringify(block)));
+  });
+
+  test('a package with no name for itself fails', () => {
+    expect(parseManifestJson(JSON.stringify({ apiVersion: 1, contributes: {} }))).toMatchObject({ ok: false, code: 'missing-panel' });
+  });
+});
+
 describe('contributes.actions and contributes.commands', () => {
+  test('display belongs to a selection action', () => {
+    const contributes = (action: JsonValue) => parseManifestJson(JSON.stringify({ name: 'x', version: '1.0.0', openchamber: { apiVersion: 1, contributes: { panel: { id: 'x', name: 'X', icon: 'window', entry: 'index.html' }, actions: [action] } } }));
+    expect(contributes({ id: 'a', label: 'A', where: 'selection', display: 'icon' }).ok).toBe(true);
+    expect(contributes({ id: 'a', label: 'A', where: 'file', display: 'icon' }).ok).toBe(false);
+  });
+
   const withContributes = (extra: Record<string, unknown>) => parseManifest({
     apiVersion: 1,
     contributes: { panel: validBlock.contributes.panel, ...extra },
@@ -1560,5 +1594,70 @@ describe('contributes.quota', () => {
     expect(withProviders(Array.from({ length: 17 }, (_, index) => `provider-${index}`))).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(withProviders('openrouter')).toMatchObject({ ok: false, code: 'invalid-service' });
     expect(parse({ panel: pageless, service: role, quota: { ...quota, extra: 1 } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+});
+
+describe('services that act on their own', () => {
+  const pageless = { id: 'desk', name: 'Desk', icon: 'robot-2' };
+  const service = { entry: 'service/main.js', runtime: 'host' };
+  const parse = (contributes: JsonValue) => parseManifestJson(JSON.stringify({ apiVersion: OPENCHAMBER_SDK_API_VERSION, contributes }));
+
+  test('keepRunning and a schedule need no frame', () => {
+    expect(parse({ panel: pageless, service: { ...service, keepRunning: true } }).ok).toBe(true);
+    expect(parse({ panel: pageless, service: { ...service, schedule: [{ id: 'tick', cron: '*/5 * * * *', timezone: 'Europe/Kyiv' }] } }).ok).toBe(true);
+  });
+
+  test('a schedule refuses what is not five cron fields, and a repeated id', () => {
+    expect(parse({ panel: pageless, service: { ...service, schedule: [{ id: 'tick', cron: 'every minute' }] } })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parse({ panel: pageless, service: { ...service, schedule: [{ id: 'a', cron: '* * * * *' }, { id: 'a', cron: '0 * * * *' }] } })).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('session control, instructions and mentions need a service', () => {
+    expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, sessionControl: {} })).toMatchObject({ ok: false, code: 'invalid-session-control' });
+    expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, instructions: true })).toMatchObject({ ok: false, code: 'invalid-instructions' });
+    expect(parse({ panel: { ...pageless, entry: 'panel/index.html' }, mentions: { label: 'Notes' } })).toMatchObject({ ok: false, code: 'invalid-mentions' });
+  });
+
+  test('each one asks for its own capability, and content asks for transcript', () => {
+    const declared: OpenChamberContributes['service'] = { entry: 'service/main.js', runtime: 'host' };
+    expect(requestedGuestCapabilities({ service: declared, sessionControl: {} })).toEqual(['service', 'sessionControl']);
+    expect(requestedGuestCapabilities({ service: declared, sessionControl: { content: true }, instructions: true, skills: 'skills' }))
+      .toEqual(['service', 'transcript', 'sessionControl', 'instructions', 'skills']);
+  });
+
+  test('skills stay inside the package', () => {
+    expect(parse({ panel: pageless, skills: 'skills' }).ok).toBe(true);
+    expect(parse({ panel: pageless, skills: '../skills' })).toMatchObject({ ok: false, code: 'invalid-skills' });
+  });
+
+  test('mentions need no frame', () => {
+    expect(parse({ panel: pageless, service, mentions: { label: 'Notes' } }).ok).toBe(true);
+  });
+});
+
+describe('contributes.blocks', () => {
+  const block = { name: 'JiraIssue', description: 'A Jira ticket', args: ['key'], entry: 'blocks/issue.html' };
+  const parse = (blocks: JsonValue[]) => parseManifestJson(JSON.stringify({
+    apiVersion: OPENCHAMBER_SDK_API_VERSION,
+    contributes: { panel: { id: 'desk', name: 'Desk', icon: 'robot-2' }, blocks },
+  }));
+
+  test('a block is a frame of its own, so a package needs no panel for it', () => {
+    expect(parse([block]).ok).toBe(true);
+  });
+
+  test('refuses a name an agent could not write, and repeated names or arguments', () => {
+    expect(parse([{ ...block, name: 'jira-issue' }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+    expect(parse([block, block])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+    expect(parse([{ ...block, args: ['key', 'key'] }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+  });
+
+  test('refuses more than four: each signature is text every session pays for', () => {
+    expect(parse(['A', 'B', 'C', 'D', 'E'].map((letter) => ({ ...block, name: `Block${letter}` })))).toMatchObject({ ok: false, code: 'invalid-blocks' });
+  });
+
+  test('an entry stays inside the package and is html', () => {
+    expect(parse([{ ...block, entry: '../issue.html' }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
+    expect(parse([{ ...block, entry: 'blocks/issue.js' }])).toMatchObject({ ok: false, code: 'invalid-blocks' });
   });
 });

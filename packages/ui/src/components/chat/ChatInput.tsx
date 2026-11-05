@@ -64,6 +64,7 @@ import { QueuedMessagesStrip } from './QueuedMessagesStrip';
 import { AutoReviewStrip } from './AutoReviewStrip';
 import { PullRequestWatchStrip } from './PullRequestWatchStrip';
 import type { FileMentionHandle } from './FileMentionAutocomplete';
+import { resolveGuestMention, type GuestMention } from '@/lib/guests/mentions';
 import type { CommandAutocompleteHandle, CommandInfo } from './CommandAutocomplete';
 import type { SkillAutocompleteHandle } from './SkillAutocomplete';
 import type { SnippetAutocompleteHandle } from './SnippetAutocomplete';
@@ -3765,6 +3766,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         composerRef.current?.focus();
     });
 
+    // The row's content is read now: a row that cannot be read leaves no chip
+    // to send with nothing behind it, and says so.
+    const handleExtensionMentionSelect = useStableHandler((mention: GuestMention) => {
+        const editor = composerRef.current;
+        if (editor) {
+            const value = editor.getValue();
+            const cursorPosition = editor.getSelection().start;
+            const lastAtSymbol = value.substring(0, cursorPosition).lastIndexOf('@');
+            if (lastAtSymbol !== -1) editor.replaceRange(lastAtSymbol, cursorPosition, '');
+        }
+        closeAutocomplete();
+        editor?.focus();
+        const pickedIn = JSON.stringify(currentChatDraftIdentityRef.current);
+        void resolveGuestMention(mention).then((item) => {
+            if (!item) {
+                toast.error(t('chat.composer.extensionMention.failed', { title: mention.title, extension: mention.label }));
+                return;
+            }
+            // This composer's own chip, and only while it still shows the draft it was picked in.
+            if (JSON.stringify(currentChatDraftIdentityRef.current) === pickedIn) handleGuestAttach(item);
+        });
+    });
+
     const handleSkillSelect = useStableHandler((skillName: string) => {
         const textarea = composerRef.current;
         const cursorPosition = textarea?.getSelection().start ?? message.length;
@@ -4190,7 +4214,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // an empty surface.
         const installed = useGuestsStore.getState().guests.find((entry) => entry.id === issue.providerId);
         if (!installed || !isGuestActive(installed)) {
-            toast.info(t('chat.chatInput.toast.guestUnavailableHere'));
+            const supported = useGuestsStore.getState().status !== 'unsupported';
+            toast.info(t(!supported
+                ? 'chat.chatInput.toast.guestUnavailableHere'
+                : installed ? 'chat.chatInput.toast.guestOff' : 'chat.chatInput.toast.guestRemoved'));
             return;
         }
         if (!installed.entry) {
@@ -5001,6 +5028,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onAgentSelect={completeMentionSelection}
                         // VS Code shows no reference chips, so it cannot hold one.
                         onSessionSelect={isVSCode ? undefined : handleSessionSelect}
+                        onExtensionMentionSelect={isVSCode || isBtwActive ? undefined : handleExtensionMentionSelect}
                         currentSessionId={currentSessionId}
                         onEmojiSelect={handleEmojiSelect}
                         onClose={closeAutocomplete}

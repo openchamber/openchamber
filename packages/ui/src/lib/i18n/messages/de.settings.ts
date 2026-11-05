@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Zählt die Aufbewahrungsdauer ab der Archivierung. Abgelaufene Sitzungen werden gelöscht.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Zählt die Aufbewahrungsdauer ab der letzten Aktivität der Sitzung. Abgelaufene Sitzungen werden archiviert.',
@@ -2651,6 +2652,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.de,
   ...thirdPartyIntegrationI18n.de,
   ...extensionCatalogI18n.de,
+  ...extensionPowersI18n.de,
   ...guestIntegrationsI18n.de,
   ...extensionsSettingsI18n.de,
   ...settingsLayoutI18n.de,

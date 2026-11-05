@@ -1998,6 +1998,31 @@ const takePendingSessionDeepLinks = () => {
   return taken;
 };
 
+// `openchamber://extensions/install?url=…`: any web page can raise this link, so
+// only an https repository passes, and the app asks before it fetches anything.
+const extensionInstallUrl = (link) => {
+  if (link.value !== 'install') return null;
+  const value = readDeepLinkQueryParam(link.raw, 'url');
+  try {
+    const url = new URL(value ?? '');
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+};
+
+const takePendingExtensionInstalls = () => {
+  const taken = [];
+  for (let index = pendingDeepLinks.length - 1; index >= 0; index -= 1) {
+    const link = pendingDeepLinks[index];
+    if (link.type !== 'extensions') continue;
+    pendingDeepLinks.splice(index, 1);
+    const url = extensionInstallUrl(link);
+    if (url) taken.unshift(url);
+  }
+  return taken;
+};
+
 const parseDeepLink = (raw) => {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
@@ -2163,6 +2188,16 @@ const dispatchDeepLink = (link) => {
     emitToPrimaryWindow('openchamber:open-session', sessionDeepLinkTarget(link));
     return;
   }
+  if (link.type === 'extensions') {
+    const url = extensionInstallUrl(link);
+    if (!url) {
+      log.warn('[electron] invalid extension install link');
+      return;
+    }
+    focusForegroundWindow();
+    emitToPrimaryWindow('openchamber:install-extension', { url });
+    return;
+  }
   if (link.type === 'host' && link.value) {
     void switchToHostById(link.value);
     return;
@@ -2178,7 +2213,7 @@ const flushPendingDeepLinks = ({ includeSessions }) => {
   const kept = [];
   while (pendingDeepLinks.length > 0) {
     const link = pendingDeepLinks.shift();
-    if (link.type === 'session' && !includeSessions) {
+    if ((link.type === 'session' || link.type === 'extensions') && !includeSessions) {
       kept.push(link);
       continue;
     }
@@ -2201,7 +2236,7 @@ const handleDeepLinks = (urls) => {
   for (const raw of urls) {
     const parsed = parseDeepLink(raw);
     if (!parsed) continue;
-    if (isMainWindowReadyForDeepLink() && (parsed.type !== 'session' || mainWindowSessionLinkGate.isListening())) {
+    if (isMainWindowReadyForDeepLink() && ((parsed.type !== 'session' && parsed.type !== 'extensions') || mainWindowSessionLinkGate.isListening())) {
       dispatchDeepLink(parsed);
     } else {
       pendingDeepLinks.push(parsed);
@@ -5347,6 +5382,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
       return pendingHostActions.splice(0, pendingHostActions.length);
 
+    case 'desktop_take_pending_extension_installs':
+      // Install links open in the main window only.
+      if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
+      return takePendingExtensionInstalls();
     case 'desktop_take_pending_session_links':
       // Session links open in the main window only.
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];

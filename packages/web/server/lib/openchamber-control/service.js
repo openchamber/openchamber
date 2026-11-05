@@ -666,7 +666,7 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
-  const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId) => {
+  const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId, startedByExtension) => {
     // The tool path forwards raw JSON, so a boolean parameter can arrive as the
     // string "true". Both of these are compared with `=== true` below, which
     // would read a string as false and silently drop the behavior: a dispatch
@@ -731,7 +731,7 @@ export const createOpenChamberControlService = (dependencies) => {
     const startedAt = now();
     let result;
     if (action === 'session.create') {
-      result = await sessionService.create(payload);
+      result = await sessionService.create(payload, ...(startedByExtension ? [{ startedByExtension }] : []));
     } else {
       if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
       if (action === 'session.send') {
@@ -1048,7 +1048,7 @@ export const createOpenChamberControlService = (dependencies) => {
         }
       }
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
-        return executeSessionAction(action, input, contextDirectory, options.signal, options.contextSessionId);
+        return executeSessionAction(action, input, contextDirectory, options.signal, options.contextSessionId, options.startedByExtension);
       }
       if (action === 'session.link') {
         if (!sessionLinks) throw new OpenChamberControlError('Linking is not available on this server', 503);

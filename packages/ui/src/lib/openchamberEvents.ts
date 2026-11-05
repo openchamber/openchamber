@@ -11,6 +11,7 @@ import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@
 import { autoReviewUpdatedEventSchema, type AutoReviewUpdatedEvent } from '@/stores/useAutoReviewStore';
 import { prWatchUpdatedEventSchema, type PrWatchUpdatedEvent } from '@/sync/pr-watch';
 import { sessionWarmingSnapshotSchema, type SessionWarmingSnapshot } from '@/stores/useSessionWarmingStore';
+import { isJsonValue, type JsonValue } from '@openchamber/sdk';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
 import type { SyncEvent } from './opencode/events';
@@ -157,6 +158,9 @@ type QuotaProvidersChangedEvent = { type: 'quota-providers-changed' };
  * nothing; listeners re-read the catalog.
  */
 type GuestsChangedEvent = { type: 'guests-changed' };
+
+/** An extension's service sent its open frames something (`emit`). */
+type GuestServiceEvent = { type: 'guest-service-event'; guestId: string; topic: string; data: JsonValue };
 
 /**
  * A theme file in the server's custom themes folder was added, removed or
@@ -318,6 +322,7 @@ type OpenChamberEvent =
   | TrackerProvidersChangedEvent
   | QuotaProvidersChangedEvent
   | GuestsChangedEvent
+  | GuestServiceEvent
   | ThemesChangedEvent
   | LimitFailoverEvent
   | ProjectContextChangedEvent
@@ -490,6 +495,8 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
   return properties as Record<string, unknown>;
 };
 
+const guestServiceEventSchema = z.object({ guestId: z.string().min(1), topic: z.string().min(1), data: z.json() });
+
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
   if (envelope.type === 'openchamber:terminal-sessions-changed') {
     for (const listener of listeners) listener({ type: 'terminal-sessions-changed' });
@@ -650,6 +657,13 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
   if (envelope.type === 'openchamber:guests-changed') {
     for (const listener of listeners) listener({ type: 'guests-changed' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:guest-service-event') {
+    const parsed = guestServiceEventSchema.safeParse(envelope.properties);
+    if (!parsed.success || !isJsonValue(parsed.data.data)) return;
+    for (const listener of listeners) listener({ type: 'guest-service-event', ...parsed.data });
     return;
   }
 
