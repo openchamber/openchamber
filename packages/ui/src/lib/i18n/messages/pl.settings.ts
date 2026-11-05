@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Okres przechowywania liczy się od archiwizacji. Sesje po upływie tego okresu są usuwane.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Okres przechowywania liczy się od ostatniej aktywności sesji. Sesje po upływie tego okresu są archiwizowane.',
@@ -2653,6 +2654,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.pl,
   ...thirdPartyIntegrationI18n.pl,
   ...extensionCatalogI18n.pl,
+  ...extensionPowersI18n.pl,
   ...guestIntegrationsI18n.pl,
   ...extensionsSettingsI18n.pl,
   ...settingsLayoutI18n.pl,

@@ -28,6 +28,9 @@ const CAPABILITY_ROWS = {
   network: { icon: 'plug', titleKey: 'settings.extensions.capability.network', detailKey: 'settings.extensions.capability.network.detail' },
   origins: { icon: 'global', titleKey: 'settings.extensions.capability.origins', detailKey: 'settings.extensions.capability.origins.detail' },
   transcript: { icon: 'history', titleKey: 'settings.extensions.capability.transcript', detailKey: 'settings.extensions.capability.transcript.detail' },
+  sessionControl: { icon: 'robot-2', titleKey: 'settings.extensions.capability.sessionControl', detailKey: 'settings.extensions.capability.sessionControl.detail' },
+  instructions: { icon: 'book-open', titleKey: 'settings.extensions.capability.instructions', detailKey: 'settings.extensions.capability.instructions.detail' },
+  skills: { icon: 'sparkling', titleKey: 'settings.extensions.capability.skills', detailKey: 'settings.extensions.capability.skills.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {
@@ -169,6 +172,22 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
                         <p>{t('settings.extensions.capability.service.providesQuota.none')}</p>
                       )}
                     </div>
+                  ) : null}
+                  {capability === 'service' && guest?.service?.keepRunning ? (
+                    <p className="typography-meta mt-0.5 text-foreground">{t('settings.extensions.capability.service.keepRunning')}</p>
+                  ) : null}
+                  {capability === 'service' && guest?.service?.schedule ? (
+                    <div className="typography-meta mt-0.5 text-foreground">
+                      <p>{t('settings.extensions.capability.service.schedule')}</p>
+                      <ul className="mt-0.5 list-disc space-y-0.5 ps-4">
+                        {guest.service.schedule.map((entry) => (
+                          <li key={entry.id} className="break-all font-mono">{entry.timezone ? `${entry.cron} (${entry.timezone})` : entry.cron}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {capability === 'service' && guest?.mentions ? (
+                    <p className="typography-meta mt-0.5 text-foreground">{t('settings.extensions.capability.service.mentions')}</p>
                   ) : null}
                   {capability === 'service' && sessionEvents.length > 0 ? (
                     <div className="typography-meta mt-0.5 text-foreground">

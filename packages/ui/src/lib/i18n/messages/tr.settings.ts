@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Saklama süresi arşivleme anından itibaren sayılır. Süresi dolan oturumlar silinir.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Saklama süresi oturumun son etkinliğinden itibaren sayılır. Süresi dolan oturumlar arşivlenir.',
@@ -2653,6 +2654,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.tr,
   ...thirdPartyIntegrationI18n.tr,
   ...extensionCatalogI18n.tr,
+  ...extensionPowersI18n.tr,
   'settings.agents.page.field.steps': 'En fazla adım',
   'settings.agents.page.field.stepsTooltip': 'Ajanın bir turda durmadan önce yapabileceği araç adımı sayısı.',
   'settings.agents.page.field.clearStepsAria': 'En fazla adımı temizle',

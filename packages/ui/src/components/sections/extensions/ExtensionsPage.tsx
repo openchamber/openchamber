@@ -455,6 +455,9 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           </SettingsFieldRow>
         </div>
         {state.builtIn ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.extensions.builtIn.info')}</p> : null}
+        {guest.needsConfiguration ? (
+          <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.needsConfiguration', { message: guest.needsConfiguration })}</p>
+        ) : null}
       </SettingsSection>
 
       {hasPermissions ? (
@@ -466,6 +469,16 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
             <p className="typography-meta text-foreground">
               {t('settings.extensions.service.sessionEvents', {
                 list: guest.sessionEvents.events.map((type) => t(SESSION_EVENT_LABEL_KEYS[type])).join(', '),
+              })}
+            </p>
+          ) : null}
+          {guest.service?.keepRunning || guest.service?.schedule ? (
+            <p className="typography-meta text-foreground">
+              {t('settings.extensions.service.runsAlone', {
+                list: [
+                  ...(guest.service.keepRunning ? [t('settings.extensions.capability.service.keepRunning')] : []),
+                  ...(guest.service.schedule ?? []).map((entry) => entry.cron),
+                ].join(', '),
               })}
             </p>
           ) : null}

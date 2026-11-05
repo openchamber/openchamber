@@ -36,15 +36,27 @@ const mintGuestFrameGrant = async (guestId: string, signal?: AbortSignal): Promi
 
 const packagePath = (entry: string): string => entry.split('/').map((segment) => encodeURIComponent(segment)).join('/');
 
+/**
+ * Documents read over the relay, by what the frame's key names (runtime,
+ * package revision, grants). A panel loads once, but a chat with several
+ * blocks of one extension would read the whole package through the tunnel for
+ * each, again on every scroll back.
+ */
+const relayDocuments = new Map<string, string>();
+const RELAY_DOCUMENTS_MAX = 16;
+
 export const resolveGuestFrameUrl = async (
   guestId: string,
   entry: string,
   signal?: AbortSignal,
   origins: readonly string[] = [],
+  documentKey?: string,
 ): Promise<GuestFrameUrl> => {
   const runtimeKey = getRuntimeKey();
   const relay = getActiveRelayTunnel();
   if (relay) {
+    const kept = documentKey ? relayDocuments.get(documentKey) : undefined;
+    if (kept) return { kind: 'document', html: kept };
     const html = await loadRelayGuestDocument(guestId, entry, (path) => {
       if (getRuntimeKey() !== runtimeKey || getActiveRelayTunnel() !== relay || signal?.aborted) {
         throw new DOMException('Extension frame owner changed', 'AbortError');
@@ -53,6 +65,10 @@ export const resolveGuestFrameUrl = async (
     }, origins);
     if (getRuntimeKey() !== runtimeKey || getActiveRelayTunnel() !== relay || signal?.aborted) {
       throw new DOMException('Extension frame owner changed', 'AbortError');
+    }
+    if (documentKey) {
+      relayDocuments.set(documentKey, html);
+      if (relayDocuments.size > RELAY_DOCUMENTS_MAX) relayDocuments.delete(relayDocuments.keys().next().value ?? '');
     }
     return { kind: 'document', html };
   }

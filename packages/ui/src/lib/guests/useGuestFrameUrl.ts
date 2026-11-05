@@ -4,6 +4,8 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { resolveGuestFrameUrl, type GuestFrameUrl } from './frame-url';
 
 type GuestFrameOptions = {
+  /** A read over the relay may be kept and shared by frames with one `instanceKey`. */
+  reuseDocument?: boolean;
   guestId: string;
   entry: string | null;
   instanceKey: string;
@@ -17,7 +19,7 @@ type FrameState =
   | { key: string; status: 'ready'; source: GuestFrameUrl };
 
 /** Keep a loaded document alive; renew scoped auth only when it navigates again. */
-export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled, origins }: GuestFrameOptions) => {
+export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled, origins, reuseDocument = false }: GuestFrameOptions) => {
   // `instanceKey` changes with the list, so the effect re-runs; the ref only avoids an array dependency.
   const originsRef = React.useRef(origins);
   originsRef.current = origins;
@@ -40,7 +42,7 @@ export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled, origins
     if (!entry || !enabled) return;
     let cancelled = false;
     const abort = new AbortController();
-    void resolveGuestFrameUrl(guestId, entry, abort.signal, originsRef.current)
+    void resolveGuestFrameUrl(guestId, entry, abort.signal, originsRef.current, reuseDocument ? key : undefined)
       .then((next) => {
         if (!cancelled) setState({ key, status: 'ready', source: next });
       })
@@ -48,7 +50,7 @@ export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled, origins
         if (!cancelled) setState({ key, status: 'error' });
       });
     return () => { cancelled = true; abort.abort(); };
-  }, [enabled, entry, guestId, key, reloadGeneration]);
+  }, [enabled, entry, guestId, key, reloadGeneration, reuseDocument]);
 
   const current = state?.key === key && state.status === 'ready' ? state.source : null;
   const recoverExpiredNavigation = (): boolean => {

@@ -36,6 +36,7 @@ const isCurrentAction = (entry: GuestActionEntry, item: GuestActionItem, runtime
   if (!action || action.where !== item.kind || JSON.stringify(action) !== JSON.stringify(entry.action)) return false;
   if (action.mode !== 'background' && !guest.entry) return false;
   if (item.kind === 'message') return !action.roles || action.roles.includes(item.role);
+  if (item.kind !== 'session') return true;
   return !item.messages || (action.payload?.includes('messages') === true && guest.capabilities.granted.includes('conversation'));
 };
 

@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'تُحسب مدة الاحتفاظ من وقت الأرشفة. تُحذف الجلسات التي انتهت مدتها.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'تُحسب مدة الاحتفاظ من آخر نشاط للجلسة. تُؤرشف الجلسات التي انتهت مدتها.',
@@ -2693,6 +2694,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.ar,
   ...thirdPartyIntegrationI18n.ar,
   ...extensionCatalogI18n.ar,
+  ...extensionPowersI18n.ar,
   ...guestIntegrationsI18n.ar,
   ...extensionsSettingsI18n.ar,
   ...settingsLayoutI18n.ar,

@@ -29,6 +29,10 @@ import {
     useMobileCommentDraft,
 } from '../composer/comment/MobileCommentComposerContext';
 import { SelectionApprovalButton } from './SelectionApprovalButton';
+import { GUEST_ITEM_MESSAGE_TEXT_MAX } from '@openchamber/sdk';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestActionsWhere, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { resolveShadowSelectionRange } from './shadowSelection';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
@@ -103,6 +107,7 @@ const ownsSelection = (container: HTMLElement, range: Range): boolean => {
 };
 
 const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false }) => {
+  const guestActions = useGuestActions();
   const { t } = useI18n();
   const { isPlaying: isReading, play: playReading, stop: stopReading } = useMessageTTS(readingKey);
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, placement: 'above', show: false });
@@ -809,6 +814,20 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     )
     : null;
 
+  const selectionActions = currentSessionId && selectedMessageId ? guestActionsWhere(guestActions, 'selection') : [];
+  const runSelectionAction = (entry: GuestActionEntry) => {
+    if (!currentSessionId || !selectedMessageId) return;
+    void runGuestAction(entry, {
+      kind: 'selection',
+      action: entry.action.id,
+      sessionId: currentSessionId,
+      directory: selectionDirectory || null,
+      messageId: selectedMessageId,
+      text: selectedTextMarkdown.slice(0, GUEST_ITEM_MESSAGE_TEXT_MAX),
+    }, t);
+    hideMenu();
+  };
+
   const approvalButton = currentSessionId && selectedMessageId
     ? <SelectionApprovalButton mobile={isMobile} getSelection={getApprovalSelection} onSuccess={finishApproval} />
     : null;
@@ -977,6 +996,24 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               </button>
             ) : null}
 
+            {selectionActions.map((entry) => (
+              <button
+                key={`${entry.guest.id}:${entry.action.id}`}
+                onClick={() => runSelectionAction(entry)}
+                className={cn(
+                  'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-start',
+                  'text-sm font-medium leading-tight',
+                  'bg-foreground/[0.04] text-foreground',
+                  'active:opacity-80',
+                  'transition-opacity duration-150'
+                )}
+                type="button"
+              >
+                <Icon name={entry.icon} className="h-5 w-5 flex-shrink-0" />
+                <span className="min-w-0 whitespace-normal">{entry.action.label}</span>
+              </button>
+            ))}
+
             {approvalButton}
           </div>
         </div>
@@ -1075,6 +1112,24 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
               </HoverTooltip>
             </>
           ) : null}
+
+          {selectionActions.length > 0 ? <div className="mx-0.5 h-5 w-px shrink-0 bg-[var(--interactive-border)]" /> : null}
+          {selectionActions.map((entry) => (
+            <button
+              key={`${entry.guest.id}:${entry.action.id}`}
+              onClick={() => runSelectionAction(entry)}
+              className={cn(
+                'flex items-center gap-1.5 px-3.5 py-1.5 rounded-full',
+                'text-sm font-medium',
+                'text-foreground',
+                'hover:bg-[var(--interactive-hover)]',
+                'transition-colors duration-150'
+              )}
+              type="button"
+            >
+              <span className="whitespace-nowrap">{entry.action.label}</span>
+            </button>
+          ))}
 
           {approvalButton ? (
             <>

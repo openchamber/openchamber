@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': '保留期限從封存時開始計算。過期的工作階段會被刪除。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保留期限從工作階段的最後活動時間開始計算。過期的工作階段會被封存。',
@@ -2660,6 +2661,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n['zh-TW'],
   ...thirdPartyIntegrationI18n['zh-TW'],
   ...extensionCatalogI18n['zh-TW'],
+  ...extensionPowersI18n['zh-TW'],
   ...guestIntegrationsI18n['zh-TW'],
   ...extensionsSettingsI18n['zh-TW'],
   ...settingsLayoutI18n['zh-TW'],

@@ -9,6 +9,7 @@ import {
   GUEST_POPOVER_HEIGHT_MAX,
   guestFileScope,
   type AttachIssueRequest,
+  type GuestBlockCall,
   type GuestHostSurface,
   type GuestItem,
   type GuestPopoverClosedEvent,
@@ -26,6 +27,7 @@ import { getReadableThemeColors } from '@/lib/theme/readableColors';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useI18n } from '@/lib/i18n';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import {
   answerGuestMessage,
   buildConnectionMessage,
@@ -110,7 +112,9 @@ type PluginPaneProps = {
   onDismiss?: () => void;
   onAttach?: (issue: AttachIssueRequest) => void;
   onSessionStarted?: () => void;
-  /** The guest asked for this content height (`setHeight`). The Work Status section sizes its frame from it. */
+  /** `surface="block"` only: what the agent wrote and the page that draws it. */
+  block?: { call: GuestBlockCall; entry: string };
+  /** The guest asked for this content height (`setHeight`). The Work Status section and a chat block size their frames from it. */
   onResize?: (height: number) => void;
   onStatusControls?: (binding: GuestStatusControlBinding | null) => void;
   /** The Work Status panel's own directory; null deliberately means no project. */
@@ -167,6 +171,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   onDismiss,
   onAttach,
   onSessionStarted,
+  block,
   onResize,
   onStatusControls,
   statusDirectory,
@@ -185,7 +190,8 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const directory = popoverHost?.directory ?? pinnedDirectory ?? (backgroundAction ? backgroundAction.item.directory ?? ''
     : surface === 'status' && statusDirectory !== undefined ? statusDirectory ?? '' : effectiveDirectory);
   const statusContextKey = surface === 'status' ? directory : null;
-  const currentSessionId = backgroundAction ? backgroundAction.item.sessionId : selectedSessionId;
+  const actionItem = backgroundAction?.item;
+  const currentSessionId = actionItem && 'sessionId' in actionItem ? actionItem.sessionId : selectedSessionId;
   const session = useSession(currentSessionId, directory || undefined);
   const sessionStatus = useSessionStatus(currentSessionId ?? '', directory || undefined);
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
@@ -225,14 +231,14 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       currentSessionId
         ? {
           id: session?.id ?? currentSessionId,
-          title: session?.title ?? backgroundAction?.item.sessionTitle,
+          title: session?.title ?? (actionItem && 'sessionTitle' in actionItem ? actionItem.sessionTitle : undefined),
           busy: sessionBusy,
           model: guestSessionModelId(session?.model),
           agent: session?.agent,
         }
         : null,
     ),
-    [backgroundAction, currentSessionId, session, sessionBusy],
+    [actionItem, currentSessionId, session, sessionBusy],
   );
 
   const readableColors = React.useMemo(() => getReadableThemeColors(currentTheme), [currentTheme]);
@@ -295,10 +301,11 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     connection: oauthStatus?.connection ?? EMPTY_GUEST_CONNECTION,
     settings: oauthStatus?.settings ?? {},
     item,
+    ...(block ? { block: block.call } : {}),
     popover: popoverHost?.context ?? popover,
     features,
     };
-  }, [currentTheme, pageColors, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
+  }, [block, currentTheme, pageColors, readableColors, directory, guest?.backgroundEntry, guest?.storageId, headless, item, locale, oauthStatus, onStatusControls, popover, popoverHost, sessionSnapshot, surface]);
 
   const fileEditorEntry = surface === 'file' && fileEditor
     ? guest?.fileEditors?.find((editor) => editor.id === fileEditor.editorId)?.entry ?? null
@@ -307,7 +314,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
   const approvedOrigins = guest?.capabilities.granted.includes('origins') ? guest.origins ?? [] : [];
   // New package files reload the frame, except a file editor's: a reload there would drop unsaved edits, so it picks them up on its next open.
   const revision = surface === 'file' ? 0 : guest?.revision ?? 0;
-  const frameKey = `${guestId}:${guest?.storageId ?? ''}:${guest?.version ?? ''}:rev-${revision}:${guestEnabled}:grants-${guest?.capabilities.granted.join(',') ?? ''}:service-${guest?.service?.granted ? '1' : '0'}:origins-${approvedOrigins.join(',')}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}:${guest?.pageEntry ?? ''}:${guest?.attachEntry ?? ''}:${fileEditorEntry ?? ''}:popover-${popoverHost?.context.id ?? popover?.id ?? ''}`;
+  const frameKey = `${guestId}:${guest?.storageId ?? ''}:${guest?.version ?? ''}:rev-${revision}:${guestEnabled}:grants-${guest?.capabilities.granted.join(',') ?? ''}:service-${guest?.service?.granted ? '1' : '0'}:origins-${approvedOrigins.join(',')}:${guest?.entry ?? ''}:${guest?.backgroundEntry ?? ''}:${guest?.statusEntry ?? ''}:${guest?.pageEntry ?? ''}:${guest?.attachEntry ?? ''}:${fileEditorEntry ?? ''}:${block?.entry ?? ''}:popover-${popoverHost?.context.id ?? popover?.id ?? ''}`;
 
   // Scoped auth is minted per mount/version/grant and renewed if an existing
   // iframe navigates after expiry. Healthy documents retain their local state.
@@ -317,11 +324,12 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     ? headless ? guest.backgroundEntry ?? guest.entry ?? null
       : surface === 'page' ? guest.pageEntry ?? null
         : surface === 'status' ? guest.statusEntry ?? null
+        : surface === 'block' ? block?.entry ?? null
         : surface === 'file' ? fileEditorEntry
         : surface === 'dialog' && guest.attachEntry ? guest.attachEntry : guest.entry ?? null
     : null);
   const { src, srcDoc, status: frameStatus, recoverExpiredNavigation, acknowledgeHandshake } = useGuestFrameUrl({
-    guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled, origins: approvedOrigins,
+    guestId, entry: guestEntry, instanceKey: frameKey, enabled: guestEnabled, origins: approvedOrigins, reuseDocument: surface === 'block',
   });
 
   const readyRef = React.useRef(ready);
@@ -389,6 +397,16 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
     const message = backgroundAction?.takeMessage();
     if (message) postToGuest(message);
   }, [backgroundAction, postToGuest]);
+
+  // What the extension's service sends its open frames. Nothing is kept for a
+  // frame that has not said hello: it reads the current state when it starts.
+  React.useEffect(() => {
+    if (!guestEnabled) return undefined;
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type !== 'guest-service-event' || event.guestId !== guestId) return;
+      postToGuest({ channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'service-event', payload: { topic: event.topic, data: event.data } });
+    });
+  }, [guestEnabled, guestId, postToGuest]);
 
   // A file editor gets its file once the frame is listening (hello or load),
   // not on every host-state push: theme or session changes are no reload.
@@ -999,7 +1017,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
 
   React.useEffect(() => {
     // A Work Status section or a file editor is not a rail tab and may be the package's only frame.
-    if (headless || surface === 'status' || surface === 'file' || surface === 'popover' || catalogStatus !== 'ready' || guest?.entry) {
+    if (headless || surface === 'status' || surface === 'file' || surface === 'popover' || surface === 'block' || catalogStatus !== 'ready' || guest?.entry) {
       return;
     }
     closeGuestTabsEverywhere(mode);
@@ -1046,7 +1064,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
       className={cn(
         'h-full w-full min-h-0 min-w-0 border-0 overflow-hidden',
         // The attach window and the Work Status card draw their own chrome behind the page.
-        surface === 'dialog' || surface === 'status' || surface === 'popover' ? 'bg-transparent' : 'bg-[var(--surface-background)]',
+        surface === 'dialog' || surface === 'status' || surface === 'popover' || surface === 'block' ? 'bg-transparent' : 'bg-[var(--surface-background)]',
       )}
       onLoad={() => {
         if (!popoverHost && !popover) closeActivePopover('owner');

@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': '보존 기간은 보관 시점부터 계산합니다. 기간이 지난 세션은 삭제됩니다.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '보존 기간은 세션의 마지막 활동부터 계산합니다. 기간이 지난 세션은 보관됩니다.',
@@ -2660,6 +2661,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.ko,
   ...thirdPartyIntegrationI18n.ko,
   ...extensionCatalogI18n.ko,
+  ...extensionPowersI18n.ko,
   ...guestIntegrationsI18n.ko,
   ...extensionsSettingsI18n.ko,
   ...settingsLayoutI18n.ko,

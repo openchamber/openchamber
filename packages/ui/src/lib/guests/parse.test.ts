@@ -369,7 +369,7 @@ describe('session events on a catalog row', () => {
       sessionEvents,
     });
     const [guest, newer] = readGuests(JSON.stringify({
-      guests: [row(slice), { ...row({ events: ['turn-finished', 'turn-started'], content: false }), id: 'newer' }],
+      guests: [row(slice), { ...row({ events: ['turn-finished', 'turn-paused'], content: false }), id: 'newer' }],
     })) ?? [];
     expect(guest?.sessionEvents).toEqual(slice);
     expect(guest?.capabilities.requested).toEqual(['service', 'transcript']);

@@ -4,6 +4,9 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { guestActionsWhere, type GuestActionEntry } from '@/lib/guests/actions';
+import { runGuestAction } from '@/lib/guests/run-action';
 import { getDisambiguatingFolders } from '@/lib/path-utils';
 
 import {
@@ -401,9 +404,11 @@ interface FileRowProps {
   onOpenDialog: (type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => void;
   canUpload: boolean;
   onPickFiles: (directory: string) => void;
+  guestActions: GuestActionEntry[];
 }
 
 const FileRow: React.FC<FileRowProps> = ({
+  guestActions,
   node,
   root,
   isExpanded,
@@ -457,6 +462,8 @@ const FileRow: React.FC<FileRowProps> = ({
     setRightClickMenuPath(null);
     setContextMenuPath(node.path);
   }, [node.path, setContextMenuPath, setRightClickMenuPath]);
+
+  const fileActions = guestActionsWhere(guestActions, 'file');
 
   const renderMenuItems = ({
     Item,
@@ -523,6 +530,18 @@ const FileRow: React.FC<FileRowProps> = ({
           <Icon name="external-link" className="me-2 size-4" /> {t('sidebarFilesTree.menu.openInDefaultApp')}
         </Item>
       )}
+      {fileActions.length > 0 && <Separator />}
+      {fileActions.map((entry) => (
+        <Item
+          key={`${entry.guest.id}:${entry.action.id}`}
+          onClick={(e: React.MouseEvent) => {
+            e.stopPropagation();
+            void runGuestAction(entry, { kind: 'file', action: entry.action.id, directory: root || null, path: node.path, isDirectory: isDir }, t);
+          }}
+        >
+          <Icon name={entry.icon} className="me-2 size-4" /> {entry.action.label}
+        </Item>
+      ))}
       {isDir && (canCreateFile || canCreateFolder || canUploadHere) && (
         <>
           <Separator />
@@ -767,6 +786,7 @@ const FilePositionEditor = ({
 
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = true, onCloseFile }) => {
   const { t } = useI18n();
+  const guestActions = useGuestActions();
   const { files, runtime, git } = useRuntimeAPIs();
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
   const { isMobile, isTablet, screenWidth } = useDeviceInfo();
@@ -2643,6 +2663,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return (
         <li key={node.path}>
           <FileRow
+            guestActions={guestActions}
             node={node}
             root={root}
             isExpanded={isExpanded}
