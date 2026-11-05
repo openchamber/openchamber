@@ -16,8 +16,10 @@ import { cn } from '@/lib/utils';
 import { MarkdownContent } from '../MarkdownRenderer';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { axisTicks } from './axisTicks';
+import { ExtensionBlockFrame } from './ExtensionBlockFrame';
+import { useExtensionBlocks } from './useExtensionBlocks';
 import {
-  blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
+  NO_EXTENSION_BLOCKS, type ExtensionBlocks, blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
 } from './catalog';
 import {
   describeUiBlockAnswer,
@@ -1382,8 +1384,20 @@ const drawn = blockName.extract([
   'LineChart', 'Choice', 'Input', 'DateInput', 'Slider', 'Button',
 ]);
 
+/** The active extensions' components, and whether the block is finished: only a finished one mounts their pages. */
+const ExtensionBlocksContext = React.createContext<{ blocks: ExtensionBlocks; complete: boolean }>({ blocks: NO_EXTENSION_BLOCKS, complete: false });
+
+const extensionArgs = (props: Record<string, BlockValue>): Record<string, string> => Object.fromEntries(
+  Object.entries(props).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+);
+
 function Node({ value }: { value: BlockValue }) {
+  const extensions = React.useContext(ExtensionBlocksContext);
   const node = blockNode.safeParse(value);
+  const extension = node.data ? extensions.blocks.get(node.data.typeName) : undefined;
+  const nodeProps = node.data?.props;
+  const args = React.useMemo(() => (extension && nodeProps ? extensionArgs(nodeProps) : null), [extension, nodeProps]);
+  if (extension && args) return <ExtensionBlockFrame block={extension} args={args} complete={extensions.complete} />;
   const name = drawn.safeParse(node.data?.typeName);
   if (!node.success || !name.success) return null;
   const Renderer = renderers[name.data];
@@ -1466,7 +1480,9 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   // A broken page goes back to the agent, which draws it again, so only a
   // reply, which has no such second try, draws what it can.
   const salvage = host.kind === 'reply';
-  const parsed = React.useMemo(() => parseUiBlock(source, complete, salvage), [source, complete, salvage]);
+  const extensionBlocks = useExtensionBlocks();
+  const parsed = React.useMemo(() => parseUiBlock(source, complete, salvage, extensionBlocks), [source, complete, salvage, extensionBlocks]);
+  const extensionContext = React.useMemo(() => ({ blocks: extensionBlocks, complete }), [complete, extensionBlocks]);
   // The kit's variables (series colours, tones) land on the block's root before paint, and follow a theme switch.
   const blockRef = React.useRef<HTMLDivElement>(null);
   React.useInsertionEffect(addKitStyles, []);
@@ -1622,7 +1638,9 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
       <BlockErrorBoundary source={source} fallback={fallback} onFailed={onNotDrawn}>
         <FormContext.Provider value={form}>
           <SlotContext.Provider value={slot}>
-            <Node value={parsed.root} />
+            <ExtensionBlocksContext.Provider value={extensionContext}>
+              <Node value={parsed.root} />
+            </ExtensionBlocksContext.Provider>
           </SlotContext.Provider>
         </FormContext.Provider>
       </BlockErrorBoundary>

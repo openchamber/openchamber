@@ -216,6 +216,55 @@ const evaluationLibrary = createLibrary({ components: [] });
 
 const parser = createParser(uiBlockLibrary.toJSONSchema(), 'Stack');
 
+/** A component an active extension adds; its own page draws it (`ExtensionBlockFrame`). */
+export type ExtensionBlock = {
+  guestId: string;
+  name: string;
+  description: string;
+  args: string[];
+  entry: string;
+  height?: number;
+};
+
+export type ExtensionBlocks = ReadonlyMap<string, ExtensionBlock>;
+export const NO_EXTENSION_BLOCKS: ExtensionBlocks = new Map();
+
+/** The active extensions' components by name. The catalog's own names stay the catalog's, and the first extension keeps a shared name. */
+export const collectExtensionBlocks = (blocks: readonly ExtensionBlock[]): ExtensionBlocks => {
+  const collected = new Map<string, ExtensionBlock>();
+  for (const block of blocks) {
+    if (block.name in blockProps || collected.has(block.name)) {
+      console.warn(`[ui-blocks] ${block.guestId}: the block "${block.name}" is already taken and was left out`);
+      continue;
+    }
+    collected.set(block.name, block);
+  }
+  return collected.size > 0 ? collected : NO_EXTENSION_BLOCKS;
+};
+
+const extensionBlockProps = (block: ExtensionBlock) => z.object(Object.fromEntries(block.args.map((arg) => [arg, z.string().optional()])));
+
+/**
+ * The parser for the current set, built once per set. Extensions change
+ * rarely and only on a catalog change, while every keystroke of a streaming
+ * block parses again.
+ */
+let extendedParser: { blocks: ExtensionBlocks; parser: typeof parser } | null = null;
+
+const parserFor = (blocks: ExtensionBlocks): typeof parser => {
+  if (blocks.size === 0) return parser;
+  if (extendedParser?.blocks !== blocks) {
+    const extra = [...blocks.values()].map((block) => defineComponent({
+      name: block.name,
+      description: block.description,
+      props: extensionBlockProps(block),
+      component: null,
+    }));
+    extendedParser = { blocks, parser: createParser(createLibrary({ components: [...components, ...extra], root: 'Stack' }).toJSONSchema(), 'Stack') };
+  }
+  return extendedParser.parser;
+};
+
 export type UiBlockParse =
   | { kind: 'empty' }
   /** `dropped` says what a salvaged block lost; it is empty for a whole block. */
@@ -242,8 +291,8 @@ const canDropParts = (source: string, kept: BlockValue): boolean => (
  * rest in `dropped`. A block cut short or written in a shape the chat does not
  * support stays invalid either way.
  */
-export function parseUiBlock(source: string, complete: boolean, salvage = false): UiBlockParse {
-  const result = parser.parse(source);
+export function parseUiBlock(source: string, complete: boolean, salvage = false, extensions: ExtensionBlocks = NO_EXTENSION_BLOCKS): UiBlockParse {
+  const result = parserFor(extensions).parse(source);
   // A fold with nothing inside loses nothing by not drawing, and the parser
   // has already left it out of the tree.
   const errors = result.meta.errors
@@ -283,7 +332,7 @@ export function parseUiBlock(source: string, complete: boolean, salvage = false)
   }
   const tree = toBlockValue(root);
   const treeErrors: string[] = [];
-  const kept = soundNode(tree, treeErrors);
+  const kept = soundNode(tree, treeErrors, extensions);
   const problems = namedError ? errors : [...errors, ...treeErrors];
   if (!problems.length) return { kind: 'ready', root: tree, dropped: [] };
   // An expression over a broken name evaluates to a made-up value, so a block
@@ -353,8 +402,14 @@ const chart = z.object({ labels: z.array(z.string()), series: nodes });
  * value per label. Returns the node without such parts, null when the node
  * itself is one, and lists every one found in `errors`.
  */
-function soundNode(value: BlockValue, errors: string[]): BlockValue | null {
+function soundNode(value: BlockValue, errors: string[], extensions: ExtensionBlocks): BlockValue | null {
   const node = blockNode.safeParse(value);
+  const extension = node.data ? extensions.get(node.data.typeName) : undefined;
+  if (extension) {
+    if (node.data?.partial) errors.push(`${extension.name} is incomplete`);
+    if (!extensionBlockProps(extension).safeParse(node.data?.props).success) errors.push(`${extension.name} has arguments that do not match its signature`);
+    return node.data?.partial ? null : value;
+  }
   const name = blockName.safeParse(node.data?.typeName);
   if (!node.success || !name.success) {
     errors.push('A component in the block is not one of the catalog');
@@ -380,7 +435,7 @@ function soundNode(value: BlockValue, errors: string[]): BlockValue | null {
   const broken = errors.length > errorsBefore;
   const props = { ...node.data.props };
   for (const [slot, children] of Object.entries(slots.data)) {
-    props[slot] = (children ?? []).flatMap((child) => soundNode(child, errors) ?? []);
+    props[slot] = (children ?? []).flatMap((child) => soundNode(child, errors, extensions) ?? []);
   }
   return broken ? null : { ...node.data, props };
 }

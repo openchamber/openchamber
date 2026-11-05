@@ -7,7 +7,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 ## Invariants
 
 - Only an assistant reply on screen draws blocks: `MarkdownRenderer` sets `uiBlocks` for the `assistant` variant, and copies and image exports keep the source. User messages, reasoning, tool output and documents show the fence as code.
-- The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
+- The catalog in `catalog.ts` is the one source for the parser, validation and the agent's signatures of the built-in components. An extension's component never takes a catalog name or one an earlier extension holds. After changing it, run `bun run --cwd packages/ui ui-blocks:generate`; `guidance.test.ts` fails while the server copy is stale.
 - A finished block that has any parser error, an undefined or unused name, state, a query or a mutation, or no `Stack` root draws nothing but its source and a short note. One exception: a reply's block with no fields, Buttons or expressions that is not cut short draws its sound parts and says what it lost, under the block. A block never shows with parts silently dropped.
 - While a block streams, a node keeps drawing its last props that parsed against its schema; a node that never parsed draws nothing.
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.
@@ -17,6 +17,10 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - `@openuidev/lang-core` is a dependency of this private package only, bundled at build time. It never goes into `packages/web`'s dependencies.
 
 ## Decisions
+
+### Why an extension's component is a frame in the block
+
+An active extension adds components to the block's language (`contributes.blocks`): `parseUiBlock` takes the set, and the agent reads their signatures from the session's `openchamber.extensions` entry, which the server formats because `lang-core` stays out of its package. `ExtensionBlockFrame` draws a call in the extension's own sandboxed page, mounted once the block is finished and on screen, and a row that scrolls away gives the frame back and keeps its height. A name without its extension is an unknown component: a reply draws the rest and says what it lost, as with any other broken part. Templates over the catalog were the first design and were dropped, since they draw nothing an agent could not write itself (`packages/sdk/DOCUMENTATION.md`).
 
 ### Why OpenUI's language and not our own JSON format
 

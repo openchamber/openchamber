@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue, type UiBlockParse } from './catalog';
+import { NO_EXTENSION_BLOCKS, collectExtensionBlocks, blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue, type UiBlockParse } from './catalog';
 
 const program = `root = Stack([note, flow])
 note = Callout("Routers rewrite **MAC** addresses", "info")
@@ -269,5 +269,45 @@ describe('noteSlot', () => {
   test('a row of buttons moves as one, and a block without buttons has no place', () => {
     expect(noteSlot(root('root = Stack([Choice("a", ["x"]), Row([Button("Send"), Button("Skip")])])'))).toEqual({ parent: '', index: 1 });
     expect(noteSlot(root('root = Stack([Text("no buttons")])'))).toBeNull();
+  });
+});
+
+describe('extension blocks', () => {
+  const extensions = collectExtensionBlocks([{ guestId: 'desk', name: 'DeskChart', description: 'A chart', args: ['title', 'values'], entry: 'b.html' }]);
+
+  test('a call parses with its arguments under their names', () => {
+    const parsed = parseUiBlock('root = Stack([chart])\nchart = DeskChart("Builds", "3,5,8")', true, false, extensions);
+    if (parsed.kind !== 'ready') throw new Error(`expected ready, got ${JSON.stringify(parsed)}`);
+    const [chart] = childrenOf(parsed.root);
+    expect(chart.typeName).toBe('DeskChart');
+    expect(chart.props).toMatchObject({ title: 'Builds', values: '3,5,8' });
+  });
+
+  test('it sits inside a card like any other item', () => {
+    const parsed = parseUiBlock('root = Stack([Card("Stats", [DeskChart("Builds", "3")])])', true, false, extensions);
+    expect(parsed.kind).toBe('ready');
+  });
+
+  test('without the extension the name is unknown and a reply draws the rest', () => {
+    const source = 'root = Stack([note, chart])\nnote = Text("Before")\nchart = DeskChart("Builds", "3")';
+    expect(parseUiBlock(source, true).kind).toBe('invalid');
+    const salvaged = parseUiBlock(source, true, true);
+    if (salvaged.kind !== 'ready') throw new Error(`expected ready, got ${salvaged.kind}`);
+    expect(childrenOf(salvaged.root).map((child) => child.typeName)).toEqual(['Text']);
+    expect(salvaged.dropped.join('\n')).toContain('DeskChart');
+  });
+
+  test('a name the catalog or an earlier extension holds is left out', () => {
+    const taken = collectExtensionBlocks([
+      { guestId: 'a', name: 'Card', description: 'x', args: [], entry: 'a.html' },
+      { guestId: 'a', name: 'First', description: 'x', args: [], entry: 'a.html' },
+      { guestId: 'b', name: 'First', description: 'x', args: [], entry: 'b.html' },
+    ]);
+    expect([...taken.keys()]).toEqual(['First']);
+    expect(taken.get('First')?.guestId).toBe('a');
+  });
+
+  test('no extension means the same empty set, so a parse keeps its memo', () => {
+    expect(collectExtensionBlocks([])).toBe(NO_EXTENSION_BLOCKS);
   });
 });
