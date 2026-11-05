@@ -1,0 +1,29 @@
+// One call to the DeskChart component. The arguments are written by a model,
+// so this page only draws them: it never acts on them.
+import { connectHost } from '@openchamber/sdk';
+import { applyHostReady } from '@openchamber/sdk/ui';
+
+const host = connectHost();
+const root = document.querySelector('#root');
+if (!root) throw new Error('DeskChart: missing root');
+
+host.onReady((context) => applyHostReady(context, document.documentElement));
+
+host.onBlock(({ args }) => {
+  const values = (args.values ?? '').split(',').map(Number).filter(Number.isFinite);
+  const top = Math.max(1, ...values);
+  root.replaceChildren();
+  const title = document.createElement('div');
+  title.textContent = args.title ?? '';
+  title.style.font = '600 13px var(--oc-font, system-ui)';
+  const bars = document.createElement('div');
+  bars.style.cssText = 'display:flex;align-items:flex-end;gap:6px;height:96px;margin-top:8px';
+  for (const value of values) {
+    const bar = document.createElement('div');
+    bar.style.cssText = `flex:1;height:${(value / top) * 100}%;background:currentColor;opacity:.6;border-radius:3px 3px 0 0`;
+    bar.title = String(value);
+    bars.append(bar);
+  }
+  root.append(title, bars);
+  void host.setHeight(root.getBoundingClientRect().height + 16);
+});

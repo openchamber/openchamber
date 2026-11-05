@@ -1,6 +1,6 @@
 # Extension gallery
 
-Thirteen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Fourteen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |
@@ -16,6 +16,7 @@ Thirteen examples to use, explore, and adapt. The five panel extensions also hav
 | `session-events-log` | **Session Journal** | Allow its local service and the content line in the approval dialog, then `tail -f ~/.openchamber-session-events.log`. Every finished turn, failed turn, permission request and question in any project lands as one JSON line, with what the agent said or asked, whether or not a window is open. It has no panel; see [its README](./session-events-log/README.md). |
 | `notification-webhook` | **Webhook Notifier** | Run `bun packages/sdk/examples/notification-webhook/receiver.ts`, allow the local service, then connect the receiver's address and token on the **Webhook** card in Settings → Integrations. Every notification you would get on the phone is posted to the receiver, following your notification toggles; the token stays in OpenChamber. It has no panel; see [its README](./notification-webhook/README.md). |
 | `tracker-provider` | **Teaboard Tracker** | Run `bun packages/sdk/examples/tracker-provider/tracker-server.ts`, allow the local service, then connect the server's address and the token `demo` on the **Teaboard** card under Extension accounts in Settings → Integrations. Search its items in the picker and start a worktree from one; the token stays in OpenChamber. It has no panel; see [its README](./tracker-provider/README.md). |
+| `agent-desk` | **Agent Desk** | Allow what it asks for and open its panel: a tick arrives every minute with no polling, and **Start a session** opens one from the service. Type `@rel` in the composer, or ask an agent for a `DeskChart`. |
 | `quota-provider` | **Teapot Usage** | Run `bun packages/sdk/examples/quota-provider/usage-server.ts`, store its key `demo` for a `teapot` provider in OpenCode (Settings → Providers → custom provider), allow the local service, then open Settings → Usage: the **Teapot Usage** card sits after the built-ins with the plan, two windows and a balance, and joins Work Status like any of them. The service receives only the `teapot` credential, which the approval dialog names. It has no panel; see [its README](./quota-provider/README.md). |
 
 ## Install and explore
@@ -68,6 +69,10 @@ bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/session-ev
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/notification-webhook/service/main.ts packages/sdk/examples/notification-webhook/service/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/tracker-provider/service/main.ts packages/sdk/examples/tracker-provider/service/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/quota-provider/service/main.ts packages/sdk/examples/quota-provider/service/main.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/panel/main.ts packages/sdk/examples/agent-desk/panel/main.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/panel/background.ts packages/sdk/examples/agent-desk/panel/background.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/blocks/chart.ts packages/sdk/examples/agent-desk/blocks/chart.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/agent-desk/service/main.ts packages/sdk/examples/agent-desk/service/main.js
 ```
 
 Rebuild all panels after editing `shared.ts` or the SDK. Commit built files with the extension; installation never builds source or installs dependencies. Bump the extension's own version when publishing an update through Git. A Bun upgrade also invalidates every panel bundle, because the minifier assigns different identifier names; regenerate them with the Bun version the repository pins in `package.json`.
