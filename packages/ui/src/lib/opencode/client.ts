@@ -329,7 +329,15 @@ const createTimeoutSignal = (timeoutMs: number): { signal: AbortSignal; cleanup:
  */
 const OPENCODE_REQUEST_TIMEOUT_MS = 30_000
 
+/**
+ * Usage stats aggregate every step in the range on the server, and on a large
+ * history a 30-day range takes minutes (#6366). They get the server proxy's
+ * default deadline instead, so the slow answer still arrives.
+ */
+const OPENCODE_STATS_REQUEST_TIMEOUT_MS = 4 * 60_000
+
 const isEventStreamUrl = (url: URL): boolean => url.pathname.endsWith("/event") || url.pathname.endsWith("/log")
+const isUsageStatsUrl = (url: URL): boolean => url.pathname.endsWith("/experimental/session/stats")
 
 /** Header the server reads to resolve a Location; the value is URI-encoded on both ends. */
 const OPENCODE_DIRECTORY_HEADER = "x-opencode-directory"
@@ -377,7 +385,8 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
     if (isEventStreamUrl(url) || requestMethodOf(input, init) === "POST") {
       return validateRuntimeResponse(await runtimeFetch(input, init))
     }
-    const timeout = createTimeoutSignal(requestTimeoutMs)
+    const timeoutMs = isUsageStatsUrl(url) ? OPENCODE_STATS_REQUEST_TIMEOUT_MS : requestTimeoutMs
+    const timeout = createTimeoutSignal(timeoutMs)
     const callerSignal = init?.signal !== undefined
       ? init.signal
       : input instanceof Request ? input.signal : undefined
@@ -424,7 +433,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       return response
     } catch (error) {
       if (timeout.signal.aborted && !callerSignal?.aborted) {
-        throw new Error(`OpenCode request timed out after ${requestTimeoutMs}ms`)
+        throw new Error(`OpenCode request timed out after ${timeoutMs}ms`)
       }
       throw error
     } finally {
