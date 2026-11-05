@@ -31,7 +31,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { GuestApprovalDialog } from './GuestApprovalDialog';
 import { toast } from '@/components/ui';
-import { setGuestServiceSocketPath } from '@/lib/guests/service';
+import { loadGuestServiceStatus, setGuestServiceSocketPath } from '@/lib/guests/service';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
 import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
@@ -344,6 +344,16 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
   const state = extensionState(guest);
   const iconSrc = useGuestIconSrc(guest);
   const permissions = servicePermissionList(guest);
+  const [serviceFailed, setServiceFailed] = React.useState(false);
+  const watchesService = Boolean(guest.service) && guest.enabled !== false;
+  React.useEffect(() => {
+    if (!watchesService) return;
+    let current = true;
+    void loadGuestServiceStatus(guest.id).then((answer) => {
+      if (current) setServiceFailed(answer.ok && answer.result.status === 'failed');
+    });
+    return () => { current = false; };
+  }, [guest.id, guest.revision, watchesService]);
   const location = guest.path || guest.id;
   const hasPermissions = Boolean(permissions) || Boolean(guest.service);
 
@@ -455,6 +465,9 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           </SettingsFieldRow>
         </div>
         {state.builtIn ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.extensions.builtIn.info')}</p> : null}
+        {serviceFailed ? (
+          <p className="typography-meta text-[var(--status-error)]">{t('settings.extensions.service.failed')}</p>
+        ) : null}
         {guest.needsConfiguration ? (
           <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.needsConfiguration', { message: guest.needsConfiguration })}</p>
         ) : null}
@@ -575,10 +588,15 @@ export const ExtensionsPage: React.FC = () => {
   const [installValue, setInstallValue] = React.useState('');
   const enterpriseMode = useEnterpriseMode();
   const [busy, setBusy] = React.useState(false);
+  // Declining a new package removes it; one already here can wait.
+  const [newlyAddedId, setNewlyAddedId] = React.useState<string | null>(null);
   const [checking, setChecking] = React.useState(false);
   const checkedOnOpen = React.useRef(false);
   const [reinstall, setReinstall] = React.useState<{ source: InstallSource; name: string } | null>(null);
   const [approval, setApproval] = React.useState<InstalledGuest | null>(null);
+  React.useEffect(() => {
+    if (!approval) setNewlyAddedId(null);
+  }, [approval]);
   const [dropActive, setDropActive] = React.useState(false);
   const [addOpen, setAddOpen] = React.useState(false);
   // The shown extension is page-local: every visit starts at the grid.
@@ -757,6 +775,7 @@ export const ExtensionsPage: React.FC = () => {
     );
     await loadGuestCatalog();
     if (guestNeedsApproval(result.guest)) {
+      setNewlyAddedId(result.guest.id);
       setApproval(result.guest);
     }
     return true;
@@ -1051,6 +1070,7 @@ export const ExtensionsPage: React.FC = () => {
         busy={busy}
         onApprove={(guest) => void approve(guest)}
         onDecline={(guest) => void decline(guest)}
+        onLater={approval && approval.id !== newlyAddedId ? () => setApproval(null) : undefined}
         onDismiss={() => setApproval(null)}
       />
 

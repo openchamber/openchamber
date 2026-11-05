@@ -38,6 +38,8 @@ type GuestApprovalDialogProps = {
   busy: boolean;
   onApprove: (guest: InstalledGuest) => void;
   onDecline: (guest: InstalledGuest) => void;
+  /** Leaves an installed package waiting; a package just added has only Remove. */
+  onLater?: () => void;
   onDismiss: () => void;
 };
 
@@ -46,7 +48,7 @@ type GuestApprovalDialogProps = {
  * install that requests any capability, and again from the card whenever a
  * newer package asks for more than the user approved.
  */
-export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest, busy, onApprove, onDecline, onDismiss }) => {
+export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest, busy, onApprove, onDecline, onLater, onDismiss }) => {
   const { t } = useI18n();
   const requested = guest?.capabilities.requested ?? [];
   const filesystemPatterns = guest?.filesystem ?? [];
@@ -213,6 +215,11 @@ export const GuestApprovalDialog: React.FC<GuestApprovalDialogProps> = ({ guest,
           >
             {t('settings.extensions.dialog.decline')}
           </Button>
+          {onLater ? (
+            <Button size="sm" variant="outline" disabled={busy} onClick={onLater}>
+              {t('settings.extensions.dialog.later')}
+            </Button>
+          ) : null}
           <Button
             size="sm"
             disabled={busy}

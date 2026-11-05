@@ -14,6 +14,9 @@ type GuestFrameOptions = {
   origins: readonly string[];
 };
 
+/** Past this a load counts as failed and the pane offers another try; a read over the relay can be slow. */
+const FRAME_LOAD_TIMEOUT_MS = 60_000;
+
 type FrameState =
   | { key: string; status: 'loading' | 'error' }
   | { key: string; status: 'ready'; source: GuestFrameUrl };
@@ -42,14 +45,21 @@ export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled, origins
     if (!entry || !enabled) return;
     let cancelled = false;
     const abort = new AbortController();
+    const deadline = setTimeout(() => {
+      if (cancelled) return;
+      cancelled = true;
+      abort.abort();
+      setState({ key, status: 'error' });
+    }, FRAME_LOAD_TIMEOUT_MS);
     void resolveGuestFrameUrl(guestId, entry, abort.signal, originsRef.current, reuseDocument ? key : undefined)
       .then((next) => {
         if (!cancelled) setState({ key, status: 'ready', source: next });
       })
       .catch(() => {
         if (!cancelled) setState({ key, status: 'error' });
-      });
-    return () => { cancelled = true; abort.abort(); };
+      })
+      .finally(() => clearTimeout(deadline));
+    return () => { cancelled = true; clearTimeout(deadline); abort.abort(); };
   }, [enabled, entry, guestId, key, reloadGeneration, reuseDocument]);
 
   const current = state?.key === key && state.status === 'ready' ? state.source : null;
@@ -71,7 +81,10 @@ export const useGuestFrameUrl = ({ guestId, entry, instanceKey, enabled, origins
     recoveryAttempted.current = false;
   }, []);
 
+  const retry = React.useCallback(() => setReloadGeneration((generation) => generation + 1), []);
+
   return {
+    retry,
     src: current?.kind === 'url' ? current.url : '',
     srcDoc: current?.kind === 'document' ? current.html : undefined,
     status: state?.key === key ? state.status : 'loading',

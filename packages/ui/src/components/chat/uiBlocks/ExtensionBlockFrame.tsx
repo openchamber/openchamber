@@ -2,6 +2,7 @@ import React from 'react';
 import { GUEST_BLOCK_HEIGHT_DEFAULT, GUEST_BLOCK_HEIGHT_MAX, type GuestBlockCall } from '@openchamber/sdk';
 
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { useI18n } from '@/lib/i18n';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 
 import type { ExtensionBlock } from './catalog';
@@ -26,6 +27,11 @@ const remember = (key: string, height: number) => {
 };
 
 const clampHeight = (height: number) => Math.min(GUEST_BLOCK_HEIGHT_MAX, Math.max(MIN_HEIGHT, Math.round(height)));
+
+function BlockUnavailable() {
+  const { t } = useI18n();
+  return <div className="px-3 py-2 typography-meta text-muted-foreground">{t('contextPanel.plugin.blockLoadFailed')}</div>;
+}
 
 /**
  * One call to an extension's block: the extension's own sandboxed page, with
@@ -74,7 +80,7 @@ export function ExtensionBlockFrame({ block, args, complete, answered, answer }:
     // Inline: the kit's `.oc-box` padding lands after the utilities, and would take the height the frame asked for.
     <div ref={boxRef} className="oc-box w-full overflow-hidden" style={{ height, padding: 0 }}>
       {complete && onScreen ? (
-        <ErrorBoundary fallback={null}>
+        <ErrorBoundary fallback={<BlockUnavailable />}>
           <React.Suspense fallback={null}>
             <PluginPane mode={pluginModeFromId(block.guestId)} surface="block" block={pane} onResize={handleResize} />
           </React.Suspense>

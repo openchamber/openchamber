@@ -1418,10 +1418,12 @@ function NotDrawn({ source, errors, partial = false }: { source: string; errors:
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const panelId = React.useId();
+  // An agent's block outlives the extension that drew it; the parser's wording is for the agent.
+  const shown = errors.map((error) => (/Unknown component "[A-Z]/.test(error) ? t('chat.uiBlocks.extensionBlock.unavailable') : error));
   return (
     <div className="flex flex-col gap-1 typography-meta">
       <div className={partial ? 'text-muted-foreground' : 'text-[var(--status-error)]'}>{t(partial ? 'chat.uiBlock.partial' : 'chat.uiBlock.invalid')}</div>
-      {errors.map((error, index) => <div key={index} className="text-muted-foreground" dir="ltr">{error}</div>)}
+      {[...new Set(shown)].map((error) => <div key={error} className="text-muted-foreground">{error}</div>)}
       <button
         type="button"
         aria-expanded={open}
