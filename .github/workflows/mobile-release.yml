@@ -57,6 +57,10 @@ on:
         required: false
         default: false
         type: boolean
+      retention_days:
+        description: Days to keep the Android and iOS run artifacts. Leave empty for the repository default.
+        required: false
+        type: string
       build_android:
         description: Build Android signed APK/AAB artifacts.
         required: false
@@ -190,6 +194,7 @@ jobs:
             packages/mobile/android/app/build/outputs/bundle/release/*.aab
             packages/mobile/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
 
       - name: Upload Android artifacts to GitHub Release
         if: inputs.upload_github_release && needs.resolve-version.outputs.release_tag != ''
@@ -459,6 +464,7 @@ jobs:
           name: openchamber-ios-${{ needs.resolve-version.outputs.version_name }}-${{ needs.resolve-version.outputs.build_number }}
           path: ${{ runner.temp }}/OpenChamberExport/*.ipa
           if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
 
       - name: Upload to TestFlight
         shell: bash

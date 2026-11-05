@@ -524,6 +524,7 @@ jobs:
       build_number: ${{ needs.prepare.outputs.build_number }}
       build_android: true
       build_ios: false
+      retention_days: '3'
     secrets: inherit
 
   # Not needed by the publish job: a failed TestFlight upload does not hold
@@ -543,6 +544,7 @@ jobs:
       build_number: ${{ needs.prepare.outputs.build_number }}
       build_android: false
       build_ios: true
+      retention_days: '3'
     secrets: inherit
 
   # Last, after npm too: the release notes name the commit the next night
@@ -596,10 +598,10 @@ jobs:
         run: |
           set -euo pipefail
           apk=$(find android -name '*.apk' | head -1)
-          aab=$(find android -name '*.aab' | head -1)
-          test -n "$apk" && test -n "$aab"
+          test -n "$apk"
           cp "$apk" "files/OpenChamber-${VERSION}-${BUILD_NUMBER}-android.apk"
-          cp "$aab" "files/OpenChamber-${VERSION}-${BUILD_NUMBER}-android.aab"
+          # A name that never changes, for the website's download buttons.
+          cp "$apk" files/OpenChamber-canary-android.apk
 
       - name: Combine macOS and Windows manifests
         env:
@@ -632,20 +634,33 @@ jobs:
             --from "$FROM" --to "$SHA" --version "$VERSION" > "$RUNNER_TEMP/canary-notes.json"
 
       - name: Publish to the canary pre-release
+        env:
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
         run: |
           set -euo pipefail
-          NOTES="OpenChamber Canary ${VERSION}, built from ${SHA}. The nightly build of main. In the desktop app, or in the browser page of a server installed from npm (@openchamber/web@canary), Settings → About → Updates: pick Canary to update into it, Stable to go back. Expect rough edges."
+          BASE="https://github.com/openchamber/openchamber/releases/download/canary/OpenChamber-${VERSION}"
+          NOTES="OpenChamber Canary ${VERSION}, built from ${SHA}. The nightly build of main. In the desktop app, or in the browser page of a server installed from npm (@openchamber/web@canary), Settings → About → Updates: pick Canary to update into it, Stable to go back. Expect rough edges.
+
+          ## Downloads
+
+          | System | File |
+          | --- | --- |
+          | macOS, Apple Silicon | [.dmg](${BASE}-mac-arm64.dmg) |
+          | macOS, Intel | [.dmg](${BASE}-mac-x64.dmg) |
+          | Windows, x64 | [.exe](${BASE}-win-x64.exe) |
+          | Windows, ARM | [.exe](${BASE}-win-arm64.exe) |
+          | Linux, x64 | [.AppImage](${BASE}-linux-x86_64.AppImage), [.deb](${BASE}-linux-amd64.deb), [.rpm](${BASE}-linux-x86_64.rpm) |
+          | Linux, ARM | [.AppImage](${BASE}-linux-arm64.AppImage), [.deb](${BASE}-linux-arm64.deb), [.rpm](${BASE}-linux-aarch64.rpm) |
+          | Android | [.apk](${BASE}-${BUILD_NUMBER}-android.apk) |"
           # The notes name the published commit, which tells the next night
           # whether main moved, so they are written last, once every file is up.
           if ! gh release view canary >/dev/null 2>&1; then
             gh release create canary --prerelease --latest=false --target "$SHA" --title "OpenChamber Canary" --notes "OpenChamber Canary: the first build is being published."
           fi
           OLD_ASSETS=$(gh release view canary --json assets --jq '.assets[].name')
-          # The newest earlier build's files stay one more night: an app that
-          # found that build before this run downloads it from the addresses
-          # it read. Taken from the files, so a re-run of this version keeps it too.
-          PREVIOUS=$(printf '%s\n' "$OLD_ASSETS" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9]+\.[0-9]+' | grep -vxF "$VERSION" | sort -uV | tail -1 || true)
-          PREVIOUS=${PREVIOUS:-$VERSION}
+          # Only this build stays, so the release page lists one file per
+          # system. An app still holding the previous build's addresses fails
+          # its download and finds this build on its next update check.
           # New files first, then the manifests that name them, then the old
           # files: an updater always reads a manifest whose files exist.
           gh release upload canary files/OpenChamber-* "$RUNNER_TEMP/canary-notes.json" --clobber
@@ -654,7 +669,7 @@ jobs:
             files/latest-linux.yml files/latest-linux-arm64.yml --clobber
           for asset in $OLD_ASSETS; do
             case "$asset" in
-              latest*.yml|canary-notes.json|*"-${VERSION}-"*|*"-${PREVIOUS}-"*) ;;
+              latest*.yml|canary-notes.json|OpenChamber-canary-android.apk|*"-${VERSION}-"*) ;;
               *) gh release delete-asset canary "$asset" --yes ;;
             esac
           done
