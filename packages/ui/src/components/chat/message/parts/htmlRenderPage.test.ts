@@ -390,6 +390,31 @@ describe('the page height', () => {
         expect(sizes()).toEqual([90]);
     });
 
+    const barRoundingCases: Array<[number, number[]]> = [[48, [515]], [49, [514, 515]]];
+    for (const [startHeight, expected] of barRoundingCases) {
+        test(`settles on one height when rounding changes the scrollbar's height with the frame (from ${startHeight} px)`, () => {
+            // A 505 px page wider than its frame at 175%: the window's and the
+            // root's heights are rounded, so the 10 px bar reads 9 at odd frame
+            // heights and 10 at even ones.
+            const page = mountPage(undefined, '<div style="width:1100px;height:505px"></div>');
+            const { win } = page;
+            const root = win.document.documentElement;
+            let frameHeight = startHeight;
+            Object.defineProperty(win, 'innerHeight', { get: () => frameHeight, configurable: true });
+            Object.defineProperty(root, 'clientHeight', { get: () => frameHeight - (frameHeight % 2 ? 9 : 10), configurable: true });
+            Object.defineProperty(root, 'scrollHeight', { get: () => Math.max(frameHeight - (frameHeight % 2 ? 9 : 10), 505), configurable: true });
+            root.getBoundingClientRect = () => new win.DOMRect(0, 0, 600, 505);
+
+            const sizes = () => page.reports.flatMap((report) => (report?.kind === 'size' ? [report.height] : []));
+            for (let round = 0; round < 6; round += 1) {
+                frameHeight = sizes().at(-1) ?? frameHeight;
+                win.dispatchEvent(new win.Event('resize'));
+            }
+
+            expect(sizes()).toEqual(expected);
+        });
+    }
+
     test('sizes again when the scrollbar appears without the root resizing', async () => {
         const page = mountPage(undefined, '<div id="row" style="height:300px"></div>');
         const { win } = page;
