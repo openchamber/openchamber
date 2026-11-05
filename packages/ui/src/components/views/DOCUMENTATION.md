@@ -567,3 +567,16 @@ browser WebSocket also never sees the upgrade's 401 or 403, so a refused token
 cannot be told apart from a server that is down. Five attempts span a typical
 server restart, so a short outage shows nothing, and an outage that lasts shows
 the error while the retry goes on underneath.
+
+## Office documents in a diff
+
+`getFileDiff` and `getCommitFileDiff` return docx, xlsx, pptx, odt, ods and odp as
+two data URLs, the way images travel, because a text patch of a zip says nothing.
+`OfficeDocumentDiff` reads them in the app: a workbook lists changed cells, a
+text document goes through the regular viewer as its extracted text, so comments
+work there, and layout changes do not show. Branch and pull request comparisons
+ask for the two versions apart from their patches: `useGitComparison.fetchVersions`
+reads them from `GET /api/git/range-file-versions` or from the change request
+route with `binary=true`. A provider that ignores the flag, as an extension
+provider may, answers text that is no data URL, and the diff keeps the binary
+placeholder.

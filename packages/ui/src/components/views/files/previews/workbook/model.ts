@@ -30,12 +30,27 @@ export type BookSheet = {
 /** A change to one cell; `next` is null for an emptied cell. `edited` marks what the user typed, the rest was recalculated. */
 export type CellChange = { sheet: number; row: number; column: number; next: BookCell | null; edited: boolean };
 
+/** One row or column added before `at`, or `at` removed. Rows count from 1 and columns from 0, as cells do. */
+export type StructureChange = { sheet: number; axis: 'row' | 'column'; at: number; delta: 1 | -1 };
+
+/** Where a cell lands after a structure change; null when its row or column went away. */
+export const movedCell = ({ axis, at, delta }: StructureChange, row: number, column: number): { row: number; column: number } | null => {
+  const line = axis === 'row' ? row : column;
+  if (delta === -1 && line === at) return null;
+  const next = line >= at + (delta === -1 ? 1 : 0) ? line + delta : line;
+  return axis === 'row' ? { row: next, column } : { row, column: next };
+};
+
 export type WorkbookDocument = {
   sheets: BookSheet[];
   definedNames: Array<{ name: string; scope: number | null; formula: string }>;
   date1904: boolean;
   /** The file's bytes with these changes in place and everything else as it was. */
   write: (changes: CellChange[]) => Promise<Uint8Array<ArrayBuffer>>;
+  /** Parts tied to cell addresses that a structure change would leave behind rule it out. */
+  canRestructure: (sheet: number) => boolean;
+  /** Moves the cells and the defined names with them, then applies `changes`, which name cells where they end up. */
+  restructure: (change: StructureChange, changes: CellChange[]) => Promise<Uint8Array<ArrayBuffer>>;
 };
 
 export const cellKey = (row: number, column: number): string => `${row}:${column}`;

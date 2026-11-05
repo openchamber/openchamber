@@ -15,8 +15,8 @@ import {
   xml,
   type NumberFormat,
 } from '@/sync/document-attachments';
-import { shiftFormula } from './formulaText';
-import { cellKey, rangeBounds, type BookCell, type BookSheet, type CellChange, type CellKind, type WorkbookDocument } from './model';
+import { shiftFormula, shiftSheetReferences, shiftSpan } from './formulaText';
+import { cellKey, movedCell, rangeBounds, type BookCell, type BookSheet, type CellChange, type CellKind, type StructureChange, type WorkbookDocument } from './model';
 import { escapeXml, packArchive } from './rezip';
 
 type SheetPart = { path: string; shared: Map<string, { origin: BookCell; keys: string[] }> };
@@ -203,6 +203,63 @@ const patchSheet = (source: string, changes: Map<number, Map<number, PendingCell
   return `${source.slice(0, start)}${openTag}${inner}</sheetData>${source.slice(start + data[0].length)}`.replace(/<dimension\b[^>]*\/>/i, '');
 };
 
+const shiftRange = (reference: string, change: StructureChange): string | null => {
+  const bounds = rangeBounds(reference);
+  if (!bounds) return reference;
+  const { axis, at, delta } = change;
+  const span = axis === 'row' ? shiftSpan(bounds.firstRow, bounds.lastRow, at, delta) : shiftSpan(bounds.firstColumn, bounds.lastColumn, at, delta);
+  if (!span) return null;
+  const [nextFirst, nextLast] = span;
+  const name = (row: number, column: number) => `${columnName(column)}${row}`;
+  const start = axis === 'row' ? name(nextFirst, bounds.firstColumn) : name(bounds.firstRow, nextFirst);
+  const end = axis === 'row' ? name(nextLast, bounds.lastColumn) : name(bounds.lastRow, nextLast);
+  return start === end ? start : `${start}:${end}`;
+};
+
+const shiftSheet = (source: string, change: StructureChange): string => {
+  const data = source.match(/<sheetData\b[^>]*?(?:\/>|>[\s\S]*<\/sheetData>)/i);
+  if (!data) return source;
+  const rows: Array<[number, string]> = [];
+  for (const rowXml of elements(data[0], 'row')) {
+    const open = rowXml.match(/^<row\b[^>]*>/i)?.[0] ?? '';
+    const number = Number(attribute(open, 'r'));
+    const nextNumber = change.axis === 'row' ? movedCell(change, number, 0)?.row : number;
+    if (nextNumber === undefined) continue;
+    const cells = elements(rowXml, 'c').flatMap((cell): Array<[number, string]> => {
+      const reference = attribute(cell.match(/^<c\b[^>]*>/i)?.[0] ?? '', 'r')?.match(/^([a-z]+)/i)?.[1] ?? 'A';
+      const next = movedCell(change, number, columnIndex(reference));
+      if (!next) return [];
+      return [[next.column, cell.replace(/(^<c\b[^>]*?\sr\s*=\s*["'])[^"']*/i, `$1${columnName(next.column)}${next.row}`)]];
+    }).sort(([left], [right]) => left - right).map(([, cell]) => cell);
+    const movedOpen = open.replace(/\/>$/, '>').replace(/\s+spans\s*=\s*("[^"]*"|'[^']*')/i, '').replace(/(\sr\s*=\s*["'])\d+/i, `$1${nextNumber}`);
+    rows.push([nextNumber, `${movedOpen}${cells.join('')}</row>`]);
+  }
+  const inner = rows.sort(([left], [right]) => left - right).map(([, row]) => row).join('');
+  const openTag = data[0].match(/^<sheetData\b[^>]*?\/?>/i)?.[0].replace(/\/>$/, '>') ?? '<sheetData>';
+  const start = data.index ?? 0;
+  const moved = `${source.slice(0, start)}${openTag}${inner}</sheetData>${source.slice(start + data[0].length)}`;
+  const withRanges = moved
+    .replace(/<(mergeCell|hyperlink)\b[^>]*\/>/gi, (element) => {
+      const reference = attribute(element, 'ref') ?? '';
+      const next = shiftRange(reference, change);
+      return next === null ? '' : element.replace(/(\sref\s*=\s*["'])[^"']*/i, `$1${next}`);
+    })
+    .replace(/<autoFilter\b[^>]*>/i, (element) => {
+      const next = shiftRange(attribute(element, 'ref') ?? '', change);
+      return next === null ? element : element.replace(/(\sref\s*=\s*["'])[^"']*/i, `$1${next}`);
+    })
+    .replace(/<dimension\b[^>]*\/>/i, '');
+  if (change.axis !== 'column') return withRanges;
+  return withRanges.replace(/<col\b[^>]*\/>/gi, (element) => {
+    const min = Number(attribute(element, 'min')) - 1;
+    const max = Number(attribute(element, 'max')) - 1;
+    if (change.delta === -1 && min === change.at && max === change.at) return '';
+    const nextMin = min > change.at || (change.delta === 1 && min === change.at) ? min + change.delta : min;
+    const nextMax = max >= change.at ? max + change.delta : max;
+    return element.replace(/(\smin\s*=\s*["'])\d+/i, `$1${nextMin + 1}`).replace(/(\smax\s*=\s*["'])\d+/i, `$1${nextMax + 1}`);
+  });
+};
+
 const setText = (archive: Unzipped, path: string, text: string): void => {
   archive[path] = strToU8(text);
 };
@@ -289,6 +346,33 @@ export const openXlsxDocument = async (bytes: Uint8Array): Promise<WorkbookDocum
     definedNames,
     date1904: /<workbookPr\b[^>]*\bdate1904\s*=\s*["'](?:1|true)["']/i.test(workbook),
     write: async (changes) => {
+      applyChanges(archive, parts, sheets, changes);
+      return packArchive(archive);
+    },
+    canRestructure: (sheet) => !/<(?:tableParts|conditionalFormatting|dataValidations|drawing|legacyDrawing|extLst|filterColumn)\b/i.test(xml(archive, parts[sheet].path))
+      // An array formula on any sheet can read this one, and its block cannot be rewritten cell by cell.
+      && !parts.some((part) => /<f\b[^>]*\bt\s*=\s*["']array["']/i.test(xml(archive, part.path))),
+    restructure: async (change, changes) => {
+      // Shared formulas name their cells by distance, which a move breaks, so
+      // each is written out first.
+      const sharedCells = sheets.flatMap((sheet, index) => Array.from(sheet.cells.values())
+        .filter((cell) => cell.shared !== undefined)
+        .map((cell): CellChange => ({ sheet: index, row: cell.row, column: cell.column, next: { ...cell, shared: undefined }, edited: false })));
+      const rows = new Map<number, Map<number, Map<number, PendingCell>>>();
+      for (const { sheet, row, column, next } of sharedCells) {
+        const sheetRows = rows.get(sheet) ?? new Map<number, Map<number, PendingCell>>();
+        const columns = sheetRows.get(row) ?? new Map<number, PendingCell>();
+        columns.set(column, { cell: next, keepFormula: false });
+        sheetRows.set(row, columns);
+        rows.set(sheet, sheetRows);
+      }
+      for (const [sheet, sheetRows] of rows) setText(archive, parts[sheet].path, patchSheet(xml(archive, parts[sheet].path), sheetRows));
+      setText(archive, parts[change.sheet].path, shiftSheet(xml(archive, parts[change.sheet].path), change));
+      const target = { sheet: sheets[change.sheet].name, axis: change.axis, at: change.at, delta: change.delta };
+      setText(archive, 'xl/workbook.xml', xml(archive, 'xl/workbook.xml').replace(/(<definedName\b[^>]*>)([\s\S]*?)(<\/definedName>)/gi, (_, open: string, text: string, close: string) => (
+        `${open}${escapeXml(shiftSheetReferences(decodeXml(text), target, attribute(open, 'localSheetId') === String(change.sheet)))}${close}`
+      )));
+      for (const part of parts) part.shared.clear();
       applyChanges(archive, parts, sheets, changes);
       return packArchive(archive);
     },

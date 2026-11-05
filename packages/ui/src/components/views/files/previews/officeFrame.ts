@@ -19,6 +19,7 @@ const isEmbedded = (value: string): boolean => /^\s*(?:#|data:image\/)/i.test(va
 export const isOpenableLink = (value: string): boolean => /^(?:https?:\/\/|mailto:)/i.test(value.trim());
 
 export const OFFICE_LINK_MESSAGE = 'openchamber-office-link';
+export const OFFICE_SELECTION_MESSAGE = 'openchamber-office-selection';
 
 /** Keeps a document's look and drops what acts: scripts, handlers, and every URL outside the file. */
 export const cleanDocumentHtml = (html: string): string => {
@@ -68,6 +69,31 @@ document.addEventListener('click', (event) => {
   const target = link.getAttribute('data-oc-href');
   if (!link.getAttribute('href')) event.preventDefault();
   if (target) parent.postMessage({ type: '${OFFICE_LINK_MESSAGE}', url: target }, PARENT_ORIGIN);
+});
+// A selection cannot cross the frame's edge, so the page says what is selected
+// and where, and the app draws the Comment pill. The place is for the agent.
+const placeOf = (node) => {
+  const element = node?.nodeType === 1 ? node : node?.parentElement;
+  const slide = element?.closest('.slide');
+  if (slide) return 'Slide ' + (Array.from(document.querySelectorAll('.slide')).indexOf(slide) + 1);
+  const page = element?.closest('section.docx');
+  return page ? 'Page ' + (Array.from(document.querySelectorAll('section.docx')).indexOf(page) + 1) : '';
+};
+let selectionTimer;
+document.addEventListener('selectionchange', () => {
+  clearTimeout(selectionTimer);
+  selectionTimer = setTimeout(() => {
+    const selection = getSelection();
+    const text = selection.toString().trim();
+    const box = text && selection.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
+    parent.postMessage({
+      type: '${OFFICE_SELECTION_MESSAGE}',
+      text: box ? text : '',
+      place: box ? placeOf(selection.anchorNode) : '',
+      x: box ? box.left + box.width / 2 : 0,
+      y: box ? box.top : 0,
+    }, PARENT_ORIGIN);
+  }, 150);
 });
 const fit = document.getElementById('oc-fit');
 const apply = () => {

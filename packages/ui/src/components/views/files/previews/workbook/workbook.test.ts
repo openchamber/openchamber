@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import init, { Model } from '@ironcalc/wasm';
 
-import { formulaFromOpenDocument, formulaToOpenDocument, shiftFormula } from './formulaText';
+import { formulaFromOpenDocument, formulaToOpenDocument, shiftFormula, shiftSheetReferences } from './formulaText';
 import { cellKey } from './model';
 import { cellInput, openWorkbookDocument, parseCellInput, sheetGrid, WorkbookSession } from './workbookSession';
 
@@ -32,7 +32,7 @@ const open = async (bytes: Uint8Array<ArrayBuffer>, name = 'book.xlsx') => {
 const entry = (bytes: Uint8Array, path: string) => strFromU8(unzipSync(bytes)[path]);
 const shown = (session: WorkbookSession, row: number, column: number, sheet = 0) => session.document.sheets[sheet].cells.get(cellKey(row, column))?.display;
 const edit = async (session: WorkbookSession, row: number, column: number, input: string) => {
-  const outcome = await session.edit(0, row, column, input);
+  const outcome = await session.edit(0, [{ row, column, input }]);
   if (outcome.status !== 'changed') throw new Error(outcome.status);
   return outcome;
 };
@@ -114,7 +114,7 @@ describe('editing an xlsx', () => {
     expect(sheet).toContain('<c r="B1" t="s"><v>0</v></c>');
     expect(entry(outcome.bytes, 'xl/media/image1.png')).toBe('PNG');
     expect(entry(outcome.bytes, 'xl/sharedStrings.xml')).toContain('keep');
-    expect(outcome.previous).toEqual({ kind: 'number', raw: '1', formula: undefined });
+    expect(outcome.previous).toEqual([{ row: 1, column: 0, value: { kind: 'number', raw: '1', formula: undefined } }]);
   });
 
   test('adds cells and rows in order and empties a cell without losing its style', async () => {
@@ -171,7 +171,7 @@ describe('editing an xlsx', () => {
 
   test('refuses a formula it cannot read and changes nothing', async () => {
     const session = await open(xlsx('<row r="1"><c r="A1"><f>1+1</f><v>2</v></c></row>'));
-    expect((await session.edit(0, 1, 0, '=SUM(')).status).toBe('invalid-formula');
+    expect((await session.edit(0, [{ row: 1, column: 0, input: '=SUM(' }])).status).toBe('invalid-formula');
     expect(shown(session, 1, 0)).toBe('2');
   });
 
@@ -229,14 +229,25 @@ describe('editing an xlsx', () => {
       await write(changes);
       return xlsx('<row r="1"><c r="A1"><v>9</v></c></row>');
     };
-    await expect(session.edit(0, 1, 0, '9')).rejects.toThrow('did not read back');
+    await expect(session.edit(0, [{ row: 1, column: 0, input: '9' }])).rejects.toThrow('did not read back');
     expect(shown(session, 1, 1)).toBe('2');
+  });
+
+  test('a batch is one step: it recalculates once for all cells and undoes as one', async () => {
+    const session = await open(xlsx('<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1"><f>A1+B1</f><v>3</v></c></row>'));
+    const outcome = await session.edit(0, [{ row: 1, column: 0, input: '10' }, { row: 1, column: 1, input: '20' }, { row: 2, column: 0, input: '=C1*2' }]);
+    if (outcome.status !== 'changed') throw new Error(outcome.status);
+    expect(shown(session, 1, 2)).toBe('30');
+    expect(shown(session, 2, 0)).toBe('60');
+    await session.restore(0, outcome.previous);
+    expect(shown(session, 1, 2)).toBe('3');
+    expect(shown(session, 2, 0)).toBeUndefined();
   });
 
   test('undo puts text back as text', async () => {
     const session = await open(xlsx('<row r="1"><c r="A1" t="inlineStr"><is><t>00123</t></is></c></row>'));
     const outcome = await edit(session, 1, 0, 'hello');
-    const back = await session.restore(0, 1, 0, outcome.status === 'changed' ? outcome.previous : null);
+    const back = await session.restore(0, outcome.previous);
     expect(back.status).toBe('changed');
     const cell = session.document.sheets[0].cells.get(cellKey(1, 0));
     expect([cell?.kind, cell?.raw]).toEqual(['text', '00123']);
@@ -325,5 +336,107 @@ describe('formula text', () => {
   test('turns ODF formulas into Excel ones and back', () => {
     expect(formulaFromOpenDocument('of:=SUM([.A1:.B2];[$Sheet2.C3])&";"')).toBe('SUM(A1:B2,Sheet2!C3)&";"');
     expect(formulaToOpenDocument('SUM(A1:B2,Sheet2!C3)&","')).toBe('of:=SUM([.A1:.B2];[$Sheet2.C3])&","');
+  });
+});
+
+describe('rows and columns', () => {
+  const table = () => xlsx(`
+    <row r="1" ht="30"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c><c r="C1"><f>A1+B1</f><v>3</v></c></row>
+    <row r="2"><c r="A2"><f>SUM(A1:B1)</f><v>3</v></c></row>
+    <row r="3"><c r="A3" s="2"><v>9</v></c></row>`);
+
+  test('inserting a row moves cells and rewrites references', async () => {
+    const session = await open(table());
+    const { bytes } = await session.restructure({ sheet: 0, axis: 'row', at: 2, delta: 1 });
+    const cells = session.document.sheets[0].cells;
+    expect(cells.get(cellKey(3, 0))?.formula).toBe('SUM(A1:B1)');
+    expect(cells.get(cellKey(4, 0))?.raw).toBe('9');
+    expect(cells.has(cellKey(2, 0))).toBe(false);
+    expect(entry(bytes, 'xl/worksheets/sheet1.xml')).toContain('<c r="A4" s="2">');
+  });
+
+  test('deleting a column rewrites what referred past it, and keeps a broken reference visible', async () => {
+    const session = await open(table());
+    await session.restructure({ sheet: 0, axis: 'column', at: 0, delta: -1 });
+    const cells = session.document.sheets[0].cells;
+    expect(cells.get(cellKey(1, 0))?.raw).toBe('2');
+    expect(cells.get(cellKey(1, 1))?.formula).toBe('#REF!+A1');
+    expect(cells.get(cellKey(1, 1))?.kind).toBe('error');
+  });
+
+  test('a row keeps its height, and undo returns the file', async () => {
+    const session = await open(table());
+    const { bytes, previousBytes } = await session.restructure({ sheet: 0, axis: 'row', at: 1, delta: 1 });
+    expect(entry(bytes, 'xl/worksheets/sheet1.xml')).toContain('<row r="2" ht="30">');
+    await session.restoreBytes(previousBytes);
+    expect(shown(session, 3, 0)).toBe('9');
+    expect(session.document.sheets[0].cells.get(cellKey(2, 0))?.formula).toBe('SUM(A1:B1)');
+  });
+
+  test('merged areas and links move, and a sheet with drawings stays put', async () => {
+    const session = await open(xlsx('', {
+      'xl/worksheets/sheet1.xml': '<worksheet xmlns:r="r"><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="3"><c r="B3"><v>2</v></c></row></sheetData><mergeCells><mergeCell ref="A3:B3"/></mergeCells></worksheet>',
+    }));
+    const drawn = await open(xlsx('', { 'xl/worksheets/sheet1.xml': '<worksheet><sheetData/><drawing r:id="r1"/></worksheet>' }));
+    expect(drawn.canRestructure(0)).toBe(false);
+    expect(session.document.canRestructure(0)).toBe(true);
+    const { bytes } = await session.restructure({ sheet: 0, axis: 'row', at: 2, delta: 1 });
+    expect(entry(bytes, 'xl/worksheets/sheet1.xml')).toContain('<mergeCell ref="A4:B4"/>');
+  });
+
+  test('ODS rows and columns move through repeats', async () => {
+    const ods = pack({ mimetype: 'x', 'content.xml': `<office:document-content><table:table table:name="T">
+      <table:table-row table:number-rows-repeated="2"><table:table-cell office:value-type="float" office:value="1"><text:p>1</text:p></table:table-cell></table:table-row>
+      <table:table-row><table:table-cell table:formula="of:=SUM([.A1:.A2])" office:value-type="float" office:value="2"><text:p>2</text:p></table:table-cell></table:table-row>
+    </table:table></office:document-content>` });
+    const session = await open(ods, 'book.ods');
+    await session.restructure({ sheet: 0, axis: 'row', at: 2, delta: 1 });
+    expect(session.document.sheets[0].cells.get(cellKey(4, 0))?.formula).toBe('SUM(A1:A3)');
+    expect(shown(session, 3, 0)).toBe('1');
+    await session.restructure({ sheet: 0, axis: 'column', at: 0, delta: 1 });
+    expect(session.document.sheets[0].cells.get(cellKey(4, 1))?.formula).toBe('SUM(B1:B3)');
+  });
+
+  test('defined names follow the cells, and formulas using them keep their value', async () => {
+    const session = await open(xlsx('<row r="1"><c r="A1"><v>5</v></c></row><row r="3"><c r="A3"><f>Total*2</f><v>10</v></c></row>', {
+      'xl/workbook.xml': '<workbook xmlns:r="r"><sheets><sheet name="Data" r:id="rId1"/></sheets><definedNames><definedName name="Total">Data!$A$1</definedName></definedNames></workbook>',
+    }));
+    const { bytes } = await session.restructure({ sheet: 0, axis: 'row', at: 1, delta: 1 });
+    expect(entry(bytes, 'xl/workbook.xml')).toContain('>Data!$A$2<');
+    expect(shown(session, 4, 0)).toBe('10');
+  });
+
+  test('a defined name moves only what really points at the sheet', async () => {
+    const shifted = (formula: string, axis: 'row' | 'column', at: number, delta: 1 | -1, own = false) => shiftSheetReferences(formula, { sheet: 'Data', axis, at, delta }, own);
+    expect(shifted('OtherData!$A$1', 'row', 1, 1)).toBe('OtherData!$A$1');
+    expect(shifted('"Data!A1"&Data!A1', 'row', 1, 1)).toBe('"Data!A1"&Data!A2');
+    expect(shifted("'data'!A1+'Data 2'!A1", 'row', 1, 1)).toBe("'data'!A2+'Data 2'!A1");
+    expect(shifted('Data!$A$1:$A$3', 'row', 1, -1)).toBe('Data!$A$1:$A$2');
+    expect(shifted('Data!$A$1:$A$3', 'row', 2, -1)).toBe('Data!$A$1:$A$2');
+    expect(shifted('Data!$A$3', 'row', 3, -1)).toBe('#REF!');
+    expect(shifted('Data!$A:$A', 'column', 0, 1)).toBe('Data!$B:$B');
+    expect(shifted('Data!$A:$A', 'row', 1, 1)).toBe('Data!$A:$A');
+    expect(shifted('Data!$1:$2', 'row', 1, 1)).toBe('Data!$2:$3');
+    expect(shifted('$A$1', 'row', 1, 1)).toBe('$A$1');
+    expect(shifted('$A$1', 'row', 1, 1, true)).toBe('$A$2');
+    expect(shifted('LOG10(Data!B1)', 'column', 0, 1)).toBe('LOG10(Data!C1)');
+  });
+
+  test('an ODS document with named ranges stays put', async () => {
+    const ods = pack({ mimetype: 'x', 'content.xml': `<office:document-content><table:table table:name="T"><table:table-row><table:table-cell office:value-type="float" office:value="1"><text:p>1</text:p></table:table-cell></table:table-row></table:table><table:named-expressions><table:named-range table:name="N" table:cell-range-address="$T.$A$1"/></table:named-expressions></office:document-content>` });
+    expect((await open(ods, 'book.ods')).canRestructure(0)).toBe(false);
+  });
+
+  test('a filter range follows its rows', async () => {
+    const session = await open(xlsx('', {
+      'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row></sheetData><autoFilter ref="A1:A2"/></worksheet>',
+    }));
+    const { bytes } = await session.restructure({ sheet: 0, axis: 'row', at: 1, delta: 1 });
+    expect(entry(bytes, 'xl/worksheets/sheet1.xml')).toContain('<autoFilter ref="A2:A3"/>');
+  });
+
+  test('an array formula on any sheet rules a structure change out', async () => {
+    const session = await open(xlsx('<row r="1"><c r="A1"><f t="array" ref="A1:A2">B1:B2*2</f><v>1</v></c></row>'));
+    expect(session.canRestructure(0)).toBe(false);
   });
 });

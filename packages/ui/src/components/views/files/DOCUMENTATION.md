@@ -387,6 +387,62 @@ through `workbook/WorkbookSession`, and these must stay true:
 - XLSX writes drop `calcChain.xml` and set `fullCalcOnLoad`: a chain naming a cell
   that lost its formula makes Excel offer a repair.
 
+A selection is a rectangle of the sorted view, and its summary is the numbers
+in it. A comment on it, or on text selected inside a document's frame, attaches
+to the composer through `QuoteCommentMenu` as a `file-quote` naming the place
+(sheet and range, slide or page) and never sends. The frame reports its selection
+by message, because a selection cannot cross the frame's edge.
+
+Cells changed from outside stay marked until selected (`cellTraces.ts`). The
+marks live for the app's lifetime and outside the components, since a change on
+disk remounts the preview; the user's own edits move the baseline and mark nothing.
+
+Search and value filters narrow the view the same way sorting does, and the file
+stays as it is. A value filter keeps the values it hides, not the ones it shows,
+because a column can hold more values than the menu lists. Pinned rows stay
+outside the filter and render in the `thead`, so the virtualizer counts body rows
+only: `viewRows` indexes the whole view, `bodyRows` what scrolls. Frozen columns
+and filters live in the view and are not saved.
+
+Rows and columns as a whole change through `TableEditing.structure`, one undo
+step each:
+
+- CSV shifts by byte offset (`shiftDelimitedRow`, `shiftDelimitedColumn`), so
+  every field it does not touch keeps its quoting and line ending.
+- A workbook lets the engine rewrite references in every sheet, then
+  `WorkbookSession.restructure` patches the file and proves the whole of it.
+  Defined names shift through `shiftSheetReferences`, because the engine leaves
+  them. Undo restores the earlier bytes, not the inverse change: a deleted row's
+  cells exist nowhere else.
+- `canRestructure` refuses what would be left behind: a sheet with tables,
+  conditional formatting, data validation, drawings or `extLst`, a protected or
+  partly locked sheet, and any array formula in the workbook, since its block
+  cannot be rewritten cell by cell.
+  An ODS document is refused whole when it holds named ranges, database ranges,
+  validations, conditional formats, drawings, merged or matrix cells: those keep
+  addresses in their own notation or span the lines that would move.
+
+### Data files, archives, notebooks
+
+Each opens as a copy in memory, and nothing it does reaches the disk.
+
+- `DataFileArtifact` shows SQLite through sql.js and Parquet through hyparquet, in
+  the same grid. A query runs on the copy, so a write there changes nothing. A
+  WAL database opens with its flags patched, and the meta line says when a
+  non-empty `-wal` holds changes the copy lacks.
+- `ArchiveArtifact` lists a zip without unpacking it and inflates one entry on
+  click, up to `MAX_ENTRY_BYTES`.
+- `NotebookArtifact` shows cells and saved outputs and runs nothing. HTML output
+  is the notebook's own content, so it stays in `officeFrameDocument`.
+
+### Export
+
+`documentExport.ts` turns Markdown into docx or a printable page, and a table into
+xlsx. A file lands next to its source under the next free name and never replaces
+one; the upload runs with `overwrite: false` so a stat that lied cannot change
+that. A runtime without `uploadFile` downloads it instead. PDF is the system print
+dialog on a hidden frame, so it is off on phones.
+
 ### Why IronCalc for formulas
 
 HyperFormula covers more but is GPL, which an MIT app cannot ship. IronCalc is

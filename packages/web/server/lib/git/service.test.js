@@ -27,6 +27,8 @@ import {
   getRepositoryRoot,
   getUnpushedBranchCounts,
   getRangeDiff,
+  getCommitFileDiff,
+  getRangeFileVersions,
   getBranchBase,
   getCommitDiff,
   getCommitFiles,
@@ -6884,5 +6886,79 @@ describe('worktree task titles', () => {
     expect(entry?.pinnedAt).toBe(1234);
     expect(entry?.pinList).toBeUndefined();
     await expect(setWorktreePinned(linked, true, 'bad list')).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe.runIf(canRunGit())('getRangeFileVersions', () => {
+  it('reads a binary file at the merge base and at the head, untouched', async () => {
+    const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-range-versions-'));
+    const run = (...args) => execFileSync('git', args, { cwd: repository });
+    run('init', '-q', '-b', 'main');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    const before = Buffer.from([0x50, 0x4b, 0x00, 0xff, 0x01]);
+    const after = Buffer.from([0x50, 0x4b, 0x00, 0xff, 0x02]);
+    fs.writeFileSync(path.join(repository, 'book.xlsx'), before);
+    run('add', '.');
+    run('commit', '-qm', 'base');
+    run('switch', '-qc', 'feature');
+    fs.writeFileSync(path.join(repository, 'book.xlsx'), after);
+    run('commit', '-qam', 'change');
+    const versions = await getRangeFileVersions(repository, { base: 'main', head: 'feature', path: 'book.xlsx' });
+    expect(versions.original).toBe(`data:application/octet-stream;base64,${before.toString('base64')}`);
+    expect(versions.modified).toBe(`data:application/octet-stream;base64,${after.toString('base64')}`);
+    fs.rmSync(repository, { recursive: true, force: true });
+  });
+
+  it('finds a renamed file under its old name on the base side', async () => {
+    const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-range-rename-'));
+    const run = (...args) => execFileSync('git', args, { cwd: repository });
+    run('init', '-q', '-b', 'main');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    const before = Buffer.from([0x50, 0x4b, 0x00, 0xff, 0x01]);
+    fs.mkdirSync(path.join(repository, 'old'));
+    fs.mkdirSync(path.join(repository, 'new'));
+    fs.writeFileSync(path.join(repository, 'old', 'book.xlsx'), before);
+    fs.writeFileSync(path.join(repository, 'new', '.keep'), '');
+    run('add', '.');
+    run('commit', '-qm', 'base');
+    run('switch', '-qc', 'feature');
+    run('mv', 'old/book.xlsx', 'new/report.xlsx');
+    run('commit', '-qm', 'rename');
+    const dataUrl = `data:application/octet-stream;base64,${before.toString('base64')}`;
+    const range = await getRangeFileVersions(repository, { base: 'main', head: 'feature', path: 'new/report.xlsx', previousPath: 'old/book.xlsx' });
+    expect(range).toEqual({ original: dataUrl, modified: dataUrl });
+    const hash = run('rev-parse', 'HEAD').toString().trim();
+    const commit = await getCommitFileDiff(repository, hash, 'new/report.xlsx', true, 'old/book.xlsx');
+    expect(commit.original).toBe(dataUrl);
+    expect(commit.modified).toBe(dataUrl);
+    fs.rmSync(repository, { recursive: true, force: true });
+  });
+
+  it('reads a rename inside a subfolder, past a file of the old name at the root', async () => {
+    const repository = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-range-subfolder-')));
+    const run = (...args) => execFileSync('git', args, { cwd: repository });
+    run('init', '-q', '-b', 'main');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    const unrelated = Buffer.from([0x50, 0x4b, 0x09]);
+    const before = Buffer.from([0x50, 0x4b, 0x01]);
+    fs.mkdirSync(path.join(repository, 'sub'));
+    fs.writeFileSync(path.join(repository, 'old.xlsx'), unrelated);
+    fs.writeFileSync(path.join(repository, 'sub', 'old.xlsx'), before);
+    run('add', '.');
+    run('commit', '-qm', 'base');
+    run('switch', '-qc', 'feature');
+    run('mv', 'sub/old.xlsx', 'sub/new.xlsx');
+    run('commit', '-qm', 'rename');
+    const dataUrl = `data:application/octet-stream;base64,${before.toString('base64')}`;
+    const directory = path.join(repository, 'sub');
+    const range = await getRangeFileVersions(directory, { base: 'main', head: 'feature', path: 'new.xlsx', previousPath: 'old.xlsx' });
+    expect(range).toEqual({ original: dataUrl, modified: dataUrl });
+    const hash = run('rev-parse', 'HEAD').toString().trim();
+    const commit = await getCommitFileDiff(directory, hash, 'new.xlsx', true, 'old.xlsx');
+    expect(commit.original).toBe(dataUrl);
+    fs.rmSync(repository, { recursive: true, force: true });
   });
 });

@@ -930,15 +930,19 @@ export async function getGitCommitDiff(directory: string, options: import('./api
   return gitHttp.getGitCommitDiff(directory, options);
 }
 
+/** Goes straight to the server: only OpenChamber's own git routes hand out both versions of a file. */
+export const getGitRangeFileVersions = gitHttp.getGitRangeFileVersions;
+
 export async function getCommitFileDiff(
   directory: string,
   hash: string,
   filePath: string,
-  isBinary: boolean
+  isBinary: boolean,
+  previousPath?: string,
 ): Promise<import('./api/types').CommitFileDiffResponse> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getCommitFileDiff ? runtime.getCommitFileDiff(directory, hash, filePath, isBinary) : unsupportedByRuntime('getCommitFileDiff');
-  return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary);
+  return gitHttp.getCommitFileDiff(directory, hash, filePath, isBinary, previousPath);
 }
 
 export async function getGitIdentities(): Promise<import('./api/types').GitIdentityProfile[]> {

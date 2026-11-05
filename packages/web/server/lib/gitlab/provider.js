@@ -727,8 +727,8 @@ export function createProvider({
         .readUpload(directory, project, remote, { secret, filename, range, signal, linked: context?.linked }),
       readChangeRequestPatch: ({ session, directory, number, sourceRepo, remote, linked }) => serviceFor(session)
         .changeRequestPatch(directory, number, { project: projectSelector(sourceRepo), remote, linked }),
-      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, linked }) => serviceFor(session)
-        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, linked }),
+      readChangeRequestFile: ({ session, directory, number, sourceRepo, remote, path, previousPath, status, binary, linked }) => serviceFor(session)
+        .changeRequestFileContents(directory, number, { project: projectSelector(sourceRepo), remote, path, previousPath, status, binary, linked }),
       /** Live state of known merge requests and issues. */
       liveSummaries: ({ session, refs, issueRefs, details }) => serviceFor(session, { canonicalReads: false }).liveSummaries({ refs, issueRefs, details }),
       /** A merge request's head on the context's primary project network, by number, for a worktree made from it. */

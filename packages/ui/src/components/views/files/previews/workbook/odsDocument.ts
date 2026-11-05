@@ -2,7 +2,7 @@ import { strToU8, type Unzipped } from 'fflate';
 
 import { attribute, decodeXml, elements, expandOdfSpaces, odsSheetName, repeatCount, tagBlocks, unzipWorkbook, xml } from '@/sync/document-attachments';
 import { formulaFromOpenDocument, formulaToOpenDocument } from './formulaText';
-import { cellKey, type BookCell, type BookSheet, type CellChange, type CellKind, type WorkbookDocument } from './model';
+import { cellKey, type BookCell, type BookSheet, type CellChange, type CellKind, type StructureChange, type WorkbookDocument } from './model';
 import { escapeXml, packArchive } from './rezip';
 
 const CONTENT = 'content.xml';
@@ -174,6 +174,47 @@ const patchTable = (table: string, changes: Map<number, RowChanges>): string => 
   return result;
 };
 
+const shiftColumn = (rowXml: string, at: number, delta: 1 | -1): string => {
+  const output: string[] = [];
+  let column = 0;
+  let done = false;
+  for (const element of elements(rowXml, CELL)) {
+    const repeat = repeatCount(element, COLUMNS_REPEATED);
+    if (!done && at >= column && at < column + repeat) {
+      done = true;
+      if (delta === 1) {
+        if (at > column) output.push(withRepeat(element, COLUMNS_REPEATED, at - column));
+        output.push('<table:table-cell/>');
+        output.push(withRepeat(element, COLUMNS_REPEATED, column + repeat - at));
+      } else if (repeat > 1) {
+        output.push(withRepeat(element, COLUMNS_REPEATED, repeat - 1));
+      }
+    } else {
+      output.push(element);
+    }
+    column += repeat;
+  }
+  return `${openTagOf(rowXml).replace(/\/>$/, '>')}${output.join('')}</table:table-row>`;
+};
+
+const shiftTable = (table: string, { axis, at, delta }: StructureChange): string => {
+  let row = 1;
+  let done = false;
+  return table.replace(new RegExp(`<${ROW}(?=[\\s/>])[^>]*?\\/>|<${ROW}(?=[\\s/>])[^>]*>[\\s\\S]*?<\\/${ROW}>`, 'gi'), (rowXml) => {
+    if (axis === 'column') return shiftColumn(rowXml, at, delta);
+    const repeat = repeatCount(rowXml, ROWS_REPEATED);
+    const hit = !done && at >= row && at < row + repeat;
+    const first = row;
+    row += repeat;
+    if (!hit) return rowXml;
+    done = true;
+    if (delta === -1) return repeat > 1 ? withRepeat(rowXml, ROWS_REPEATED, repeat - 1) : '';
+    const blank = `<${ROW}><table:table-cell/></${ROW}>`;
+    const before = at > first ? withRepeat(rowXml, ROWS_REPEATED, at - first) : '';
+    return `${before}${blank}${withRepeat(rowXml, ROWS_REPEATED, first + repeat - at)}`;
+  });
+};
+
 const patchContent = (content: string, changes: CellChange[]): string => {
   const bySheet = new Map<number, Map<number, RowChanges>>();
   for (const change of changes) {
@@ -201,6 +242,18 @@ export const openOdsDocument = async (bytes: Uint8Array): Promise<WorkbookDocume
     date1904: false,
     write: async (changes) => {
       archive = { ...archive, [CONTENT]: strToU8(patchContent(xml(archive, CONTENT), changes)) };
+      return packArchive(archive, ['mimetype']);
+    },
+    // Named ranges, filters, charts and the like hold addresses in their own
+    // notation, and merged or array cells span the lines that would move.
+    canRestructure: () => !/<(?:table:named-range|table:named-expression|table:database-range|table:content-validation|table:covered-table-cell|calcext:conditional-format|draw:frame|table:shapes)\b|table:number-matrix-/i.test(xml(archive, CONTENT)),
+    restructure: async (change, changes) => {
+      let index = -1;
+      const shifted = xml(archive, CONTENT).replace(/<table:table\b[^>]*>[\s\S]*?<\/table:table>/gi, (table) => {
+        index += 1;
+        return index === change.sheet ? shiftTable(table, change) : table;
+      });
+      archive = { ...archive, [CONTENT]: strToU8(patchContent(shifted, changes)) };
       return packArchive(archive, ['mimetype']);
     },
   };

@@ -6,6 +6,7 @@ export * from './useLineNumberDragSelection';
 export * from './PierreDiffCommentUtils';
 export * from './PierreDiffCommentOverlays';
 export * from './FilePreviewCommentMenu';
+export * from './QuoteCommentMenu';
 export * from './useWholeFileComment';
 export * from './WholeFileCommentButton';
 export * from './wholeFileComment';

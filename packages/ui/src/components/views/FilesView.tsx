@@ -64,7 +64,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getRevealLabelKey } from '@/lib/utils';
-import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isOfficePreviewFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, getImageMimeType, isAudioFile, isBinaryFile, isDelimitedTableFile, isDrawioFile, isExcalidrawFile, isFontFile, isImageFile, isMermaidFile, isArchiveFile, isDataFile, isNotebookFile, isOfficePreviewFile, isPdfFile, isSvgFile, isVideoFile, looksLikeBinaryText } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
 import { MAX_OFFICE_PREVIEW_BYTES, MAX_OPEN_FILE_BYTES } from '@/lib/fileOpenLimits';
 import { LARGE_FILE_CHAR_THRESHOLD, initialFileTextMode, makeFileContentCacheKey, prepareFileEditorContent, serializeEditorContent, type FileLineEnding } from './fileEditorContent';
@@ -98,6 +98,10 @@ import { useFileTreeUpload } from './files/useFileTreeUpload';
 import { moveWorkspacePath } from './files/moveWorkspacePath';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
 import { BinaryArtifact } from './files/previews/BinaryArtifact';
+import { delimiterForPath, parseDelimitedText } from './files/previews/delimitedText';
+import { ArchiveArtifact } from './files/previews/ArchiveArtifact';
+import { DataFileArtifact } from './files/previews/DataFileArtifact';
+import { NotebookArtifact } from './files/previews/NotebookArtifact';
 import { OfficeArtifact } from './files/previews/OfficeArtifact';
 import { PdfArtifact } from './files/previews/PdfArtifact';
 import { FontArtifact } from './files/previews/FontArtifact';
@@ -2823,6 +2827,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const isDrawio = !claimedByGuest && !enterpriseMode && Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
   const isMermaid = !claimedByGuest && Boolean(selectedFile?.path && isMermaidFile(selectedFile.path));
   const isTable = !claimedByGuest && Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
+  const isNotebook = !claimedByGuest && Boolean(selectedFile?.path && isNotebookFile(selectedFile.path));
+  // Both are text with a richer view that the same toggle switches.
+  const isTableView = isTable || isNotebook;
   const hasCanvas = claimedByGuest;
   // A binary editor checks the bytes it reads too; the stat size spares a read.
   const canMountCanvas = claimedByGuest && (binaryCanvas
@@ -2838,15 +2845,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     && !(isHtml && htmlViewMode === 'preview')
     && !(isSelectedSvg && svgViewMode === 'preview')
     && !(isMermaid && mermaidViewMode === 'preview')
-    && !(isTable && tableViewMode === 'table');
+    && !(isTableView && tableViewMode === 'table');
   const isEditingFile = (isMarkdown && mdViewMode === 'edit')
     || (isHtml && htmlViewMode === 'edit')
     || (hasCanvas && (canvasViewMode === 'edit' || !canMountCanvas))
     || (isSelectedSvg && svgViewMode === 'edit')
     || (isMermaid && mermaidViewMode === 'edit')
-    || (isTable && tableViewMode === 'text')
+    || (isTableView && tableViewMode === 'text')
     || (isJson && jsonViewMode === 'text')
-    || (!isMarkdown && !isHtml && !isJson && !hasCanvas && !isSelectedSvg && !isMermaid && !isTable && textViewMode === 'edit');
+    || (!isMarkdown && !isHtml && !isJson && !hasCanvas && !isSelectedSvg && !isMermaid && !isTableView && textViewMode === 'edit');
   // The CodeMirror source is on screen. A draw.io file shows it whenever its diagram is not;
   // a read-only file in its source mode shows the code preview instead.
   const sourceEditorShown = (isDrawio ? drawioViewMode !== 'preview' : isEditingFile)
@@ -3867,6 +3874,39 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   }, [fetchRawFile]);
 
   // Named by path: an edit can still be saving after the viewer moved on.
+  // An export lands next to its file, where the agent sees it too.
+  const exportDocument = async (format: 'docx' | 'pdf' | 'xlsx') => {
+    if (!selectedFile) return;
+    const { markdownToDocx, markdownToPrintableHtml, printHtml, rowsToXlsx } = await import('./files/previews/documentExport');
+    if (format === 'pdf') {
+      printHtml(markdownToPrintableHtml(draftContent, selectedFile.name));
+      return;
+    }
+    const table = isTable ? parseDelimitedText(draftContent, delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
+    const bytes = table ? await rowsToXlsx(selectedFile.name, [table.header, ...table.rows]) : await markdownToDocx(draftContent);
+    const stem = selectedFile.path.replace(/\.[^./\\]+$/, '');
+    // A file already there is the user's: the export takes the next free name.
+    let target = `${stem}.${format}`;
+    for (let suffix = 2; suffix < 1000 && await readFileStat(target).catch(() => null); suffix += 1) {
+      target = `${stem} ${suffix}.${format}`;
+    }
+    const name = target.split(/[/\\]/).pop() ?? target;
+    if (!files.uploadFile) {
+      const url = URL.createObjectURL(new Blob([bytes]));
+      const link = Object.assign(document.createElement('a'), { href: url, download: name });
+      link.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    try {
+      const written = await files.uploadFile(target, new Blob([bytes]), { overwrite: false });
+      if (!written?.success) throw new Error('write failed');
+      toast.success(t('filesView.export.saved', { name }));
+    } catch {
+      toast.error(t('filesView.toast.writeFileFailed'));
+    }
+  };
+
   const saveOfficeBytes = React.useCallback(async (path: string, bytes: Uint8Array<ArrayBuffer>): Promise<boolean> => {
     if (!files.uploadFile) return false;
     // No baseline while writing: the poll records the new stat instead of
@@ -3938,6 +3978,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
     if (isUnsupportedBinary) {
       const officeTooLarge = artifactSize !== null && artifactSize > MAX_OFFICE_PREVIEW_BYTES;
+      if (isArchiveFile(file.path) && !officeTooLarge) {
+        return <ArchiveArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadOfficeBytes} actions={binaryFileActions} />;
+      }
+      if (isDataFile(file.path) && !officeTooLarge) {
+        return <DataFileArtifact key={`${file.path}:${fileContentRevision}`} name={file.name} path={file.path} sizeBytes={artifactSize} loadBytes={loadOfficeBytes} actions={binaryFileActions} />;
+      }
       if (isOfficePreviewFile(file.path) && !officeTooLarge) {
         return (
           <OfficeArtifact
@@ -3957,9 +4003,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           path={file.path}
           sizeBytes={artifactSize}
           download={binaryFileActions}
-          description={isOfficePreviewFile(file.path) ? t('filesView.artifact.office.tooLarge') : undefined}
+          description={isOfficePreviewFile(file.path) || isArchiveFile(file.path) || isDataFile(file.path) ? t('filesView.artifact.office.tooLarge') : undefined}
         />
       );
+    }
+    if (isNotebook && tableViewMode === 'table') {
+      return <NotebookArtifact content={fileContent} sizeBytes={artifactSize} />;
     }
     if (isTable && tableViewMode === 'table') {
       return (
@@ -4369,7 +4418,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       else if (isJson) saveJsonViewMode('text');
       else if (isSelectedSvg) saveSvgViewMode('edit');
       else if (isMermaid) saveMermaidViewMode('edit');
-      else if (isTable) saveTableViewMode('text');
+      else if (isTableView) saveTableViewMode('text');
       else saveTextViewMode('edit');
     };
 
@@ -4390,10 +4439,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       : isHtml ? previewToggle(getHtmlViewMode() === 'preview', (on) => saveHtmlViewMode(on ? 'preview' : 'edit'))
       : isSelectedSvg ? previewToggle(svgViewMode === 'preview', (on) => saveSvgViewMode(on ? 'preview' : 'edit'))
       : isMermaid ? previewToggle(mermaidViewMode === 'preview', (on) => saveMermaidViewMode(on ? 'preview' : 'edit'))
-      : isTable ? {
+      : isTableView ? {
         id: 'mode',
-        label: t('documentToolbar.tableView'),
-        icon: 'table-2',
+        label: isNotebook ? previewLabel : t('documentToolbar.tableView'),
+        icon: isNotebook ? 'eye' : 'table-2',
         pressed: tableViewMode === 'table',
         onSelect: () => saveTableViewMode(tableViewMode === 'table' ? 'text' : 'table'),
         pinned: true,
@@ -4428,7 +4477,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     } : null;
 
     const searchOpen = mdPreview ? mdPreviewFindOpen : (sourceEditorShown && isSearchOpen);
-    const searchAction: ToolbarAction | null = hasSourceEditor ? {
+    // A table has its own search, which filters rows.
+    const searchAction: ToolbarAction | null = hasSourceEditor && !(isTable && tableViewMode === 'table') ? {
       id: 'search',
       label: t('filesView.editor.findInFile'),
       icon: 'search',
@@ -4533,6 +4583,24 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         label: t('filesView.editor.saveFile'),
         icon: 'download',
         onSelect: downloadSelectedFile,
+      },
+      isMarkdown && {
+        id: 'export-word',
+        label: t('filesView.export.word'),
+        icon: 'download',
+        onSelect: () => void exportDocument('docx'),
+      },
+      isMarkdown && !isMobile && {
+        id: 'export-pdf',
+        label: t('filesView.export.pdf'),
+        icon: 'download',
+        onSelect: () => void exportDocument('pdf'),
+      },
+      isTable && {
+        id: 'export-excel',
+        label: t('filesView.export.excel'),
+        icon: 'download',
+        onSelect: () => void exportDocument('xlsx'),
       },
     ];
 

@@ -1,10 +1,12 @@
 import type { Model } from '@ironcalc/wasm';
 
-import { cellKey, type BookCell, type CellKind, type CellValue, type WorkbookDocument } from './model';
+import { shiftSheetReferences } from './formulaText';
+import { cellKey, type BookCell, type CellKind, type CellValue, type StructureChange, type WorkbookDocument } from './model';
 
 export type EngineModel = Pick<Model,
   'evaluate' | 'getCellContent' | 'getCellType' | 'getFormattedCellValue' | 'newDefinedName' | 'newSheet'
-  | 'pauseEvaluation' | 'renameSheet' | 'resumeEvaluation' | 'setUserInput' | 'updateRangeStyle'>;
+  | 'pauseEvaluation' | 'renameSheet' | 'resumeEvaluation' | 'setUserInput' | 'updateRangeStyle'
+  | 'insertRows' | 'deleteRows' | 'insertColumns' | 'deleteColumns' | 'updateDefinedName'>;
 
 type EngineCell = { sheet: number; row: number; column: number };
 export type Recalculated = EngineCell & CellValue;
@@ -96,6 +98,37 @@ export class FormulaEngine {
   /** The computed result of a formula cell. */
   result(sheet: number, row: number, column: number): Recalculated | undefined {
     return this.results.get(this.key(sheet, row, column));
+  }
+
+  /** Moves the cells; the engine rewrites every reference to them, in all sheets. */
+  restructure({ sheet, axis, at, delta }: StructureChange): void {
+    if (axis === 'row' && delta === 1) this.model.insertRows(sheet, at, 1);
+    else if (axis === 'row') this.model.deleteRows(sheet, at, 1);
+    else if (delta === 1) this.model.insertColumns(sheet, at + 1, 1);
+    else this.model.deleteColumns(sheet, at + 1, 1);
+    // The engine leaves defined names where they were.
+    const target = { sheet: this.document.sheets[sheet].name, axis, at, delta };
+    for (const { name, scope, formula } of this.document.definedNames) {
+      const next = shiftSheetReferences(formula, target, scope === sheet);
+      if (next === formula) continue;
+      try {
+        this.model.updateDefinedName(name, scope, name, scope, next);
+      } catch {
+        // A name the engine never took in has nothing to update.
+      }
+    }
+    this.evaluate();
+  }
+
+  /** A formula cell as it stands now: its text and result. */
+  formulaAt(cell: EngineCell) {
+    const { kind, raw } = this.read(cell);
+    const value: CellValue = { kind, raw };
+    return { formula: this.model.getCellContent(cell.sheet, cell.row, cell.column + 1).replace(/^=/, ''), value };
+  }
+
+  isUnsupported(sheet: number, row: number, column: number): boolean {
+    return this.unsupported.has(this.key(sheet, row, column));
   }
 
   /** `#ERROR!` means the engine could not read the formula at all. */

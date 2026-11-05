@@ -64,6 +64,8 @@ describe('OfficeArtifact', () => {
       definedNames: [],
       date1904: false,
       write: async () => bytes,
+      canRestructure: () => false,
+      restructure: async () => bytes,
     };
     const preview: OfficePreview = { kind: 'workbook', document, bytes };
     const container = await render(

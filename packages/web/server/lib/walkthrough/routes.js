@@ -155,6 +155,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
         status,
         sourceRepo: source.sourceRepo ?? null,
         revision: source.revision,
+        binary: query.get('binary') === 'true',
       }));
     } catch (error) {
       respondWithError(res, error, 'Failed to load pull request file');

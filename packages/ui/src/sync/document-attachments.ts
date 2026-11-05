@@ -234,7 +234,7 @@ const inlineText = (
   const tokenPattern = /<(?:w:t|a:t|text:span)\b[^>]*>([\s\S]*?)<\/(?:w:t|a:t|text:span)>|<(?:w:tab|text:tab)\b[^>]*\/?>|<(?:w:br|a:br|text:line-break)\b[^>]*\/?>|<(?:a:blip|v:imagedata)\b[^>]*>|<draw:image\b[^>]*>/gi
   for (const match of block.matchAll(tokenPattern)) {
     if (match[1] !== undefined) {
-      pieces.push(decodeXml(match[1]).replace(/<[^>]+>/g, ""))
+      pieces.push(decodeXml(match[1].replace(/<[^>]+>/g, "")))
       continue
     }
     if (/tab/i.test(match[0])) {
@@ -415,7 +415,7 @@ const cellValue = (cell: string, sharedStrings: string[], numberFormats: Array<N
   const tag = cell.match(/^<c\b[^>]*>/i)?.[0] ?? ""
   const type = attribute(tag, "t")
   if (type === "inlineStr") {
-    return Array.from(cell.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1]).replace(/<[^>]+>/g, "")).join("")
+    return Array.from(cell.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1].replace(/<[^>]+>/g, ""))).join("")
   }
   const value = cell.match(/<v\b[^>]*>([\s\S]*?)<\/v>/i)?.[1] ?? ""
   if (type === "s") return sharedStrings[Number(value)] ?? ""
@@ -550,7 +550,7 @@ const xlsxSheets = (archive: Unzipped): XlsxSheet[] | undefined => {
   if (!workbookXml) return
   const workbookRelationships = parseRelationships(archive, workbookPath)
   const sharedStrings = tagBlocks(xml(archive, "xl/sharedStrings.xml"), "si")
-    .map((item) => Array.from(item.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1]).replace(/<[^>]+>/g, "")).join(""))
+    .map((item) => Array.from(item.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/gi), (match) => decodeXml(match[1].replace(/<[^>]+>/g, ""))).join(""))
   const numberFormats = spreadsheetNumberFormats(archive, workbookXml)
   const sheets: XlsxSheet[] = []
 

@@ -116,7 +116,12 @@ export const setDelimitedField = (content: string, delimiter: ',' | '\t', record
   let fieldStart = start;
   let quoted = false;
   let recordHasContent = false;
-  const replace = (end: number) => `${content.slice(0, fieldStart)}${fieldText(value, delimiter)}${content.slice(end)}`;
+  // An empty record would read as a blank line and fall out of the table.
+  const fieldOf = (lone: boolean) => (value === '' && lone ? '""' : fieldText(value, delimiter));
+  const replace = (end: number) => {
+    const lone = fieldIndex === 0 && (end === content.length || content[end] === '\n' || content[end] === '\r');
+    return `${content.slice(0, fieldStart)}${fieldOf(lone)}${content.slice(end)}`;
+  };
   const pad = (end: number) => `${content.slice(0, end)}${delimiter.repeat(column - fieldIndex)}${fieldText(value, delimiter)}${content.slice(end)}`;
   for (let index = start; index < content.length; index += 1) {
     const char = content[index];
@@ -161,4 +166,81 @@ export const setDelimitedField = (content: string, delimiter: ',' | '\t', record
   const separator = content.length === start || /[\r\n]$/.test(content) ? '' : ending;
   const blankLines = ending.repeat(Math.max(0, record - recordIndex)).replace(new RegExp(ending, 'g'), `${delimiter}${ending}`);
   return `${content}${separator}${blankLines}${delimiter.repeat(column)}${fieldText(value, delimiter)}${ending}`;
+};
+
+type FieldSpan = { start: number; end: number };
+
+/** Where each record and field sits in the text, blank lines skipped the way the parser skips them. */
+const recordSpans = (content: string, delimiter: string): Array<{ start: number; end: number; fields: FieldSpan[] }> => {
+  const records: Array<{ start: number; end: number; fields: FieldSpan[] }> = [];
+  const first = content.charCodeAt(0) === 0xfeff ? 1 : 0;
+  let start = first;
+  let fieldStart = first;
+  let fields: FieldSpan[] = [];
+  let quoted = false;
+  let hasContent = false;
+  const close = (end: number, next: number) => {
+    fields.push({ start: fieldStart, end });
+    if (hasContent || fields.length > 1 || end > fieldStart) records.push({ start, end: next, fields });
+    fields = [];
+    start = next;
+    fieldStart = next;
+    hasContent = false;
+  };
+  for (let index = first; index < content.length; index += 1) {
+    const char = content[index];
+    if (quoted) {
+      if (char === '"') {
+        if (content[index + 1] === '"') index += 1;
+        else quoted = false;
+      }
+    } else if (char === '"') {
+      quoted = true;
+      hasContent = true;
+    } else if (char === delimiter) {
+      fields.push({ start: fieldStart, end: index });
+      fieldStart = index + 1;
+      hasContent = true;
+    } else if (char === '\n' || char === '\r') {
+      const next = char === '\r' && content[index + 1] === '\n' ? index + 2 : index + 1;
+      close(index, next);
+      index = next - 1;
+    } else {
+      hasContent = true;
+    }
+  }
+  if (fieldStart < content.length || fields.length > 0) close(content.length, content.length);
+  return records;
+};
+
+/** A row of empty fields before `record`, or `record` gone; every other byte stays. */
+export const shiftDelimitedRow = (content: string, delimiter: ',' | '\t', record: number, delta: 1 | -1): string => {
+  const records = recordSpans(content, delimiter);
+  const target = records[record];
+  if (!target) return content;
+  if (delta === -1) return `${content.slice(0, target.start)}${content.slice(target.end)}`;
+  const ending = content.includes('\r\n') ? '\r\n' : '\n';
+  const width = Math.max(1, ...records.map((entry) => entry.fields.length));
+  return `${content.slice(0, target.start)}${width === 1 ? '""' : delimiter.repeat(width - 1)}${ending}${content.slice(target.start)}`;
+};
+
+/** A column of empty fields before `column`, or `column` gone. */
+export const shiftDelimitedColumn = (content: string, delimiter: ',' | '\t', column: number, delta: 1 | -1): string => {
+  const records = recordSpans(content, delimiter);
+  let result = content;
+  // From the end, so earlier offsets stay true.
+  for (const { fields } of [...records].reverse()) {
+    const field = fields[column];
+    if (delta === 1) {
+      const at = field ? field.start : fields[fields.length - 1].end;
+      const text = field ? delimiter : delimiter.repeat(column - fields.length + 1);
+      result = `${result.slice(0, at)}${text}${result.slice(at)}`;
+    } else if (field) {
+      const isLast = column === fields.length - 1;
+      const from = isLast && column > 0 ? fields[column - 1].end : field.start;
+      const to = isLast ? field.end : fields[column + 1].start;
+      result = `${result.slice(0, from)}${result.slice(to)}`;
+    }
+  }
+  return result;
 };

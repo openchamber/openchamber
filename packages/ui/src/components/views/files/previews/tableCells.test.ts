@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { cellParts, sortedRowOrder } from './tableCells';
+import { cellParts, fromTsv, selectionSummary, sortedRowOrder, toTsv } from './tableCells';
 
 describe('sorting', () => {
   const rows = [['10'], ['9'], [''], ['apple'], ['12.5%'], ['Banana'], ['1,000']];
@@ -29,5 +29,39 @@ describe('links in cells', () => {
     expect(cellParts('Report', 'https://a.dev')).toEqual([{ text: 'Report', href: 'https://a.dev' }]);
     expect(cellParts('Report', 'javascript:alert(1)')).toEqual([{ text: 'Report' }]);
     expect(cellParts('javascript:alert(1)')).toEqual([{ text: 'javascript:alert(1)' }]);
+  });
+});
+
+describe('a selection', () => {
+  test('adds up what is numeric and counts everything filled', () => {
+    expect(selectionSummary(['1', '2.5', '', 'x', '1,000'])).toEqual({ count: 4, sum: '1003.5', average: '334.5' });
+    expect(selectionSummary(['0.1', '0.2'])?.sum).toBe('0.3');
+    expect(selectionSummary(['a'])).toEqual({ count: 1, sum: '', average: '' });
+    expect(selectionSummary(['', ' '])).toBeNull();
+  });
+
+  test('goes to the clipboard the way spreadsheets write it', () => {
+    expect(toTsv([['a', 'b\tc'], ['line\nbreak', 'say "hi"']])).toBe('a\t"b\tc"\n"line\nbreak"\t"say ""hi"""');
+  });
+
+  test('comes back from the clipboard with empty rows in place', () => {
+    expect(fromTsv('x\n\ny\n')).toEqual([['x'], [''], ['y']]);
+    expect(fromTsv('a\t\tc\r\n"l\nb"\t"q""r"')).toEqual([['a', '', 'c'], ['l\nb', 'q"r']]);
+  });
+});
+
+describe('a chart of a selection', () => {
+  test('the first text column names the points, numeric columns are series', async () => {
+    const { chartProgram } = await import('./tableChart');
+    const program = chartProgram([['Pears', '3', 'x'], ['Kiwi', '2', 'y']], ['Item', 'Qty', 'Note']);
+    expect(program).toContain('BarChart(["Pears","Kiwi"], [s0])');
+    expect(program).toContain('s0 = Series("Qty", [3,2])');
+    expect(program).not.toContain('Note');
+  });
+
+  test('dates draw a line, and no numbers draw nothing', async () => {
+    const { chartProgram } = await import('./tableChart');
+    expect(chartProgram([['2024-01', '1'], ['2024-02', '2']], [])).toContain('LineChart');
+    expect(chartProgram([['a'], ['b']], ['x'])).toBeNull();
   });
 });

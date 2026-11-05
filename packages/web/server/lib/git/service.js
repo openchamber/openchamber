@@ -3679,6 +3679,51 @@ export async function getRangeDiff(directory, { base, head, path: filePath, cont
   return diff;
 }
 
+/** A document at the merge base and at the head of a range, the checked-out files included when asked. */
+export async function getRangeFileVersions(directory, { base, head, path: filePath, previousPath, includeWorkingTree = false } = {}) {
+  const { directoryPath, repoRoot, git } = await createRepositoryGitContext(directory);
+  const baseRef = String(base ?? '').trim();
+  const headRef = String(head ?? '').trim();
+  if (!baseRef || !headRef || !filePath) throw new Error('base, head and path are required');
+  await assertRangeRefsResolve(git, repoRoot, [baseRef, headRef]);
+  const headCommit = (await git.raw(['rev-parse', '--verify', '--end-of-options', `${headRef}^{commit}`])).trim();
+  const mergeBase = (await git.raw(['merge-base', baseRef, headCommit])).trim();
+  const absolutePath = path.resolve(directoryPath, filePath);
+  const candidates = new Set([path.resolve(repoRoot, filePath), absolutePath]);
+  const repoPaths = Array.from(candidates)
+    .filter((candidate) => isInsideOrSameDirectory(repoRoot, candidate))
+    .map((candidate) => toGitPath(path.relative(repoRoot, candidate)));
+  const readRevision = async (revision, repoPath) => {
+    try {
+      const { stdout } = await execFileAsync(getGitBinary(), ['show', `${revision}:${repoPath}`], {
+        cwd: repoRoot,
+        encoding: 'buffer',
+        windowsHide: true,
+        maxBuffer: 50 * 1024 * 1024,
+      });
+      return stdout.length > 0 ? `data:application/octet-stream;base64,${stdout.toString('base64')}` : '';
+    } catch {
+      return '';
+    }
+  };
+  for (const repoPath of repoPaths) {
+    // A renamed file has its old path at the merge base.
+    const basePath = previousPath ? toGitPath(path.relative(repoRoot, path.resolve(path.dirname(path.join(repoRoot, repoPath)), path.relative(path.dirname(filePath), previousPath)))) : repoPath;
+    const original = await readRevision(mergeBase, basePath);
+    let modified = '';
+    if (includeWorkingTree) {
+      modified = await fsp.readFile(path.join(repoRoot, repoPath))
+        .then((bytes) => `data:application/octet-stream;base64,${bytes.toString('base64')}`)
+        .catch(() => '');
+    } else {
+      modified = await readRevision(headCommit, repoPath);
+    }
+    // For a rename only the new name tells which folder the paths are from.
+    if (modified || (original && !previousPath)) return { original, modified };
+  }
+  return { original: '', modified: '' };
+}
+
 const BRANCH_CREATION_SOURCE_RE = /^branch: Created from (.+)$/;
 
 /**
@@ -3871,11 +3916,19 @@ async function readWorkingFileSignature(absolutePath) {
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif'];
 
+const OFFICE_DOCUMENT_EXTENSIONS = ['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp'];
+
 const BINARY_SNIFF_BYTES = 8192;
 
 function isImageFile(filePath) {
   const ext = filePath.split('.').pop()?.toLowerCase();
   return IMAGE_EXTENSIONS.includes(ext || '');
+}
+
+// The viewer compares these itself, so a diff carries the two files.
+function isOfficeDocument(filePath) {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  return OFFICE_DOCUMENT_EXTENSIONS.includes(ext || '');
 }
 
 function getImageMimeType(filePath) {
@@ -3961,7 +4014,7 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   }
 
   const { directoryPath, directoryGit, repoRoot, git } = await createRepositoryGitContext(directory);
-  const isImage = isImageFile(filePath);
+  const isImage = isImageFile(filePath) || isOfficeDocument(filePath);
   const mimeType = isImage ? getImageMimeType(filePath) : null;
   const fileContext = await resolveGitFileContext(directoryPath, directoryGit, filePath, repoRoot);
   const { absolutePath, repoPath, isSymbolicLink } = fileContext;
@@ -3998,7 +4051,9 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     if (isImage) {
       // For images, use git show with raw output and convert to base64
       try {
-        const { stdout } = await execFileAsync(getGitBinary(), ['show', `HEAD:${repoPath}`], {
+        // Unstaged changes start from the index, so what is staged stays out.
+        const originalRevision = staged ? `HEAD:${repoPath}` : `:${repoPath}`;
+        const { stdout } = await execFileAsync(getGitBinary(), ['show', originalRevision], {
           cwd: repoRoot,
           encoding: 'buffer',
           windowsHide: true,
@@ -7890,12 +7945,13 @@ export async function getConflictDetails(directory) {
 }
 
 /** @public */
-export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
+export async function getCommitFileDiff(directory, hash, filePath, isBinary, previousPath) {
   if (!directory || !hash || !filePath) {
     throw new Error('directory, hash, and path are required for getCommitFileDiff');
   }
 
-  if (isBinary) {
+  const isDocument = isOfficeDocument(filePath);
+  if (isBinary && !isDocument) {
     return { original: '', modified: '', isBinary: true };
   }
 
@@ -7904,6 +7960,30 @@ export async function getCommitFileDiff(directory, hash, filePath, isBinary) {
     toGitPath(path.relative(repoRoot, path.resolve(repoRoot, filePath))),
     toGitPath(path.relative(repoRoot, path.resolve(directoryPath, filePath))),
   ])).filter((candidate) => candidate && !candidate.startsWith('..') && !path.isAbsolute(candidate));
+
+  if (isDocument) {
+    const readRevision = async (revision, candidate) => {
+      try {
+        const { stdout } = await execFileAsync(getGitBinary(), ['show', `${revision}:${candidate}`], {
+          cwd: repoRoot,
+          encoding: 'buffer',
+          windowsHide: true,
+          maxBuffer: 50 * 1024 * 1024,
+        });
+        return stdout.length > 0 ? `data:application/octet-stream;base64,${stdout.toString('base64')}` : '';
+      } catch {
+        return '';
+      }
+    };
+    for (const candidate of candidates) {
+      // A renamed file has its old path in the parent.
+      const parentPath = previousPath ? toGitPath(path.relative(repoRoot, path.resolve(path.dirname(path.resolve(repoRoot, candidate)), path.relative(path.dirname(filePath), previousPath)))) : candidate;
+      const [original, modified] = await Promise.all([readRevision(`${hash}^`, parentPath), readRevision(hash, candidate)]);
+      // For a rename only the new name tells which folder the paths are from.
+      if (modified || (original && !previousPath)) return { original, modified, isBinary: false };
+    }
+    return { original: '', modified: '', isBinary: true };
+  }
 
   let originalResult = null;
   let modifiedResult = null;

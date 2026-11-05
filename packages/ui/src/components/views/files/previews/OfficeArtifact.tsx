@@ -1,6 +1,7 @@
 import React from 'react';
 import { z } from 'zod';
 
+import { QuoteCommentMenu } from '@/components/comments/QuoteCommentMenu';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { ContentLoadingState, ContentState } from '@/components/ui/content-state';
@@ -14,13 +15,23 @@ import { BinaryArtifact } from './BinaryArtifact';
 import { formatArtifactSize } from './artifactMeta';
 import type { OfficePreview } from './officeDocument';
 import { DEFAULT_TABLE_ROW_CAP } from './delimitedText';
-import { isOpenableLink, OFFICE_LINK_MESSAGE } from './officeFrame';
+import { markSeen, noteOwnEdit, traceChanges } from './cellTraces';
+import { isOpenableLink, OFFICE_LINK_MESSAGE, OFFICE_SELECTION_MESSAGE } from './officeFrame';
 import { TableGrid, type TableEditing } from './TableArtifact';
-import { cellKey, type BookSheet, type CellValue, type WorkbookDocument } from './workbook/model';
-import { cellInput, sheetGrid, WorkbookSession, type EditOutcome, type LoadEngineModel } from './workbook/workbookSession';
+import { cellKey, type BookSheet, type StructureChange, type WorkbookDocument } from './workbook/model';
+import { cellInput, sheetGrid, WorkbookSession, type CellRestore, type EditOutcome, type LoadEngineModel } from './workbook/workbookSession';
 
 const MAX_UNDO = 100;
-const officeLinkMessage = z.object({ type: z.literal(OFFICE_LINK_MESSAGE), url: z.string() });
+const officeFrameMessage = z.discriminatedUnion('type', [
+  z.object({ type: z.literal(OFFICE_LINK_MESSAGE), url: z.string() }),
+  z.object({
+    type: z.literal(OFFICE_SELECTION_MESSAGE),
+    text: z.string(),
+    place: z.string(),
+    x: z.number(),
+    y: z.number(),
+  }),
+]);
 
 type ReadPreview = (name: string, bytes: Uint8Array<ArrayBuffer>) => Promise<OfficePreview | null>;
 
@@ -35,7 +46,7 @@ type LoadState =
   | { status: 'ready'; preview: OfficePreview };
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
-type CellEdit = { sheet: number; row: number; column: number; value: CellValue | null };
+type CellEdit = { sheet: number; cells: CellRestore[] } | { sheet: number; bytes: Uint8Array<ArrayBuffer> };
 
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean => (
   left.byteLength === right.byteLength && left.every((value, index) => value === right[index])
@@ -86,6 +97,14 @@ const WorkbookView: React.FC<{
     });
   }, [session]);
 
+  // A pasted block can run past the last row on screen.
+  const rowNumberOf = (row: number) => grid.rowNumbers[row] ?? (grid.rowNumbers.at(-1) ?? 0) + row - grid.rowNumbers.length + 1;
+  const shownCells = () => new Map(session.document.sheets.flatMap((book, index) => Array.from(book.cells, ([key, cell]): [string, string] => [`${index}:${key}`, `${cell.raw}\u0000${cell.formula ?? ''}`])));
+  const [changedCells, setChangedCells] = React.useState<ReadonlySet<string>>(() => new Set());
+  // After results are filled in, so a formula with no stored result is no news.
+  React.useEffect(() => {
+    queue.current = queue.current.then(() => setChangedCells(traceChanges(path, shownCells())));
+  }, [session, path]);
   const cellAt = (row: number, column: number) => sheet.cells.get(cellKey(grid.rowNumbers[row], column));
 
   const persist = async (next: Uint8Array<ArrayBuffer>): Promise<boolean> => {
@@ -118,10 +137,11 @@ const WorkbookView: React.FC<{
     });
   };
 
-  const finishEdit = async (outcome: EditOutcome, record: (previous: CellValue | null) => void) => {
+  const finishEdit = async (outcome: EditOutcome, record: (previous: CellRestore[]) => void) => {
     if (outcome.status === 'invalid-formula') toast.error(t('filesView.artifact.office.invalidFormula'));
     if (outcome.status !== 'changed') return;
     record(outcome.previous);
+    noteOwnEdit(path, shownCells());
     setVersion((value) => value + 1);
     await persist(outcome.bytes);
   };
@@ -131,26 +151,56 @@ const WorkbookView: React.FC<{
       const edit = from.current.pop();
       if (!edit) return;
       setSelected(edit.sheet);
-      await finishEdit(await session.restore(edit.sheet, edit.row, edit.column, edit.value), (value) => to.current.push({ ...edit, value }));
+      if ('bytes' in edit) {
+        const previous = await session.restoreBytes(edit.bytes);
+        to.current.push({ sheet: edit.sheet, bytes: previous });
+        noteOwnEdit(path, shownCells());
+        setVersion((value) => value + 1);
+        await persist(edit.bytes);
+        return;
+      }
+      await finishEdit(await session.restore(edit.sheet, edit.cells), (cells) => to.current.push({ sheet: edit.sheet, cells }));
+    });
+  };
+
+  const restructure = (change: StructureChange) => {
+    enqueue(async () => {
+      const { bytes: next, previousBytes } = await session.restructure(change);
+      redoStack.current = [];
+      undoStack.current.push({ sheet: change.sheet, bytes: previousBytes });
+      noteOwnEdit(path, shownCells());
+      setVersion((value) => value + 1);
+      await persist(next);
     });
   };
 
   const editing: TableEditing | undefined = editable ? {
-    canEdit: (row, column) => row >= 0 && !session.isLocked(selected, grid.rowNumbers[row], column),
+    canEdit: (row, column) => row >= 0 && !session.isLocked(selected, rowNumberOf(row), column),
     inputOf: (row, column) => cellInput(cellAt(row, column)),
-    commit: (row, column, input) => {
-      const target = { sheet: selected, row: grid.rowNumbers[row], column };
+    commit: (cells) => {
+      const sheetIndex = selected;
+      const inputs = cells.map(({ row, column, input }) => ({ row: rowNumberOf(row), column, input }));
       enqueue(async () => {
-        await finishEdit(await session.edit(target.sheet, target.row, target.column, input), (value) => {
+        await finishEdit(await session.edit(sheetIndex, inputs), (previous) => {
           redoStack.current = [];
-          undoStack.current.push({ ...target, value });
+          undoStack.current.push({ sheet: sheetIndex, cells: previous });
           if (undoStack.current.length > MAX_UNDO) undoStack.current.shift();
         });
       });
     },
     undo: () => stepHistory(undoStack, redoStack),
     redo: () => stepHistory(redoStack, undoStack),
+    structure: session.canRestructure(selected) ? {
+      insertRow: (row) => restructure({ sheet: selected, axis: 'row', at: rowNumberOf(row), delta: 1 }),
+      deleteRow: (row) => restructure({ sheet: selected, axis: 'row', at: rowNumberOf(row), delta: -1 }),
+      insertColumn: (column) => restructure({ sheet: selected, axis: 'column', at: column, delta: 1 }),
+      deleteColumn: (column) => restructure({ sheet: selected, axis: 'column', at: column, delta: -1 }),
+    } : undefined,
   } : undefined;
+
+  const gridChanges = new Set(grid.rowNumbers.flatMap((rowNumber, row) => Array.from({ length: grid.columnCount }, (_, column) => column)
+    .filter((column) => changedCells.has(`${selected}:${cellKey(rowNumber, column)}`))
+    .map((column) => `${row}:${column}`)));
 
   const statusText = saveStatus === 'idle' ? '' : t(`filesView.artifact.office.${saveStatus}`);
   const pending = session.unsupportedFormulas;
@@ -173,6 +223,12 @@ const WorkbookView: React.FC<{
         return cell?.href ?? hyperlinkFormula(cell?.formula);
       }}
       editing={editing}
+      changedCells={gridChanges}
+      onSeen={(keys) => setChangedCells(markSeen(path, keys.map((key) => {
+        const [row, column] = key.split(':').map(Number);
+        return `${selected}:${cellKey(grid.rowNumbers[row], column)}`;
+      })))}
+      commentTarget={{ fileLabel: path, place: session.document.sheets.length > 1 ? `Sheet "${sheet.name}"` : undefined }}
       describeCell={(row, column) => {
         const reference = `${grid.header[column]}${grid.rowNumbers[row]}`;
         if (session.isLocked(selected, grid.rowNumbers[row], column)) return `${reference} ${t('filesView.artifact.office.locked')}`;
@@ -227,14 +283,22 @@ export const OfficeArtifact: React.FC<{
   const [state, setState] = React.useState<LoadState>({ status: 'loading' });
   const [attempt, setAttempt] = React.useState(0);
   const frameRef = React.useRef<HTMLIFrameElement>(null);
+  const [selection, setSelection] = React.useState<{ quote: string; x: number; y: number } | null>(null);
 
   // The frame has no way out, so its links arrive here, from that frame only.
   React.useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
       const frame = frameRef.current;
       if (!frame || event.source !== frame.contentWindow) return;
-      const link = officeLinkMessage.safeParse(event.data);
-      if (link.success && isOpenableLink(link.data.url)) void openExternalUrl(link.data.url);
+      const message = officeFrameMessage.safeParse(event.data);
+      if (!message.success) return;
+      if (message.data.type === OFFICE_LINK_MESSAGE) {
+        if (isOpenableLink(message.data.url)) void openExternalUrl(message.data.url);
+        return;
+      }
+      const { text, place, x, y } = message.data;
+      const box = frame.getBoundingClientRect();
+      setSelection(text ? { quote: place ? `${place}:\n${text}` : text, x: box.left + x, y: box.top + Math.max(0, y) - 10 } : null);
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
@@ -330,6 +394,15 @@ export const OfficeArtifact: React.FC<{
           style={{ colorScheme: 'normal' }}
         />
       </div>
+      {selection ? (
+        <QuoteCommentMenu
+          key={selection.quote}
+          anchor={selection}
+          quote={selection.quote}
+          fileLabel={path}
+          onClose={() => setSelection(null)}
+        />
+      ) : null}
     </div>
   );
 };

@@ -74,6 +74,7 @@ import { notifyGitPush } from './gitPushEvents';
 import { GitPathUnavailableError, gitPathUnavailableBodySchema, gitSubmoduleStateSchema } from './api/git-path-diff';
 
 const API_BASE = '/api/git';
+const gitFileVersionsSchema = z.object({ original: z.string(), modified: z.string() });
 const gitRangeDiffSchema = z.object({ diff: z.string() });
 const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string(), revision: z.string().optional() })) });
 const gitRangeErrorSchema = z.object({ error: z.string() });
@@ -2190,17 +2191,35 @@ export async function getCommitFiles(
   return gitCommitFilesSchema.parse(await response.json());
 }
 
+export async function getGitRangeFileVersions(
+  directory: string,
+  options: { base: string; head: string; path: string; previousPath?: string; includeWorkingTree?: boolean },
+): Promise<{ original: string; modified: string }> {
+  const { base, head, path, previousPath, includeWorkingTree } = options;
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/range-file-versions`, directory, {
+    base,
+    head,
+    path,
+    previousPath,
+    includeWorkingTree: includeWorkingTree ? 'true' : undefined,
+  }));
+  if (!response.ok) throw await rangeResponseError(response, 'Failed to read file versions');
+  return gitFileVersionsSchema.parse(await response.json());
+}
+
 export async function getCommitFileDiff(
   directory: string,
   hash: string,
   filePath: string,
-  isBinary: boolean
+  isBinary: boolean,
+  previousPath?: string,
 ): Promise<CommitFileDiffResponse> {
   const response = await runtimeFetch(
     buildUrl(`${API_BASE}/commit-file-diff`, directory, {
       hash,
       path: filePath,
       binary: isBinary ? 'true' : undefined,
+      previousPath,
     })
   );
   if (!response.ok) {

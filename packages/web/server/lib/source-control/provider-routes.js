@@ -1168,9 +1168,9 @@ export function registerProviderRoutes(app, {
     readChangeRequestPatch: async ({ context, number, sourceRepo, revision }) => readWithBoundAccount(
       context, 'readChangeRequestPatch', withRevision({ number, sourceRepo, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
-    readChangeRequestFile: async ({ context, number, sourceRepo, path, previousPath, status, revision }) => readWithBoundAccount(
+    readChangeRequestFile: async ({ context, number, sourceRepo, path, previousPath, status, revision, binary }) => readWithBoundAccount(
       context, 'readChangeRequestFile',
-      withRevision({ number, sourceRepo, path, previousPath, status, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
+      withRevision({ number, sourceRepo, path, previousPath, status, binary: binary || undefined, ...linkedRead(context) }, readRevision(providers.describe(context?.provider), revision)),
     ),
     /** A change request's head on the context's primary project network, for a worktree made from it. */
     readChangeRequestHead: (input) => trustedRead(input, 'readChangeRequestHead', () => ({ number: input.number })),

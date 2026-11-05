@@ -838,6 +838,25 @@ export function isOfficePreviewFile(filePath: string): boolean {
   return OFFICE_PREVIEW_EXTENSIONS.has(getFileExtension(filePath));
 }
 
+export function isNotebookFile(filePath: string): boolean {
+  return getFileExtension(filePath) === 'ipynb';
+}
+
+/** Zip archives under the names they go by. */
+export function isArchiveFile(filePath: string): boolean {
+  return ['zip', 'jar', 'war'].includes(getFileExtension(filePath));
+}
+
+/** Tables kept in a binary file, read in the viewer. */
+export function isDataFile(filePath: string): boolean {
+  return ['sqlite', 'sqlite3', 'db', 'parquet'].includes(getFileExtension(filePath));
+}
+
+/** Files whose diff is the two versions themselves, not a text patch. */
+export function hasFileVersionsDiff(filePath: string): boolean {
+  return isImageFile(filePath) || isOfficePreviewFile(filePath);
+}
+
 export function isMermaidFile(filePath: string): boolean {
   const ext = getFileExtension(filePath);
   return ext === 'mmd' || ext === 'mermaid';

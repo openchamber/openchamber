@@ -1026,6 +1026,25 @@ export function registerGitRoutes(app, {
     }
   });
 
+  app.get('/api/git/range-file-versions', async (req, res) => {
+    const { getRangeFileVersions } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      const [base, head, filePath] = [req.query.base, req.query.head, req.query.path].map((value) => String(value ?? ''));
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      if (!base || !head || !filePath) {
+        return res.status(400).json({ error: 'base, head and path parameters are required' });
+      }
+      const previousPath = String(req.query.previousPath ?? '') || undefined;
+      res.json(await getRangeFileVersions(directory, { base, head, path: filePath, previousPath, includeWorkingTree: req.query.includeWorkingTree === 'true' }));
+    } catch (error) {
+      console.error('Failed to read file versions:', error);
+      res.status(500).json({ error: error.message || 'Failed to read file versions' });
+    }
+  });
+
   app.get('/api/git/branch-base', async (req, res) => {
     const { getBranchBase } = await getGitLibraries();
     try {
@@ -2073,7 +2092,7 @@ export function registerGitRoutes(app, {
       }
 
       const isBinary = req.query.binary === 'true';
-      const result = await getCommitFileDiff(directory, hash, filePath, isBinary);
+      const result = await getCommitFileDiff(directory, hash, filePath, isBinary, String(req.query.previousPath ?? '') || undefined);
       res.json(result);
     } catch (error) {
       console.error('Failed to get commit file diff:', error);

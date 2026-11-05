@@ -1,7 +1,7 @@
 import { columnName } from '@/sync/document-attachments';
 import { getFileExtension } from '@/lib/toolHelpers';
 import { FormulaEngine, type EngineModel } from './formulaEngine';
-import { cellKey, type BookCell, type BookSheet, type CellChange, type CellValue, type WorkbookDocument } from './model';
+import { cellKey, movedCell, type BookCell, type BookSheet, type CellChange, type CellValue, type StructureChange, type WorkbookDocument } from './model';
 import { openOdsDocument } from './odsDocument';
 import { openXlsxDocument } from './xlsxDocument';
 
@@ -97,11 +97,14 @@ export const cellInput = (cell: BookCell | undefined): string => {
 
 const sameValue = (left: BookCell, right: CellValue | BookCell): boolean => left.kind === right.kind && left.raw === right.raw && (left.formula ?? '') === (right.formula ?? '');
 
+export type CellInput = { row: number; column: number; input: string };
+export type CellRestore = { row: number; column: number; value: CellValue | null };
+
 export type EditOutcome =
   | { status: 'saved-nothing' }
   | { status: 'invalid-formula' }
   /** `previous` puts the cell back exactly: typing it again could turn the text `00123` into a number. */
-  | { status: 'changed'; bytes: Uint8Array<ArrayBuffer>; previous: CellValue | null };
+  | { status: 'changed'; bytes: Uint8Array<ArrayBuffer>; previous: CellRestore[] };
 
 export type LoadEngineModel = () => Promise<new (name: string, locale: string, timezone: string, language: string) => EngineModel>;
 
@@ -137,7 +140,7 @@ export class WorkbookSession {
     return this.engine;
   }
 
-  private build(sheet: number, row: number, column: number, value: CellValue, previous: BookCell | undefined): BookCell {
+  private build(row: number, column: number, value: CellValue, previous: BookCell | undefined): BookCell {
     const { display: _display, ...kept } = previous ?? { row, column, display: '' };
     return { ...kept, ...value, formula: value.formula, row, column, display: displayOf(value, previous) };
   }
@@ -161,59 +164,150 @@ export class WorkbookSession {
     return true;
   }
 
-  async edit(sheet: number, row: number, column: number, input: string): Promise<EditOutcome> {
+  /** What was typed into these cells, as one step. */
+  async edit(sheet: number, cells: CellInput[]): Promise<EditOutcome> {
     const book = this.document.sheets[sheet];
-    const key = cellKey(row, column);
-    const previous = book.cells.get(key);
-    const parsed = parseCellInput(input, previous, this.document.date1904);
-    if (!parsed && !previous) return { status: 'saved-nothing' };
-    if (parsed && previous && !parsed.formula && sameValue(previous, parsed)) return { status: 'saved-nothing' };
-    return this.put(sheet, row, column, parsed);
+    const parsed = cells.flatMap(({ row, column, input }) => {
+      const previous = book.cells.get(cellKey(row, column));
+      const value = parseCellInput(input, previous, this.document.date1904);
+      if (!value && !previous) return [];
+      if (value && previous && !value.formula && sameValue(previous, value)) return [];
+      return [{ row, column, value }];
+    });
+    if (parsed.length === 0) return { status: 'saved-nothing' };
+    return this.put(sheet, parsed);
   }
 
   /** Puts back what `edit` reported as `previous`. */
-  restore(sheet: number, row: number, column: number, value: CellValue | null): Promise<EditOutcome> {
-    return this.put(sheet, row, column, value);
+  restore(sheet: number, cells: CellRestore[]): Promise<EditOutcome> {
+    return this.put(sheet, cells);
   }
 
-  private async put(sheet: number, row: number, column: number, parsed: CellValue | null): Promise<EditOutcome> {
-    const previous = this.document.sheets[sheet].cells.get(cellKey(row, column));
-    const before: CellValue | null = previous ? { kind: previous.kind, raw: previous.raw, formula: previous.formula } : null;
-    const changes: CellChange[] = [];
-    const cell = { sheet, row, column };
-    if (parsed?.formula || this.hasFormulas) {
-      const engine = await this.ensureEngine();
-      let value = parsed;
-      if (parsed?.formula) {
-        const checked = engine.check(cell, `=${parsed.formula}`);
-        if (checked.broken) return { status: 'invalid-formula' };
-        value = { ...parsed, formula: checked.formula };
+  private async put(sheet: number, items: CellRestore[]): Promise<EditOutcome> {
+    const book = this.document.sheets[sheet];
+    const previous: CellRestore[] = items.map(({ row, column }) => {
+      const cell = book.cells.get(cellKey(row, column));
+      return { row, column, value: cell ? { kind: cell.kind, raw: cell.raw, formula: cell.formula } : null };
+    });
+    const changes = new Map<string, CellChange>();
+    const place = (target: number, row: number, column: number) => `${target}:${cellKey(row, column)}`;
+    const usesEngine = this.hasFormulas || items.some((item) => item.value?.formula);
+    const engine = usesEngine ? await this.ensureEngine() : null;
+    for (const { row, column, value: input } of items) {
+      const cell = { sheet, row, column };
+      const before = book.cells.get(cellKey(row, column));
+      let value = input;
+      if (!engine) {
+        changes.set(place(sheet, row, column), { ...cell, next: value ? this.build(row, column, value, before) : null, edited: true });
+        continue;
+      }
+      if (value?.formula) {
+        const checked = engine.check(cell, `=${value.formula}`);
+        if (checked.broken) {
+          // Cells of this batch already went in; the next edit starts clean.
+          this.engine = null;
+          return { status: 'invalid-formula' };
+        }
+        value = { ...value, formula: checked.formula };
       }
       const results = engine.set(cell, value);
       const own = results.find((result) => result.sheet === sheet && result.row === row && result.column === column);
-      if (value?.formula && !own) value = { ...value, kind: parsed?.raw ? parsed.kind : previous?.kind ?? 'number', raw: parsed?.raw || (previous?.raw ?? '0') };
-      else if (value?.formula && own) value = { kind: own.kind, raw: own.raw, formula: value.formula };
-      changes.push({ ...cell, next: value ? this.build(sheet, row, column, value, previous) : null, edited: true });
+      if (value?.formula && own) value = { kind: own.kind, raw: own.raw, formula: value.formula };
+      else if (value?.formula && !value.raw) value = { ...value, kind: before?.kind ?? 'number', raw: before?.raw ?? '0' };
+      changes.set(place(sheet, row, column), { ...cell, next: value ? this.build(row, column, value, before) : null, edited: true });
       for (const result of results) {
         if (result === own) continue;
-        const target = this.document.sheets[result.sheet].cells.get(cellKey(result.row, result.column));
+        const key = place(result.sheet, result.row, result.column);
+        const pending = changes.get(key);
+        const target = pending?.next ?? this.document.sheets[result.sheet].cells.get(cellKey(result.row, result.column));
         if (!target) continue;
-        changes.push({ sheet: result.sheet, row: result.row, column: result.column, next: this.build(result.sheet, result.row, result.column, { ...result, formula: target.formula }, target), edited: false });
+        changes.set(key, {
+          sheet: result.sheet,
+          row: result.row,
+          column: result.column,
+          next: this.build(result.row, result.column, { ...result, formula: target.formula }, target),
+          edited: pending?.edited ?? false,
+        });
       }
-    } else {
-      changes.push({ ...cell, next: parsed ? this.build(sheet, row, column, parsed, previous) : null, edited: true });
     }
 
-    const next = await this.document.write(changes);
-    await this.prove(next, changes);
-    for (const change of changes) {
+    const list = Array.from(changes.values());
+    const next = await this.document.write(list);
+    await this.prove(next, list);
+    for (const change of list) {
       const cells = this.document.sheets[change.sheet].cells;
       const changeKey = cellKey(change.row, change.column);
       if (change.next) cells.set(changeKey, change.next);
       else cells.delete(changeKey);
     }
     this.bytes = next;
-    return { status: 'changed', bytes: next, previous: before };
+    return { status: 'changed', bytes: next, previous };
+  }
+
+  canRestructure(sheet: number): boolean {
+    return !this.document.sheets[sheet].protected && this.document.sheets[sheet].locked.size === 0 && this.document.canRestructure(sheet);
+  }
+
+  /** Adds or removes a row or column; `previousBytes` undoes it. */
+  async restructure(change: StructureChange): Promise<{ bytes: Uint8Array<ArrayBuffer>; previousBytes: Uint8Array<ArrayBuffer> }> {
+    const engine = await this.ensureEngine();
+    const unsupported = (sheet: number, cell: BookCell) => engine.isUnsupported(sheet, cell.row, cell.column);
+    const held = this.document.sheets.map((sheet, index) => Array.from(sheet.cells.values()).filter((cell) => cell.formula && unsupported(index, cell)));
+    engine.restructure(change);
+    const changes: CellChange[] = [];
+    const expected = this.document.sheets.map((sheet, index) => {
+      const cells = new Map<string, BookCell>();
+      for (const cell of sheet.cells.values()) {
+        const place = index === change.sheet ? movedCell(change, cell.row, cell.column) : { row: cell.row, column: cell.column };
+        if (!place) continue;
+        let next: BookCell = { ...cell, ...place };
+        if (cell.formula) {
+          const { formula, value } = engine.formulaAt({ sheet: index, ...place });
+          // What the engine cannot compute keeps the file's result.
+          const result = held[index].includes(cell) ? { kind: cell.kind, raw: cell.raw } : value;
+          next = { ...next, ...result, formula, display: displayOf(result, cell), shared: undefined };
+          if (next.formula !== cell.formula || next.raw !== cell.raw || next.kind !== cell.kind || cell.shared !== undefined) {
+            changes.push({ sheet: index, ...place, next, edited: true });
+          }
+        }
+        cells.set(cellKey(place.row, place.column), next);
+      }
+      return cells;
+    });
+    const bytes = await this.document.restructure(change, changes);
+    const reread = await openWorkbookDocument(this.name, bytes);
+    const failed = !reread || expected.some((cells, index) => {
+      const stored = reread.sheets[index]?.cells;
+      if (!stored || stored.size !== cells.size) return true;
+      for (const [key, cell] of cells) {
+        const found = stored.get(key);
+        if (!found || (found.formula ?? '') !== (cell.formula ?? '') || (found.raw !== cell.raw && !(cell.formula && found.raw === ''))) return true;
+      }
+      return false;
+    });
+    this.engine = null;
+    if (!reread || failed) {
+      const restored = await openWorkbookDocument(this.name, this.bytes);
+      if (restored) this.document = restored;
+      throw new Error('The changed workbook did not read back');
+    }
+    const previousBytes = this.bytes;
+    this.document = reread;
+    this.bytes = bytes;
+    await this.fillMissingResults();
+    return { bytes, previousBytes };
+  }
+
+  /** Back to an earlier state of the file, for undoing a structure change. */
+  async restoreBytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+    const document = await openWorkbookDocument(this.name, bytes);
+    if (!document) throw new Error('The earlier workbook did not read back');
+    const previousBytes = this.bytes;
+    this.document = document;
+    this.bytes = bytes;
+    this.engine = null;
+    await this.fillMissingResults();
+    return previousBytes;
   }
 
   /** A write that cannot be read back is never handed over: the open document returns to the last good bytes. */

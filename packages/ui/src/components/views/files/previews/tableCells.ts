@@ -1,7 +1,7 @@
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 /** A shown value as a number: `12.50%`, `1,234.5`. Dates read in ISO order sort fine as text. */
-const numericValue = (text: string): number | null => {
+export const numericValue = (text: string): number | null => {
   const match = text.trim().match(/^([+-]?(?:\d[\d,]*\.?\d*|\.\d+)(?:e[+-]?\d+)?)(%?)$/i);
   return match ? Number(match[1].replace(/,/g, '')) : null;
 };
@@ -51,3 +51,58 @@ export const cellParts = (text: string, href?: string): CellPart[] => {
   if (position < text.length) parts.push({ text: text.slice(position) });
   return parts;
 };
+
+/** A number for the summary line, without the noise of adding decimals up. */
+const shortNumber = (value: number): string => String(Number(value.toPrecision(12)));
+
+/** Sum and average of the numbers in a selection, and how many cells hold anything. */
+export const selectionSummary = (values: string[]): { count: number; sum: string; average: string } | null => {
+  const filled = values.filter((value) => value.trim() !== '');
+  const numbers = filled.flatMap((value) => {
+    const number = numericValue(value);
+    return number === null ? [] : [number];
+  });
+  if (filled.length === 0) return null;
+  const sum = numbers.reduce((total, number) => total + number, 0);
+  return {
+    count: filled.length,
+    sum: numbers.length > 0 ? shortNumber(sum) : '',
+    average: numbers.length > 0 ? shortNumber(sum / numbers.length) : '',
+  };
+};
+
+/** What a spreadsheet put on the clipboard, with empty rows and cells in their places. */
+export const fromTsv = (text: string): string[][] => {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quoted) {
+      if (char !== '"') field += char;
+      else if (text[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else quoted = false;
+    } else if (char === '"' && field === '') quoted = true;
+    else if (char === '\t') {
+      row.push(field);
+      field = '';
+    } else if (char === '\n' || char === '\r') {
+      if (char === '\r' && text[index + 1] === '\n') index += 1;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else field += char;
+  }
+  // The newline after the last row ends it; it does not start another.
+  if (field !== '' || row.length > 0) rows.push([...row, field]);
+  return rows;
+};
+
+const tsvField = (value: string): string => (/[\t\r\n"]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
+
+/** Rows of text the way spreadsheets put them on the clipboard. */
+export const toTsv = (rows: string[][]): string => rows.map((row) => row.map(tsvField).join('\t')).join('\n');

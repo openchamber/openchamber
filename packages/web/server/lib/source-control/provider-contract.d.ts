@@ -329,6 +329,8 @@ export interface ProviderImplementation {
     readChangeRequestPatch?(input: ReadInput & { number: number; sourceRepo?: { owner: string; repo: string }; revision?: string }): Promise<Json>;
     readChangeRequestFile?(input: ReadInput & {
       number: number; sourceRepo?: { owner: string; repo: string }; path: string; previousPath?: string; status?: string; revision?: string;
+      /** Both sides as `data:` URLs of the file's bytes, for documents the viewer compares itself. A provider may ignore it. */
+      binary?: boolean;
     }): Promise<Json>;
     /** `discussionRefs` only reach a provider with `capabilities.discussions`; it answers them as `discussionSummaries`. */
     liveSummaries?(input: { session: ProviderSession; refs: Json[]; issueRefs: Json[]; discussionRefs: Json[] }): Promise<Json>;
