@@ -1,3 +1,4 @@
+import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { SERVICE_EVENT_DATA_MAX, SERVICE_EVENT_RATE_MAX, SERVICE_HOST_PATH, isGuestApproved, requestedGuestCapabilities } from '@openchamber/sdk';
 import { serviceHostCallSchema } from '@openchamber/sdk/schemas';
 
@@ -16,15 +17,27 @@ const ok = (result) => ({ status: 200, body: { result } });
 
 /** Control errors already speak to the caller; anything else stays on the server. */
 const controlFailure = (error) => {
-  const status = Number.isInteger(error?.status) ? error.status : 500;
+  const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
   if (status >= 500) console.warn('[service-host] a session call failed:', error?.message ?? error);
   return fail(status, 'SESSION_FAILED', status >= 500 ? 'OpenChamber could not reach the session.' : String(error?.message ?? 'The call was refused.'));
 };
 
+/** A service names a session only; a read goes to the folder the session lives in. */
+const readSession = async (control, action, input) => {
+  const directory = await control.resolveSessionDirectory(input.sessionId);
+  if (!directory) throw new OpenChamberControlError('Session not found', 404);
+  return control.execute(action, input, directory);
+};
+
 const lastUserPrompt = async (control, sessionId) => {
-  const { messages } = await control.execute('session.messages', { sessionId, role: 'user', limit: 1 });
+  const { messages } = await readSession(control, 'session.messages', { sessionId, role: 'user', limit: 1 });
   return messages?.[0]?.text ?? null;
 };
+
+/** Every connected client gets every event, an idle phone over the paid relay too. */
+const SERVICE_EVENT_CHARS_PER_SECOND = 256_000;
+const SESSION_STARTS_PER_HOUR = 60;
+const SESSION_START_WINDOW_MS = 60 * 60 * 1000;
 
 /**
  * @param {{
@@ -42,27 +55,41 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
   /** Per guest: the current one-second window of panel events. */
   const emitWindows = new Map();
 
-  const underRateLimit = (guestId) => {
+  const underRateLimit = (guestId, chars) => {
     const at = now();
     const window = emitWindows.get(guestId);
     if (!window || at - window.startedAt >= 1_000) {
-      emitWindows.set(guestId, { startedAt: at, count: 1 });
+      emitWindows.set(guestId, { startedAt: at, count: 1, chars });
       return true;
     }
     window.count += 1;
-    return window.count <= SERVICE_EVENT_RATE_MAX;
+    window.chars += chars;
+    return window.count <= SERVICE_EVENT_RATE_MAX && window.chars <= SERVICE_EVENT_CHARS_PER_SECOND;
   };
 
   const needs = (guest, capability) => (guest.capabilityGrants?.includes(capability) === true
     ? null
     : fail(403, 'NOT_GRANTED', `This call needs the "${capability}" approval. Ask the user to approve the extension in Settings → Extensions.`));
 
+  /** Per guest: when it last started sessions, within the hour. */
+  const sessionStarts = new Map();
+
+  /** A loop in a service cannot spend the user's tokens without end. */
+  const mayStartSession = (guestId) => {
+    const at = now();
+    const recent = (sessionStarts.get(guestId) ?? []).filter((startedAt) => at - startedAt < SESSION_START_WINDOW_MS);
+    const allowed = recent.length < SESSION_STARTS_PER_HOUR;
+    sessionStarts.set(guestId, allowed ? [...recent, at] : recent);
+    return allowed;
+  };
+
   const run = async (guest, { method, input }) => {
     switch (method) {
       case 'sessions.start': {
         const refused = needs(guest, 'sessionControl');
         if (refused) return refused;
-        const result = await control.execute('session.create', input);
+        if (!mayStartSession(guest.id)) return fail(429, 'TOO_MANY_SESSIONS', `A service starts at most ${SESSION_STARTS_PER_HOUR} sessions an hour.`);
+        const result = await control.execute('session.create', input, undefined, { startedByExtension: guest.id });
         return ok({ sessionId: result.sessionId, directory: result.directory ?? null });
       }
       case 'sessions.send': {
@@ -82,7 +109,7 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
       case 'sessions.status': {
         const refused = needs(guest, 'sessionControl');
         if (refused) return refused;
-        const { sessionStatus } = await control.execute('session.status', input);
+        const { sessionStatus } = await readSession(control, 'session.status', input);
         return ok({ status: sessionStatus?.type ?? 'idle' });
       }
       case 'sessions.lastReply': {
@@ -90,7 +117,7 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
         const refused = needs(guest, 'sessionControl') ?? needs(guest, 'transcript');
         if (refused) return refused;
         if (guest.sessionControl?.content !== true) return fail(403, 'NOT_GRANTED', 'Reading a reply needs sessionControl.content in the manifest.');
-        const { messages } = await control.execute('session.messages', { sessionId: input.sessionId, role: 'assistant', limit: 1 });
+        const { messages } = await readSession(control, 'session.messages', { sessionId: input.sessionId, role: 'assistant', limit: 1 });
         return ok({ reply: messages?.[0]?.text ?? null });
       }
       case 'instructions.set': {
@@ -100,10 +127,11 @@ export const createServiceHostApi = ({ listGuests, control, instructions, readSe
         return ok({ saved: true });
       }
       case 'panels.emit': {
-        if (JSON.stringify(input.data ?? null).length > SERVICE_EVENT_DATA_MAX) {
+        const chars = JSON.stringify(input.data ?? null).length;
+        if (chars > SERVICE_EVENT_DATA_MAX) {
           return fail(413, 'EVENT_TOO_LARGE', `An event carries at most ${SERVICE_EVENT_DATA_MAX} characters of JSON.`);
         }
-        if (!underRateLimit(guest.id)) return fail(429, 'TOO_MANY_EVENTS', `A service sends at most ${SERVICE_EVENT_RATE_MAX} events a second.`);
+        if (!underRateLimit(guest.id, chars)) return fail(429, 'TOO_MANY_EVENTS', `A service sends at most ${SERVICE_EVENT_RATE_MAX} events or ${SERVICE_EVENT_CHARS_PER_SECOND} characters a second.`);
         emitToFrames(guest.id, input.topic, input.data ?? null);
         return ok({ delivered: true });
       }

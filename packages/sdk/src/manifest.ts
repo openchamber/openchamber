@@ -888,6 +888,12 @@ export const GUEST_BLOCK_DESCRIPTION_MAX = 120;
 export const GUEST_BLOCK_ARGS_TEXT_MAX = 16_000;
 /** Height a block's frame takes before it says otherwise. */
 export const GUEST_BLOCK_HEIGHT_DEFAULT = 120;
+/** The chat's own components; an extension's block cannot take these names. */
+export const GUEST_BLOCK_RESERVED_NAMES: readonly string[] = [
+  'Stack', 'Row', 'Card', 'Tabs', 'Tab', 'Text', 'Badge', 'Callout', 'KeyValue', 'Table', 'Steps', 'BarChart', 'LineChart',
+  'Series', 'Stat', 'Progress', 'Choice', 'Input', 'DateInput', 'Slider', 'Details', 'Button',
+];
+
 /** Most a block's frame may ask for. */
 export const GUEST_BLOCK_HEIGHT_MAX = 960;
 

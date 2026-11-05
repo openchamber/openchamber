@@ -62,6 +62,7 @@ import { isMentionGuest, resolveGuestMention, searchGuestMentions } from './ment
 import { proxyGuestRequest } from './request.js';
 import {
   GuestServiceError,
+  getServiceFailure,
   getServiceStatus,
   proxyGuestServiceRequest,
   setServiceSocketOverride,
@@ -863,6 +864,19 @@ export const registerGuestRoutes = (app, {
     } catch (error) {
       console.error('Failed to read guest service status:', error);
       res.status(500).json({ error: 'Failed to read guest service status' });
+    }
+  });
+
+  app.get('/api/guests/:id/service/failure', async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.service) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      res.json({ failure: getServiceFailure(guest.id) });
+    } catch (error) {
+      console.error('Failed to read guest service failure:', error);
+      res.status(500).json({ error: 'Failed to read guest service failure' });
     }
   });
 

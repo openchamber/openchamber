@@ -1,3 +1,4 @@
+import { GUEST_BLOCK_RESERVED_NAMES } from '@openchamber/sdk';
 import { describe, expect, test } from 'bun:test';
 import { NO_EXTENSION_BLOCKS, collectExtensionBlocks, blockDecisions, blockFields, blockNode, cardDecision, decisionTitles, blockProps, noteSlot, parseUiBlock, type BlockValue, type UiBlockParse } from './catalog';
 
@@ -310,4 +311,8 @@ describe('extension blocks', () => {
   test('no extension means the same empty set, so a parse keeps its memo', () => {
     expect(collectExtensionBlocks([])).toBe(NO_EXTENSION_BLOCKS);
   });
+});
+
+test('the SDK reserves exactly the names of the catalog', () => {
+  expect([...GUEST_BLOCK_RESERVED_NAMES].sort()).toEqual(Object.keys(blockProps).sort());
 });

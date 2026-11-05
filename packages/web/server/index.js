@@ -2136,7 +2136,10 @@ const insideSpaceTaskNaming = process.env.OPENCHAMBER_SPACE_TASK_TITLE_FILE && p
 
 const serviceHostApi = createServiceHostApi({
   listGuests: () => listInstalledGuests({ persistPath: extensionsPersistPath(OPENCHAMBER_DATA_DIR) }),
-  control: { execute: (...args) => openChamberControlService.execute(...args) },
+  control: {
+    execute: (...args) => openChamberControlService.execute(...args),
+    resolveSessionDirectory: (sessionID) => openChamberControlService.resolveSessionDirectory(sessionID),
+  },
   instructions: guestInstructions,
   readSettings: async (guest) => (await getGuestAuth(guest.id, guestAuthPersistPath(OPENCHAMBER_DATA_DIR)))?.settings ?? {},
   emitToFrames: (guestId, topic, data) => broadcastOpenChamberUiEvent({

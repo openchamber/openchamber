@@ -207,6 +207,20 @@ export const setServiceSocketOverride = async (guestId, socketId, persistPath, s
 /**
  * @param {string} guestId
  */
+/**
+ * Why a service last stopped working, for the extension's card: the end of its
+ * output, in memory only. A service that starts cleanly clears it.
+ * @type {Map<string, { at: number, output: string }>}
+ */
+const lastFailures = new Map();
+
+export const getServiceFailure = (guestId) => lastFailures.get(guestId) ?? null;
+
+/** A reinstall under the same id must not inherit the removed one's failure. */
+export const forgetServiceFailure = (guestId) => {
+  lastFailures.delete(guestId);
+};
+
 export const getServiceStatus = (guestId) => {
   const runtime = runtimes.get(guestId);
   if (!runtime) {
@@ -515,9 +529,14 @@ const startGuestService = async ({
   };
   runtimes.set(guestId, runtime);
 
-  child.once('exit', () => {
+  child.once('exit', (code, signal) => {
     const current = runtimes.get(guestId);
     if (current === runtime) {
+      // A deliberate stop drops the runtime first, so this exit was unexpected.
+      if (code || signal) {
+        const detail = [output.snapshot(), signal ? `Stopped by ${signal}.` : ''].filter(Boolean).join('\n');
+        lastFailures.set(guestId, { at: Date.now(), output: detail });
+      }
       runtime.status = runtime.status === 'starting' ? 'failed' : 'stopped';
     }
   });
@@ -534,6 +553,7 @@ const startGuestService = async ({
   if (!ready || child.exitCode !== null || child.signalCode) {
     runtime.status = 'failed';
     const detail = output.snapshot();
+    lastFailures.set(guestId, { at: Date.now(), output: detail });
     await discardRuntime(guestId);
     throw new GuestServiceError(
       detail
@@ -543,6 +563,7 @@ const startGuestService = async ({
     );
   }
   runtime.status = 'ready';
+  lastFailures.delete(guestId);
   return runtime;
 };
 

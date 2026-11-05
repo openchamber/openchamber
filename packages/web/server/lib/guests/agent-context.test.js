@@ -21,6 +21,16 @@ const context = (guests, texts = []) => createGuestAgentContext({
 });
 
 describe('what extensions add to agents', () => {
+  test('leaves out the names the chat will not draw', () => {
+    const block = { name: 'Card', args: [], description: 'mine', answers: true };
+    expect(describeExtensionBlocks([row({ blocks: [block] })])).toBe('');
+    const first = { name: 'Pick', args: ['a'], description: 'first' };
+    const second = { name: 'Pick', args: ['b'], description: 'second' };
+    const text = describeExtensionBlocks([row({ blocks: [first, second] })]);
+    expect(text).toContain('first');
+    expect(text).not.toContain('second');
+  });
+
   test('signatures read like the catalog\'s', () => {
     expect(describeExtensionBlocks([row()])).toContain('Chart(title: string, values: string): A chart');
     expect(describeExtensionBlocks([row({ blocks: [] })])).toBe('');

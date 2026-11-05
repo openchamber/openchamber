@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isGuestApproved, requestedGuestCapabilities } from '@openchamber/sdk';
+import { GUEST_BLOCK_RESERVED_NAMES, isGuestApproved, requestedGuestCapabilities } from '@openchamber/sdk';
 
 /**
  * What extensions add to agents: the text and block components a session is
@@ -26,9 +26,14 @@ const blockSignature = (block) => `${block.name}(${block.args.map((arg) => `${ar
  * @param {object[]} guests active catalog rows
  */
 export const describeExtensionBlocks = (guests) => {
-  const lines = guests.flatMap((guest) => (guest.blocks ?? []).map((block) => `${blockSignature(block)}: ${block.description}`));
+  // What the chat draws: the catalog keeps its names and the first extension keeps a shared one.
+  const blocks = new Map();
+  for (const block of guests.flatMap((guest) => guest.blocks ?? [])) {
+    if (!GUEST_BLOCK_RESERVED_NAMES.includes(block.name) && !blocks.has(block.name)) blocks.set(block.name, block);
+  }
+  const lines = [...blocks.values()].map((block) => `${blockSignature(block)}: ${block.description}`);
   if (lines.length === 0) return '';
-  const asking = guests.flatMap((guest) => (guest.blocks ?? []).filter((block) => block.answers).map((block) => block.name));
+  const asking = [...blocks.values()].filter((block) => block.answers).map((block) => block.name);
   return [
     'More UI block components, from the user\'s extensions. An Item like any other, each draws itself:',
     ...lines,

@@ -31,7 +31,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { GuestApprovalDialog } from './GuestApprovalDialog';
 import { toast } from '@/components/ui';
-import { loadGuestServiceStatus, setGuestServiceSocketPath } from '@/lib/guests/service';
+import { loadGuestServiceFailure, setGuestServiceSocketPath } from '@/lib/guests/service';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
 import { SESSION_EVENT_LABEL_KEYS } from '@/lib/guests/session-event-labels';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
@@ -345,13 +345,13 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
   const state = extensionState(guest);
   const iconSrc = useGuestIconSrc(guest);
   const permissions = servicePermissionList(guest);
-  const [serviceFailed, setServiceFailed] = React.useState(false);
+  const [serviceFailure, setServiceFailure] = React.useState<{ at: number; output: string } | null>(null);
   const watchesService = Boolean(guest.service) && guest.enabled !== false;
   React.useEffect(() => {
     if (!watchesService) return;
     let current = true;
-    void loadGuestServiceStatus(guest.id).then((answer) => {
-      if (current) setServiceFailed(answer.ok && answer.result.status === 'failed');
+    void loadGuestServiceFailure(guest.id).then((failure) => {
+      if (current) setServiceFailure(failure);
     });
     return () => { current = false; };
   }, [guest.id, guest.revision, watchesService]);
@@ -466,8 +466,13 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
           </SettingsFieldRow>
         </div>
         {state.builtIn ? <p className={SETTINGS_HELPER_CLASS}>{t('settings.extensions.builtIn.info')}</p> : null}
-        {serviceFailed ? (
-          <p className="typography-meta text-[var(--status-error)]">{t('settings.extensions.service.failed')}</p>
+        {serviceFailure ? (
+          <div className="flex flex-col gap-1">
+            <p className="typography-meta text-[var(--status-error)]">{t('settings.extensions.service.failed')}</p>
+            {serviceFailure.output ? (
+              <pre dir="ltr" className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-surface-muted p-2 typography-micro text-muted-foreground">{serviceFailure.output}</pre>
+            ) : null}
+          </div>
         ) : null}
         {guest.needsConfiguration ? (
           <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.needsConfiguration', { message: guest.needsConfiguration })}</p>
