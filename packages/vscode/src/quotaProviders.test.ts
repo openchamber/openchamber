@@ -341,6 +341,22 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows.weekly!.usedPercent, 25);
   });
 
+  test('supports Go Plus and keeps usable windows when another meter is malformed', async () => {
+    globalThis.fetch = (async () => mockResponse({
+      product: 'go-teams',
+      access: { meters: {
+        fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '0', usedMicroCents: '10' },
+        week: { resetsAt: '2026-08-19T12:00:00.000Z', limitMicroCents: '1000', usedMicroCents: '250' },
+      } },
+    })) as typeof fetch;
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['weekly']);
+    assert.equal(result.usage!.windows.weekly!.usedPercent, 25);
+  });
+
   test('distinguishes an absent subscription from a temporary failure', async () => {
     globalThis.fetch = (async () => mockResponse({ product: 'free', access: { meters: {} } })) as typeof fetch;
     const absent = await fetchQuotaForProvider('opencode-go');
