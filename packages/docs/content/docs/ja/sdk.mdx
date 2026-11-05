@@ -89,7 +89,7 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` はあなたの別ページをウィンドウで開くので、選択画面がレールのパネルとコードを共有する必要がなくなる
 - 省略すると拡張機能はそのメニューに出ない
 
-`ctx.surface` は `panel`、`dialog`、`page`、`status` のいずれかです。添付項目をクリックすると、そのデータが `ctx.item` に入り、それ以外は `null` です。
+`ctx.surface` は `panel`、`dialog`、`page`、`status`、`block` のいずれかです。添付項目をクリックすると、そのデータが `ctx.item` に入り、それ以外は `null` です。
 
 `contributes.page: true` を指定すると、セッション一覧の上にある拡張機能のページメニューから全画面で開けます。`{ "entry": "panel/page.html", "title": "Board" }` で別の HTML と任意のタイトルを指定できます。`panel.entry` は必須で、サンドボックスと権限は共通です。ページを開くのはユーザーだけです。再読み込み、一時停止、削除、サーバー切り替えで閉じます。
 
@@ -156,7 +156,7 @@ CDN のフォントや画像、公開 API など、ページが直接必要と�
 | `"bearer"` | `Authorization: Bearer <token>` | API が bearer トークンまたは personal access token を記載している |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API がユーザー名 (多くはメール) と API トークンによる HTTP Basic 認証を記載している。カードは両方を尋ね、`usernameLabel` が最初の欄のラベルになる |
 
-`settings` はカードにプレーンテキストの入力欄を追加します。その値は `ctx.settings` に届きます。
+`settings` はカードにプレーンテキストの入力欄を追加します。その値は `ctx.settings` に届きます。`"secret": true` を指定したフィールドはカード上でマスクされ、ページには届きません。サービスは `readSettings()` で読み取ります。
 
 ## ファイル
 
@@ -263,6 +263,8 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` には `selection` (メッセージ内で選択したテキスト)、`file` (Files の行)、`diff` (ファイルや diff の選択した行) も指定できます。これらの項目には同じ名前の `kind` が付きます。`selection` にはテキスト、`file` にはパス、`diff` にはパスと行の範囲が入ります。
 
 メッセージのアクションは、`kind: "message"` の `ctx.item` を付けて拡張機能を開きます。中身はセッションの id とタイトル、プロジェクトのフォルダ、メッセージの id、そのロールとテキストです。セッションのアクションは `kind: "session"` と、セッションの id、タイトル、フォルダを付けて開きます。`"payload": ["messages"]` を加えると、項目には会話全体も古い順で含まれます。Markdown エクスポートが出力するのと同じテキストです。これには `conversation` 権限が必要で、ユーザーには承認ダイアログで別の行として表示されます。`item.action` でどの項目がクリックされたかが分かります。
 

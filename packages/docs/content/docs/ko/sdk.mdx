@@ -89,7 +89,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 - `{ "mode": "dialog", "entry": "panel/attach.html" }`은 여러분의 별도 페이지를 창으로 열어서, 선택기가 레일 패널과 코드를 공유하지 않아도 되게 합니다
 - 생략하면 확장은 그 메뉴에 나타나지 않습니다
 
-`ctx.surface`는 `panel`, `dialog`, `page`, `status` 중 하나입니다. 첨부 항목을 클릭하면 해당 데이터가 `ctx.item`에 들어가며, 그 외에는 `null`입니다.
+`ctx.surface`는 `panel`, `dialog`, `page`, `status`, `block` 중 하나입니다. 첨부 항목을 클릭하면 해당 데이터가 `ctx.item`에 들어가며, 그 외에는 `null`입니다.
 
 `contributes.page: true`를 지정하면 세션 목록 위의 확장 프로그램 페이지 메뉴에서 전체 화면으로 열 수 있습니다. `{ "entry": "panel/page.html", "title": "Board" }`로 별도의 HTML과 선택적 제목을 지정합니다. `panel.entry`는 필수이며 샌드박스와 권한은 같습니다. 사용자만 페이지를 열 수 있습니다. 새로고침, 일시 중지, 제거, 서버 전환 시 닫힙니다.
 
@@ -156,7 +156,7 @@ CDN의 글꼴이나 이미지, 공개 API처럼 페이지가 직접 필요로 �
 | `"bearer"` | `Authorization: Bearer <token>` | API가 bearer 토큰 또는 personal access token을 문서화한 경우 |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API가 사용자 이름(흔히 이메일)과 API 토큰을 쓰는 HTTP Basic 인증을 문서화한 경우. 카드는 둘 다 묻고, `usernameLabel`이 첫 번째 입력란의 이름이 됩니다 |
 
-`settings`는 카드에 일반 텍스트 입력란을 추가합니다. 그 값은 `ctx.settings`로 전달됩니다.
+`settings`는 카드에 일반 텍스트 입력란을 추가합니다. 그 값은 `ctx.settings`로 전달됩니다. `"secret": true`인 입력란은 카드에서 가려지고 페이지에는 전달되지 않습니다. 서비스는 `readSettings()`로 읽습니다.
 
 ## 파일
 
@@ -263,6 +263,8 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where`에는 `selection`(메시지에서 선택한 텍스트), `file`(Files의 행), `diff`(파일이나 diff에서 선택한 줄)도 쓸 수 있습니다. 이들의 항목에는 같은 이름의 `kind`가 붙습니다. `selection`에는 텍스트, `file`에는 경로, `diff`에는 경로와 줄 범위가 들어 있습니다.
 
 메시지 작업은 `kind: "message"`인 `ctx.item`과 함께 확장을 엽니다. 세션 id와 제목, 프로젝트 폴더, 메시지 id, 역할, 텍스트가 들어 있습니다. 세션 작업은 `kind: "session"`과 세션 id, 제목, 폴더와 함께 엽니다. `"payload": ["messages"]`를 추가하면 항목에 대화 전체가 오래된 순서로 담기며, Markdown 내보내기가 만드는 것과 같은 텍스트입니다. 여기에는 `conversation` 권한이 필요하고, 사용자는 승인 대화 상자에서 이를 별도 줄로 봅니다. `item.action`은 어떤 항목을 클릭했는지 알려줍니다.
 

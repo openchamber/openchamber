@@ -28,7 +28,7 @@ It is not a one-time mount callback. Mount your UI and register subscriptions on
 | `locale` | the app language tag |
 | `directory` | current project directory, or `null` |
 | `session` | `{ id, title, busy }` or `null`. Title falls back to the session id. `busy` is the live status. `model` and `agent` (the OpenCode agent) appear when the session has them. |
-| `surface` | `panel` on the rail, `dialog` in the attach window, `page` full-screen, `status` in the Work Status panel, `file` as a file editor in Files |
+| `surface` | `panel` on the rail, `dialog` in the attach window, `page` full-screen, `status` in the Work Status panel, `file` as a file editor in Files, `block` in a UI block in the chat |
 | `item` | what this surface was opened for, or `null`: the attached item the user clicked (the same fields you passed to `attach`, including `data`), a message (`kind: "message"`), or a session (`kind: "session"`) from one of your declared actions. See [Actions](/sdk/#actions-commands-and-the-badge). |
 | `connection` | `{ connected, account }` for your integration |
 | `settings` | values of the fields you declared in `integration.settings` |
@@ -309,6 +309,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 Call `host.setHeight(px)` when the content changes size. Up to 4 components per extension, since every signature is text each session reads.
+
+A block can answer the agent, as a button in a block does. Call `host.answerBlock(text)` from a click: the agent gets the text and starts its next turn. One answer per block, and `block.answered` holds it after a reload, so draw the block as answered then.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 The arguments are written by a model, so text from a web page or a ticket can steer them. Treat them as untrusted, and do nothing with side effects until the user clicks.
 

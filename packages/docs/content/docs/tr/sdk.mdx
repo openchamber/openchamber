@@ -89,7 +89,7 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` pencerede size ait ayrı bir sayfa açar; böylece seçicinin şerit paneliyle kod paylaşması gerekmez
 - atlarsanız eklenti o menüde görünmez
 
-`ctx.surface`, `panel`, `dialog`, `page` veya `status` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
+`ctx.surface`, `panel`, `dialog`, `page`, `status` veya `block` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
 
 `contributes.page: true`, paneli oturum listesinin üstündeki Uzantı sayfaları menüsünden tam ekran açılabilir yapar. `{ "entry": "panel/page.html", "title": "Board" }` ayrı HTML ve isteğe bağlı başlık kullanır. `panel.entry` zorunludur; yalıtım ve izinler aynıdır. Sayfayı yalnızca kullanıcı açar. Yenileme, duraklatma, kaldırma veya sunucu değiştirme sayfayı kapatır.
 
@@ -156,7 +156,7 @@ Her `scheme` ne gönderir:
 | `"bearer"` | `Authorization: Bearer <token>` | API bearer veya personal access token belgeliyorsa |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API kullanıcı adı (çoğunlukla e-posta) ve API token'ı ile HTTP Basic auth belgeliyorsa; kart ikisini de sorar ve `usernameLabel` ilk alanı adlandırır |
 
-`settings` karta düz metin alanları ekler. Değerleri `ctx.settings` içinde gelir.
+`settings` karta düz metin alanları ekler. Değerleri `ctx.settings` içinde gelir. `"secret": true` olan bir alan kartta maskelenir ve hiçbir sayfaya ulaşmaz; servisiniz onu `readSettings()` ile okur.
 
 ## Dosyalar
 
@@ -263,6 +263,8 @@ Sayfanız `ctx.surface` değerini `file` olarak görür. Dosya diskte değişti�
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` ayrıca `selection` (bir mesajda seçilen metin), `file` (Files içindeki bir satır) ve `diff` (bir dosyanın veya diff'in seçili satırları) değerlerini de alır. Bunların öğeleri aynı adda bir `kind` taşır: `selection` metni, `file` yolu, `diff` yolu ve satır aralığını içerir.
 
 Bir mesaj eylemi, eklentinizi `kind: "message"` olan bir `ctx.item` ile açar: oturum id'si ve başlığı, proje dizini, mesaj id'si, rolü ve metni. Bir oturum eylemi ise `kind: "session"` ile, oturum id'si, başlığı ve dizini ile açar. `"payload": ["messages"]` ekleyin, öğe tüm konuşmayı da taşır, en eskisi önce olmak üzere, Markdown dışa aktarmanın ürettiği metnin aynısı. Bu, kullanıcının onay iletişim kutusunda ayrı bir satır olarak gördüğü `conversation` yeteneğini gerektirir. `item.action` hangi girdiye tıklandığını söyler.
 

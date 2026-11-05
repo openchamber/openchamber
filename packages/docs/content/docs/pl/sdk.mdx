@@ -89,7 +89,7 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` otwiera w oknie osobną Twoją stronę, żeby wybór nie musiał dzielić kodu z panelem na pasku bocznym
 - bez tego klucza rozszerzenie nie pojawia się w tym menu
 
-`ctx.surface` ma wartość `panel`, `dialog`, `page` lub `status`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
+`ctx.surface` ma wartość `panel`, `dialog`, `page`, `status` lub `block`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
 
 `contributes.page: true` udostępnia panel na pełnym ekranie w menu Strony rozszerzeń nad listą sesji. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `panel.entry` jest wymagane, a izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
 
@@ -156,7 +156,7 @@ Co wysyła każdy `scheme`:
 | `"bearer"` | `Authorization: Bearer <token>` | API dokumentuje token bearer lub personal access token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API dokumentuje HTTP Basic auth z nazwą użytkownika (często e-mail) i tokenem API; karta prosi o oba, a `usernameLabel` nazywa pierwsze pole |
 
-`settings` dodaje do karty zwykłe pola tekstowe. Ich wartości trafiają do `ctx.settings`.
+`settings` dodaje do karty zwykłe pola tekstowe. Ich wartości trafiają do `ctx.settings`. Pole z `"secret": true` jest maskowane na karcie i nigdy nie trafia na stronę; Twoja usługa odczytuje je przez `readSettings()`.
 
 ## Pliki
 
@@ -263,6 +263,8 @@ Poza paskiem bocznym i menu + rozszerzenie może pojawić się w trzech kolejnyc
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` przyjmuje też `selection` (tekst zaznaczony w wiadomości), `file` (wiersz w Files) i `diff` (zaznaczone wiersze pliku lub diffa). Ich elementy mają `kind` o tej samej nazwie: `selection` zawiera tekst, `file` ścieżkę, `diff` ścieżkę i zakres wierszy.
 
 Akcja na wiadomości otwiera Twoje rozszerzenie z `ctx.item` o `kind: "message"`: id i tytuł sesji, folder projektu, id wiadomości, jej rola i tekst. Akcja na sesji otwiera je z `kind: "session"` oraz id, tytułem i folderem sesji. Dodaj `"payload": ["messages"]`, a element niesie też całą rozmowę, od najstarszej wiadomości, ten sam tekst, który daje eksport do Markdown. To wymaga uprawnienia `conversation`, które użytkownik widzi jako osobny wiersz w oknie zgody. `item.action` mówi, którą pozycję kliknięto.
 

@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | アプリの言語タグ |
 | `directory` | 現在のプロジェクトディレクトリ、または `null` |
 | `session` | `{ id, title, busy }` または `null`。タイトルがなければセッション ID になります。`busy` はライブの状態です。セッションが持っていれば `model` と `agent`(OpenCode のエージェント)も含まれます。 |
-| `surface` | レールは `panel`、添付ウィンドウは `dialog`、全画面は `page`、Work Status パネルは `status`、Files のファイルエディターは `file` |
+| `surface` | レールは `panel`、添付ウィンドウは `dialog`、全画面は `page`、Work Status パネルは `status`、Files のファイルエディターは `file`、チャットの UI ブロック内は `block` |
 | `item` | この画面が何のために開かれたか、または `null`。ユーザーがクリックした添付済みの項目(`attach` に渡したのと同じフィールド、`data` を含む)、または宣言したアクションから来たメッセージ(`kind: "message"`)かセッション(`kind: "session"`)。[アクション](/sdk/#アクションコマンドバッジ) を参照。 |
 | `connection` | あなたの連携の `{ connected, account }` |
 | `settings` | `integration.settings` で宣言した入力欄の値 |
@@ -269,6 +269,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 内容のサイズが変わったら `host.setHeight(px)` を呼び出します。コンポーネントは拡張機能ごとに最大 4 つです。すべてのシグネチャが、各セッションの読むテキストになるためです。
+
+ブロックは、ブロック内のボタンと同じようにエージェントに回答できます。クリックから `host.answerBlock(text)` を呼び出すと、エージェントがそのテキストを受け取り、次のターンを始めます。回答はブロックごとに 1 回だけで、再読み込み後は `block.answered` に保持されるので、そのときは回答済みとしてブロックを描画してください。
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 引数はモデルが書くので、ウェブページやチケットのテキストに左右されることがあります。信頼できない入力として扱い、副作用のある処理はユーザーがクリックするまで行わないでください。
 

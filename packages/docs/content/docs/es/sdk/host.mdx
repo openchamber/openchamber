@@ -28,7 +28,7 @@ No es un callback de montaje único. Monta la UI y registra suscripciones una ve
 | `locale` | la etiqueta de idioma de la app |
 | `directory` | el directorio del proyecto actual, o `null` |
 | `session` | `{ id, title, busy }` o `null`. Si no hay título, se usa el id de la sesión. `busy` es el estado en vivo. `model` y `agent` (el agente de OpenCode) aparecen cuando la sesión los tiene. |
-| `surface` | `panel` en la barra lateral, `dialog` en la ventana de adjuntar, `page` a pantalla completa, `status` en el panel Work Status, `file` como editor de archivos en Files |
+| `surface` | `panel` en la barra lateral, `dialog` en la ventana de adjuntar, `page` a pantalla completa, `status` en el panel Work Status, `file` como editor de archivos en Files, `block` en un bloque de UI del chat |
 | `item` | para qué se abrió esta superficie, o `null`: el elemento adjunto en el que el usuario hizo clic (los mismos campos que pasaste a `attach`, incluido `data`), un mensaje (`kind: "message"`) o una sesión (`kind: "session"`) desde una de tus acciones declaradas. Ver [Acciones](/sdk/#acciones-comandos-y-la-insignia). |
 | `connection` | `{ connected, account }` de tu integración |
 | `settings` | los valores de los campos que declaraste en `integration.settings` |
@@ -269,6 +269,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 Llama a `host.setHeight(px)` cuando el contenido cambie de tamaño. Hasta 4 componentes por extensión, porque cada firma es texto que lee cada sesión.
+
+Un bloque puede responder al agente, como hace un botón dentro de un bloque. Llama a `host.answerBlock(text)` desde un clic: el agente recibe el texto y empieza su siguiente turno. Hay una respuesta por bloque, y `block.answered` la conserva tras recargar, así que entonces dibuja el bloque como respondido.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 Los argumentos los escribe un modelo, así que el texto de una página web o de un ticket puede dirigirlos. Trátalos como no confiables y no hagas nada con efectos secundarios hasta que el usuario haga clic.
 

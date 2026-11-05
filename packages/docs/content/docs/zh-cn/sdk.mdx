@@ -89,7 +89,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` 在窗口中打开你的另一个页面，这样选择器就不必和侧栏面板共用代码
 - 省略它，扩展就不会出现在该菜单中
 
-`ctx.surface` 为 `panel`、`dialog`、`page` 或 `status`。点击附加条目时，`ctx.item` 包含其数据；其他情况下为 `null`。
+`ctx.surface` 为 `panel`、`dialog`、`page`、`status` 或 `block`。点击附加条目时，`ctx.item` 包含其数据；其他情况下为 `null`。
 
 `contributes.page: true` 将面板作为全屏页面加入会话列表上方的扩展页面菜单。`{ "entry": "panel/page.html", "title": "Board" }` 使用独立 HTML 和可选标题。仍需 `panel.entry`，并使用相同沙箱和权限。只有用户可以打开页面。重新加载、暂停、移除或切换服务器时会关闭页面。
 
@@ -156,7 +156,7 @@ const { text } = await host.generate({
 | `"bearer"` | `Authorization: Bearer <token>` | API 文档中要求 bearer 令牌或 personal access token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | API 文档中要求使用用户名(通常是邮箱)加 API 令牌的 HTTP Basic 认证;卡片会要求填写两者,`usernameLabel` 指定第一个字段的名称 |
 
-`settings` 会在卡片上添加纯文本字段。它们的值会通过 `ctx.settings` 传给你。
+`settings` 会在卡片上添加纯文本字段。它们的值会通过 `ctx.settings` 传给你。带 `"secret": true` 的字段在卡片上会被遮盖，也不会传给页面；你的服务用 `readSettings()` 读取它。
 
 ## 文件
 
@@ -263,6 +263,8 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` 还可以取 `selection`（消息中选中的文本）、`file`（Files 中的一行）和 `diff`（文件或 diff 中选中的行）。它们的条目带有同名的 `kind`：`selection` 含文本，`file` 含路径，`diff` 含路径和行范围。
 
 消息操作会以 `kind: "message"` 的 `ctx.item` 打开你的扩展：会话 id 和标题、项目目录、消息 id、它的角色和文本。会话操作则以 `kind: "session"` 打开，附带会话 id、标题和目录。加上 `"payload": ["messages"]`，条目还会携带整段对话，从最早的消息开始，与 Markdown 导出产生的文本相同。这需要 `conversation` 能力，用户会在批准对话框中看到它单独占一行。`item.action` 告诉你点击的是哪一项。
 

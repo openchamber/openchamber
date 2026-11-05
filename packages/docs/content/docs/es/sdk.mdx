@@ -89,7 +89,7 @@ También puedes añadir un `.zip` local o un enlace https a un repositorio de gi
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` abre en la ventana una página aparte tuya, para que el selector no tenga que compartir código con el panel de la barra lateral
 - si lo omites, la extensión no aparece en ese menú
 
-`ctx.surface` es `panel`, `dialog`, `page` o `status`. Al pulsar un elemento adjunto, `ctx.item` contiene sus datos; en los demás casos es `null`.
+`ctx.surface` es `panel`, `dialog`, `page`, `status` o `block`. Al pulsar un elemento adjunto, `ctx.item` contiene sus datos; en los demás casos es `null`.
 
 `contributes.page: true` ofrece el panel a pantalla completa en el menú Páginas de extensiones, encima de las sesiones. `{ "entry": "panel/page.html", "title": "Board" }` usa otro HTML y un título opcional. Sigue necesitando `panel.entry` y usa el mismo aislamiento y permisos. Solo el usuario abre la página. Se cierra al recargar, pausar, eliminar o cambiar de servidor.
 
@@ -156,7 +156,7 @@ Qué envía cada `scheme`:
 | `"bearer"` | `Authorization: Bearer <token>` | la API documenta un token bearer o un personal access token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | la API documenta HTTP Basic auth con un usuario (a menudo un email) y un token de API; la tarjeta pide ambos, y `usernameLabel` da nombre al primer campo |
 
-`settings` añade campos de texto sencillos a la tarjeta. Sus valores llegan en `ctx.settings`.
+`settings` añade campos de texto sencillos a la tarjeta. Sus valores llegan en `ctx.settings`. Un campo con `"secret": true` se enmascara en la tarjeta y nunca llega a una página; tu servicio lo lee con `readSettings()`.
 
 ## Archivos
 
@@ -263,6 +263,8 @@ Además de la barra lateral y el menú +, una extensión puede aparecer en tres 
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` también acepta `selection` (texto seleccionado en un mensaje), `file` (una fila en Files) y `diff` (líneas seleccionadas de un archivo o de un diff). Sus elementos llevan un `kind` con el mismo nombre: `selection` trae el texto, `file` la ruta, `diff` la ruta y el rango de líneas.
 
 Una acción de mensaje abre tu extensión con un `ctx.item` de `kind: "message"`: el id y el título de la sesión, la carpeta del proyecto, el id del mensaje, su rol y su texto. Una acción de sesión la abre con `kind: "session"` y el id, el título y la carpeta de la sesión. Añade `"payload": ["messages"]` y el elemento también lleva toda la conversación, de la más antigua a la más reciente, el mismo texto que produce la exportación a Markdown. Eso necesita la capacidad `conversation`, que el usuario ve como una línea aparte en el diálogo de aprobación. `item.action` te dice qué entrada se pulsó.
 

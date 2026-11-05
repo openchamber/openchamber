@@ -28,7 +28,7 @@ Het is geen eenmalige callback voor het opbouwen van de interface. Bouw uw UI en
 | `locale` | taalcode van de app |
 | `directory` | huidige projectmap, of `null` |
 | `session` | `{ id, title, busy }` of `null`; zonder titel wordt de sessie-ID gebruikt. `busy` is de livestatus. `model` en `agent`, de OpenCode-agent, zijn aanwezig wanneer de sessie die heeft. |
-| `surface` | `panel` in de balk, `dialog` in het bijlagevenster, `page` schermvullend, `status` in Werkstatus, `file` als editor in Bestanden |
+| `surface` | `panel` in de balk, `dialog` in het bijlagevenster, `page` schermvullend, `status` in Werkstatus, `file` als editor in Bestanden, `block` in een UI-blok in de chat |
 | `item` | waarvoor de weergave werd geopend, of `null`: het aangeklikte gekoppelde item met dezelfde velden als bij `attach`, inclusief `data`, een bericht met `kind: "message"` of een sessie met `kind: "session"` uit een opgegeven actie. Zie [Acties](/nl/sdk/#acties-opdrachten-en-de-badge). |
 | `connection` | `{ connected, account }` voor uw integratie |
 | `settings` | waarden van de velden uit `integration.settings` |
@@ -293,6 +293,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 Roep `host.setHeight(px)` aan wanneer de inhoud van grootte verandert. Maximaal 4 componenten per extensie, omdat elke handtekening tekst is die elke sessie leest.
+
+Een blok kan de agent antwoorden, zoals een knop in een blok dat doet. Roep `host.answerBlock(text)` aan vanuit een klik: de agent krijgt de tekst en start zijn volgende beurt. Eén antwoord per blok, en `block.answered` bewaart het na herladen, dus teken het blok dan als beantwoord.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 De argumenten worden door een model geschreven, dus tekst van een webpagina of ticket kan ze sturen. Behandel ze als onbetrouwbaar en doe niets met neveneffecten totdat de gebruiker klikt.
 

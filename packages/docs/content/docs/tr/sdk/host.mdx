@@ -28,7 +28,7 @@ Bu, yalnızca bir kez çalışan bir bağlama callback'i değildir. Arayüzü ve
 | `locale` | uygulamanın dil etiketi |
 | `directory` | geçerli proje dizini veya `null` |
 | `session` | `{ id, title, busy }` veya `null`. Başlık yoksa oturum id'sine düşer. `busy` canlı durumdur. Oturumda varsa `model` ve `agent` (OpenCode ajanı) de gelir. |
-| `surface` | şeritte `panel`, iliştirme penceresinde `dialog`, tam ekranda `page`, Work Status panelinde `status`, Files içinde dosya düzenleyici olarak `file` |
+| `surface` | şeritte `panel`, iliştirme penceresinde `dialog`, tam ekranda `page`, Work Status panelinde `status`, Files içinde dosya düzenleyici olarak `file`, sohbetteki UI bloğunda `block` |
 | `item` | bu yüzeyin ne için açıldığı veya `null`: kullanıcının tıkladığı iliştirilmiş öğe (`attach` çağrısına verdiğiniz alanların aynısı, `data` dahil), tanımladığınız eylemlerden birinden gelen bir mesaj (`kind: "message"`) veya oturum (`kind: "session"`). Bkz. [Eylemler](/sdk/#eylemler-komutlar-ve-rozet). |
 | `connection` | entegrasyonunuz için `{ connected, account }` |
 | `settings` | `integration.settings` içinde tanımladığınız alanların değerleri |
@@ -278,6 +278,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 İçeriğin boyutu değiştiğinde `host.setHeight(px)` çağırın. Eklenti başına en fazla 4 bileşen olabilir, çünkü her imza her oturumun okuduğu metindir.
+
+Bir blok, bloktaki bir düğmenin yaptığı gibi ajana yanıt verebilir. Bir tıklamadan `host.answerBlock(text)` çağırın: ajan metni alır ve sonraki turuna başlar. Blok başına bir yanıt olur ve `block.answered` bunu yeniden yüklemeden sonra tutar, bu yüzden bloğu o zaman yanıtlanmış olarak çizin.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 Argümanları bir model yazar, bu yüzden bir web sayfasındaki ya da bir bilet metnindeki yazı onları yönlendirebilir. Argümanları güvenilmez sayın ve kullanıcı tıklayana kadar yan etkisi olan hiçbir şey yapmayın.
 

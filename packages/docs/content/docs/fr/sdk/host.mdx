@@ -28,7 +28,7 @@ Ce n'est pas un callback de montage unique. Montez l'interface et inscrivez les 
 | `locale` | le tag de langue de l'application |
 | `directory` | le dossier du projet en cours, ou `null` |
 | `session` | `{ id, title, busy }` ou `null`. Le titre retombe sur l'id de session. `busy` est le statut en direct. `model` et `agent` (l'agent OpenCode) apparaissent quand la session les a. |
-| `surface` | `panel` dans la barre latérale, `dialog` dans la fenêtre d'attache, `page` en plein écran, `status` dans le panneau Work Status, `file` comme éditeur de fichiers dans Files |
+| `surface` | `panel` dans la barre latérale, `dialog` dans la fenêtre d'attache, `page` en plein écran, `status` dans le panneau Work Status, `file` comme éditeur de fichiers dans Files, `block` dans un bloc d'interface du chat |
 | `item` | ce pour quoi cette surface a été ouverte, ou `null` : l'élément attaché sur lequel l'utilisateur a cliqué (les mêmes champs que vous avez passés à `attach`, y compris `data`), un message (`kind: "message"`) ou une session (`kind: "session"`) venant d'une de vos actions déclarées. Voir [Actions](/sdk/#actions-commandes-et-le-badge). |
 | `connection` | `{ connected, account }` pour votre intégration |
 | `settings` | les valeurs des champs déclarés dans `integration.settings` |
@@ -269,6 +269,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 Appelez `host.setHeight(px)` quand la taille du contenu change. Jusqu'à 4 composants par extension, car chaque signature est du texte que chaque session lit.
+
+Un bloc peut répondre à l'agent, comme le fait un bouton dans un bloc. Appelez `host.answerBlock(text)` depuis un clic : l'agent reçoit le texte et démarre son tour suivant. Une seule réponse par bloc, et `block.answered` la conserve après un rechargement, donc dessinez alors le bloc comme déjà répondu.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 Les arguments sont écrits par un modèle, donc du texte provenant d'une page web ou d'un ticket peut les orienter. Traitez-les comme non fiables, et ne faites rien qui ait des effets de bord avant que l'utilisateur clique.
 

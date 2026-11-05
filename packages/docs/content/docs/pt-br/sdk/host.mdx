@@ -28,7 +28,7 @@ Não é um callback de montagem única. Monte a UI e registre assinaturas uma ve
 | `locale` | a tag de idioma do app |
 | `directory` | o diretório do projeto atual, ou `null` |
 | `session` | `{ id, title, busy }` ou `null`. Sem título, o id da sessão é usado no lugar. `busy` é o status ao vivo. `model` e `agent` (o agente do OpenCode) aparecem quando a sessão os tem. |
-| `surface` | `panel` na barra lateral, `dialog` na janela de anexar, `page` em tela cheia, `status` no painel Work Status, `file` como editor de arquivos no Files |
+| `surface` | `panel` na barra lateral, `dialog` na janela de anexar, `page` em tela cheia, `status` no painel Work Status, `file` como editor de arquivos no Files, `block` em um bloco de UI no chat |
 | `item` | para que esta superfície foi aberta, ou `null`: o item anexado em que o usuário clicou (os mesmos campos que você passou para `attach`, incluindo `data`), uma mensagem (`kind: "message"`) ou uma sessão (`kind: "session"`) vinda de uma das suas ações declaradas. Veja [Ações](/sdk/#ações-comandos-e-o-selo). |
 | `connection` | `{ connected, account }` da sua integração |
 | `settings` | os valores dos campos que você declarou em `integration.settings` |
@@ -269,6 +269,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 Chame `host.setHeight(px)` quando o conteúdo mudar de tamanho. Até 4 componentes por extensão, porque cada assinatura é texto que cada sessão lê.
+
+Um bloco pode responder ao agente, como faz um botão dentro de um bloco. Chame `host.answerBlock(text)` a partir de um clique: o agente recebe o texto e começa o próximo turno. É uma resposta por bloco, e `block.answered` a guarda depois de recarregar, então nesse caso desenhe o bloco como respondido.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 Os argumentos são escritos por um modelo, então texto de uma página web ou de um ticket pode direcioná-los. Trate-os como não confiáveis e não faça nada com efeitos colaterais até o usuário clicar.
 

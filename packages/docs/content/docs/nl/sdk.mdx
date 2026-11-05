@@ -89,7 +89,7 @@ U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-be
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` opent een aparte pagina in het venster, zodat de kiezer geen code met het zijpaneel hoeft te delen
 - zonder dit veld verschijnt de extensie niet in dat menu
 
-Uw pagina leest via `ctx.surface` waar ze staat: `panel`, `dialog`, `page` of `status`. Klikt de gebruiker op een gekoppeld item, dan krijgt u de bijbehorende `data` terug in `ctx.item`. Openen vanuit de balk, het +-menu of het menu voor schermvullende pagina's begint zonder item.
+Uw pagina leest via `ctx.surface` waar ze staat: `panel`, `dialog`, `page`, `status` of `block`. Klikt de gebruiker op een gekoppeld item, dan krijgt u de bijbehorende `data` terug in `ctx.item`. Openen vanuit de balk, het +-menu of het menu voor schermvullende pagina's begint zonder item.
 
 `contributes.page: true` maakt het paneel schermvullend beschikbaar via Extensiepagina's boven de sessielijst. Gebruik `{ "entry": "panel/page.html", "title": "Board" }` voor aparte HTML en een optionele titel. Lever die HTML en de gebouwde scripts mee. Een pagina vereist `panel.entry`, gebruikt dezelfde afscherming en rechten en opent alleen op keuze van de gebruiker. Herladen, pauzeren, verwijderen of wisselen van server sluit de pagina.
 
@@ -156,7 +156,7 @@ Wat elke `scheme` verstuurt:
 | `"bearer"` | `Authorization: Bearer <token>` | de API verwacht een bearer- of persoonlijk toegangstoken |
 | `"basic"` | `Authorization: Basic base64(username:token)` | de API verwacht HTTP Basic met gebruikersnaam, vaak een e-mailadres, en API-token; de kaart vraagt om beide en `usernameLabel` benoemt het eerste veld |
 
-`settings` voegt gewone tekstvelden aan de kaart toe. Hun waarden staan in `ctx.settings`.
+`settings` voegt gewone tekstvelden aan de kaart toe. Hun waarden staan in `ctx.settings`. Een veld met `"secret": true` wordt op de kaart gemaskeerd en bereikt nooit een pagina. Uw service leest het met `readSettings()`.
 
 ## Bestanden
 
@@ -263,6 +263,8 @@ Naast de balk en het +-menu kan een extensie op nog drie plekken verschijnen. Ze
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` accepteert ook `selection` (geselecteerde tekst in een bericht), `file` (een rij in Bestanden) en `diff` (geselecteerde regels van een bestand of diff). Hun items hebben een `kind` met dezelfde naam: `selection` bevat de tekst, `file` het pad, `diff` het pad en het regelbereik.
 
 Een berichtactie opent de extensie met `ctx.item` van `kind: "message"`: sessie-ID en -titel, projectmap, bericht-ID, rol en tekst. Een sessieactie gebruikt `kind: "session"` met sessie-ID, titel en map. Voeg `"payload": ["messages"]` toe om het hele gesprek mee te krijgen, oudste eerst, met dezelfde tekst als de Markdown-export. Dit vereist `conversation`, apart getoond in het toestemmingsvenster. `item.action` geeft aan welke menuoptie is gekozen.
 

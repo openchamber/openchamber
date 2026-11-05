@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | 应用的语言标签 |
 | `directory` | 当前项目目录，或 `null` |
 | `session` | `{ id, title, busy }` 或 `null`。没有标题时回退为会话 id。`busy` 是实时状态。会话有 `model` 和 `agent`（OpenCode 的 agent）时也会出现。 |
-| `surface` | 侧栏为 `panel`，附加窗口为 `dialog`，全屏为 `page`，Work Status 面板中为 `status`，Files 中的文件编辑器为 `file` |
+| `surface` | 侧栏为 `panel`，附加窗口为 `dialog`，全屏为 `page`，Work Status 面板中为 `status`，Files 中的文件编辑器为 `file`，聊天的 UI 块中为 `block` |
 | `item` | 此界面因何而打开，或 `null`：用户点击的已附加条目（与你传给 `attach` 的字段相同，包括 `data`）、来自你声明的某个操作的消息（`kind: "message"`）或会话（`kind: "session"`）。见[操作](/sdk/#操作命令和徽标)。 |
 | `connection` | 你的集成的 `{ connected, account }` |
 | `settings` | 你在 `integration.settings` 中声明的字段的值 |
@@ -269,6 +269,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 内容大小变化时调用 `host.setHeight(px)`。每个扩展最多 4 个组件，因为每个签名都是每个会话要读取的文本。
+
+块可以回答智能体，就像块里的按钮那样。在点击时调用 `host.answerBlock(text)`：智能体收到文本并开始下一轮。每个块只能回答一次，重新加载后 `block.answered` 仍保留这个回答，这时请把块绘制为已回答状态。
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 参数由模型写入，所以网页或工单中的文本可能左右它们。请把它们视为不可信内容，在用户点击之前不要执行任何有副作用的操作。
 

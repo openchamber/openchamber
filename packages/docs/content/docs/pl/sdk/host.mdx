@@ -28,7 +28,7 @@ To nie jest jednorazowy callback montowania. Zamontuj UI i zarejestruj subskrypc
 | `locale` | tag języka aplikacji |
 | `directory` | katalog bieżącego projektu albo `null` |
 | `session` | `{ id, title, busy }` albo `null`. Tytuł wraca do id sesji, gdy go brak. `busy` to status na żywo. `model` i `agent` (agent OpenCode) pojawiają się, gdy sesja je ma. |
-| `surface` | `panel` na pasku bocznym, `dialog` w oknie dołączania, `page` na pełnym ekranie, `status` w panelu Work Status, `file` jako edytor plików w Files |
+| `surface` | `panel` na pasku bocznym, `dialog` w oknie dołączania, `page` na pełnym ekranie, `status` w panelu Work Status, `file` jako edytor plików w Files, `block` w bloku UI na czacie |
 | `item` | to, dla czego otwarto tę powierzchnię, albo `null`: dołączony element, który użytkownik kliknął (te same pola, które przekazałeś do `attach`, łącznie z `data`), wiadomość (`kind: "message"`) albo sesja (`kind: "session"`) z jednej z zadeklarowanych przez Ciebie akcji. Zobacz [Akcje](/sdk/#akcje-polecenia-i-odznaka). |
 | `connection` | `{ connected, account }` dla Twojej integracji |
 | `settings` | wartości pól zadeklarowanych w `integration.settings` |
@@ -269,6 +269,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 Wywołaj `host.setHeight(px)`, gdy treść zmieni rozmiar. Do 4 komponentów na rozszerzenie, ponieważ każda sygnatura to tekst, który czyta każda sesja.
+
+Blok może odpowiedzieć agentowi, tak jak robi to przycisk w bloku. Wywołaj `host.answerBlock(text)` po kliknięciu: agent dostaje tekst i zaczyna następną turę. Na blok przypada jedna odpowiedź, a `block.answered` przechowuje ją po przeładowaniu, więc narysuj wtedy blok z udzieloną odpowiedzią.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 Argumenty pisze model, więc tekst ze strony internetowej lub zgłoszenia może nimi sterować. Traktuj je jako niezaufane i nie rób niczego z efektami ubocznymi, dopóki użytkownik nie kliknie.
 

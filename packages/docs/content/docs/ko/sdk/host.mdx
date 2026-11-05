@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | 앱 언어 태그 |
 | `directory` | 현재 프로젝트 디렉터리, 또는 `null` |
 | `session` | `{ id, title, busy }` 또는 `null`. 제목이 없으면 세션 id를 사용합니다. `busy`는 실시간 상태입니다. 세션에 있으면 `model`과 `agent`(OpenCode 에이전트)도 포함됩니다. |
-| `surface` | 레일은 `panel`, 첨부 창은 `dialog`, 전체 화면은 `page`, Work Status 패널은 `status`, Files의 파일 편집기는 `file` |
+| `surface` | 레일은 `panel`, 첨부 창은 `dialog`, 전체 화면은 `page`, Work Status 패널은 `status`, Files의 파일 편집기는 `file`, 채팅의 UI 블록은 `block` |
 | `item` | 이 화면이 무엇 때문에 열렸는지, 또는 `null`. 사용자가 클릭한 첨부 항목(`attach`에 넘긴 것과 같은 필드, `data` 포함), 또는 선언한 작업에서 온 메시지(`kind: "message"`)나 세션(`kind: "session"`). [작업](/sdk/#작업-명령-배지) 참고. |
 | `connection` | 여러분의 통합에 대한 `{ connected, account }` |
 | `settings` | `integration.settings`에 선언한 입력란의 값 |
@@ -269,6 +269,13 @@ host.onBlock(({ args }) => draw(args.key));
 ```
 
 콘텐츠 크기가 바뀌면 `host.setHeight(px)`를 호출하세요. 컴포넌트는 확장당 최대 4개입니다. 모든 시그니처가 각 세션이 읽는 텍스트이기 때문입니다.
+
+블록은 블록 안의 버튼처럼 에이전트에게 답할 수 있습니다. 클릭에서 `host.answerBlock(text)`를 호출하면 에이전트가 텍스트를 받아 다음 턴을 시작합니다. 답은 블록당 하나이고 새로고침 후에는 `block.answered`에 남아 있으니, 그때는 블록을 답변한 상태로 그리세요.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
 
 인수는 모델이 쓰므로 웹 페이지나 티켓의 텍스트가 인수를 조종할 수 있습니다. 신뢰할 수 없는 값으로 취급하고, 사용자가 클릭하기 전에는 부수 효과가 있는 작업을 하지 마세요.
 

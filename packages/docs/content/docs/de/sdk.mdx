@@ -89,7 +89,7 @@ Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repos
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` öffnet eine separate Seite von dir im Fenster, damit die Auswahl keinen Code mit dem Panel in der Leiste teilen muss
 - lässt du es weg, bleibt die Erweiterung aus diesem Menü draußen
 
-`ctx.surface` ist `panel`, `dialog`, `page` oder `status`. Beim Klick auf einen angehängten Eintrag enthält `ctx.item` dessen Daten, sonst `null`.
+`ctx.surface` ist `panel`, `dialog`, `page`, `status` oder `block`. Beim Klick auf einen angehängten Eintrag enthält `ctx.item` dessen Daten, sonst `null`.
 
 `contributes.page: true` bietet die Panel-Seite im Menü Erweiterungsseiten über der Sitzungsliste an. `{ "entry": "panel/page.html", "title": "Board" }` verwendet eigene HTML-Dateien und einen optionalen Titel. `panel.entry` bleibt erforderlich; Sandbox und Berechtigungen bleiben gleich. Nur der Nutzer öffnet die Seite. Neuladen, Pause, Entfernen oder Serverwechsel schließen sie.
 
@@ -156,7 +156,7 @@ Was jedes `scheme` sendet:
 | `"bearer"` | `Authorization: Bearer <token>` | die API dokumentiert einen Bearer- oder Personal-Access-Token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | die API dokumentiert HTTP Basic Auth mit Benutzername (oft eine E-Mail) und API-Token; die Karte fragt nach beidem, und `usernameLabel` beschriftet das erste Feld |
 
-`settings` fügt der Karte einfache Textfelder hinzu. Ihre Werte kommen in `ctx.settings` an.
+`settings` fügt der Karte einfache Textfelder hinzu. Ihre Werte kommen in `ctx.settings` an. Ein Feld mit `"secret": true` wird auf der Karte maskiert und erreicht nie eine Seite; dein Dienst liest es mit `readSettings()`.
 
 ## Dateien
 
@@ -263,6 +263,8 @@ Neben der Leiste und dem +-Menü kann eine Erweiterung an drei weiteren Stellen 
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` nimmt auch `selection` (markierter Text in einer Nachricht), `file` (eine Zeile in Files) und `diff` (markierte Zeilen einer Datei oder eines Diffs). Ihre Einträge tragen ein gleichnamiges `kind`: `selection` enthält den Text, `file` den Pfad, `diff` den Pfad und den Zeilenbereich.
 
 Eine Nachrichtenaktion öffnet deine Erweiterung mit einem `ctx.item` der Art `kind: "message"`: Session-ID und -Titel, Projektordner, Nachrichten-ID, ihre Rolle und ihr Text. Eine Session-Aktion öffnet sie mit `kind: "session"` sowie Session-ID, Titel und Ordner. Füge `"payload": ["messages"]` hinzu, und der Eintrag trägt außerdem das ganze Gespräch, älteste Nachricht zuerst, derselbe Text, den der Markdown-Export erzeugt. Dafür braucht es die Berechtigung `conversation`, die der Nutzer als eigene Zeile im Freigabedialog sieht. `item.action` sagt dir, welcher Eintrag angeklickt wurde.
 
