@@ -68,6 +68,48 @@ const parseState = (value, maxRecords) => {
   return Object.freeze({ version: VERSION, records: Object.freeze(records) });
 };
 
+const emptyState = () => Object.freeze({ version: VERSION, records: Object.freeze([]) });
+
+const readProvenanceState = async (filePath, fsImpl, maxRecords) => {
+  let handle;
+  try {
+    handle = await fsImpl.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return emptyState();
+    throw error?.code === 'ELOOP' ? invalidStore() : error;
+  }
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile() || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
+    return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords);
+  } catch (error) {
+    if (error?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') throw error;
+    throw invalidStore();
+  } finally {
+    await handle.close();
+  }
+};
+
+/**
+ * Whether the store holds a contributor fork for this git directory, for the
+ * VS Code host, which reads the server's file without its repository identity
+ * resolver: each record's own `repositoryId` rebuilds the id it was stored
+ * under. Writes replace the file by rename, so this read takes no lock. An
+ * unreadable store rejects: the caller cannot tell and must not run its code.
+ */
+export const isContributorForkGitDirectory = async ({
+  filePath,
+  gitDirectory,
+  fsImpl = fs,
+  maxRecords = DEFAULT_MAX_RECORDS,
+}) => {
+  const state = await readProvenanceState(filePath, fsImpl, maxRecords);
+  const canonicalGitDirectory = await fsImpl.realpath(gitDirectory);
+  const stats = await fsImpl.stat(canonicalGitDirectory);
+  return state.records.some((record) => record.provenance !== null
+    && record.worktreeId === worktreeIdFor(record.repositoryId, canonicalGitDirectory, stats));
+};
+
 export function createContributorProvenanceStore({
   filePath,
   resolveRepositoryIdentity,
@@ -89,26 +131,7 @@ export function createContributorProvenanceStore({
     writes = next.then(() => undefined, () => undefined);
     return next;
   };
-  const emptyState = () => Object.freeze({ version: VERSION, records: Object.freeze([]) });
-  const readState = async () => {
-    let handle;
-    try {
-      handle = await fsImpl.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-    } catch (error) {
-      if (error?.code === 'ENOENT') return emptyState();
-      throw error?.code === 'ELOOP' ? invalidStore() : error;
-    }
-    try {
-      const stats = await handle.stat();
-      if (!stats.isFile() || (process.platform !== 'win32' && (stats.mode & 0o077) !== 0)) throw invalidStore();
-      return parseState(JSON.parse(await handle.readFile('utf8')), maxRecords);
-    } catch (error) {
-      if (error?.code === 'CONTRIBUTOR_PROVENANCE_STORE_INVALID') throw error;
-      throw invalidStore();
-    } finally {
-      await handle.close();
-    }
-  };
+  const readState = () => readProvenanceState(filePath, fsImpl, maxRecords);
   const writeState = async (state) => {
     await fsImpl.mkdir(path.dirname(filePath), { recursive: true });
     const temporary = `${filePath}.${crypto.randomUUID()}.tmp`;

@@ -12,6 +12,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
 import { readConfig } from './opencodeConfig';
+import { isContributorForkGitDirectory } from '../../web/server/lib/git/contributor-provenance-storage.js';
 import { readProjectStartCommand } from '../../web/server/lib/opencode/project-start-command.js';
 import { resolveWorktreeDirectory } from './worktree-directory';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
@@ -2369,15 +2370,32 @@ const removeGitWorktreeWhenFree = async (
 // Mirrors the server (`runWorktreeTeardown` in packages/web/server/lib/git/service.js):
 // teardown runs while the worktree and its OpenCode instance are intact, so a
 // failing command leaves both as they were; a folder already gone or a
-// checkout whose bootstrap failed has nothing to stop. The contributor
-// provenance store lives in the OpenChamber server's data directory and is
-// not read here, so a contributor-fork worktree another runtime created runs
-// the teardown when deleted from VS Code (a known gap, see the server's
-// DOCUMENTATION.md).
+// checkout whose bootstrap failed has nothing to stop. A contributor-fork
+// checkout holds the contributor's code and never runs it. The host creates no
+// such checkout, so the answer comes from the server's store; when it cannot be
+// read nothing runs and the worktree is kept. The path is the server's own
+// (`OPENCHAMBER_USER_CONFIG_ROOT`, the same on every platform).
+const contributorProvenancePath = (): string => path.join(
+  process.env.OPENCHAMBER_DATA_DIR ? path.resolve(process.env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'),
+  'git-contributor-provenance.json',
+);
+
+const isContributorCheckout = async (worktreeDirectory: string): Promise<boolean> => {
+  const gitDirectory = await runGitCommandOrThrow(worktreeDirectory, ['rev-parse', '--absolute-git-dir'], 'Could not find the git directory');
+  return isContributorForkGitDirectory({
+    filePath: contributorProvenancePath(),
+    gitDirectory: gitDirectory.stdout.trim(),
+  });
+};
+
 const runWorktreeTeardown = async (worktreeDirectory: string, command: string | undefined): Promise<void> => {
   if (!command?.trim()) return;
   if (worktreeBootstrapState.get(toBootstrapStateKey(worktreeDirectory))?.status === WORKTREE_BOOTSTRAP_FAILED) return;
   if (!(await checkPathExists(worktreeDirectory))) return;
+  const contributor = await isContributorCheckout(worktreeDirectory).catch((error: Error) => {
+    throw Object.assign(new Error(`Could not tell whether this checkout holds a contributor's code, so no teardown command ran and the worktree was kept: ${error.message}`), { code: 'WORKTREE_TEARDOWN_FAILED' });
+  });
+  if (contributor) return;
   const teardown = await runWorktreeStartCommand(worktreeDirectory, command, { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
   if (!teardown.success) {
     const output = teardown.message || 'the command exited with an error';

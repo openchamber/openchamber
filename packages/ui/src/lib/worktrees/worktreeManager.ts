@@ -845,13 +845,11 @@ export const resolveWorktreeTeardownCommand = async (
  * Archives the worktree: the server records its state with `sessionIds` (the
  * sessions the caller archived for it) under a private ref and removes the
  * folder, keeping the branch. The row shows the removal until git answers.
- * `teardownCommand` comes from `resolveWorktreeTeardownCommand`, which the
- * caller runs before it archives any session.
  */
 export async function archiveProjectWorktree(
   project: ProjectRef,
   worktree: WorktreeMetadata,
-  input: { id: string; sessionIds: string[]; title?: string; teardownCommand?: string },
+  input: { id: string; sessionIds: string[]; title?: string },
 ): Promise<GitWorktreeArchive> {
   markWorktreeRemoving(worktree.path);
   let archive: GitWorktreeArchive;

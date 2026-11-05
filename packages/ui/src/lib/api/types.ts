@@ -1133,8 +1133,6 @@ export interface ArchiveGitWorktreePayload {
   sessionIds: string[];
   /** The name the sidebar showed for the work, kept when the worktree has no task title. */
   title?: string;
-  /** Runs inside the worktree before the snapshot; a failure keeps the worktree. */
-  teardownCommand?: string;
 }
 
 export interface GitWorktreeArchiveRestoreResult {

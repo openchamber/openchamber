@@ -113,20 +113,22 @@ A stale status row can outlive its repository. Returning empty contents would re
 
 ### Worktree teardown commands
 
-`DELETE /api/git/worktrees` and `POST /api/git/worktrees/archives` take an
-optional `teardownCommand`: the project's `teardownWorktree` list joined with
-`&&`, after the client's trust prompt (`resolveWorktreeTeardownCommands` in
+`DELETE /api/git/worktrees` takes an optional `teardownCommand`: the project's
+`teardownWorktree` list joined with `&&`, after the client's trust prompt
+(`resolveWorktreeTeardownCommands` in
 `packages/ui/src/lib/sharedTrustConfirmation.ts`). `POST
 /api/git/worktrees/teardown` runs it alone and removes nothing
-(`teardownWorktree`). It runs through the same shell runner as the setup
+(`teardownWorktree`). An archive uses that route before it archives any session,
+so a failing teardown leaves the sessions alone, and `POST
+/api/git/worktrees/archives` then snapshots what the teardown left; a delete
+with a remote branch uses it the same way before the remote delete. It runs through the same shell runner as the setup
 commands, with the worktree as working directory, stdin closed, and the
-project's current environment (all three routes are user actions). The request
+project's current environment (both routes are user actions). The request
 waits for it, so it is stopped after 5 minutes and the removal fails as for any
 other failing command.
 
 - It runs before anything is touched: before the bootstrap record is cleared,
-  the OpenCode instance released and `git worktree remove` runs, and in an
-  archive before the snapshot, so the snapshot holds what the teardown left.
+  the OpenCode instance released and `git worktree remove` runs.
 - A failing command throws `Worktree teardown command failed, so the worktree
   was kept: <output>` with `code: 'WORKTREE_TEARDOWN_FAILED'` and leaves the
   worktree, its instance and its branch as they were; `<output>` keeps only the
@@ -147,7 +149,8 @@ other failing command.
   started is not torn down. The routes inject `isContributorCheckout`, which
   reads `contributorProvenance`. A read that fails runs nothing and keeps the
   worktree with `WORKTREE_TEARDOWN_FAILED`, so "Delete without teardown" stays
-  available.
+  available. The VS Code host makes the same check from the store file
+  (`isContributorForkGitDirectory`).
 - The client asks for no trust where the server runs no teardown: a checkout
   whose bootstrap state it has as failed, or whose `provenance.kind` is
   `contributor-fork` (`resolveWorktreeTeardownCommand` in
@@ -157,7 +160,9 @@ other failing command.
   runs, a failed session move) run no teardown, as they run no setup commands.
   The client's merged-PR cleanup never opens the trust prompt: untrusted shared
   teardown commands make its archive fail before any session is archived, and
-  the worktree waits for a removal by hand.
+  the worktree waits for a removal by hand. A trusted teardown that fails stops
+  that archive at the same point, so the cleanup's retries leave the sessions
+  alone.
 - A delete that also removes the remote branch checks that the remote is
   ready, then runs the teardown alone, then plans and runs the remote delete,
   then removes the worktree without a teardown command
@@ -165,10 +170,9 @@ other failing command.
   nothing, and a failing teardown never reaches the remote delete.
 - The VS Code runtime applies the same rules in `removeWorktree` and
   `teardownWorktree` (`packages/vscode/src/gitService.ts`) and has no archive.
-  It does not read the contributor provenance store, which lives in the
-  OpenChamber server's data directory: a contributor-fork worktree the desktop
-  or web app created, deleted from VS Code, runs the teardown. Its webview sends
-  both requests without the bridge's 30 second timeout, since the host may run
+  It creates no contributor-fork worktree, but one the desktop or web app
+  created can be deleted from it, so it reads the server's store file at the
+  server's path. Its webview sends both requests without the bridge's 30 second timeout, since the host may run
   the teardown for 5 minutes.
 
 #### Why a failed teardown keeps the worktree

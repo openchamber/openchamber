@@ -209,6 +209,25 @@ describe('shared trust confirmation', () => {
     expect(getSharedTrustConfirmationSnapshot()).toBeNull();
   });
 
+  test('a later prompt waits for an open teardown prompt, and each gets its own answer', async () => {
+    const otherProject = { id: 'other', path: '/other' };
+    const teardown = resolveWorktreeTeardownCommands(project);
+    await Promise.resolve();
+    await Promise.resolve();
+    const newSetup = resolveWorktreeSetupCommandsOrCancel(otherProject);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getSharedTrustConfirmationSnapshot()?.project).toEqual(project);
+
+    settleSharedTrustConfirmation('trust');
+    expect(await teardown).toEqual(['docker compose down', 'rm -f .dev.pid']);
+    await Promise.resolve();
+    expect(getSharedTrustConfirmationSnapshot()?.project).toEqual(otherProject);
+
+    settleSharedTrustConfirmation('skip');
+    expect(await newSetup).toEqual(['cp .env.example .env']);
+  });
+
   test('teardown without shared commands never asks', async () => {
     setup.shared.teardownWorktree = [];
     setup.teardownWorktree = ['rm -f .dev.pid'];

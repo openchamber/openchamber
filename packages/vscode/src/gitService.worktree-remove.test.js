@@ -9,6 +9,10 @@ mock.module('vscode', () => ({
   Uri: { file: (fsPath) => ({ fsPath }) },
 }));
 
+const noDataDir = path.join(os.tmpdir(), 'openchamber-vscode-no-data-dir');
+process.env.OPENCHAMBER_DATA_DIR = noDataDir;
+
+const { createContributorProvenanceStore } = await import('../../web/server/lib/git/contributor-provenance-storage.js');
 const { createWorktree, getWorktreeBootstrapStatus, removeWorktree, teardownWorktree, waitForWorktreeRemoval } = await import('./gitService.ts?worktree-remove-test');
 
 const tempDirs = [];
@@ -58,6 +62,31 @@ const withIsolatedOpenCodeData = async (run) => {
       process.env.XDG_DATA_HOME = previousXdgDataHome;
     }
   }
+};
+
+// The server's store in the data directory, written by the server's own code.
+const withContributorStore = async (run) => {
+  process.env.OPENCHAMBER_DATA_DIR = createTempDir();
+  try {
+    await run({ filePath: path.join(process.env.OPENCHAMBER_DATA_DIR, 'git-contributor-provenance.json') });
+  } finally {
+    process.env.OPENCHAMBER_DATA_DIR = noDataDir;
+  }
+};
+
+const recordContributorFork = async (filePath, worktreePath) => {
+  const gitDirectory = fs.realpathSync(runGit(worktreePath, ['rev-parse', '--absolute-git-dir']).trim());
+  const store = createContributorProvenanceStore({
+    filePath,
+    resolveRepositoryIdentity: async () => ({ supported: true, repositoryId: 'repo_one' }),
+    resolveGitPaths: async () => ({ supported: true, bare: false, gitDirectory }),
+  });
+  await store.compareAndSwap(worktreePath, 0, {
+    kind: 'contributor-fork', remoteName: 'pr-alice', endpointFingerprint: 'endpoint_one', sourceSha: 'a'.repeat(40),
+    sourceRef: 'refs/heads/feature/login', sourceProjectId: 'alice/app', targetProjectId: 'acme/app',
+    provider: 'github', instance: 'github.com', accountId: 'account_one', bindingRevision: 3,
+    primaryRemote: 'origin', projectId: 'acme/app', setupCommand: '',
+  });
 };
 
 afterEach(() => {
@@ -137,6 +166,60 @@ describe('VS Code worktree removal instance disposal', () => {
       await expect(removeWorktree(repo, { directory: worktreePath, teardownCommand: 'exit 3' })).rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED' });
       expect(fs.existsSync(path.join(worktreePath, '.git'))).toBe(true);
     });
+  });
+
+  it('never runs a teardown in a contributor fork, and removes it', async () => {
+    if (!canRunGit()) return;
+
+    await withIsolatedOpenCodeData(() => withContributorStore(async ({ filePath }) => {
+      const { repo, worktreePath } = createRepositoryWithWorktree();
+      await recordContributorFork(filePath, worktreePath);
+      const marker = path.join(createTempDir(), 'ran.txt');
+      const recording = path.join(path.dirname(marker), 'record.cjs');
+      fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n`);
+      const teardownCommand = `${JSON.stringify(process.execPath)} ${JSON.stringify(recording)}`;
+
+      await expect(teardownWorktree(repo, { directory: worktreePath, teardownCommand })).resolves.toBe(true);
+      await expect(removeWorktree(repo, { directory: worktreePath, teardownCommand })).resolves.toBe(true);
+
+      expect(fs.existsSync(marker)).toBe(false);
+      expect(fs.existsSync(worktreePath)).toBe(false);
+    }));
+  });
+
+  it('runs the teardown of a checkout the store does not list as a fork', async () => {
+    if (!canRunGit()) return;
+
+    await withIsolatedOpenCodeData(() => withContributorStore(async ({ filePath }) => {
+      const { repo, worktreePath } = createRepositoryWithWorktree();
+      await recordContributorFork(filePath, runGit(repo, ['rev-parse', '--show-toplevel']).trim());
+      const marker = path.join(createTempDir(), 'ran.txt');
+      const recording = path.join(path.dirname(marker), 'record.cjs');
+      fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n`);
+
+      await teardownWorktree(repo, { directory: worktreePath, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(recording)}` });
+
+      expect(fs.existsSync(marker)).toBe(true);
+    }));
+  });
+
+  it('runs nothing and keeps the worktree when the store cannot be read', async () => {
+    if (!canRunGit()) return;
+
+    await withIsolatedOpenCodeData(() => withContributorStore(async ({ filePath }) => {
+      const { repo, worktreePath } = createRepositoryWithWorktree();
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, '{', { mode: 0o600 });
+      const marker = path.join(createTempDir(), 'ran.txt');
+      const recording = path.join(path.dirname(marker), 'record.cjs');
+      fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n`);
+
+      await expect(removeWorktree(repo, { directory: worktreePath, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(recording)}` }))
+        .rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED' });
+
+      expect(fs.existsSync(marker)).toBe(false);
+      expect(fs.existsSync(path.join(worktreePath, '.git'))).toBe(true);
+    }));
   });
 
   it('holds requests for the worktree folders from the release until the removal settles', async () => {

@@ -5,7 +5,9 @@ import type { WorktreeMetadata } from '@/types/worktree';
 
 const archivedSessionIds: string[][] = [];
 const restoredSessionIds: string[][] = [];
-const worktreeArchives: Array<{ sessionIds: string[]; teardownCommand?: string }> = [];
+const worktreeArchives: Array<{ sessionIds: string[] }> = [];
+const teardowns: Array<{ projectDirectory: string; directory: string; teardownCommand: string }> = [];
+let runTeardown: () => Promise<void> = async () => undefined;
 const teardownAsks: Array<boolean | undefined> = [];
 let resolveTeardown: () => Promise<string | undefined> = async () => undefined;
 
@@ -16,8 +18,8 @@ mock.module('@/lib/worktrees/worktreeManager', () => ({
     teardownAsks.push(options?.ask);
     return resolveTeardown();
   },
-  archiveProjectWorktree: async (_project: ProjectRef, _worktree: WorktreeMetadata, input: { sessionIds: string[]; teardownCommand?: string }) => {
-    worktreeArchives.push({ sessionIds: input.sessionIds, teardownCommand: input.teardownCommand });
+  archiveProjectWorktree: async (_project: ProjectRef, _worktree: WorktreeMetadata, input: { sessionIds: string[] }) => {
+    worktreeArchives.push({ sessionIds: input.sessionIds });
     return { id: 'a1' };
   },
   createWorktree: mock(),
@@ -38,7 +40,18 @@ mock.module('@/sync/session-actions', () => ({
   },
 }));
 
-mock.module('@/lib/gitApi', () => ({ canArchiveWorktrees: () => false, git: { worktree: {} } }));
+mock.module('@/lib/gitApi', () => ({
+  canArchiveWorktrees: () => false,
+  git: {
+    worktree: {
+      teardown: async (projectDirectory: string, payload: { directory: string; teardownCommand: string }) => {
+        teardowns.push({ projectDirectory, ...payload });
+        await runTeardown();
+        return true;
+      },
+    },
+  },
+}));
 mock.module('@/lib/sharedTrustConfirmation', () => ({ resolveWorktreeSetupCommandsOrCancel: mock() }));
 
 // The module subscribes to runtime switches at import, which needs a window.
@@ -67,6 +80,8 @@ describe('archiveWorktreeWork teardown', () => {
     restoredSessionIds.length = 0;
     worktreeArchives.length = 0;
     teardownAsks.length = 0;
+    teardowns.length = 0;
+    runTeardown = async () => undefined;
   });
 
   test('a pass nobody started leaves the sessions alone when the shared teardown is not trusted', async () => {
@@ -80,18 +95,39 @@ describe('archiveWorktreeWork teardown', () => {
     expect(worktreeArchives).toEqual([]);
   });
 
-  test('Done resolves the teardown before any session is archived and sends it with the archive', async () => {
+  test('a failing teardown archives and restores nothing', async () => {
+    resolveTeardown = async () => 'docker compose down';
+    runTeardown = () => Promise.reject(new Error('stack still running'));
+
+    await expect(archiveWorktreeWork({ project, worktree, sessions: [session], askForTrust: false })).rejects.toThrow('stack still running');
+
+    expect(archivedSessionIds).toEqual([]);
+    expect(restoredSessionIds).toEqual([]);
+    expect(worktreeArchives).toEqual([]);
+  });
+
+  test('Done runs the teardown before any session is archived, then archives the worktree', async () => {
     const order: string[] = [];
-    resolveTeardown = async () => {
+    resolveTeardown = async () => 'docker compose down';
+    runTeardown = async () => {
       order.push(`teardown, ${archivedSessionIds.length} sessions archived`);
-      return 'docker compose down';
     };
 
     await archiveWorktreeWork({ project, worktree, sessions: [session] });
 
     expect(order).toEqual(['teardown, 0 sessions archived']);
     expect(teardownAsks).toEqual([undefined]);
+    expect(teardowns).toEqual([{ projectDirectory: '/repo', directory: '/repo-feature', teardownCommand: 'docker compose down' }]);
     expect(archivedSessionIds).toEqual([['ses_1']]);
-    expect(worktreeArchives).toEqual([{ sessionIds: ['ses_1'], teardownCommand: 'docker compose down' }]);
+    expect(worktreeArchives).toEqual([{ sessionIds: ['ses_1'] }]);
+  });
+
+  test('nothing to tear down archives without a teardown request', async () => {
+    resolveTeardown = async () => undefined;
+
+    await archiveWorktreeWork({ project, worktree, sessions: [session] });
+
+    expect(teardowns).toEqual([]);
+    expect(worktreeArchives).toEqual([{ sessionIds: ['ses_1'] }]);
   });
 });

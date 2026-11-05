@@ -116,8 +116,13 @@ export async function archiveWorktreeWork(input: {
   markWorktreeRemoving(input.worktree.path);
   try {
     // Before any session is archived: a teardown that cannot run (untrusted
-    // in a pass nobody started, an unreadable setup) leaves the sessions alone.
+    // in a pass nobody started, an unreadable setup) or that fails leaves the
+    // sessions alone, so the merged-PR cleanup's retries do not churn them. The
+    // server snapshots the worktree later, with what the teardown left.
     const teardownCommand = await resolveWorktreeTeardownCommand(input.project, input.worktree, { ask: input.askForTrust });
+    if (teardownCommand) {
+      await git.worktree.teardown(normalizePath(input.project.path) ?? input.project.path, { directory: input.worktree.path, teardownCommand });
+    }
     await archiveSessionsThenRemoveWorktree({
       sessionIds,
       archiveSessions: (ids) => archiveSessions(ids),
@@ -127,7 +132,7 @@ export async function archiveWorktreeWork(input: {
           throw new Error(`Could not archive ${sessionIds.length - archivedIds.length} session(s)`);
         }
         try {
-          await archiveProjectWorktree(input.project, input.worktree, { id: newArchiveId(), sessionIds: archivedIds, title: input.title, teardownCommand });
+          await archiveProjectWorktree(input.project, input.worktree, { id: newArchiveId(), sessionIds: archivedIds, title: input.title });
         } catch (error) {
           if (!(error instanceof GitWorktreeRequestError) || error.code !== 'WORKTREE_ARCHIVE_PARTIAL') throw error;
           partial = error;

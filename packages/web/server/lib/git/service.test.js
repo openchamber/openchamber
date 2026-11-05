@@ -5158,27 +5158,6 @@ describe('worktree archives', () => {
     expect(await listWorktreeArchives(repo)).toEqual([]);
   });
 
-  it('runs the teardown command before the snapshot, and archives nothing when it fails', async () => {
-    if (!canRunGit()) return;
-    const { repo, linked } = createArchivableWorktree();
-    const scripts = createTempDir();
-    const failing = path.join(scripts, 'fail.cjs');
-    const stopping = path.join(scripts, 'stop.cjs');
-    fs.writeFileSync(failing, "process.stderr.write('stack still running\\n'); process.exit(3);\n");
-    fs.writeFileSync(stopping, "require('fs').writeFileSync('stopped.txt', 'stopped\\n');\n");
-    const run = (script) => `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
-
-    await expect(archiveWorktree(repo, { directory: linked, id: 't1', teardownCommand: run(failing) })).rejects.toThrow('stack still running');
-    expect(await listWorktreeArchives(repo)).toEqual([]);
-    expect(fs.readFileSync(path.join(linked, 'new.txt'), 'utf8')).toBe('untracked\n');
-
-    await archiveWorktree(repo, { directory: linked, id: 't2', teardownCommand: run(stopping) });
-    expect(fs.existsSync(linked)).toBe(false);
-    runGit(repo, ['worktree', 'add', linked, 'feature/task']);
-    await expect(restoreWorktreeArchive(linked, { id: 't2' })).resolves.toEqual({ id: 't2', conflicts: false });
-    expect(fs.readFileSync(path.join(linked, 'stopped.txt'), 'utf8')).toBe('stopped\n');
-  });
-
   it('refuses a worktree that lost only its .git file, keeping its files out of a partial archive', async () => {
     if (!canRunGit()) return;
     const { repo, linked } = createArchivableWorktree();

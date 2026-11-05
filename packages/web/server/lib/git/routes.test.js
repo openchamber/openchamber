@@ -865,24 +865,21 @@ describe('git worktree teardown routes', () => {
     gitLibraries.teardownWorktree.mockReset();
   });
 
-  it('tells removal, archive and teardown alone which checkouts are a contributor fork, and fails closed', async () => {
+  it('tells removal and teardown alone which checkouts are a contributor fork, and fails closed', async () => {
     const read = vi.fn(async (directory) => {
       if (directory === '/repo/broken') throw new Error('provenance store unreadable');
       return { provenance: directory === '/repo/fork' ? { kind: 'contributor-fork' } : null };
     });
     gitLibraries.removeWorktree.mockResolvedValue(true);
-    gitLibraries.archiveWorktree.mockResolvedValue({ id: 'a1' });
     gitLibraries.teardownWorktree.mockResolvedValue(true);
     const { app, getRoute } = createRouteRegistry();
     registerGitRoutes(app, { worktreeBootstrapStore, contributorProvenance: { read } });
 
     await getRoute('DELETE', '/api/git/worktrees')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
-    await getRoute('POST', '/api/git/worktrees/archives')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', id: 'a1', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
     await getRoute('POST', '/api/git/worktrees/teardown')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
 
     const hooks = [
       gitLibraries.removeWorktree.mock.calls[0][1],
-      gitLibraries.archiveWorktree.mock.calls[0][1],
       gitLibraries.teardownWorktree.mock.calls[0][1],
     ];
     for (const input of hooks) {

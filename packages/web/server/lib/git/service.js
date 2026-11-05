@@ -7063,9 +7063,6 @@ const archiveRegisteredWorktree = async ({ directory, id, worktreeDirectory, tar
   if (bootstrap?.status === WORKTREE_BOOTSTRAP_FAILED && !bootstrap.hydration) {
     throw new Error('The worktree did not finish setting up, so it cannot be archived. Delete it instead.');
   }
-  // Before the snapshot, so the snapshot holds what the teardown left.
-  await runWorktreeTeardown(worktreeDirectory, input?.teardownCommand, input?.isContributorCheckout);
-
   const branch = entry.branch ?? '';
   // The task title; without one, the name the sidebar showed for the work.
   const title = (branch ? toTaskTitle(await readGitConfigValue(context.primaryWorktree, `branch.${branch}.description`)) : '')

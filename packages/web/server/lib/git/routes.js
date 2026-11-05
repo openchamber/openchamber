@@ -1957,8 +1957,6 @@ export function registerGitRoutes(app, {
         id: req.body.id,
         sessionIds: req.body.sessionIds,
         title: req.body.title,
-        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
-        isContributorCheckout,
         disposeInstance: canDisposeWorktreeInstance
           ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
           : undefined,
