@@ -1124,6 +1124,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': 'Arşivlenmemiş oturumları son etkinliğe göre arşivler veya siler. En yeni 5 oturumu, açık oturumu, çalışan ve paylaşılan oturumları korur. Arşivlenmiş oturumlar korunur. Bir üst oturumun silinmesi korunan bir alt oturumu da silecekse üst oturum korunur.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Otomatik temizlemeyi etkinleştir',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Otomatik Temizlemeyi Etkinleştir',
+  'settings.openchamber.sessionRetention.field.includeInWork': '"Devam eden" oturumları dahil et',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '"Devam eden" bölümündeki oturumlar, tamamlandı olarak işaretleyene kadar korunur. Diğer oturumlar gibi süreleri dolsun istiyorsanız bunu açın. Sabitlenen oturumlar her zaman korunur.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Saklama Süresi',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Gün cinsinden saklama süresi',
   'settings.openchamber.sessionRetention.field.days': 'gün',

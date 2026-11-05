@@ -1079,6 +1079,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.actions.runCleanupNow': 'Uruchom czyszczenie teraz',
   'settings.openchamber.sessionRetention.field.days': 'dni',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Włącz automatyczne czyszczenie',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Uwzględniaj sesje „W toku”',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Sesje w bloku „W toku” zostają, dopóki nie oznaczysz ich jako gotowe. Włącz tę opcję, aby wygasały jak każda inna sesja. Przypięte sesje zawsze zostają.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Włącz automatyczne czyszczenie',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Okres przechowywania',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Okres przechowywania w dniach',

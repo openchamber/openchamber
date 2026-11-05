@@ -1151,6 +1151,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': 'Archives or deletes unarchived sessions based on last activity. Keeps the 5 most recent sessions, the open session, running sessions and shared sessions. Archived sessions are kept. A parent is kept if deleting it would also delete a protected child.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Enable auto-cleanup',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Enable Auto-Cleanup',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Include sessions in In work',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Sessions in the In work block stay until you mark them done. Turn this on to let them expire like any other session. Pinned sessions always stay.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Retention period',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Retention period in days',
   'settings.openchamber.sessionRetention.field.days': 'days',

@@ -1152,6 +1152,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': 'Archiveert of verwijdert niet-gearchiveerde sessies op basis van de laatste activiteit. Behoudt de 5 meest recente sessies, de geopende sessie, lopende sessies en gedeelde sessies. Gearchiveerde sessies blijven behouden. Een bovenliggende sessie blijft behouden als verwijderen daarvan ook een beschermde subsessie zou verwijderen.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Automatisch opschonen aanzetten',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Automatisch opschonen aanzetten',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Sessies in "In bewerking" meenemen',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Sessies in het blok "In bewerking" blijven bewaard tot u ze als afgerond markeert. Schakel dit in om ze te laten verlopen zoals elke andere sessie. Vastgezette sessies blijven altijd bewaard.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Bewaartermijn',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Bewaartermijn in dagen',
   'settings.openchamber.sessionRetention.field.days': 'dagen',

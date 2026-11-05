@@ -1022,6 +1022,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': 'Archive ou supprime les sessions non archivées selon leur dernière activité. Conserve les 5 sessions les plus récentes, la session ouverte, les sessions en cours et les sessions partagées. Les sessions archivées sont conservées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Activer le nettoyage automatique',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Activer le nettoyage automatique',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Inclure les sessions « En cours »',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Les sessions du bloc « En cours » sont conservées jusqu’à ce que vous les marquiez comme terminées. Activez cette option pour qu’elles expirent comme toute autre session. Les sessions épinglées sont toujours conservées.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Période de conservation',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Durée de conservation en jours',
   'settings.openchamber.sessionRetention.field.days': 'jours',

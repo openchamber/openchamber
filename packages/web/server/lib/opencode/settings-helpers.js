@@ -749,6 +749,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
       result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
     }
+    if (candidate.sessionRetentionIncludeInWork === true || candidate.sessionRetentionIncludeInWork === false) {
+      result.sessionRetentionIncludeInWork = candidate.sessionRetentionIncludeInWork;
+    }
     if (typeof candidate.mergedWorktreeCleanupEnabled === 'boolean') {
       result.mergedWorktreeCleanupEnabled = candidate.mergedWorktreeCleanupEnabled;
     }

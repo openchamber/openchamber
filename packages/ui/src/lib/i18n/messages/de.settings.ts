@@ -1101,6 +1101,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': 'Archiviert oder löscht nicht archivierte Sitzungen anhand ihrer letzten Aktivität. Behält die 5 neuesten Sitzungen, die geöffnete Sitzung sowie laufende und geteilte Sitzungen. Archivierte Sitzungen bleiben erhalten. Eine übergeordnete Sitzung bleibt erhalten, wenn ihre Löschung auch eine geschützte untergeordnete Sitzung löschen würde.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Automatische Bereinigung aktivieren',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Automatische Bereinigung aktivieren',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Sitzungen „In Arbeit“ einbeziehen',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Sitzungen im Bereich „In Arbeit“ bleiben erhalten, bis Sie sie als erledigt markieren. Aktivieren Sie diese Option, damit sie wie jede andere Sitzung ablaufen. Angeheftete Sitzungen bleiben immer erhalten.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Aufbewahrungszeitraum',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Aufbewahrungszeitraum in Tagen',
   'settings.openchamber.sessionRetention.field.days': 'Tage',

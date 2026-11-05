@@ -1119,6 +1119,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': '마지막 활동을 기준으로 보관되지 않은 세션을 보관하거나 삭제합니다. 최근 세션 5개, 열려 있는 세션, 실행 중인 세션과 공유된 세션은 유지됩니다. 보관된 세션도 유지됩니다. 상위 세션을 삭제하면 보호된 하위 세션도 삭제되는 경우 상위 세션을 유지합니다.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '자동 정리 활성화',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': '자동 정리 활성화',
+  'settings.openchamber.sessionRetention.field.includeInWork': '"작업 중" 세션 포함',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '"작업 중" 영역의 세션은 완료로 표시할 때까지 유지됩니다. 켜면 다른 세션처럼 만료됩니다. 고정된 세션은 항상 유지됩니다.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': '보존 기간',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': '일 단위 보존 기간',
   'settings.openchamber.sessionRetention.field.days': '일',

@@ -1119,6 +1119,8 @@ export const settingsDict = {
   "settings.openchamber.sessionRetention.tooltip": "Arquiva ou exclui sessões não arquivadas com base na última atividade. Mantém as 5 sessões mais recentes, a sessão aberta, as sessões em execução e as compartilhadas. As sessões arquivadas são mantidas. Uma sessão principal é mantida se sua exclusão também excluir uma sessão filha protegida.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Ativar limpeza automática",
   "settings.openchamber.sessionRetention.field.enableAutoCleanup": "Ativar limpeza automática",
+  "settings.openchamber.sessionRetention.field.includeInWork": "Incluir sessões 'Em andamento'",
+  "settings.openchamber.sessionRetention.field.includeInWorkInfo": "As sessões do bloco 'Em andamento' ficam até você marcá-las como concluídas. Ative esta opção para que expirem como qualquer outra sessão. As sessões fixadas sempre ficam.",
   "settings.openchamber.sessionRetention.field.retentionPeriod": "Período de retenção",
   "settings.openchamber.sessionRetention.field.retentionPeriodAria": "Período de retenção em dias",
   "settings.openchamber.sessionRetention.field.days": "dias",

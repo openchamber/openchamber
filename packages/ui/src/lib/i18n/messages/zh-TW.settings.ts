@@ -1116,6 +1116,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': '根據最後活動時間封存或刪除未封存的工作階段。保留最近 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已分享的工作階段。已封存的工作階段會保留。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '啟用自動清理',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': '啟用自動清理',
+  'settings.openchamber.sessionRetention.field.includeInWork': '包含「進行中」的工作階段',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '「進行中」區塊裡的工作階段會一直保留，直到將其標記為完成。開啟後，它們會像其他工作階段一樣過期。已釘選的工作階段一律保留。',
   'settings.openchamber.sessionRetention.field.retentionPeriod': '保留時長',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': '按天設定保留時長',
   'settings.openchamber.sessionRetention.field.days': '天',

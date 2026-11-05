@@ -1151,6 +1151,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': 'מעביר לארכיון או מוחק הפעלות שלא בארכיון לפי הפעילות האחרונה. שומר את 5 ההפעלות האחרונות, את ההפעלה הפתוחה, הפעלות שרצות והפעלות משותפות. הפעלות בארכיון נשמרות. הפעלת אב נשמרת אם מחיקתה תמחק גם הפעלת צאצא מוגנת.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'הפעל ניקוי אוטומטי',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'הפעל ניקוי אוטומטי',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'לכלול הפעלות „בעבודה”',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'הפעלות באזור „בעבודה” נשמרות עד שמסמנים אותן כהושלמו. הפעילו את האפשרות כדי שיפוגו כמו כל הפעלה אחרת. הפעלות מוצמדות תמיד נשמרות.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'תקופת שמירה',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'תקופת שמירה בימים',
   'settings.openchamber.sessionRetention.field.days': 'ימים',

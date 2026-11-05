@@ -1152,6 +1152,8 @@ export const settingsDict = {
   'settings.openchamber.sessionRetention.tooltip': '最終アクティビティに基づいて未アーカイブのセッションをアーカイブまたは削除します。最新5件、開いているセッション、実行中および共有中のセッションは保持されます。アーカイブ済みのセッションも保持されます。保護された子セッションまで削除される場合、親セッションは削除されません。',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '自動クリーンアップを有効化',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': '自動クリーンアップを有効化',
+  'settings.openchamber.sessionRetention.field.includeInWork': '「作業中」のセッションも含める',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '「作業中」ブロックのセッションは、完了にするまで残ります。オンにすると、ほかのセッションと同じように期限切れになります。ピン留めしたセッションは常に残ります。',
   'settings.openchamber.sessionRetention.field.retentionPeriod': '保持期間',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': '保持期間（日数）',
   'settings.openchamber.sessionRetention.field.days': '日',
