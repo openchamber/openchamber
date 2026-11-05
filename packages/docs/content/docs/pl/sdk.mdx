@@ -38,7 +38,7 @@ Wskaż `main.js` w `index.html` zwykłym `<script src="main.js"></script>`.
 
 OpenChamber odczytuje manifest i pokazuje okno z listą tego, o co rozszerzenie prosi (zobacz [Uprawnienia](#uprawnienia)). Zatwierdź, a Twoja ikona pojawi się na pasku bocznym. Kliknij ją i Twoja strona się załaduje.
 
-Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub pliku zip. Tylko instalacja z git może się aktualizować: podnieś `version` w `package.json`, wypchnij zmiany, a OpenChamber zaproponuje aktualizację, gdy użytkownik następnym razem otworzy Ustawienia → Rozszerzenia. `#tag` albo `#branch` w adresie URL przypina, co jest śledzone. Te są kopiowane do folderu danych OpenChamber i uruchamiane z tej kopii, więc dostarczaj zbudowane pliki, a nie `node_modules` ani źródła TypeScript. Usunięcie rozszerzenia usuwa kopię. Instalacja z folderu działa bezpośrednio z Twojego folderu, więc możesz edytować, przebudowywać i przeładowywać.
+Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub pliku zip. Tylko instalacja z git może się aktualizować: podnieś `version` w `package.json`, wypchnij zmiany, a OpenChamber sprawdzi to wkrótce po otwarciu i co kilka godzin, powiadomi użytkownika raz i zaproponuje aktualizację w Ustawienia → Rozszerzenia. `#tag` albo `#branch` w adresie URL przypina, co jest śledzone. Te są kopiowane do folderu danych OpenChamber i uruchamiane z tej kopii, więc dostarczaj zbudowane pliki, a nie `node_modules` ani źródła TypeScript. Usunięcie rozszerzenia usuwa kopię. Instalacja z folderu działa bezpośrednio z Twojego folderu, więc możesz edytować, przebudowywać i przeładowywać.
 
 ## Manifest
 
@@ -264,7 +264,7 @@ Poza paskiem bocznym i menu + rozszerzenie może pojawić się w trzech kolejnyc
 ]
 ```
 
-`where` przyjmuje też `selection` (tekst zaznaczony w wiadomości), `file` (wiersz w Files) i `diff` (zaznaczone wiersze pliku lub diffa). Ich elementy mają `kind` o tej samej nazwie: `selection` zawiera tekst, `file` ścieżkę, `diff` ścieżkę i zakres wierszy.
+`where` przyjmuje też `selection` (tekst zaznaczony w wiadomości), `file` (wiersz w Files) i `diff` (zaznaczone wiersze pliku lub diffa). Ich elementy mają `kind` o tej samej nazwie: `selection` zawiera tekst, `file` ścieżkę, `diff` ścieżkę i zakres wierszy. Przy zaznaczeniu `display` określa, jak wygląda akcja: `label` (domyślnie), `icon` z etykietą w podpowiedzi albo `both`.
 
 Akcja na wiadomości otwiera Twoje rozszerzenie z `ctx.item` o `kind: "message"`: id i tytuł sesji, folder projektu, id wiadomości, jej rola i tekst. Akcja na sesji otwiera je z `kind: "session"` oraz id, tytułem i folderem sesji. Dodaj `"payload": ["messages"]`, a element niesie też całą rozmowę, od najstarszej wiadomości, ten sam tekst, który daje eksport do Markdown. To wymaga uprawnienia `conversation`, które użytkownik widzi jako osobny wiersz w oknie zgody. `item.action` mówi, którą pozycję kliknięto.
 

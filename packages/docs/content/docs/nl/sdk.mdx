@@ -38,7 +38,7 @@ Verwijs in `index.html` naar `main.js` met een gewone `<script src="main.js"></s
 
 OpenChamber leest het manifest en toont de gevraagde rechten. Zie [Rechten](#rechten). Na goedkeuring verschijnt uw pictogram in de balk. Klik erop om de pagina te laden.
 
-U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-bestand toevoegen. Alleen een Git-installatie ondersteunt updates: verhoog `version` in `package.json` en push. OpenChamber biedt de update aan wanneer de gebruiker opnieuw Instellingen → Extensies opent. Met `#tag` of `#branch` in de URL bepaalt u welke versie wordt gevolgd. Deze installaties worden naar de gegevensmap van OpenChamber gekopieerd en draaien daaruit. Lever dus gebouwde bestanden mee, geen `node_modules` of TypeScript-bronbestanden. Verwijderen wist de kopie. Een mapinstallatie draait rechtstreeks uit uw map, zodat u kunt bewerken, opnieuw bouwen en herladen.
+U kunt ook een lokale `.zip` of een https-link naar een Git-repository of ZIP-bestand toevoegen. Alleen een Git-installatie ondersteunt updates: verhoog `version` in `package.json` en push. OpenChamber controleert kort na het openen en om de paar uur, meldt het de gebruiker één keer en biedt de update aan in Instellingen → Extensies. Met `#tag` of `#branch` in de URL bepaalt u welke versie wordt gevolgd. Deze installaties worden naar de gegevensmap van OpenChamber gekopieerd en draaien daaruit. Lever dus gebouwde bestanden mee, geen `node_modules` of TypeScript-bronbestanden. Verwijderen wist de kopie. Een mapinstallatie draait rechtstreeks uit uw map, zodat u kunt bewerken, opnieuw bouwen en herladen.
 
 ## Manifest
 
@@ -264,7 +264,7 @@ Naast de balk en het +-menu kan een extensie op nog drie plekken verschijnen. Ze
 ]
 ```
 
-`where` accepteert ook `selection` (geselecteerde tekst in een bericht), `file` (een rij in Bestanden) en `diff` (geselecteerde regels van een bestand of diff). Hun items hebben een `kind` met dezelfde naam: `selection` bevat de tekst, `file` het pad, `diff` het pad en het regelbereik.
+`where` accepteert ook `selection` (geselecteerde tekst in een bericht), `file` (een rij in Bestanden) en `diff` (geselecteerde regels van een bestand of diff). Hun items hebben een `kind` met dezelfde naam: `selection` bevat de tekst, `file` het pad, `diff` het pad en het regelbereik. Bij een selectie bepaalt `display` hoe de actie verschijnt: `label` (de standaard), `icon` met het label als tooltip, of `both`.
 
 Een berichtactie opent de extensie met `ctx.item` van `kind: "message"`: sessie-ID en -titel, projectmap, bericht-ID, rol en tekst. Een sessieactie gebruikt `kind: "session"` met sessie-ID, titel en map. Voeg `"payload": ["messages"]` toe om het hele gesprek mee te krijgen, oudste eerst, met dezelfde tekst als de Markdown-export. Dit vereist `conversation`, apart getoond in het toestemmingsvenster. `item.action` geeft aan welke menuoptie is gekozen.
 

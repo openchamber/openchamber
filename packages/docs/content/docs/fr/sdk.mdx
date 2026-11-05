@@ -38,7 +38,7 @@ Faites pointer `index.html` vers `main.js` avec un `<script src="main.js"></scri
 
 OpenChamber lit le manifeste et affiche une boîte de dialogue qui liste ce que l'extension demande (voir [Capacités](#capacités)). Approuvez, et votre icône apparaît dans la barre latérale. Cliquez dessus et votre page se charge.
 
-Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git ou un fichier zip. Seule une installation git peut se mettre à jour : montez `version` dans `package.json`, poussez, et OpenChamber propose la mise à jour la prochaine fois que l'utilisateur ouvre Paramètres → Extensions. Un `#tag` ou `#branch` dans l'URL fixe ce qu'elle suit. Ceux-ci sont copiés dans le dossier de données d'OpenChamber et exécutés depuis cette copie, donc livrez les fichiers construits, pas `node_modules` ni les sources TypeScript. Supprimer l'extension supprime la copie. Une installation depuis un dossier s'exécute directement depuis votre dossier, vous pouvez donc modifier, reconstruire et recharger.
+Vous pouvez aussi ajouter un `.zip` local ou un lien https vers un dépôt git ou un fichier zip. Seule une installation git peut se mettre à jour : montez `version` dans `package.json`, poussez, et OpenChamber vérifie peu après son ouverture et toutes les quelques heures, prévient l'utilisateur une fois et propose la mise à jour dans Paramètres → Extensions. Un `#tag` ou `#branch` dans l'URL fixe ce qu'elle suit. Ceux-ci sont copiés dans le dossier de données d'OpenChamber et exécutés depuis cette copie, donc livrez les fichiers construits, pas `node_modules` ni les sources TypeScript. Supprimer l'extension supprime la copie. Une installation depuis un dossier s'exécute directement depuis votre dossier, vous pouvez donc modifier, reconstruire et recharger.
 
 ## Manifeste
 
@@ -264,7 +264,7 @@ Au-delà de la barre latérale et du menu +, une extension peut apparaître à t
 ]
 ```
 
-`where` accepte aussi `selection` (texte sélectionné dans un message), `file` (une ligne dans Files) et `diff` (lignes sélectionnées d'un fichier ou d'un diff). Leurs éléments portent un `kind` du même nom : `selection` contient le texte, `file` le chemin, `diff` le chemin et la plage de lignes.
+`where` accepte aussi `selection` (texte sélectionné dans un message), `file` (une ligne dans Files) et `diff` (lignes sélectionnées d'un fichier ou d'un diff). Leurs éléments portent un `kind` du même nom : `selection` contient le texte, `file` le chemin, `diff` le chemin et la plage de lignes. Sur une sélection, `display` indique comment l'action s'affiche : `label` (la valeur par défaut), `icon` avec le libellé comme infobulle, ou `both`.
 
 Une action de message ouvre votre extension avec un `ctx.item` de `kind: "message"` : l'id et le titre de la session, le dossier du projet, l'id du message, son rôle et son texte. Une action de session l'ouvre avec `kind: "session"` et l'id, le titre et le dossier de la session. Ajoutez `"payload": ["messages"]` et l'élément porte aussi toute la conversation, du plus ancien au plus récent, le même texte que produit l'export Markdown. Cela demande la capacité `conversation`, que l'utilisateur voit comme une ligne à part dans la boîte de dialogue d'approbation. `item.action` vous dit quelle entrée a été cliquée.
 

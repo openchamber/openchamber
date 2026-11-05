@@ -38,7 +38,7 @@ Paketleme komutu Bun üzerinde çalışır. Bun yoksa esbuild'i ya da başka bir
 
 OpenChamber manifesti okur ve eklentinin ne istediğini listeleyen bir pencere gösterir (bkz. [Yetenekler](#yetenekler)). Onaylayın, simgeniz şeritte belirir. Tıklayın, sayfanız yüklenir.
 
-Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https bağlantısı da ekleyebilirsiniz. Yalnızca git kurulumu güncellenebilir: `package.json` içindeki `version` değerini yükseltip push edin; kullanıcı Ayarlar → Uzantılar sayfasını bir sonraki açışında OpenChamber güncellemeyi sunar. URL'deki `#tag` ya da `#branch` neyi izleyeceğini sabitler. Bunlar OpenChamber'ın veri klasörüne kopyalanır ve o kopyadan çalışır; bu yüzden `node_modules` veya TypeScript kaynaklarını değil, derlenmiş dosyaları yayınlayın. Eklentiyi kaldırmak kopyayı siler. Klasörden kurulum doğrudan sizin klasörünüzden çalışır; düzenleyip yeniden derleyip yeniden yükleyebilirsiniz.
+Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https bağlantısı da ekleyebilirsiniz. Yalnızca git kurulumu güncellenebilir: `package.json` içindeki `version` değerini yükseltip push edin; OpenChamber açıldıktan kısa süre sonra ve birkaç saatte bir denetler, kullanıcıya bir kez haber verir ve güncellemeyi Ayarlar → Uzantılar sayfasında sunar. URL'deki `#tag` ya da `#branch` neyi izleyeceğini sabitler. Bunlar OpenChamber'ın veri klasörüne kopyalanır ve o kopyadan çalışır; bu yüzden `node_modules` veya TypeScript kaynaklarını değil, derlenmiş dosyaları yayınlayın. Eklentiyi kaldırmak kopyayı siler. Klasörden kurulum doğrudan sizin klasörünüzden çalışır; düzenleyip yeniden derleyip yeniden yükleyebilirsiniz.
 
 ## Manifest
 
@@ -264,7 +264,7 @@ Sayfanız `ctx.surface` değerini `file` olarak görür. Dosya diskte değişti�
 ]
 ```
 
-`where` ayrıca `selection` (bir mesajda seçilen metin), `file` (Files içindeki bir satır) ve `diff` (bir dosyanın veya diff'in seçili satırları) değerlerini de alır. Bunların öğeleri aynı adda bir `kind` taşır: `selection` metni, `file` yolu, `diff` yolu ve satır aralığını içerir.
+`where` ayrıca `selection` (bir mesajda seçilen metin), `file` (Files içindeki bir satır) ve `diff` (bir dosyanın veya diff'in seçili satırları) değerlerini de alır. Bunların öğeleri aynı adda bir `kind` taşır: `selection` metni, `file` yolu, `diff` yolu ve satır aralığını içerir. Seçimde, `display` eylemin nasıl görüneceğini belirler: `label` (varsayılan), `label` metni ipucu olan `icon` veya `both`.
 
 Bir mesaj eylemi, eklentinizi `kind: "message"` olan bir `ctx.item` ile açar: oturum id'si ve başlığı, proje dizini, mesaj id'si, rolü ve metni. Bir oturum eylemi ise `kind: "session"` ile, oturum id'si, başlığı ve dizini ile açar. `"payload": ["messages"]` ekleyin, öğe tüm konuşmayı da taşır, en eskisi önce olmak üzere, Markdown dışa aktarmanın ürettiği metnin aynısı. Bu, kullanıcının onay iletişim kutusunda ayrı bir satır olarak gördüğü `conversation` yeteneğini gerektirir. `item.action` hangi girdiye tıklandığını söyler.
 

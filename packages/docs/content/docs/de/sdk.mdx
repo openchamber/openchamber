@@ -38,7 +38,7 @@ Binde `main.js` in `index.html` mit einem normalen `<script src="main.js"></scri
 
 OpenChamber liest das Manifest und zeigt einen Dialog mit allem, was die Erweiterung anfordert (siehe [Berechtigungen](#berechtigungen)). Bestätige ihn, und dein Icon erscheint in der Leiste. Klick darauf, und deine Seite lädt.
 
-Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repository oder einer Zip-Datei hinzufügen. Nur eine Git-Installation kann sich aktualisieren: erhöhe `version` in `package.json` und pushe, dann bietet OpenChamber das Update an, wenn der Nutzer das nächste Mal Einstellungen → Erweiterungen öffnet. Ein `#tag` oder `#branch` in der URL legt fest, welchem es folgt. Die werden in den Datenordner von OpenChamber kopiert und aus dieser Kopie ausgeführt. Liefere also die gebauten Dateien aus, nicht `node_modules` oder TypeScript-Quellen. Beim Entfernen der Erweiterung wird die Kopie gelöscht. Eine Installation aus einem Ordner läuft direkt aus deinem Ordner, du kannst also bearbeiten, neu bauen und neu laden.
+Du kannst auch eine lokale `.zip`-Datei oder einen https-Link zu einem Git-Repository oder einer Zip-Datei hinzufügen. Nur eine Git-Installation kann sich aktualisieren: erhöhe `version` in `package.json` und pushe, dann prüft OpenChamber kurz nach dem Start und alle paar Stunden, sagt dem Nutzer einmal Bescheid und bietet das Update in Einstellungen → Erweiterungen an. Ein `#tag` oder `#branch` in der URL legt fest, welchem es folgt. Die werden in den Datenordner von OpenChamber kopiert und aus dieser Kopie ausgeführt. Liefere also die gebauten Dateien aus, nicht `node_modules` oder TypeScript-Quellen. Beim Entfernen der Erweiterung wird die Kopie gelöscht. Eine Installation aus einem Ordner läuft direkt aus deinem Ordner, du kannst also bearbeiten, neu bauen und neu laden.
 
 ## Manifest
 
@@ -264,7 +264,7 @@ Neben der Leiste und dem +-Menü kann eine Erweiterung an drei weiteren Stellen 
 ]
 ```
 
-`where` nimmt auch `selection` (markierter Text in einer Nachricht), `file` (eine Zeile in Files) und `diff` (markierte Zeilen einer Datei oder eines Diffs). Ihre Einträge tragen ein gleichnamiges `kind`: `selection` enthält den Text, `file` den Pfad, `diff` den Pfad und den Zeilenbereich.
+`where` nimmt auch `selection` (markierter Text in einer Nachricht), `file` (eine Zeile in Files) und `diff` (markierte Zeilen einer Datei oder eines Diffs). Ihre Einträge tragen ein gleichnamiges `kind`: `selection` enthält den Text, `file` den Pfad, `diff` den Pfad und den Zeilenbereich. Bei einer Auswahl legt `display` fest, wie die Aktion erscheint: `label` (der Standard), `icon` mit dem Label als Tooltip oder `both`.
 
 Eine Nachrichtenaktion öffnet deine Erweiterung mit einem `ctx.item` der Art `kind: "message"`: Session-ID und -Titel, Projektordner, Nachrichten-ID, ihre Rolle und ihr Text. Eine Session-Aktion öffnet sie mit `kind: "session"` sowie Session-ID, Titel und Ordner. Füge `"payload": ["messages"]` hinzu, und der Eintrag trägt außerdem das ganze Gespräch, älteste Nachricht zuerst, derselbe Text, den der Markdown-Export erzeugt. Dafür braucht es die Berechtigung `conversation`, die der Nutzer als eigene Zeile im Freigabedialog sieht. `item.action` sagt dir, welcher Eintrag angeklickt wurde.
 

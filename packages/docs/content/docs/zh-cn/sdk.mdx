@@ -38,7 +38,7 @@ bunx openchamber-guest-bundle panel/main.ts panel/main.js
 
 OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的内容（见[能力](#能力)）。批准后，你的图标会出现在侧栏。点击它，你的页面就会加载。
 
-你也可以添加本地 `.zip` 文件，或指向 git 仓库或 zip 文件的 https 链接。只有 git 安装能够更新：提高 `package.json` 里的 `version` 并推送，用户下次打开 设置 → 扩展 时 OpenChamber 就会提供更新。URL 上的 `#tag` 或 `#branch` 固定它跟随的是哪一个。这些会被复制到 OpenChamber 的数据文件夹，并从该副本运行，因此请发布构建好的文件，而不是 `node_modules` 或 TypeScript 源码。移除扩展时会删除该副本。从文件夹安装则直接从你的文件夹运行，你可以编辑、重新构建、再重新加载。
+你也可以添加本地 `.zip` 文件，或指向 git 仓库或 zip 文件的 https 链接。只有 git 安装能够更新：提高 `package.json` 里的 `version` 并推送，OpenChamber 会在启动后不久和每隔几小时检查一次，通知用户一次，并在 设置 → 扩展 中提供更新。URL 上的 `#tag` 或 `#branch` 固定它跟随的是哪一个。这些会被复制到 OpenChamber 的数据文件夹，并从该副本运行，因此请发布构建好的文件，而不是 `node_modules` 或 TypeScript 源码。移除扩展时会删除该副本。从文件夹安装则直接从你的文件夹运行，你可以编辑、重新构建、再重新加载。
 
 ## 清单
 
@@ -264,7 +264,7 @@ host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBy
 ]
 ```
 
-`where` 还可以取 `selection`（消息中选中的文本）、`file`（Files 中的一行）和 `diff`（文件或 diff 中选中的行）。它们的条目带有同名的 `kind`：`selection` 含文本，`file` 含路径，`diff` 含路径和行范围。
+`where` 还可以取 `selection`（消息中选中的文本）、`file`（Files 中的一行）和 `diff`（文件或 diff 中选中的行）。它们的条目带有同名的 `kind`：`selection` 含文本，`file` 含路径，`diff` 含路径和行范围。在选中内容上，`display` 决定操作的显示方式：`label`（默认）、以 `label` 文本作为提示的 `icon`，或 `both`。
 
 消息操作会以 `kind: "message"` 的 `ctx.item` 打开你的扩展：会话 id 和标题、项目目录、消息 id、它的角色和文本。会话操作则以 `kind: "session"` 打开，附带会话 id、标题和目录。加上 `"payload": ["messages"]`，条目还会携带整段对话，从最早的消息开始，与 Markdown 导出产生的文本相同。这需要 `conversation` 能力，用户会在批准对话框中看到它单独占一行。`item.action` 告诉你点击的是哪一项。
 

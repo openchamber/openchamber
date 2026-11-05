@@ -38,7 +38,7 @@ Point `index.html` at `main.js` with a normal `<script src="main.js"></script>`.
 
 OpenChamber reads the manifest and shows a dialog listing what the extension asks for (see [Capabilities](#capabilities)). Approve it, and your icon appears on the rail. Click it and your page loads.
 
-You can also add a local `.zip` or an https link to a git repository or a zip file. A git install is the one that can update: raise `version` in `package.json` and push, and OpenChamber offers the update the next time the user opens Settings → Extensions. A `#tag` or `#branch` on the URL pins which one it follows. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
+You can also add a local `.zip` or an https link to a git repository or a zip file. A git install is the one that can update: raise `version` in `package.json` and push, and OpenChamber checks soon after it opens and every few hours, tells the user once, and offers the update in Settings → Extensions. A `#tag` or `#branch` on the URL pins which one it follows. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
 
 ## Manifest
 
@@ -266,7 +266,7 @@ Beyond the rail and the + menu, an extension can appear in three more places. Al
 ]
 ```
 
-`where` also takes `selection` (text selected in a message), `file` (a row in Files) and `diff` (selected lines of a file or a diff). Their items carry `kind` of the same name: `selection` has the text, `file` the path, `diff` the path and the line range.
+`where` also takes `selection` (text selected in a message), `file` (a row in Files) and `diff` (selected lines of a file or a diff). Their items carry `kind` of the same name: `selection` has the text, `file` the path, `diff` the path and the line range. On a selection, `display` says how the action shows: `label` (the default), `icon` with the label as its tooltip, or `both`.
 
 A message action opens your extension with `ctx.item` of `kind: "message"`: the session id and title, the project directory, the message id, its role, and its text. A session action opens it with `kind: "session"` and the session id, title, and directory. Add `"payload": ["messages"]` and the item also carries the whole conversation, oldest first, the same text the Markdown export produces. That needs the `conversation` capability, which the user sees as a separate line in the approval dialog. `item.action` tells you which entry was clicked.
 

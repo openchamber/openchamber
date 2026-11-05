@@ -38,7 +38,7 @@ Uma extensão completa e funcional, com os três arquivos, está na página [Exe
 
 O OpenChamber lê o manifesto e mostra um diálogo com o que a extensão pede (veja [Capacidades](#capacidades)). Aprove, e seu ícone aparece na barra lateral. Clique nele e sua página carrega.
 
-Você também pode adicionar um `.zip` local ou um link https para um repositório git ou um arquivo zip. Só uma instalação por git consegue se atualizar: suba `version` no `package.json`, faça push e o OpenChamber oferece a atualização na próxima vez que o usuário abrir Configurações → Extensões. Um `#tag` ou `#branch` na URL fixa qual ele segue. Esses são copiados para a pasta de dados do OpenChamber e rodam a partir dessa cópia, então distribua os arquivos compilados, não `node_modules` nem fontes em TypeScript. Remover a extensão apaga a cópia. Uma instalação a partir de pasta roda direto da sua pasta, então você pode editar, recompilar e recarregar.
+Você também pode adicionar um `.zip` local ou um link https para um repositório git ou um arquivo zip. Só uma instalação por git consegue se atualizar: suba `version` no `package.json`, faça push e o OpenChamber verifica logo depois de abrir e a cada poucas horas, avisa o usuário uma vez e oferece a atualização em Configurações → Extensões. Um `#tag` ou `#branch` na URL fixa qual ele segue. Esses são copiados para a pasta de dados do OpenChamber e rodam a partir dessa cópia, então distribua os arquivos compilados, não `node_modules` nem fontes em TypeScript. Remover a extensão apaga a cópia. Uma instalação a partir de pasta roda direto da sua pasta, então você pode editar, recompilar e recarregar.
 
 ## Manifesto
 
@@ -264,7 +264,7 @@ Além da barra lateral e do menu +, uma extensão pode aparecer em mais três lu
 ]
 ```
 
-`where` também aceita `selection` (texto selecionado em uma mensagem), `file` (uma linha no Files) e `diff` (linhas selecionadas de um arquivo ou de um diff). Os itens deles têm um `kind` com o mesmo nome: `selection` traz o texto, `file` o caminho, `diff` o caminho e o intervalo de linhas.
+`where` também aceita `selection` (texto selecionado em uma mensagem), `file` (uma linha no Files) e `diff` (linhas selecionadas de um arquivo ou de um diff). Os itens deles têm um `kind` com o mesmo nome: `selection` traz o texto, `file` o caminho, `diff` o caminho e o intervalo de linhas. Em uma seleção, `display` define como a ação aparece: `label` (o padrão), `icon` com o rótulo como dica, ou `both`.
 
 Uma ação de mensagem abre sua extensão com um `ctx.item` de `kind: "message"`: o id e o título da sessão, a pasta do projeto, o id da mensagem, o papel dela e o texto. Uma ação de sessão abre com `kind: "session"` e o id, o título e a pasta da sessão. Adicione `"payload": ["messages"]` e o item também carrega a conversa inteira, da mais antiga para a mais nova, o mesmo texto que a exportação em Markdown produz. Isso precisa da capacidade `conversation`, que o usuário vê como uma linha separada no diálogo de aprovação. `item.action` diz qual entrada foi clicada.
 
