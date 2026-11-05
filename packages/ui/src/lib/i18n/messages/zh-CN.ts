@@ -938,6 +938,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': '添加项目失败',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': '请选择有效的目录路径。',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': '移除工作树失败',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': '不清理直接删除',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': '正在移除工作树“{name}”…',
   'sessions.sidebar.sessionDialogs.worktree.removed': '工作树已移除',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': '工作树和远程分支已移除',

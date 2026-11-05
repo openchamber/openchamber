@@ -51,6 +51,7 @@ import {
   populateWorktreeWithLockRecovery,
   previewWorktreeCreate,
   removeWorktree,
+  teardownWorktree,
   waitForWorktreeRemoval,
   snapshotWorktree,
   archiveWorktree,
@@ -4808,6 +4809,55 @@ describe('removeWorktree', () => {
       .resolves.toBe(true);
     expect(fs.existsSync(worktree)).toBe(false);
   }, 10_000);
+
+  it('skips the teardown of a contributor-fork checkout, and keeps the worktree with the teardown code when that cannot be told', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'fork');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'fork', worktree]);
+    const unknown = path.join(createTempDir(), 'unknown');
+    runGit(repo, ['worktree', 'add', '-b', 'unknown', unknown]);
+    const unreadable = async () => { throw new Error('provenance store unreadable'); };
+
+    await expect(removeWorktree(repo, { directory: unknown, teardownCommand: 'exit 1', isContributorCheckout: unreadable }))
+      .rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED', message: expect.stringContaining('provenance store unreadable') });
+    expect(fs.existsSync(path.join(unknown, '.git'))).toBe(true);
+    // "Delete without teardown" sends no command, so nothing has to be told.
+    await expect(removeWorktree(repo, { directory: unknown, isContributorCheckout: unreadable })).resolves.toBe(true);
+    expect(fs.existsSync(unknown)).toBe(false);
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: 'exit 1', isContributorCheckout: async () => true })).resolves.toBe(true);
+    expect(fs.existsSync(worktree)).toBe(false);
+  });
+
+  it('runs a teardown alone without removing anything, and reports a failure with its code', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const scripts = createTempDir();
+    const worktree = path.join(createTempDir(), 'teardown-only');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'teardown-only', worktree]);
+    const marker = path.join(scripts, 'ran.txt');
+    const recording = path.join(scripts, 'record.cjs');
+    fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.cwd());\n`);
+
+    await expect(teardownWorktree(repo, { directory: worktree, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(recording)}` })).resolves.toBe(true);
+    expect(fs.readFileSync(marker, 'utf8')).toBe(path.join(fs.realpathSync(path.dirname(worktree)), 'teardown-only'));
+    expect(runGit(repo, ['worktree', 'list', '--porcelain'])).toContain('branch refs/heads/teardown-only');
+
+    await expect(teardownWorktree(repo, { directory: worktree, teardownCommand: 'exit 3' })).rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED' });
+    await expect(teardownWorktree(repo, { directory: repo, teardownCommand: 'exit 3' })).rejects.toThrow('primary workspace');
+    expect(fs.existsSync(path.join(worktree, '.git'))).toBe(true);
+  });
 
   it('keeps only the end of a long teardown failure in the error', async () => {
     if (!canRunGit()) return;

@@ -872,6 +872,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'تعذّرت إضافة المشروع',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'يُرجى اختيار مسار مجلد صالح.',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'تعذّرت إزالة شجرة العمل',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': 'حذف دون تنظيف',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'جارٍ إزالة شجرة العمل «{name}»…',
   'sessions.sidebar.sessionDialogs.worktree.removed': 'تمت إزالة شجرة العمل',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'تمت إزالة شجرة العمل والفرع البعيد',

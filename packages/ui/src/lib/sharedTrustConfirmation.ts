@@ -38,6 +38,8 @@ type PendingSharedTrustRequest = {
 };
 
 let pendingRequest: PendingSharedTrustRequest | null = null;
+// Teardown answers being asked for, by project path and trust hash.
+const pendingTeardownAnswers = new Map<string, Promise<SharedTrustChoice>>();
 const listeners = new Set<() => void>();
 
 const emitChange = (): void => {
@@ -168,7 +170,15 @@ export const resolveWorktreeTeardownCommands = async (project: ProjectRef, { ask
   if (!ask && !setup.trust.trusted) {
     throw new Error('The repository\'s teardown commands are not trusted yet, so the worktree was kept. Archive or delete it yourself to review them.');
   }
-  return (await answerSharedTrust(project, setup, 'machine', 'skip')) === 'trust'
+  // Two deletes in one project ask once and share the answer: a second prompt
+  // would settle the first as "Not this time" without the user answering it.
+  const key = `${project.path}\n${setup.trust.hash}`;
+  let answer = pendingTeardownAnswers.get(key);
+  if (!answer) {
+    answer = answerSharedTrust(project, setup, 'machine', 'skip').finally(() => pendingTeardownAnswers.delete(key));
+    pendingTeardownAnswers.set(key, answer);
+  }
+  return (await answer) === 'trust'
     ? setup.teardownWorktree
     : setup.personal.teardownWorktree;
 };

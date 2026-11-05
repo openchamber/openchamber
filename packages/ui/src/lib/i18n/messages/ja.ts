@@ -938,6 +938,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'プロジェクトの追加に失敗しました',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': '有効なディレクトリパスを選択してください。',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'ワークツリーを削除できませんでした',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': 'クリーンアップせずに削除',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'ワークツリー「{name}」を削除しています…',
   'sessions.sidebar.sessionDialogs.worktree.removed': 'ワークツリーを削除しました',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'ワークツリーとリモートブランチを削除しました',

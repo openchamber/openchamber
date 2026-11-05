@@ -942,6 +942,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle": "Não foi possível adicionar projeto",
   "sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription": "Selecione uma caminho de diretório válida.",
   "sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle": "Não foi possível excluir o worktree",
+  "sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown": "Excluir sem limpeza",
   "sessions.sidebar.sessionDialogs.worktree.removingTitle": "Excluindo o worktree “{name}”…",
   "sessions.sidebar.sessionDialogs.worktree.removed": "Worktree excluído",
   "sessions.sidebar.sessionDialogs.worktree.removedWithRemote": "Worktree e branch remota excluídos",

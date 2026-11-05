@@ -29,6 +29,7 @@ import { getCurrentSessionAssist } from '@/lib/sessionAssistMetadata';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { cn } from '@/lib/utils';
 import { getWorktreeDisplayName } from '@/lib/worktrees/worktreeManager';
+import { deleteWithoutTeardownToast } from '@/lib/worktrees/worktreeRemovalFlow';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
@@ -385,20 +386,25 @@ export function OverviewPage({ layout, onLeave }: { layout: Layout; onLeave: () 
     for (const session of failed) toast.error(t('overview.toast.doneFailed', { title: titleOf(session) }));
   });
 
-  const removeOne = async (target: OverviewWorktreeTarget, agreed: OverviewWorktreeLosses) => {
+  const removeOne = async (target: OverviewWorktreeTarget, agreed: OverviewWorktreeLosses, skipTeardown = false) => {
     const name = worktreeName(target);
-    const outcome = await removeOverviewWorktree({ target, agreed });
+    const outcome = await removeOverviewWorktree({ target, agreed, skipTeardown });
     if (outcome.kind === 'removed') {
       toast.success(t('overview.toast.removed', { name }));
     } else if (outcome.kind === 'failed') {
-      toast.error(t('overview.toast.removeFailed', { name }), { description: outcome.error.message });
+      toast.error(t('overview.toast.removeFailed', { name }), {
+        description: outcome.error.message,
+        ...deleteWithoutTeardownToast(outcome.error, t('sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown'), () => {
+          void removeWorktree(target, agreed, true);
+        }),
+      });
     } else {
       toast.info(t(LEFT_AS_IS_KEY[outcome.kind], { name }));
     }
   };
 
-  const removeWorktree = (target: OverviewWorktreeTarget, agreed: OverviewWorktreeLosses) => run([target.worktree.path], async () => {
-    await removeOne(target, agreed);
+  const removeWorktree = (target: OverviewWorktreeTarget, agreed: OverviewWorktreeLosses, skipTeardown = false) => run([target.worktree.path], async () => {
+    await removeOne(target, agreed, skipTeardown);
     data.refreshGit();
   });
 

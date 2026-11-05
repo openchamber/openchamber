@@ -938,6 +938,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': '프로젝트 추가 실패',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': '유효한 디렉터리 경로를 선택하세요.',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': '워크트리를 제거하지 못했습니다',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': '정리 없이 삭제',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': '워크트리 “{name}” 제거 중…',
   'sessions.sidebar.sessionDialogs.worktree.removed': '워크트리가 제거되었습니다',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': '워크트리와 리모트 브랜치가 제거되었습니다',

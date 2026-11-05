@@ -937,6 +937,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Failed to add project',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Please select a valid directory path.',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Couldn\'t remove the worktree',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': 'Delete without teardown',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Removing worktree “{name}”…',
   'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree removed',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree and remote branch removed',

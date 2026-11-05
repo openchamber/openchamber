@@ -771,6 +771,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Échec de l\'ajout du projet',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Veuillez sélectionner un chemin de répertoire valide.',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Impossible de supprimer le worktree',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': 'Supprimer sans nettoyage',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Suppression du worktree « {name} »…',
   'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree supprimé',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree et branche du dépôt distant supprimés',

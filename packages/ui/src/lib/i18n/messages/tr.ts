@@ -850,6 +850,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Proje eklenemedi',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Geçerli bir dizin yolu seçin.',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Worktree kaldırılamadı',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': 'Temizlik olmadan sil',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': '“{name}” worktree kaldırılıyor…',
   'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree kaldırıldı',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree ve uzak branch kaldırıldı',

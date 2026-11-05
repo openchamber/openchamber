@@ -9,7 +9,7 @@ mock.module('vscode', () => ({
   Uri: { file: (fsPath) => ({ fsPath }) },
 }));
 
-const { createWorktree, getWorktreeBootstrapStatus, removeWorktree, waitForWorktreeRemoval } = await import('./gitService.ts?worktree-remove-test');
+const { createWorktree, getWorktreeBootstrapStatus, removeWorktree, teardownWorktree, waitForWorktreeRemoval } = await import('./gitService.ts?worktree-remove-test');
 
 const tempDirs = [];
 
@@ -116,6 +116,26 @@ describe('VS Code worktree removal instance disposal', () => {
       await expect(removeWorktree(repo, { directory: worktreePath, teardownCommand: run(recording), disposeInstance })).resolves.toBe(true);
       expect(fs.readFileSync(marker, 'utf8')).toBe(targetRealPath);
       expect(fs.existsSync(worktreePath)).toBe(false);
+    });
+  });
+
+  it('runs a teardown alone without removing anything, and reports a failure with its code', async () => {
+    if (!canRunGit()) return;
+
+    await withIsolatedOpenCodeData(async () => {
+      const { repo, worktreePath } = createRepositoryWithWorktree();
+      const scripts = createTempDir();
+      const marker = path.join(scripts, 'ran.txt');
+      const recording = path.join(scripts, 'record.cjs');
+      fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.cwd());\n`);
+
+      await expect(teardownWorktree(repo, { directory: worktreePath, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(recording)}` })).resolves.toBe(true);
+      expect(fs.readFileSync(marker, 'utf8')).toBe(fs.realpathSync(worktreePath));
+      expect(fs.existsSync(path.join(worktreePath, '.git'))).toBe(true);
+
+      await expect(teardownWorktree(repo, { directory: worktreePath, teardownCommand: 'exit 3' })).rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED' });
+      await expect(removeWorktree(repo, { directory: worktreePath, teardownCommand: 'exit 3' })).rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED' });
+      expect(fs.existsSync(path.join(worktreePath, '.git'))).toBe(true);
     });
   });
 

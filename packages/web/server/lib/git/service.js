@@ -6652,21 +6652,58 @@ const WORKTREE_TEARDOWN_TIMEOUT_MS = 5 * 60 * 1000;
 // The failure is shown in a toast: its end, where the error usually is, is enough.
 const WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS = 2000;
 
+// Clients offer to delete without teardown when they see this code.
+const WORKTREE_TEARDOWN_FAILED = 'WORKTREE_TEARDOWN_FAILED';
+
 // Teardown runs before anything is touched, while the worktree and its
 // OpenCode instance are intact, so a failing command leaves both as they
 // were. A folder already gone has nothing left to stop, and a checkout whose
-// bootstrap failed never ran its setup commands.
-const runWorktreeTeardown = async (worktreeDirectory, command) => {
+// bootstrap failed never ran its setup commands. A contributor-fork checkout
+// holds the contributor's code, and the server keeps no record of a checkout
+// trust the user granted, so its teardown never runs; `isContributorCheckout`
+// (injected by the route) answers that. When it cannot answer, nothing runs
+// and the worktree is kept, with the teardown failure code, so the client can
+// still offer to delete without teardown.
+const runWorktreeTeardown = async (worktreeDirectory, command, isContributorCheckout) => {
+  if (!String(command || '').trim()) return;
   if (!(await checkPathExists(worktreeDirectory))) return;
   const bootstrap = worktreeBootstrapState.get(await toCanonicalBootstrapStateKey(worktreeDirectory));
   if (bootstrap?.status === WORKTREE_BOOTSTRAP_FAILED) return;
+  if (isContributorCheckout instanceof Function) {
+    const contributor = await isContributorCheckout(worktreeDirectory).catch((error) => {
+      throw Object.assign(new Error(`Could not tell whether this checkout holds a contributor's code, so no teardown command ran and the worktree was kept: ${error?.message || error}`), { code: WORKTREE_TEARDOWN_FAILED });
+    });
+    if (contributor) return;
+  }
   const result = await runWorktreeStartCommand(worktreeDirectory, command, { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
   if (!result.success) {
     const output = result.message || 'the command exited with an error';
     const shown = output.length > WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS ? `...${output.slice(-WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS)}` : output;
-    throw new Error(`Worktree teardown command failed, so the worktree was kept: ${shown}`);
+    throw Object.assign(new Error(`Worktree teardown command failed, so the worktree was kept: ${shown}`), { code: WORKTREE_TEARDOWN_FAILED });
   }
 };
+
+/**
+ * Runs `input.teardownCommand` in the registered linked worktree
+ * `input.directory` and removes nothing. A delete that also removes the
+ * remote branch runs this first, so a failing teardown stops before the
+ * remote branch goes. Anything that is not a registered linked worktree has
+ * nothing to tear down.
+ */
+export async function teardownWorktree(directory, input = {}) {
+  const targetDirectory = normalizeDirectoryPath(input?.directory);
+  if (!targetDirectory) throw new Error('Worktree directory is required');
+  const targetCanonical = await canonicalPath(targetDirectory);
+  await waitForActiveWorktreeBootstrap(targetDirectory);
+  await waitForActiveWorktreeBootstrap(targetCanonical);
+  const context = await resolveWorktreeProjectContext(directory, { tolerateWorktreeRootConfigError: true });
+  if (targetCanonical === await canonicalPath(context.primaryWorktree)) {
+    throw new Error('Cannot tear down the primary workspace');
+  }
+  const entry = await findRegisteredWorktree(context.primaryWorktree, targetCanonical);
+  if (entry?.worktree) await runWorktreeTeardown(entry.worktree, input?.teardownCommand, input?.isContributorCheckout);
+  return true;
+}
 
 export async function removeWorktree(directory, input = {}, { bootstrapStore } = {}) {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
@@ -6732,7 +6769,7 @@ export async function removeWorktree(directory, input = {}, { bootstrapStore } =
     return true;
   }
 
-  await runWorktreeTeardown(matchedEntry.worktree, input?.teardownCommand);
+  await runWorktreeTeardown(matchedEntry.worktree, input?.teardownCommand, input?.isContributorCheckout);
 
   await clearWorktreeBootstrapState(matchedEntry.worktree, bootstrapStore);
   const settleRemoval = trackWorktreeRemoval(targetCanonical);
@@ -6972,7 +7009,7 @@ const archiveRegisteredWorktree = async ({ directory, id, worktreeDirectory, tar
     throw new Error('The worktree did not finish setting up, so it cannot be archived. Delete it instead.');
   }
   // Before the snapshot, so the snapshot holds what the teardown left.
-  await runWorktreeTeardown(worktreeDirectory, input?.teardownCommand);
+  await runWorktreeTeardown(worktreeDirectory, input?.teardownCommand, input?.isContributorCheckout);
 
   const branch = entry.branch ?? '';
   // The task title; without one, the name the sidebar showed for the work.

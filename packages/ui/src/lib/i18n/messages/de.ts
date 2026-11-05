@@ -838,6 +838,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Fehler beim Hinzufügen des Projekts',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Bitte wählen Sie einen gültigen Verzeichnispfad aus.',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Worktree konnte nicht entfernt werden',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': 'Ohne Aufräumen löschen',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Worktree „{name}“ wird entfernt…',
   'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree entfernt',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree und Remote-Branch entfernt',

@@ -153,6 +153,14 @@ export function registerGitRoutes(app, {
     return worktrees;
   };
 
+  // A contributor-fork checkout runs no project command before its checkout
+  // trust passes, so its teardown is skipped. A provenance read that fails
+  // throws, and the removal keeps the worktree.
+  const isContributorCheckout = contributorProvenance?.read instanceof Function
+    ? async (worktreeDirectory) => (await contributorProvenance.read(worktreeDirectory)).provenance?.kind === 'contributor-fork'
+    : undefined;
+  const worktreeTeardownCodeOf = (error) => (error?.code === 'WORKTREE_TEARDOWN_FAILED' ? error.code : undefined);
+
   const sendNetworkOperationError = (req, res, error) => {
     const code = isString(error?.code) ? error.code : 'UNKNOWN';
     const storageFailure = code === 'GIT_NETWORK_OPERATION_STORAGE_INVALID';
@@ -1841,6 +1849,7 @@ export function registerGitRoutes(app, {
         directory: worktreeDirectory,
         deleteLocalBranch: req.body?.deleteLocalBranch === true,
         teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        isContributorCheckout,
         disposeInstance: canDisposeWorktreeInstance
           ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
           : undefined,
@@ -1850,7 +1859,29 @@ export function registerGitRoutes(app, {
       res.json({ success: Boolean(result) });
     } catch (error) {
       console.error('Failed to remove worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to remove worktree' });
+      res.status(500).json({ error: error.message || 'Failed to remove worktree', code: worktreeTeardownCodeOf(error) });
+    }
+  }));
+
+  // Runs a worktree's teardown commands without removing it: a delete that also
+  // removes the remote branch calls this first, so a failing teardown stops it
+  // before the remote branch goes.
+  app.post('/api/git/worktrees/teardown', userAction(async (req, res) => {
+    const { teardownWorktree } = await getGitLibraries();
+    const directory = resolveDirectoryQuery(req.query.directory);
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    const worktreeDirectory = z.string().min(1).safeParse(req.body?.directory).data;
+    if (!worktreeDirectory) return res.status(400).json({ error: 'worktree directory is required' });
+    try {
+      await teardownWorktree(directory, {
+        directory: worktreeDirectory,
+        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        isContributorCheckout,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to tear down worktree:', error);
+      res.status(500).json({ error: error.message || 'Failed to tear down worktree', code: worktreeTeardownCodeOf(error) });
     }
   }));
 
@@ -1908,6 +1939,7 @@ export function registerGitRoutes(app, {
         sessionIds: req.body.sessionIds,
         title: req.body.title,
         teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        isContributorCheckout,
         disposeInstance: canDisposeWorktreeInstance
           ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
           : undefined,

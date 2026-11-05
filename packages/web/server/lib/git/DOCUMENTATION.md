@@ -115,36 +115,60 @@ A stale status row can outlive its repository. Returning empty contents would re
 `DELETE /api/git/worktrees` and `POST /api/git/worktrees/archives` take an
 optional `teardownCommand`: the project's `teardownWorktree` list joined with
 `&&`, after the client's trust prompt (`resolveWorktreeTeardownCommands` in
-`packages/ui/src/lib/sharedTrustConfirmation.ts`). It runs through the same
-shell runner as the setup commands, with the worktree as working directory,
-stdin closed, and the project's current environment (both routes are user
-actions). The request waits for it, so it is stopped after 5 minutes and the
-removal fails as for any other failing command.
+`packages/ui/src/lib/sharedTrustConfirmation.ts`). `POST
+/api/git/worktrees/teardown` runs it alone and removes nothing
+(`teardownWorktree`). It runs through the same shell runner as the setup
+commands, with the worktree as working directory, stdin closed, and the
+project's current environment (all three routes are user actions). The request
+waits for it, so it is stopped after 5 minutes and the removal fails as for any
+other failing command.
 
 - It runs before anything is touched: before the bootstrap record is cleared,
   the OpenCode instance released and `git worktree remove` runs, and in an
   archive before the snapshot, so the snapshot holds what the teardown left.
 - A failing command throws `Worktree teardown command failed, so the worktree
-  was kept: <output>` and leaves the worktree, its instance and its branch as
-  they were; `<output>` keeps only the last 2000 characters. The route answers
-  500 with that text and the delete toast shows it.
+  was kept: <output>` with `code: 'WORKTREE_TEARDOWN_FAILED'` and leaves the
+  worktree, its instance and its branch as they were; `<output>` keeps only the
+  last 2000 characters. The routes answer 500 with that text and the code. The
+  delete toasts (the delete dialogs, mobile and the overview) then offer
+  "Delete without teardown", which repeats that delete with the same options
+  and no teardown command, and stay until answered or closed. Only that click
+  skips a teardown.
 - A registered worktree whose folder is already gone skips the teardown, so a
   folder deleted outside the app stays removable. So does a worktree whose
   bootstrap failed: its setup commands never ran, and the teardown would run
-  against a checkout that may not have landed. The client skips the trust
-  prompt for it too, when its own bootstrap state says failed. An unregistered
-  leftover never runs it.
+  against a checkout that may not have landed. An unregistered leftover never
+  runs it.
+- A contributor-fork checkout never runs it: the folder holds the
+  contributor's code, and a "run" checkout-trust decision is a one-time
+  `checkout-actions` operation, not a trust kept on the worktree, so nothing
+  tells an approved checkout from one never approved. Setup that a "run"
+  started is not torn down. The routes inject `isContributorCheckout`, which
+  reads `contributorProvenance`. A read that fails runs nothing and keeps the
+  worktree with `WORKTREE_TEARDOWN_FAILED`, so "Delete without teardown" stays
+  available.
+- The client asks for no trust where the server runs no teardown: a checkout
+  whose bootstrap state it has as failed, or whose `provenance.kind` is
+  `contributor-fork` (`resolveWorktreeTeardownCommand` in
+  `packages/ui/src/lib/worktrees/worktreeManager.ts`). Concurrent deletes in one
+  project share one prompt and one answer.
 - Only removals the client starts carry it. Server-side cleanups (scheduled-task
   runs, a failed session move) run no teardown, as they run no setup commands.
   The client's merged-PR cleanup never opens the trust prompt: untrusted shared
-  teardown commands make its archive fail, and the worktree waits for a removal
-  by hand.
-- The VS Code runtime applies the same rule in `removeWorktree`
-  (`packages/vscode/src/gitService.ts`); it has no archive.
-- A delete that also removes the remote branch removes it first, on the client,
-  before this request (a failed remote delete must keep the worktree). A failing
-  teardown then keeps the worktree and its local branch, but the remote branch
-  is already gone.
+  teardown commands make its archive fail before any session is archived, and
+  the worktree waits for a removal by hand.
+- A delete that also removes the remote branch checks that the remote is
+  ready, then runs the teardown alone, then plans and runs the remote delete,
+  then removes the worktree without a teardown command
+  (`runBoundRemoteBranchDelete`'s `beforePlan`). A remote that refuses stops
+  nothing, and a failing teardown never reaches the remote delete.
+- The VS Code runtime applies the same rules in `removeWorktree` and
+  `teardownWorktree` (`packages/vscode/src/gitService.ts`) and has no archive.
+  It does not read the contributor provenance store, which lives in the
+  OpenChamber server's data directory: a contributor-fork worktree the desktop
+  or web app created, deleted from VS Code, runs the teardown. Its webview sends
+  both requests without the bridge's 30 second timeout, since the host may run
+  the teardown for 5 minutes.
 
 #### Why a failed teardown keeps the worktree
 
@@ -152,7 +176,9 @@ The commands exist to stop what lives in the folder (a Docker stack, a dev
 server). Deleting it anyway leaves that process running against a folder that is
 gone, or fails `git worktree remove` halfway. A failed removal already restores
 the sessions archived for it (`packages/ui/src/lib/worktrees/worktreeRemovalFlow.ts`),
-so keeping the worktree fits the existing failure path.
+so keeping the worktree fits the existing failure path. The command list is
+shared with the whole team, so one broken command must not block a delete:
+"Delete without teardown" lets the user go on, and only by hand.
 
 #### Why the client's rollbacks still run teardown
 

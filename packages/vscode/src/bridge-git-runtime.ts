@@ -205,6 +205,16 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
     }
 
+    case 'api:git/worktrees/teardown': {
+      const { directory, worktreeDirectory, teardownCommand } = (payload || {}) as { directory?: string; worktreeDirectory?: unknown; teardownCommand?: unknown };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const target = z.string().min(1).safeParse(worktreeDirectory).data;
+      if (!target) return { id, type, success: false, error: 'Worktree directory is required' };
+      await gitService.teardownWorktree(directory!, { directory: target, teardownCommand: z.string().safeParse(teardownCommand).data });
+      return { id, type, success: true, data: { success: true } };
+    }
+
     case 'api:git/worktrees/snapshot': {
       const { directory, ref } = (payload || {}) as { directory?: string; ref?: string };
       const dirError = requireDirectory(id, type, directory);

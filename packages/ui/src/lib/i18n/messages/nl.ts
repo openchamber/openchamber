@@ -932,6 +932,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'Kan project niet toevoegen',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'Selecteer een geldig mappad.',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'Kan worktree niet verwijderen',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': 'Verwijderen zonder opruimen',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'Worktree “{name}” wordt verwijderd…',
   'sessions.sidebar.sessionDialogs.worktree.removed': 'Worktree verwijderd',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'Worktree en remote branch verwijderd',

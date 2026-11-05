@@ -872,6 +872,7 @@ export const dict = {
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle': 'לא ניתן היה להוסיף את הפרויקט',
   'sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription': 'יש לבחור נתיב תיקייה תקין.',
   'sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle': 'לא ניתן היה להסיר את עץ העבודה',
+  'sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown': 'מחיקה ללא ניקוי',
   'sessions.sidebar.sessionDialogs.worktree.removingTitle': 'מסיר את עץ העבודה “{name}”…',
   'sessions.sidebar.sessionDialogs.worktree.removed': 'עץ העבודה הוסר',
   'sessions.sidebar.sessionDialogs.worktree.removedWithRemote': 'עץ העבודה והענף המרוחק הוסרו',

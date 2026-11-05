@@ -2366,6 +2366,47 @@ const removeGitWorktreeWhenFree = async (
   }
 };
 
+// Mirrors the server (`runWorktreeTeardown` in packages/web/server/lib/git/service.js):
+// teardown runs while the worktree and its OpenCode instance are intact, so a
+// failing command leaves both as they were; a folder already gone or a
+// checkout whose bootstrap failed has nothing to stop. The contributor
+// provenance store lives in the OpenChamber server's data directory and is
+// not read here, so a contributor-fork worktree another runtime created runs
+// the teardown when deleted from VS Code (a known gap, see the server's
+// DOCUMENTATION.md).
+const runWorktreeTeardown = async (worktreeDirectory: string, command: string | undefined): Promise<void> => {
+  if (!command?.trim()) return;
+  if (worktreeBootstrapState.get(toBootstrapStateKey(worktreeDirectory))?.status === WORKTREE_BOOTSTRAP_FAILED) return;
+  if (!(await checkPathExists(worktreeDirectory))) return;
+  const teardown = await runWorktreeStartCommand(worktreeDirectory, command, { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
+  if (!teardown.success) {
+    const output = teardown.message || 'the command exited with an error';
+    const shown = output.length > WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS ? `...${output.slice(-WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS)}` : output;
+    throw Object.assign(new Error(`Worktree teardown command failed, so the worktree was kept: ${shown}`), { code: 'WORKTREE_TEARDOWN_FAILED' });
+  }
+};
+
+/** Runs the teardown of a registered linked worktree without removing it; see the server's `teardownWorktree`. */
+export async function teardownWorktree(directory: string, input: { directory: string; teardownCommand?: string }): Promise<boolean> {
+  const targetDirectory = normalizeDirectoryPath(input?.directory);
+  if (!targetDirectory) {
+    throw new Error('Worktree directory is required');
+  }
+  await waitForActiveWorktreeBootstrap(targetDirectory);
+  const context = await resolveWorktreeProjectContext(directory, { tolerateWorktreeRootConfigError: true });
+  const targetCanonical = await canonicalPath(targetDirectory);
+  if (targetCanonical === await canonicalPath(context.primaryWorktree)) {
+    throw new Error('Cannot tear down the primary workspace');
+  }
+  for (const entry of await listWorktreeEntries(context.primaryWorktree)) {
+    if (entry?.worktree && await canonicalPath(entry.worktree) === targetCanonical) {
+      await runWorktreeTeardown(entry.worktree, input?.teardownCommand);
+      break;
+    }
+  }
+  return true;
+}
+
 export async function removeWorktree(directory: string, input: RemoveGitWorktreePayload): Promise<boolean> {
   const targetDirectory = normalizeDirectoryPath(input?.directory);
   if (!targetDirectory) {
@@ -2429,18 +2470,7 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
     return true;
   }
 
-  // Mirrors the server: teardown runs while the worktree and its OpenCode
-  // instance are intact, so a failing command leaves both as they were; a
-  // checkout whose bootstrap failed never ran its setup commands.
-  const bootstrapFailed = worktreeBootstrapState.get(toBootstrapStateKey(matchedEntry.worktree))?.status === WORKTREE_BOOTSTRAP_FAILED;
-  if (!bootstrapFailed && await checkPathExists(matchedEntry.worktree)) {
-    const teardown = await runWorktreeStartCommand(matchedEntry.worktree, input?.teardownCommand ?? '', { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
-    if (!teardown.success) {
-      const output = teardown.message || 'the command exited with an error';
-      const shown = output.length > WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS ? `...${output.slice(-WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS)}` : output;
-      throw new Error(`Worktree teardown command failed, so the worktree was kept: ${shown}`);
-    }
-  }
+  await runWorktreeTeardown(matchedEntry.worktree, input?.teardownCommand);
 
   const settleRemoval = trackWorktreeRemoval(targetCanonical);
   // The directory is a registered linked worktree and still exists here, which

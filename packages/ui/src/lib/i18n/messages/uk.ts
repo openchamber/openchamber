@@ -942,6 +942,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.directory.errorAddProjectTitle": "Не вдалося додати проєкт",
   "sessions.sidebar.sessionDialogs.directory.errorAddProjectDescription": "Виберіть правильний шлях до каталогу.",
   "sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle": "Не вдалося видалити worktree",
+  "sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown": "Видалити без очищення",
   "sessions.sidebar.sessionDialogs.worktree.removingTitle": "Видаляємо worktree «{name}»…",
   "sessions.sidebar.sessionDialogs.worktree.removed": "Worktree видалено",
   "sessions.sidebar.sessionDialogs.worktree.removedWithRemote": "Worktree та віддалену гілку видалено",

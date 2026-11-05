@@ -822,11 +822,19 @@ const forgetRemovedWorktree = (project: ProjectRef, worktree: WorktreeMetadata):
 
 /**
  * What the server runs in the worktree before it goes; may ask for trust
- * first. A checkout whose bootstrap failed never ran its setup and the server
- * skips its teardown, so nothing is asked about it.
+ * first, unless `ask` is false (a removal nobody started by hand), where
+ * untrusted shared commands reject instead. Nothing is asked for a checkout
+ * the server runs no teardown in: one whose bootstrap failed never ran its
+ * setup, and a contributor fork runs no project command before its checkout
+ * trust passes.
  */
-const resolveTeardownCommand = async (project: ProjectRef, worktree: WorktreeMetadata, ask = true): Promise<string | undefined> => {
+export const resolveWorktreeTeardownCommand = async (
+  project: ProjectRef,
+  worktree: WorktreeMetadata,
+  { ask = true }: { ask?: boolean } = {},
+): Promise<string | undefined> => {
   if (getWorktreeBootstrapState(worktree.path)?.status === 'failed') return undefined;
+  if (worktree.provenance?.kind === 'contributor-fork') return undefined;
   return joinWorktreeCommands({
     projectDirectory: normalizePath(project.path),
     commands: await resolveWorktreeTeardownCommands(project, { ask }),
@@ -837,20 +845,18 @@ const resolveTeardownCommand = async (project: ProjectRef, worktree: WorktreeMet
  * Archives the worktree: the server records its state with `sessionIds` (the
  * sessions the caller archived for it) under a private ref and removes the
  * folder, keeping the branch. The row shows the removal until git answers.
- * `askForTrust: false` is for archives nobody started by hand: untrusted
- * shared teardown commands then keep the worktree instead of opening a prompt.
+ * `teardownCommand` comes from `resolveWorktreeTeardownCommand`, which the
+ * caller runs before it archives any session.
  */
 export async function archiveProjectWorktree(
   project: ProjectRef,
   worktree: WorktreeMetadata,
-  input: { id: string; sessionIds: string[]; title?: string },
-  { askForTrust = true }: { askForTrust?: boolean } = {},
+  input: { id: string; sessionIds: string[]; title?: string; teardownCommand?: string },
 ): Promise<GitWorktreeArchive> {
   markWorktreeRemoving(worktree.path);
   let archive: GitWorktreeArchive;
   try {
-    const teardownCommand = await resolveTeardownCommand(project, worktree, askForTrust);
-    archive = await git.worktree.archive(normalizePath(project.path), { directory: worktree.path, ...input, teardownCommand });
+    archive = await git.worktree.archive(normalizePath(project.path), { directory: worktree.path, ...input });
   } catch (error) {
     clearWorktreeRemoval(worktree.path);
     throw error;
@@ -867,6 +873,8 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
     sourceControl: Pick<SourceControlAPI, 'repositoryBinding'>;
     git: Pick<GitAPI, 'planNetworkOperation' | 'executeNetworkOperation' | 'getNetworkOperation'>;
   };
+  /** Only from the failure toast's "Delete without teardown" after the teardown failed. */
+  skipTeardown?: boolean;
 }): Promise<void> {
   const projectDirectory = normalizePath(project.path);
 
@@ -879,16 +887,23 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   }
   markWorktreeRemoving(worktree.path);
   try {
-    // Before the remote branch goes, so an unreadable setup stops the whole removal.
-    const teardownCommand = await resolveTeardownCommand(project, worktree);
+    let teardownCommand = options?.skipTeardown === true ? undefined : await resolveWorktreeTeardownCommand(project, worktree);
     if (deleteRemote && branchName && remoteName && options?.network) {
+      // The teardown runs on its own once the remote is known ready (a remote
+      // that refuses stops nothing) and before the remote branch goes (a
+      // failing teardown deletes nothing); the removal then has nothing left to run.
+      const teardownFirst = teardownCommand;
       await runBoundRemoteBranchDelete({
+        beforePlan: teardownFirst
+          ? async () => { await git.worktree.teardown(projectDirectory, { directory: worktree.path, teardownCommand: teardownFirst }); }
+          : undefined,
         branch: branchName,
         directory: projectDirectory,
         remoteName,
         sourceControl: options.network.sourceControl,
         git: options.network.git,
       });
+      teardownCommand = undefined;
     }
     const raw = await git.worktree.remove(projectDirectory, {
       directory: worktree.path,

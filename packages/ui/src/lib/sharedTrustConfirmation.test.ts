@@ -195,6 +195,20 @@ describe('shared trust confirmation', () => {
     expect(patches).toEqual([{ sharedTrustHash: 'sha256:abc' }]);
   });
 
+  test('two teardowns in one project share one prompt and its answer', async () => {
+    const first = resolveWorktreeTeardownCommands(project);
+    const second = resolveWorktreeTeardownCommands(project);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(getSharedTrustConfirmationSnapshot()?.teardownCommands).toEqual(['docker compose down']);
+
+    settleSharedTrustConfirmation('trust');
+    expect(await first).toEqual(['docker compose down', 'rm -f .dev.pid']);
+    expect(await second).toEqual(['docker compose down', 'rm -f .dev.pid']);
+    expect(patches).toEqual([{ sharedTrustHash: 'sha256:abc' }]);
+    expect(getSharedTrustConfirmationSnapshot()).toBeNull();
+  });
+
   test('teardown without shared commands never asks', async () => {
     setup.shared.teardownWorktree = [];
     setup.teardownWorktree = ['rm -f .dev.pid'];

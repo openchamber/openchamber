@@ -6,7 +6,14 @@ import type { Session } from '@/lib/opencode/model';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { resolveWorktreeSetupCommandsOrCancel } from '@/lib/sharedTrustConfirmation';
-import { archiveProjectWorktree, createWorktree, listProjectWorktrees, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
+import {
+  archiveProjectWorktree,
+  createWorktree,
+  listProjectWorktrees,
+  removeProjectWorktree,
+  resolveWorktreeTeardownCommand,
+  type ProjectRef,
+} from '@/lib/worktrees/worktreeManager';
 import { archiveSessionsThenRemoveWorktree } from '@/lib/worktrees/worktreeRemovalFlow';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
@@ -101,13 +108,16 @@ export async function archiveWorktreeWork(input: {
   sessions: readonly Session[];
   /** The name the sidebar showed for the work, kept when the worktree has no task title. */
   title?: string;
-  /** False for an archive nobody started by hand; see `archiveProjectWorktree`. */
+  /** False for an archive nobody started by hand; see `resolveWorktreeTeardownCommand`. */
   askForTrust?: boolean;
 }): Promise<void> {
   const sessionIds = input.sessions.map((session) => session.id);
   let partial: Error | null = null;
   markWorktreeRemoving(input.worktree.path);
   try {
+    // Before any session is archived: a teardown that cannot run (untrusted
+    // in a pass nobody started, an unreadable setup) leaves the sessions alone.
+    const teardownCommand = await resolveWorktreeTeardownCommand(input.project, input.worktree, { ask: input.askForTrust });
     await archiveSessionsThenRemoveWorktree({
       sessionIds,
       archiveSessions: (ids) => archiveSessions(ids),
@@ -117,12 +127,7 @@ export async function archiveWorktreeWork(input: {
           throw new Error(`Could not archive ${sessionIds.length - archivedIds.length} session(s)`);
         }
         try {
-          await archiveProjectWorktree(
-            input.project,
-            input.worktree,
-            { id: newArchiveId(), sessionIds: archivedIds, title: input.title },
-            { askForTrust: input.askForTrust },
-          );
+          await archiveProjectWorktree(input.project, input.worktree, { id: newArchiveId(), sessionIds: archivedIds, title: input.title, teardownCommand });
         } catch (error) {
           if (!(error instanceof GitWorktreeRequestError) || error.code !== 'WORKTREE_ARCHIVE_PARTIAL') throw error;
           partial = error;

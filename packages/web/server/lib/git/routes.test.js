@@ -30,6 +30,7 @@ const gitLibraries = {
   observeWorktreeTopology: vi.fn(),
   subscribeWorktreeTopologyChanges: vi.fn(),
   removeWorktree: vi.fn(),
+  teardownWorktree: vi.fn(),
   archiveWorktree: vi.fn(),
   listWorktreeArchives: vi.fn(),
   deleteWorktreeArchive: vi.fn(),
@@ -65,6 +66,7 @@ vi.mock('./index.js', () => ({
   observeWorktreeTopology: gitLibraries.observeWorktreeTopology,
   subscribeWorktreeTopologyChanges: gitLibraries.subscribeWorktreeTopologyChanges,
   removeWorktree: gitLibraries.removeWorktree,
+  teardownWorktree: gitLibraries.teardownWorktree,
   archiveWorktree: gitLibraries.archiveWorktree,
   listWorktreeArchives: gitLibraries.listWorktreeArchives,
   deleteWorktreeArchive: gitLibraries.deleteWorktreeArchive,
@@ -850,6 +852,66 @@ describe('git worktree archive routes', () => {
     const response = createMockResponse();
     await getRoute('GET', '/api/git/worktrees/archives')({ query: { directory: '/repo' } }, response);
     expect(response.body).toEqual({ archives: [{ id: 'a1' }] });
+  });
+});
+
+describe('git worktree teardown routes', () => {
+  const worktreeBootstrapStore = { remove: vi.fn() };
+  const teardownFailure = () => Object.assign(new Error('Worktree teardown command failed, so the worktree was kept: no compose file'), { code: 'WORKTREE_TEARDOWN_FAILED' });
+
+  beforeEach(() => {
+    gitLibraries.removeWorktree.mockReset();
+    gitLibraries.archiveWorktree.mockReset();
+    gitLibraries.teardownWorktree.mockReset();
+  });
+
+  it('tells removal, archive and teardown alone which checkouts are a contributor fork, and fails closed', async () => {
+    const read = vi.fn(async (directory) => {
+      if (directory === '/repo/broken') throw new Error('provenance store unreadable');
+      return { provenance: directory === '/repo/fork' ? { kind: 'contributor-fork' } : null };
+    });
+    gitLibraries.removeWorktree.mockResolvedValue(true);
+    gitLibraries.archiveWorktree.mockResolvedValue({ id: 'a1' });
+    gitLibraries.teardownWorktree.mockResolvedValue(true);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { worktreeBootstrapStore, contributorProvenance: { read } });
+
+    await getRoute('DELETE', '/api/git/worktrees')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
+    await getRoute('POST', '/api/git/worktrees/archives')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', id: 'a1', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
+    await getRoute('POST', '/api/git/worktrees/teardown')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
+
+    const hooks = [
+      gitLibraries.removeWorktree.mock.calls[0][1],
+      gitLibraries.archiveWorktree.mock.calls[0][1],
+      gitLibraries.teardownWorktree.mock.calls[0][1],
+    ];
+    for (const input of hooks) {
+      expect(input.teardownCommand).toBe('./scripts/stop.sh');
+      await expect(input.isContributorCheckout('/repo/fork')).resolves.toBe(true);
+      await expect(input.isContributorCheckout('/repo/own')).resolves.toBe(false);
+      await expect(input.isContributorCheckout('/repo/broken')).rejects.toThrow('provenance store unreadable');
+    }
+  });
+
+  it('answers a failed teardown with its code, on a delete and on a teardown alone', async () => {
+    gitLibraries.removeWorktree.mockRejectedValue(teardownFailure());
+    gitLibraries.teardownWorktree.mockRejectedValue(teardownFailure());
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { worktreeBootstrapStore });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const removal = createMockResponse();
+      await getRoute('DELETE', '/api/git/worktrees')({ query: { directory: '/repo' }, body: { directory: '/repo/wt', teardownCommand: 'docker compose down' } }, removal);
+      const teardown = createMockResponse();
+      await getRoute('POST', '/api/git/worktrees/teardown')({ query: { directory: '/repo' }, body: { directory: '/repo/wt', teardownCommand: 'docker compose down' } }, teardown);
+      for (const response of [removal, teardown]) {
+        expect(response.statusCode).toBe(500);
+        expect(response.body).toEqual({ error: 'Worktree teardown command failed, so the worktree was kept: no compose file', code: 'WORKTREE_TEARDOWN_FAILED' });
+      }
+      expect(gitLibraries.teardownWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({ directory: '/repo/wt', teardownCommand: 'docker compose down' }));
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 
