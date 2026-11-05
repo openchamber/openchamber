@@ -584,6 +584,7 @@ const blockSchema = z.object({
     .refine((args) => new Set(args).size === args.length, { message: 'argument names must be unique' }),
   entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')),
   height: z.number().int().min(24).max(GUEST_BLOCK_HEIGHT_MAX).optional(),
+  answers: z.boolean().optional(),
 }).strict();
 
 const blocksSchema = z.array(blockSchema).min(1).max(GUEST_BLOCKS_MAX)

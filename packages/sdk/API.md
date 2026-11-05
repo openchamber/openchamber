@@ -304,7 +304,7 @@ Copy leaves the toast open, reports success on the button, and shows a retryable
 
 ### Blocks in the chat
 
-`contributes.blocks` adds components agents write in a UI block, drawn by your page with the grants of your panel. `host.onBlock` gives the call. `host.setHeight` sizes the frame, up to `GUEST_BLOCK_HEIGHT_MAX`. `host.answerBlock(text)`, called from a click, hands the agent `text` as a block's button does and starts its next turn; one answer per block, up to `GUEST_BLOCK_ANSWER_MAX` characters, and `answered` shows it after a reload. Without a click, or on a block that cannot take an answer, it rejects with `HOST_REJECTED`.
+`contributes.blocks` adds components agents write in a UI block, drawn by your page with the grants of your panel. `host.onBlock` gives the call. `host.setHeight` sizes the frame, up to `GUEST_BLOCK_HEIGHT_MAX`. Set `answers: true` on a component that answers: agents are told to ask with it, a waiting page adds no Send button, and the block offers a note the agent reads with the answer; a note alone also answers, with `answered` holding its text. `host.answerBlock(text)`, called from a click, hands the agent `text` as a block's button does and starts its next turn; one answer per block, up to `GUEST_BLOCK_ANSWER_MAX` characters, and `answered` shows it after a reload. Without a click, or on a block that cannot take an answer, it rejects with `HOST_REJECTED`.
 
 ### Background actions
 

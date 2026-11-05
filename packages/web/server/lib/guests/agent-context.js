@@ -28,9 +28,13 @@ const blockSignature = (block) => `${block.name}(${block.args.map((arg) => `${ar
 export const describeExtensionBlocks = (guests) => {
   const lines = guests.flatMap((guest) => (guest.blocks ?? []).map((block) => `${blockSignature(block)}: ${block.description}`));
   if (lines.length === 0) return '';
+  const asking = guests.flatMap((guest) => (guest.blocks ?? []).filter((block) => block.answers).map((block) => block.name));
   return [
     'More UI block components, from the user\'s extensions. An Item like any other, each draws itself:',
     ...lines,
+    ...(asking.length > 0
+      ? [`To ask the user, when its description fits, use ${asking.join(' or ')} in a reply block: it takes the answer itself, in place of Choice, the question tool or a page with awaitAnswer.`]
+      : []),
   ].join('\n');
 };
 

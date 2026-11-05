@@ -224,6 +224,7 @@ export type ExtensionBlock = {
   args: string[];
   entry: string;
   height?: number;
+  answers?: boolean;
 };
 
 export type ExtensionBlocks = ReadonlyMap<string, ExtensionBlock>;
@@ -501,6 +502,15 @@ export function blockFields(root: BlockValue): BlockField[] {
     if (field && !fields.some((known) => known.name === field.name)) fields.push(field);
   });
   return fields;
+}
+
+/** The first extension component in the block whose frame takes the answer itself. */
+export function answeringFrame(root: BlockValue, extensions: ExtensionBlocks): string | null {
+  let found: string | null = null;
+  eachNode(root, (node) => {
+    if (!found && extensions.get(node.typeName)?.answers) found = node.typeName;
+  });
+  return found;
 }
 
 /** Where a node's children sit: the child indexes that lead to it from the root. */

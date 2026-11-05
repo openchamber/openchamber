@@ -11,6 +11,12 @@ const readGuests = (json: string) => {
 };
 
 describe('parseGuestCatalogJson', () => {
+  test('a block keeps whether its frame answers', () => {
+    const block = { name: 'Card', description: 'Asks', args: ['title'], entry: 'card.html', answers: true };
+    const guest = { id: 'hello', name: 'Hello', icon: 'window', capabilities: { requested: [], granted: [] }, source: 'path', blocks: [block] };
+    expect(readGuests(JSON.stringify({ guests: [guest] }))?.[0]?.blocks?.[0]?.answers).toBe(true);
+  });
+
   test('one row it cannot read keeps the others and is listed by name', () => {
     const valid = {
       id: 'hello',

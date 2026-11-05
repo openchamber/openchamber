@@ -898,6 +898,8 @@ export type GuestBlockContribution = {
   entry: string;
   /** Height in px until the frame says otherwise. */
   height?: number;
+  /** Its frame answers the agent with `answerBlock`, so agents ask with it and a page adds no Send button. */
+  answers?: boolean;
 };
 
 export type OpenChamberContributes = {

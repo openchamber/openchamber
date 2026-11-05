@@ -18,7 +18,7 @@ Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: tr
 type Answer = (name: string, text: string) => Promise<void>;
 let frameAnswer: Answer | null = null;
 let frameAnswered: string | null = null;
-const chart = { guestId: 'desk', guestName: 'Desk', name: 'DeskChart', description: 'A chart', args: ['title'], entry: 'chart.html', height: 100 };
+const chart = { guestId: 'desk', guestName: 'Desk', name: 'DeskChart', description: 'A chart', args: ['title'], entry: 'chart.html', height: 100, answers: false };
 mock.module('./useExtensionBlocks', () => ({ useExtensionBlocks: () => new Map([[chart.name, chart]]) }));
 // The real frame needs a browser; these tests are about what the block does with its answer.
 mock.module('./ExtensionBlockFrame', () => ({
@@ -56,6 +56,95 @@ const answer = (text: string) => {
   if (!frameAnswer) throw new Error('The frame did not mount');
   return frameAnswer('DeskChart', text);
 };
+
+describe('a page with an extension frame', () => {
+  const send = () => [...container.querySelectorAll('button')].some((button) => button.textContent === 'Send');
+
+  test('gets a Send button unless the frame answers', async () => {
+    await draw({ kind: 'page', answered: null, submit: async () => {} });
+    expect(send()).toBe(true);
+    chart.answers = true;
+    await draw({ kind: 'page', answered: null, submit: async () => {} });
+    expect(send()).toBe(false);
+    chart.answers = false;
+  });
+});
+
+describe('a note on a frame that answers', () => {
+  const writeNote = async (text: string) => {
+    const add = [...container.querySelectorAll('button')].find((button) => button.textContent?.toLowerCase().includes('note'));
+    if (!add) throw new Error('Expected the note button');
+    await act(async () => add.click());
+    const field = container.querySelector('textarea');
+    if (!field) throw new Error('Expected the note field');
+    // SAFETY: React keeps a textarea's props under this key, onChange among them.
+    // happy-dom's textarea does not reach React's change tracking, so the handler is called directly.
+    const handlers = Object.entries(field).find(([key]) => key.startsWith('__reactProps'))?.[1] as { onChange: (event: { target: { value: string } }) => void };
+    await act(async () => handlers.onChange({ target: { value: text } }));
+  };
+  const answering = async (run: () => Promise<void>) => {
+    chart.answers = true;
+    await run();
+    chart.answers = false;
+  };
+
+  test('goes out with the frame\'s answer in a reply', () => answering(async () => {
+    const sent: Array<{ picks: unknown[] }> = [];
+    await draw({ kind: 'reply', answered: null, submit: async (data) => { sent.push(data); } });
+    await writeNote('only this week');
+    await act(async () => { await answer('Yes'); });
+    expect(sent[0].picks).toEqual([{ button: 'Yes', value: 'DeskChart', note: 'only this week' }]);
+  }));
+
+  test('is an answer on its own in a reply, and the frame hears it', () => answering(async () => {
+    const sent: Array<{ picks: unknown[] }> = [];
+    await draw({ kind: 'reply', answered: null, submit: async (data) => { sent.push(data); } });
+    await writeNote('none of these');
+    const send = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Send');
+    if (!send) throw new Error('Expected a Send button');
+    await act(async () => send.click());
+    expect(sent[0].picks).toEqual([{ value: 'DeskChart', note: 'none of these' }]);
+    expect(frameAnswered).toBe('none of these');
+  }));
+
+  test('goes out with a form that shares the block, and one Send stays', () => answering(async () => {
+    const sent: Array<{ picks: unknown[] }> = [];
+    const source = 'root = Stack([chart, field])\nchart = DeskChart("Sales")\nfield = Input("name", "Name")';
+    await draw({ kind: 'reply', answered: null, submit: async (data) => { sent.push(data); } }, source);
+    await writeNote('with a note');
+    const sends = [...container.querySelectorAll('button')].filter((button) => button.textContent === 'Send');
+    expect(sends).toHaveLength(1);
+    await act(async () => sends[0]?.click());
+    expect(sent[0].picks).toEqual([{ value: 'DeskChart', note: 'with a note' }]);
+  }));
+
+  test('goes out when a button finishes the block', () => answering(async () => {
+    const sent: Array<{ picks: unknown[] }> = [];
+    const source = 'root = Stack([chart, go])\nchart = DeskChart("Sales")\ngo = Button("Go")';
+    await draw({ kind: 'reply', answered: null, submit: async (data) => { sent.push(data); } }, source);
+    await writeNote('with a note');
+    const go = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Go');
+    if (!go) throw new Error('Expected the Go button');
+    await act(async () => go.click());
+    expect(sent[0].picks).toEqual([{ value: 'DeskChart', note: 'with a note' }, { button: 'Go' }]);
+  }));
+
+  test('is an answer on its own on a page', () => answering(async () => {
+    const sent: Array<{ data: { note?: string } }> = [];
+    await draw({ kind: 'page', answered: null, submit: async (data) => { sent.push(data); } });
+    await writeNote('none of these');
+    const send = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Send');
+    if (!send) throw new Error('Expected a Send button');
+    await act(async () => send.click());
+    expect(sent[0].data.note).toBe('none of these');
+  }));
+
+  test('a reloaded reply shows the note it sent', () => answering(async () => {
+    await draw({ kind: 'reply', answered: { picks: [{ value: 'DeskChart', note: 'kept' }], values: {}, skipped: [] }, submit: async () => {} });
+    expect(container.querySelector('textarea')?.value).toBe('kept');
+    expect(frameAnswered).toBe('kept');
+  }));
+});
 
 describe('an answer from an extension frame', () => {
   test('two answers at once send one', async () => {

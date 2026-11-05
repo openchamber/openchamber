@@ -150,6 +150,7 @@ const guestBlockSchema = z.object({
   args: z.array(z.string().regex(GUEST_BLOCK_ARG_NAME)).max(GUEST_BLOCK_ARGS_MAX),
   entry: z.string().trim().min(1),
   height: z.number().int().positive().optional(),
+  answers: z.boolean().optional(),
 });
 
 const guestToolSchema = z.object({

@@ -31,7 +31,8 @@
           "description": "A small bar chart of comma-separated numbers",
           "args": ["title", "values"],
           "entry": "blocks/chart.html",
-          "height": 140
+          "height": 140,
+          "answers": true
         }
       ],
       "actions": [

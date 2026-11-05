@@ -26,6 +26,12 @@ describe('what extensions add to agents', () => {
     expect(describeExtensionBlocks([row({ blocks: [] })])).toBe('');
   });
 
+  test('a component that answers is named for asking, others are not', () => {
+    expect(describeExtensionBlocks([row()])).not.toContain('To ask the user');
+    const [block] = row().blocks;
+    expect(describeExtensionBlocks([row({ blocks: [{ ...block, answers: true }] })])).toContain('To ask the user, when its description fits, use Chart in a reply block');
+  });
+
   test('a paused extension adds nothing', async () => {
     const guests = [row({ enabled: false })];
     expect(await context(guests, [{ guestId: 'desk', text: 'x' }]).instructionText('/repo')).toBe('');
