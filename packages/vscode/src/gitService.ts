@@ -2312,6 +2312,7 @@ export async function waitForWorktreeRemoval(directory: string): Promise<void> {
 const WORKTREE_BUSY_RETRY_DELAYS_MS = [250, 500, 1000, 2000];
 const WORKTREE_BUSY_MESSAGE = 'The worktree folder is still in use by another process (a running session, terminal or editor). Stop it and try again.';
 const WORKTREE_TEARDOWN_TIMEOUT_MS = 5 * 60 * 1000;
+const WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS = 2000;
 
 // Only Windows locks a folder that is open elsewhere; on other platforms the
 // same words mean a real permission problem and are reported as they are.
@@ -2435,7 +2436,9 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   if (!bootstrapFailed && await checkPathExists(matchedEntry.worktree)) {
     const teardown = await runWorktreeStartCommand(matchedEntry.worktree, input?.teardownCommand ?? '', { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
     if (!teardown.success) {
-      throw new Error(`Worktree teardown command failed, so the worktree was kept: ${teardown.message || 'the command exited with an error'}`);
+      const output = teardown.message || 'the command exited with an error';
+      const shown = output.length > WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS ? `...${output.slice(-WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS)}` : output;
+      throw new Error(`Worktree teardown command failed, so the worktree was kept: ${shown}`);
     }
   }
 

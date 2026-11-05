@@ -167,6 +167,7 @@ mock.module('@/lib/worktreeSessionCreator', () => ({
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   waitForWorktreeGitReady: mock((directory: string) => waitForWorktreeGitReadyImplementation(directory)),
   clearWorktreeBootstrapState: mock(),
+  getWorktreeBootstrapState: () => null,
   markWorktreeBootstrapPending: mock(),
   setWorktreeBootstrapState: mock(),
   startWorktreeBootstrapWatcher: mock(),

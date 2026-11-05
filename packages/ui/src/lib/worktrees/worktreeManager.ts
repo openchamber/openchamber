@@ -9,6 +9,7 @@ import { git } from '@/lib/gitApi';
 import { runBoundRemoteBranchDelete } from '@/lib/boundGitNetworkOperation';
 import {
   clearWorktreeBootstrapState,
+  getWorktreeBootstrapState,
   markWorktreeBootstrapPending,
   setWorktreeBootstrapState,
   startWorktreeBootstrapWatcher,
@@ -819,11 +820,18 @@ const forgetRemovedWorktree = (project: ProjectRef, worktree: WorktreeMetadata):
   clearWorktreeRemoval(worktree.path);
 };
 
-/** What the server runs in the worktree before it goes; may ask for trust first. */
-const resolveTeardownCommand = async (project: ProjectRef, ask = true): Promise<string | undefined> => joinWorktreeCommands({
-  projectDirectory: normalizePath(project.path),
-  commands: await resolveWorktreeTeardownCommands(project, { ask }),
-});
+/**
+ * What the server runs in the worktree before it goes; may ask for trust
+ * first. A checkout whose bootstrap failed never ran its setup and the server
+ * skips its teardown, so nothing is asked about it.
+ */
+const resolveTeardownCommand = async (project: ProjectRef, worktree: WorktreeMetadata, ask = true): Promise<string | undefined> => {
+  if (getWorktreeBootstrapState(worktree.path)?.status === 'failed') return undefined;
+  return joinWorktreeCommands({
+    projectDirectory: normalizePath(project.path),
+    commands: await resolveWorktreeTeardownCommands(project, { ask }),
+  });
+};
 
 /**
  * Archives the worktree: the server records its state with `sessionIds` (the
@@ -841,7 +849,7 @@ export async function archiveProjectWorktree(
   markWorktreeRemoving(worktree.path);
   let archive: GitWorktreeArchive;
   try {
-    const teardownCommand = await resolveTeardownCommand(project, askForTrust);
+    const teardownCommand = await resolveTeardownCommand(project, worktree, askForTrust);
     archive = await git.worktree.archive(normalizePath(project.path), { directory: worktree.path, ...input, teardownCommand });
   } catch (error) {
     clearWorktreeRemoval(worktree.path);
@@ -872,7 +880,7 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   markWorktreeRemoving(worktree.path);
   try {
     // Before the remote branch goes, so an unreadable setup stops the whole removal.
-    const teardownCommand = await resolveTeardownCommand(project);
+    const teardownCommand = await resolveTeardownCommand(project, worktree);
     if (deleteRemote && branchName && remoteName && options?.network) {
       await runBoundRemoteBranchDelete({
         branch: branchName,

@@ -48,9 +48,14 @@ mock.module('@/lib/openchamberConfig', () => ({
 }));
 
 let teardownCommands: string[] = [];
+let teardownResolutions = 0;
 mock.module('@/lib/sharedTrustConfirmation', () => ({
-  resolveWorktreeTeardownCommands: async () => teardownCommands,
+  resolveWorktreeTeardownCommands: async () => {
+    teardownResolutions += 1;
+    return teardownCommands;
+  },
 }));
+const failedBootstraps = new Set<string>();
 
 mock.module('@/components/ui', () => ({
   toast: {
@@ -66,6 +71,7 @@ mock.module('@/lib/i18n', () => ({
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   clearWorktreeBootstrapState: mock(),
+  getWorktreeBootstrapState: (directory: string) => (failedBootstraps.has(directory) ? { status: 'failed', phase: 'directory-created', error: null, updatedAt: 1 } : null),
   markWorktreeBootstrapPending: mock(),
   setWorktreeBootstrapState: mock(),
   startWorktreeBootstrapWatcher: (directory: string, options?: { onReady?: () => void }) => {
@@ -626,6 +632,21 @@ describe('worktreeManager list invalidation', () => {
         expect(removeCalls.map((call) => call.payload.teardownCommand)).toEqual(['docker compose down && rm -f .pid']);
       } finally {
         teardownCommands = [];
+      }
+    });
+
+    test('a checkout whose bootstrap failed is removed without resolving teardown, as the server skips it', async () => {
+      teardownCommands = ['docker compose down'];
+      teardownResolutions = 0;
+      removeCalls.length = 0;
+      failedBootstraps.add(target.path);
+      try {
+        await removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target);
+        expect(teardownResolutions).toBe(0);
+        expect(removeCalls.map((call) => call.payload.teardownCommand)).toEqual([undefined]);
+      } finally {
+        teardownCommands = [];
+        failedBootstraps.clear();
       }
     });
   });

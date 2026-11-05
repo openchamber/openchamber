@@ -126,12 +126,14 @@ removal fails as for any other failing command.
   archive before the snapshot, so the snapshot holds what the teardown left.
 - A failing command throws `Worktree teardown command failed, so the worktree
   was kept: <output>` and leaves the worktree, its instance and its branch as
-  they were. The route answers 500 with that text and the delete toast shows it.
+  they were; `<output>` keeps only the last 2000 characters. The route answers
+  500 with that text and the delete toast shows it.
 - A registered worktree whose folder is already gone skips the teardown, so a
   folder deleted outside the app stays removable. So does a worktree whose
   bootstrap failed: its setup commands never ran, and the teardown would run
-  against a checkout that may not have landed. An unregistered leftover never
-  runs it.
+  against a checkout that may not have landed. The client skips the trust
+  prompt for it too, when its own bootstrap state says failed. An unregistered
+  leftover never runs it.
 - Only removals the client starts carry it. Server-side cleanups (scheduled-task
   runs, a failed session move) run no teardown, as they run no setup commands.
   The client's merged-PR cleanup never opens the trust prompt: untrusted shared

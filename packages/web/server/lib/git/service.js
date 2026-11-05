@@ -6649,6 +6649,8 @@ const removeGitWorktreeWhenFree = async (primaryWorktree, worktreePath, targetCa
 // The removal request waits for the teardown, so a command that never ends
 // must not hold the worktree in "removing" forever.
 const WORKTREE_TEARDOWN_TIMEOUT_MS = 5 * 60 * 1000;
+// The failure is shown in a toast: its end, where the error usually is, is enough.
+const WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS = 2000;
 
 // Teardown runs before anything is touched, while the worktree and its
 // OpenCode instance are intact, so a failing command leaves both as they
@@ -6660,7 +6662,9 @@ const runWorktreeTeardown = async (worktreeDirectory, command) => {
   if (bootstrap?.status === WORKTREE_BOOTSTRAP_FAILED) return;
   const result = await runWorktreeStartCommand(worktreeDirectory, command, { timeoutMs: WORKTREE_TEARDOWN_TIMEOUT_MS });
   if (!result.success) {
-    throw new Error(`Worktree teardown command failed, so the worktree was kept: ${result.message || 'the command exited with an error'}`);
+    const output = result.message || 'the command exited with an error';
+    const shown = output.length > WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS ? `...${output.slice(-WORKTREE_TEARDOWN_OUTPUT_MAX_CHARS)}` : output;
+    throw new Error(`Worktree teardown command failed, so the worktree was kept: ${shown}`);
   }
 };
 

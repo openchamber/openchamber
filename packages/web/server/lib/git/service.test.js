@@ -4809,6 +4809,27 @@ describe('removeWorktree', () => {
     expect(fs.existsSync(worktree)).toBe(false);
   }, 10_000);
 
+  it('keeps only the end of a long teardown failure in the error', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'chatty');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'chatty', worktree]);
+    const chatty = path.join(createTempDir(), 'chatty.cjs');
+    fs.writeFileSync(chatty, "process.stderr.write('log line\\n'.repeat(5000) + 'daemon not running\\n'); process.exit(1);\n");
+
+    const error = await removeWorktree(repo, { directory: worktree, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(chatty)}` })
+      .then(() => null, (reason) => reason);
+    expect(error.message).toMatch(/^Worktree teardown command failed, so the worktree was kept: \.\.\./);
+    expect(error.message).toMatch(/daemon not running$/);
+    expect(error.message.length).toBeLessThan(2200);
+    expect(fs.existsSync(path.join(worktree, '.git'))).toBe(true);
+  });
+
   it('skips the teardown command when the worktree folder is already gone', async () => {
     if (!canRunGit()) return;
 
