@@ -89,6 +89,8 @@ Parse rules:
 - `service.entry` is a relative path inside the package. Ship compiled JS; the host never compiles TypeScript.
 - `service.runtime` phase 1 accepts only `"host"`.
 - `service.provides` is optional: roles the service stands in for on the host, `"browser"`, `"source-control"`, `"notifications"`, `"tracker"` and `"quota"` (below). A service that provides a role needs no `panel.entry` or `background.entry`; the host starts it itself. An extension is a Git host or a tracker, never both: the two would share the id `ext-<panel.id>`.
+- `service.keepRunning` is optional (`true`): the host starts the service with OpenChamber and brings it back when it stops (*Running with nobody asking*, below). The approval dialog says so.
+- `service.schedule` is optional, up to `SERVICE_SCHEDULE_MAX` (8) of `{ id, cron, timezone? }`: runs the host posts on a clock. The approval dialog lists them.
 - `service.surface` is optional (`true`): the service shows a live picture the host draws in the extension's rail panel and takes the user's input back (below). With `panel.entry` too, that page is docked to one edge of the picture (`panel.dock`: `top`, `bottom`, `left`, or `right`, default `top`; `panel.size` in CSS px across that edge, 24 to 480, default 40); without it, the picture is the whole panel.
 - `service.permissions.sockets` and `service.permissions.exec` are shown to the user in the approval dialog. They describe intent and do not confine the process: a service runs with the user's full access. Declaring `contributes.service` adds the `service` capability to the package's request list; the user approves the whole list once when the package is installed (Settings → Extensions), and the first `serviceRequest` is refused with `NO_SERVICE` until then.
 - The catalog adds `service.socketBindings`: `{ id, candidates, resolved, override }` for this host. The user can override a path in Extensions. Override empty clears it and the next spawn re-resolves.
@@ -142,7 +144,7 @@ Env the host sets:
 - `OPENCHAMBER_SERVICE_PORT` — port to bind on `127.0.0.1`
 - `OPENCHAMBER_SERVICE_TOKEN` — shared secret
 - `OPENCHAMBER_SERVICE_SOCKETS` — JSON map `{ [socketId]: absolutePath }` for every binding that resolved (override or first existing candidate)
-- `OPENCHAMBER_HOST_CALLBACK_URL` — only for a service that provides `source-control`, `notifications` or `tracker`: OpenChamber's callback listener for the requests those roles send out (see below)
+- `OPENCHAMBER_HOST_CALLBACK_URL` — OpenChamber's callback listener: what a service calls on its own (*Calling OpenChamber*, below) and the requests the `source-control`, `notifications` and `tracker` roles send out
 
 Inbound auth: every request, including ready, must send:
 
@@ -180,6 +182,44 @@ Ship `service/main.js` already built. Same packaging rule as `panel/main.js`.
 ## Example
 
 `examples/service-echo` is a checked-in service extension: a Node HTTP server on loopback that the panel calls through `serviceRequest` and whose status it shows. Bundle the service with `--node`, install the folder from Settings → Extensions, allow the local service in the approval dialog, then open the rail panel. Streaming from a service to the panel (shell into a container, log tails) is deferred; it needs a streaming call on the SDK first.
+
+## Calling OpenChamber
+
+`createServiceHost({ env: process.env })` is the service's way back. Every call is a `POST` to `SERVICE_HOST_PATH` on the callback listener with `OPENCHAMBER_SERVICE_TOKEN` as its bearer, which names the service. The catalog decides each call at that moment, so a paused extension or a withdrawn approval is refused whatever the process still holds. A refusal throws `ServiceHostError` with a `code`.
+
+| Call | Needs | What it does |
+|---|---|---|
+| `sessions.start({ prompt, projectId?, directory?, title?, model?, variant?, agent? })` | `contributes.sessionControl` | Creates a session and sends it the prompt. Answers `{ sessionId, directory }` |
+| `sessions.send(sessionId, prompt)` | `sessionControl` | Sends to a session |
+| `sessions.retry(sessionId)` | `sessionControl` | Sends the session's last message again, for a turn that failed |
+| `sessions.status(sessionId)` | `sessionControl` | `idle`, `busy`, or `waiting` when only the user can move it on |
+| `sessions.lastReply(sessionId)` | `sessionControl: { content: true }` | The agent's last answer, or `null` |
+| `setInstructions(directory, text)` | `contributes.instructions` | Text the agent reads in every session under `directory`, or everywhere with `null`, up to `SERVICE_INSTRUCTIONS_MAX` (4096). Empty text removes it. It stays on the server, so no message waits on your process |
+| `emit(topic, data?)` | nothing | Sends `data` to the extension's open frames, which hear it through `host.onServiceEvent`. Up to `SERVICE_EVENT_RATE_MAX` (30) a second and `SERVICE_EVENT_DATA_MAX` (64 000) characters of JSON. Nothing replays: a frame that opens later reads the current state from the service |
+| `readSettings()` | nothing | The fields of `contributes.integration.settings`, the `secret` ones included |
+| `needsConfiguration(message)` | nothing | Shows `message` on the extension's card until cleared with `null` |
+
+`sessionControl` shows in the approval dialog as its own line, and `content: true` adds `transcript`. A failed session call answers what the session service told the caller, never its internals.
+
+## Running with nobody asking
+
+A service starts on the first request, and a role's service stops after ten idle minutes. Two manifest keys change that, and either one frees the service from needing a panel or background entry.
+
+`service.keepRunning: true` starts the service when OpenChamber starts or the extension is approved, and holds it through every idle stop. A check every 15 s brings a stopped one back, and a process that keeps dying waits longer each time, up to five minutes. A service that needs outside events holds its own connection or polls; arbitrary inbound routes do not exist.
+
+`service.schedule` posts `POST /schedule` (`SERVICE_SCHEDULE_PATH`) when an entry comes due, with five-field cron and the host's timezone unless `timezone` names one:
+
+```json
+{ "v": 1, "requestId": "…", "id": "nightly", "at": 1730000000000 }
+```
+
+Parse it with `readServiceScheduleRequest` (`null` → HTTP 400) and answer any 2xx within `SERVICE_SCHEDULE_TIMEOUT_MS` (10 s). A run is at most once: one missed while OpenChamber was down, or that the service failed to take, is gone. Without `keepRunning`, the service stops `SERVICE_SCHEDULE_IDLE_MS` (ten minutes) after its last run.
+
+## Rows in the `@` menu (`contributes.mentions`)
+
+`contributes.mentions: { label }` adds a section to the composer's `@` menu. OpenChamber posts `{ query, directory }` to `MENTIONS_SEARCH_PATH` as the user types and draws the rows you answer, `{ items: [{ id, title, subtitle?, url? }] }`, up to `MENTIONS_ITEMS_MAX` (20). A search has `MENTIONS_SEARCH_TIMEOUT_MS` (2 s); a slower or failing service adds nothing and never holds the files back.
+
+When the user picks a row, OpenChamber posts `{ id }` to `MENTIONS_RESOLVE_PATH`, and `{ text }` (up to `MENTION_TEXT_MAX`, 16 000) becomes a chip whose text the agent reads with the message. A row that cannot be read leaves no chip and says so, since the message would otherwise go out without what the user chose. What the user types goes to your service, which the approval dialog says.
 
 ## Browser provider (`provides: ["browser"]`)
 
@@ -524,7 +564,7 @@ A service can be told what happens in the user's sessions without a window being
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-`events` lists 1 to 4 distinct types:
+`events` lists 1 to 8 distinct types:
 
 | Type | When |
 |---|---|
@@ -532,6 +572,10 @@ A service can be told what happens in the user's sessions without a window being
 | `turn-failed` | The turn ended in an error |
 | `permission-asked` | The agent asked a permission the user has to answer: sent 500 ms after the ask, only when it is still open and not answered by the session's own policy |
 | `question-asked` | The agent asked the user a question, through a form or a page it shows and waits on. An MCP elicitation, which belongs to no session, is not sent |
+| `turn-started` | The session began a turn: once per turn, however often its status repeats |
+| `session-created` | A session was created, a subagent's included (`session.parentId` is set) |
+| `session-archived` | The session was archived |
+| `session-deleted` | The session was deleted |
 
 `sessionEvents` needs `contributes.service` (`invalid-session-events` otherwise) and, like a role, lets the service go without a panel or background entry. Hosts older than this feature drop the key at parse and send nothing, so declare an `engines.openchamber` floor.
 
@@ -557,7 +601,7 @@ OpenChamber posts `POST /session-events` (`SESSION_EVENTS_PATH`) with the servic
 ```
 
 - `event.id` is OpenCode's event id (or one OpenChamber made for an event it synthesized), `at` epoch milliseconds, `session.parentId` set for a subagent's session, `project.directory` the session's directory or `null` when OpenChamber does not know it. `linked` is what the user attached to the session: ids, kinds, urls, the tracker's `provider` and `identifier`, a Git host's `number`, never a title. `permission` comes with `permission-asked` only.
-- `content` comes only with the `transcript` grant, typed by `type`: `turn-finished` carries `sessionTitle`, `reply` (cut at `SESSION_EVENT_REPLY_MAX`, 64 000 characters, with `replyTruncated`); `turn-failed` carries `error { type, message }` and no reply; `permission-asked` carries `action`, `resources`, `message`; `question-asked` carries `ask`, a form (`id`, `title`, `fields[{ title, description }]`) or a page (`id`, `title`).
+- `content` comes only with the `transcript` grant, typed by `type`: the four session types carry `sessionTitle`; `turn-finished` carries `sessionTitle`, `reply` (cut at `SESSION_EVENT_REPLY_MAX`, 64 000 characters, with `replyTruncated`); `turn-failed` carries `error { type, message }` and no reply; `permission-asked` carries `action`, `resources`, `message`; `question-asked` carries `ask`, a form (`id`, `title`, `fields[{ title, description }]`) or a page (`id`, `title`).
 - Parse the body with `readSessionEventRequest` (zod-free; `null` is a body that is not a session event of this wire version, answer HTTP 400) and answer HTTP 200 `{ "ok": true }` once the event is taken, or `{ "ok": false, "error": "…" }` (`GuestSessionEventResult`, `error` up to `SESSION_EVENT_ERROR_MAX`). OpenChamber parses the answer with `sessionEventResultSchema`; anything else is a failed delivery.
 
 ### Delivery

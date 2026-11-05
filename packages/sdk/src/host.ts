@@ -2,7 +2,7 @@ import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-vers
 import { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_VALUE_BYTES, type GuestProjectsSnapshot, type GuestWorktreesSnapshot, type GuestSessionsSnapshot, type GuestWorkspaceQuery, type GuestWorkspaceSnapshot, type GuestStorageOptions, type GuestStorageRequest, type GuestStorageResult } from './workspace.ts';
 import type { GuestStatusControl, GuestStatusControlEvent } from './status-controls.ts';
 import { isGuestStatusControls } from './status-controls.ts';
-import type { JsonValue } from './contract.ts';
+import type { GuestBlockCall, JsonValue } from './contract.ts';
 import { isGuestPopoverRequest, type GuestPopoverClosedEvent, type GuestPopoverRequest } from './popover.ts';
 import {
   GUEST_FILE_EDITOR_CONTENT_MAX,
@@ -124,6 +124,17 @@ export type HostClient = {
    * the last value; `null` when there is none.
    */
   onItem: (listener: (item: GuestItem | null) => void) => () => void;
+  /**
+   * The call this `block` frame draws, once and at once when already known.
+   * The arguments are written by a model: treat them as untrusted.
+   */
+  onBlock: (listener: (block: GuestBlockCall) => void) => () => void;
+  /**
+   * What the extension's service sends with `createServiceHost(...).emit`.
+   * Nothing replays: a frame that opens later hears only what comes after,
+   * so read the current state from the service first.
+   */
+  onServiceEvent: (listener: (event: { topic: string; data: JsonValue }) => void) => () => void;
   /** Receive activation of a host-rendered Work Status control. */
   onStatusControl: (listener: (event: GuestStatusControlEvent) => void) => () => void;
   onPopoverClosed: (listener: (event: GuestPopoverClosedEvent) => void) => () => void;
@@ -309,6 +320,8 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   const connectionListeners = new Set<(connection: GuestConnection) => void>();
   const settingsListeners = new Set<(settings: GuestSettings) => void>();
   const itemListeners = new Set<(item: GuestItem | null) => void>();
+  const blockListeners = new Set<(block: GuestBlockCall) => void>();
+  const serviceEventListeners = new Set<(event: { topic: string; data: JsonValue }) => void>();
   const statusControlListeners = new Set<(event: GuestStatusControlEvent) => void>();
   const popoverClosedListeners = new Set<(event: GuestPopoverClosedEvent) => void>();
   const lateGenerateListeners = new Set<(result: LateGenerateResult) => void>();
@@ -394,7 +407,13 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       emit(connectionListeners, message.payload.connection);
       emit(settingsListeners, message.payload.settings);
       emit(itemListeners, message.payload.item);
+      if (message.payload.block) emit(blockListeners, message.payload.block);
       listenForLateGenerate();
+      return;
+    }
+
+    if (message.type === 'service-event') {
+      emit(serviceEventListeners, message.payload);
       return;
     }
 
@@ -853,6 +872,19 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         itemListeners.delete(listener);
       };
     },
+    onBlock: (listener) => {
+      blockListeners.add(listener);
+      if (lastReady?.block) listener(lastReady.block);
+      return () => {
+        blockListeners.delete(listener);
+      };
+    },
+    onServiceEvent: (listener) => {
+      serviceEventListeners.add(listener);
+      return () => {
+        serviceEventListeners.delete(listener);
+      };
+    },
     onStatusControl: (listener) => {
       statusControlListeners.add(listener);
       return () => {
@@ -1210,6 +1242,8 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       connectionListeners.clear();
       settingsListeners.clear();
       itemListeners.clear();
+      blockListeners.clear();
+      serviceEventListeners.clear();
       statusControlListeners.clear();
       popoverClosedListeners.clear();
       lateGenerateListeners.clear();

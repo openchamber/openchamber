@@ -17,9 +17,15 @@
  * step still driving it). `turn-failed`: the turn ended in an error.
  * `permission-asked`: the agent asked for a permission the user has to
  * answer. `question-asked`: the agent asked the user a question through a
- * form or a page. A turn the user stopped emits nothing.
+ * form or a page. A turn the user stopped emits nothing. `turn-started`: the
+ * session began a turn. `session-created`, `session-archived` and
+ * `session-deleted` name what they say; subagents' sessions are included, with
+ * `session.parentId` set.
  */
-export const GUEST_SESSION_EVENT_TYPES = ['turn-finished', 'turn-failed', 'permission-asked', 'question-asked'] as const;
+export const GUEST_SESSION_EVENT_TYPES = [
+  'turn-finished', 'turn-failed', 'permission-asked', 'question-asked',
+  'turn-started', 'session-created', 'session-archived', 'session-deleted',
+] as const;
 export type GuestSessionEventType = (typeof GUEST_SESSION_EVENT_TYPES)[number];
 
 /** Route on the service loopback OpenChamber posts every event to. */
@@ -43,7 +49,7 @@ export const SESSION_EVENT_ERROR_MAX = 2_000;
  * panel or background entry for this alone.
  */
 export type SessionEventsContribution = {
-  /** 1 to 4 distinct types. */
+  /** 1 to 8 distinct types. */
   events: GuestSessionEventType[];
   /** Asks for the `transcript` capability: the reply, the question, the permission's detail. */
   content?: true;
@@ -104,11 +110,17 @@ export type GuestQuestionAskedContent = {
     | { kind: 'page'; id: string; title: string };
 };
 
+export type GuestSessionTitleContent = {
+  type: 'turn-started' | 'session-created' | 'session-archived' | 'session-deleted';
+  sessionTitle: string | null;
+};
+
 export type GuestSessionEventContent =
   | GuestTurnFinishedContent
   | GuestTurnFailedContent
   | GuestPermissionAskedContent
-  | GuestQuestionAskedContent;
+  | GuestQuestionAskedContent
+  | GuestSessionTitleContent;
 
 /**
  * One event, as OpenChamber posts it. `event` is what every subscriber gets;

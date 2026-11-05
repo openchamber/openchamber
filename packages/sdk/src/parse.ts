@@ -6,11 +6,18 @@ import {
   DECLARED_GUEST_CAPABILITIES,
   GUEST_ACTIONS_MAX,
   GUEST_ACTION_LABEL_MAX,
+  GUEST_BLOCKS_MAX,
+  GUEST_BLOCK_ARGS_MAX,
+  GUEST_BLOCK_ARG_NAME,
+  GUEST_BLOCK_DESCRIPTION_MAX,
+  GUEST_BLOCK_HEIGHT_MAX,
+  GUEST_BLOCK_NAME,
   GUEST_COMMANDS_MAX,
   GUEST_COMMAND_DESCRIPTION_MAX,
   GUEST_COMMAND_NAME,
   GUEST_FILESYSTEM_PATTERNS_MAX,
   GUEST_FILESYSTEM_PATTERN_MAX,
+  GUEST_MENTIONS_LABEL_MAX,
   GUEST_ORIGINS_MAX,
   GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
@@ -60,6 +67,7 @@ import {
 } from './manifest.ts';
 import { isGuestRequestPath } from './contract.ts';
 import { GUEST_SESSION_EVENT_TYPES } from './session-events.ts';
+import { SERVICE_SCHEDULE_MAX, SERVICE_SCHEDULE_TIMEZONE_MAX, isServiceScheduleCron } from './service-host.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_MAX, GUEST_STATUS_SOURCE_INTERVAL_MIN } from './status-view.ts';
 import {
   GUEST_FILE_EDITORS_MAX,
@@ -137,6 +145,7 @@ const panelSchema = z.object({
 const integrationSettingSchema = z.object({
   id: z.string().trim().regex(PANEL_ID),
   label: z.string().trim().min(1),
+  secret: z.literal(true).optional(),
 });
 
 const integrationOauthSchema = z.object({
@@ -245,6 +254,14 @@ const serviceSchema = z.object({
     .refine((roles) => new Set(roles).size === roles.length, { message: 'provides entries must be unique' })
     .optional(),
   surface: z.literal(true).optional(),
+  keepRunning: z.literal(true).optional(),
+  schedule: z.array(z.object({
+    id: z.string().trim().regex(PANEL_ID).max(64),
+    cron: z.string().trim().refine(isServiceScheduleCron),
+    timezone: z.string().trim().min(1).max(SERVICE_SCHEDULE_TIMEZONE_MAX).optional(),
+  }).strict()).min(1).max(SERVICE_SCHEDULE_MAX)
+    .refine((entries) => uniqueBy(entries, (entry) => entry.id), { message: 'schedule ids must be unique' })
+    .optional(),
 });
 
 // SVG path data only, the same rule the UI applies to a provider's icon path:
@@ -514,7 +531,7 @@ const actionSchema = z.object({
   id: z.string().trim().regex(PANEL_ID).max(64),
   label: z.string().trim().min(1).max(GUEST_ACTION_LABEL_MAX),
   icon: z.string().trim().refine(isPanelIcon).optional(),
-  where: z.enum(['message', 'session']),
+  where: z.enum(['message', 'session', 'selection', 'file', 'diff']),
   mode: z.enum(['open', 'background']).optional(),
   roles: z.array(z.enum(['user', 'assistant'])).min(1).max(2).optional(),
   payload: z.array(z.enum(['messages'])).max(1).optional(),
@@ -560,6 +577,18 @@ const fileEditorSchema = z.object({
 const fileEditorsSchema = z.array(fileEditorSchema).min(1).max(GUEST_FILE_EDITORS_MAX)
   .refine((editors) => uniqueBy(editors, (editor) => editor.id), { message: 'file editor ids must be unique' });
 
+const blockSchema = z.object({
+  name: z.string().trim().regex(GUEST_BLOCK_NAME),
+  description: z.string().trim().min(1).max(GUEST_BLOCK_DESCRIPTION_MAX),
+  args: z.array(z.string().trim().regex(GUEST_BLOCK_ARG_NAME)).max(GUEST_BLOCK_ARGS_MAX)
+    .refine((args) => new Set(args).size === args.length, { message: 'argument names must be unique' }),
+  entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')),
+  height: z.number().int().min(24).max(GUEST_BLOCK_HEIGHT_MAX).optional(),
+}).strict();
+
+const blocksSchema = z.array(blockSchema).min(1).max(GUEST_BLOCKS_MAX)
+  .refine((blocks) => uniqueBy(blocks, (block) => block.name), { message: 'block names must be unique' });
+
 const contributesSchema = z.object({
   panel: panelSchema,
   background: z.object({
@@ -603,6 +632,11 @@ const contributesSchema = z.object({
   notifications: notificationsSchema.optional(),
   tracker: trackerSchema.optional(),
   quota: quotaSchema.optional(),
+  sessionControl: z.object({ content: z.literal(true).optional() }).strict().optional(),
+  instructions: z.literal(true).optional(),
+  skills: z.string().trim().refine(isSafeAssetPath).optional(),
+  mentions: z.object({ label: z.string().trim().min(1).max(GUEST_MENTIONS_LABEL_MAX) }).strict().optional(),
+  blocks: blocksSchema.optional(),
 });
 
 /**
@@ -624,11 +658,14 @@ const runtimeContributions = (contributes: z.output<typeof contributesSchema>): 
   if (contributes.attach !== undefined && contributes.attach !== false) declared.push('attach');
   if (contributes.capabilities && contributes.capabilities.length > 0) declared.push('capabilities');
   if (contributes.integration !== undefined) declared.push('integration');
-  // A service the host starts itself (it provides a role or a surface, or
-  // receives session events) needs no frame; one that only answers a panel's
-  // `serviceRequest` has no caller without one.
+  // A service the host starts itself (it provides a role or a surface, keeps
+  // running, runs on a schedule, receives session events or answers the
+  // composer) needs no frame; one that only answers a panel's `serviceRequest`
+  // has no caller without one.
   if (contributes.service !== undefined && !contributes.service.provides?.length && !contributes.service.surface
-    && !hasStatusSource(contributes) && contributes.sessionEvents === undefined) declared.push('service');
+    && !contributes.service.keepRunning && !contributes.service.schedule
+    && !hasStatusSource(contributes) && contributes.sessionEvents === undefined
+    && contributes.mentions === undefined) declared.push('service');
   if (contributes.filesystem !== undefined) declared.push('filesystem');
   if (contributes.origins !== undefined) declared.push('origins');
   if (contributes.actions !== undefined) declared.push('actions');
@@ -749,6 +786,15 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
+    for (const key of ['sessionControl', 'instructions', 'mentions'] as const) {
+      if (contributes[key] !== undefined && !contributes.service) {
+        ctx.addIssue({
+          code: 'custom', path: [key],
+          message: `contributes.${key} is served by the extension's service; declare contributes.service.`,
+        });
+        return;
+      }
+    }
     if (hasGuestPage(contributes)) return;
     if (contributes.background) {
       const needsPanel = [];
@@ -761,10 +807,10 @@ export const openChamberManifestSchema = z.object({
       });
       return;
     }
-    if (hasStatusFrame(contributes) || contributes.fileEditors) {
-      // A status section or file editor frame runs code and may use what the
-      // package is granted, but it only hosts itself: things the host opens or
-      // invokes elsewhere need a panel or background entry.
+    if (hasStatusFrame(contributes) || contributes.fileEditors || contributes.blocks) {
+      // A status section, file editor or block frame runs code and may use what
+      // the package is granted, but it only hosts itself: things the host opens
+      // or invokes elsewhere need a panel or background entry.
       const needsFrame = [];
       if (contributes.page !== undefined) needsFrame.push('page');
       if (contributes.attach !== undefined && contributes.attach !== false) needsFrame.push('attach');
@@ -772,7 +818,7 @@ export const openChamberManifestSchema = z.object({
       if (contributes.commands !== undefined) needsFrame.push('commands');
       if (needsFrame.length > 0) ctx.addIssue({
         code: 'custom', path: ['panel'],
-        message: `${needsFrame.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; a status section or file editor only hosts itself.`,
+        message: `${needsFrame.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; a status section, file editor or block only hosts itself.`,
       });
       return;
     }
@@ -896,7 +942,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   if (path.startsWith('contributes.actions')) {
     return fail(
       'invalid-actions',
-      'contributes.actions lists up to 8 entries with a unique kebab-case id, a label of 1 to 40 characters, where "message" or "session", optional roles (message only), and optional payload ["messages"] (session only).',
+      'contributes.actions lists up to 8 entries with a unique kebab-case id, a label of 1 to 40 characters, where "message", "session", "selection", "file" or "diff", optional roles (message only), and optional payload ["messages"] (session only).',
     );
   }
   if (path.startsWith('contributes.commands')) {
@@ -921,6 +967,24 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail('invalid-session-events', issue.code === 'custom' && path === 'contributes.sessionEvents'
       ? issue.message
       : `contributes.sessionEvents is { events: [1 to ${GUEST_SESSION_EVENT_TYPES.length} distinct of ${GUEST_SESSION_EVENT_TYPES.map((type) => `"${type}"`).join(', ')}], content?: true }.`);
+  }
+  if (path === 'contributes.sessionControl' || path.startsWith('contributes.sessionControl.')) {
+    return fail('invalid-session-control', issue.code === 'custom' ? issue.message : 'contributes.sessionControl is { content?: true }.');
+  }
+  if (path === 'contributes.instructions') {
+    return fail('invalid-instructions', issue.code === 'custom' ? issue.message : 'contributes.instructions is true.');
+  }
+  if (path === 'contributes.skills') {
+    return fail('invalid-skills', 'contributes.skills is a folder inside the package.');
+  }
+  if (path === 'contributes.mentions' || path.startsWith('contributes.mentions.')) {
+    return fail('invalid-mentions', issue.code === 'custom' ? issue.message : `contributes.mentions is { label: 1 to ${GUEST_MENTIONS_LABEL_MAX} characters }.`);
+  }
+  if (path === 'contributes.blocks' || path.startsWith('contributes.blocks')) {
+    return fail(
+      'invalid-blocks',
+      `contributes.blocks lists 1 to ${GUEST_BLOCKS_MAX} components, each with a unique PascalCase name, a description of 1 to ${GUEST_BLOCK_DESCRIPTION_MAX} characters, up to ${GUEST_BLOCK_ARGS_MAX} unique camelCase args, an entry ending in .html inside the package, and an optional height.`,
+    );
   }
   if (path.startsWith('contributes.integration')) {
     return fail(
@@ -956,7 +1020,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   if (path.startsWith('contributes.service')) {
     return fail('invalid-service', issue.code === 'custom'
       ? issue.message
-      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control", "notifications", "tracker", "quota"), and optional surface (true).');
+      : 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser", "source-control", "notifications", "tracker", "quota"), optional surface (true), optional keepRunning (true), and optional schedule (up to 8 of { id, cron, timezone? }).');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };
