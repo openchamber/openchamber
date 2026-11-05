@@ -1057,27 +1057,33 @@ scope reads the persisted runtime bucket only.
 An empty `/btw` opens an unsent draft. `/btw <question>` opens BTW and sends
 that question immediately after its own draft and model selection are active.
 **By the way…** opens an unsent draft with Quote-formatted selection text.
-The first send creates the fork; Enter follows the user's preference. Pending text and references then
-move to the fork's draft identity. Normal and BTW drafts remain independent,
-including in memory when persistence is disabled.
+The first send creates the fork; Enter follows the user's preference. Pending
+text, references and selections then move to the fork's draft identity and
+session, and the unsent panel's own key is cleared, so the next `/btw` in that
+parent opens on Plan and the main composer's model again. Normal and BTW
+drafts remain independent, including in memory when persistence is disabled.
 
 Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
 caret at the end. BTW copies the main model/effort once, including explicit
-Default, and uses `plan` or the first selectable agent. Its controlled model
-path only writes BTW selections. The cycle-favorite-model shortcuts step the
+Default, and uses `plan` or the first selectable agent. The agent control is
+in the composer from the first question on, so a side question can run on
+another agent without collapsing the panel; the pick is saved for the fork's
+session, and the main chat keeps its own agent. Its controlled model path
+only writes BTW selections. The cycle-favorite-model shortcuts step the
 BTW model from the one its chip shows and save it as the BTW model picker
 does; the app-wide handlers decline while BTW is open, so the parent's model
 never moves, and an open overlay stops both. As with permission keys, a key
 pressed in a chat pinned in the side panel moves only that chat's BTW model,
-and a key pressed anywhere else only the main chat's. The other model, effort and agent
-shortcuts stay off in BTW. Files attach as in the normal composer
+and a key pressed anywhere else only the main chat's. The other model, effort
+and agent shortcuts stay off in BTW. Files attach as in the normal composer
 (picker, paste, drop) and live in the BTW draft identity's attachment slot,
 so they never mix with the main draft's files; the attach control offers
 only local files. Goals, expansion, shell, linked context (issues, PRs,
-guests), agent selection and file/agent mention autocomplete are
-unavailable. Auto-accept is applied before the first send.
-On mobile, model and effort controls sit in the input's upper-left row; the
-footer only contains auto-accept and send/stop controls.
+guests) and file/agent mention autocomplete are unavailable. Auto-accept is
+applied before the first send.
+On mobile, the model, effort and agent controls sit in the input's upper-left
+row and open the same bottom sheets as the main composer's; the footer only
+contains auto-accept and send/stop controls.
 
 Escape closes menus first. Otherwise it returns to normal: an unsent BTW is
 discarded with its text, references, selections and panel; a creating or real
@@ -1090,6 +1096,17 @@ The unsent panel shows "Ask your question" until fork creation starts.
 Existing panels hide titles. Promotion retains the existing internal title, without
 transcript fetching or Small Model generation.
 
+### Why a controlled agent pick carries the effort to the new agent
+
+An effort is stored per session, agent and model, so an agent the fork has not
+run yet has none for the model it is on. Left to inherit, as the main
+composer's agent switch does, the level `/btw` copied from the main chat would
+vanish the first time the user changes the agent, which is the move the agent
+control exists for. `handleAgentChange` therefore writes the current level for
+the newly picked agent when that agent has no level of its own for this model,
+and an unchosen level still stays unchosen so nothing latches an explicit
+Default the user never picked.
+
 ## Pinned composer
 
 A chat pinned in the side panel has a composer of its own next to the main
@@ -1100,9 +1117,9 @@ one app-wide composer state is split per column:
   chat. A pinned composer sends with `usePinnedComposerSelection`: what was
   picked in it, saved for its session in the selection store the way the BTW
   composer saves its picks, otherwise the session record's model, variant and
-  agent. Its picker is `ModelControls` in controlled mode with
-  `agentSelectable`, so the agent pick is saved for the session and never
-  changes the main chat's agent. A controlled picker lists the models and
+  agent. Its picker is `ModelControls` in controlled mode, where the agent
+  pick is saved for the picker's own session and never changes the main
+  chat's agent. A controlled picker lists the models and
   agents of its column's session folder (loading that catalog when it has not
   loaded), since a pinned chat can live in another folder than the main one. "Run in parallel" is offered only in the main
   chat. Picker changes record the chosen level for that model in the profile

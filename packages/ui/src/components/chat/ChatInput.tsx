@@ -2558,6 +2558,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     drafts.restoreDrafts({ directory: forkDirectory, sessionKey: fork.id }, drafts.consumeDrafts(inlineDraftTarget));
                 }
                 useBtwStore.getState().setPanelState(currentSessionId, { pending: false, creating: false, pendingSend: undefined });
+                // The pending composer's picks live on the fork now
+                // (`startBtwSession` saved them there). Left under the pending
+                // key they outlive this question, and the next `/btw` in this
+                // parent would open on its agent, model and effort instead of
+                // Plan and what the main composer is on.
+                useSelectionStore.getState().clearSessionSelections(btwComposerSessionId);
                 scrollToBottom?.();
             } catch (error) {
                 if (!ownsPendingBtwSend()) return;
