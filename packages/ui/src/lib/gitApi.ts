@@ -777,6 +777,18 @@ async function deleteGitWorktree(
   return gitHttp.deleteGitWorktree(directory, payload);
 }
 
+async function teardownGitWorktree(
+  directory: string,
+  payload: import('./api/types').TeardownGitWorktreePayload
+): Promise<{ success: boolean }> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.teardown) {
+    return runtime.worktree.teardown(directory, payload);
+  }
+  if (runtime) throw new Error('Running teardown commands alone is not available here');
+  return gitHttp.teardownGitWorktree(directory, payload);
+}
+
 /** Renames the task of the worktree at `directory`; the user's name stays over the agent's. */
 export async function setGitWorktreeTitle(
   directory: string,
@@ -849,6 +861,7 @@ export const git = {
     validate: validateGitWorktree,
     create: createGitWorktree,
     remove: deleteGitWorktree,
+    teardown: teardownGitWorktree,
     snapshot: snapshotGitWorktree,
     archive: (directory: string, payload: import('./api/types').ArchiveGitWorktreePayload) => runtimeWorktreeArchives().archive(directory, payload),
     listArchives: (directory: string) => runtimeWorktreeArchives().listArchives(directory),

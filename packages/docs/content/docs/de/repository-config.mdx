@@ -37,6 +37,9 @@ Einträge aus dem Repository tragen das Abzeichen **In repo**. Repository-Aktion
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ Einträge aus dem Repository tragen das Abzeichen **In repo**. Repository-Aktion
 Nur `version` ist Pflicht. Alle anderen Schlüssel sind optional, und OpenChamber schreibt nur die, die etwas enthalten.
 
 `setupWorktree` ist die Liste der Shell-Befehle, die OpenChamber direkt nach dem Anlegen eines neuen Worktrees darin ausführt, der Reihe nach. Verwende `$ROOT_PROJECT_PATH` für den Pfad des Haupt-Checkouts. Mit `setupWorktreeWait: true` wartet OpenChamber auf diese Befehle, bevor es eine Sitzung im Worktree startet.
+
+`teardownWorktree` ist die Liste der Shell-Befehle, die OpenChamber in einem Worktree direkt vor dem Löschen oder Archivieren ausführt, der Reihe nach, zum Beispiel `docker compose down` für einen Stack, den der Worktree gestartet hat. Schlägt einer fehl, bleibt der Worktree erhalten und OpenChamber zeigt den Fehler des Befehls. Die Befehle aus dem Repository laufen zuerst, dann deine eigenen, auch wenn du nur deine eigenen Setup-Befehle verwendest. Sie durchlaufen dieselbe Vertrauensabfrage wie Setup-Befehle.
 
 `projectActions` ist die Aktionsliste des Projekts, also die Aktionen, die du aus Work Status, dem Dialog für Projektaktionen und der Befehlspalette startest. `id`, `name` und `command` sind Pflicht. `icon` ist optional und fällt auf ein Play-Symbol zurück; OpenChamber kennt die Namen `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` und `file`. `autoOpenUrl: true` öffnet die Adresse, die der Befehl ausgibt, siehe [Vorschau und Entwicklungsserver](/preview/). `platforms` beschränkt die Aktion auf `macos`, `linux` oder `windows`. `runIn: "parent"` führt die Aktion im Haupt-Checkout statt im aktuellen Worktree aus.
 

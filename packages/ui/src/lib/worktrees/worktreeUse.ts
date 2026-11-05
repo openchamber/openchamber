@@ -17,6 +17,15 @@ export const sessionsInWorktree = (sessions: readonly Session[], path: string): 
   return root ? sessions.filter((session) => isInside(resolveGlobalSessionDirectory(session), root)) : [];
 };
 
+/**
+ * `sessionIds` and the sessions working in the worktree now. A retried delete
+ * can come long after the first attempt, so it takes the sessions started
+ * there since then as well.
+ */
+export const withSessionsNowInWorktree = (sessionIds: readonly string[], path: string): string[] => [
+  ...new Set([...sessionIds, ...sessionsInWorktree(useGlobalSessionsStore.getState().activeSessions, path).map((session) => session.id)]),
+];
+
 export type WorktreeUse = 'free' | 'busy' | 'inUse' | 'unknown';
 
 /**

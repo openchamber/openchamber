@@ -2,8 +2,8 @@
  * The trust prompt for a team's shared project setup.
  *
  * Commands in `<repo>/.openchamber/project.json` run on this machine, and a
- * `git pull` can change them. So the first time a shared setup command or a
- * shared action is about to run, the app shows exactly what would run and
+ * `git pull` can change them. So the first time a shared setup or teardown
+ * command or a shared action is about to run, the app shows exactly what would run and
  * asks. The answer is recorded on the instance against a hash of those
  * commands (`trust.hash`); a pull that changes them brings the prompt back.
  *
@@ -12,7 +12,7 @@
  * the pending request on every surface.
  */
 
-import { getProjectSetup, updateProjectSetup, type ProjectRef, type ProjectSetup } from './openchamberConfig';
+import { fetchProjectSetup, getProjectSetup, updateProjectSetup, type ProjectRef, type ProjectSetup } from './openchamberConfig';
 
 export type SharedTrustChoice = 'trust' | 'skip' | 'cancel';
 
@@ -32,11 +32,14 @@ type PendingSharedTrustRequest = {
   runsIn: SharedTrustRunsIn;
   dismissChoice: SharedTrustDismissChoice;
   setupCommands: string[];
+  teardownCommands: string[];
   actions: Array<{ id: string; name: string; command: string }>;
   resolve: (choice: SharedTrustChoice) => void;
 };
 
 let pendingRequest: PendingSharedTrustRequest | null = null;
+// Teardown answers being asked for, by project path and trust hash.
+const pendingTeardownAnswers = new Map<string, Promise<SharedTrustChoice>>();
 const listeners = new Set<() => void>();
 
 const emitChange = (): void => {
@@ -75,6 +78,7 @@ const askForTrust = (
       runsIn,
       dismissChoice,
       setupCommands: setup.shared.setupWorktree,
+      teardownCommands: setup.shared.teardownWorktree,
       actions: setup.shared.projectActions.map(({ id, name, command }) => ({ id, name, command })),
       resolve,
     };
@@ -148,6 +152,35 @@ export const resolveWorktreeSetupCommands = async (project: ProjectRef, runsIn: 
  */
 export const resolveWorktreeSetupCommandsOrCancel = async (project: ProjectRef, runsIn: SharedTrustRunsIn = 'machine'): Promise<string[] | null> => {
   return resolveWorktreeSetupCommandsForDismissal(project, runsIn, 'cancel');
+};
+
+/**
+ * The teardown commands to run before `project`'s worktree is removed, after
+ * the trust prompt when the shared ones have not been trusted yet. A "skip"
+ * answer, or closing the prompt, leaves only the user's own commands. A setup
+ * that cannot be read rejects: the removal must not go ahead without the
+ * teardown it may need. With `ask: false` (a removal nobody started by hand)
+ * untrusted shared commands reject instead of opening the prompt.
+ */
+export const resolveWorktreeTeardownCommands = async (project: ProjectRef, { ask = true }: { ask?: boolean } = {}): Promise<string[]> => {
+  const setup = await fetchProjectSetup(project);
+  if (setup.shared.teardownWorktree.length === 0) {
+    return setup.teardownWorktree;
+  }
+  if (!ask && !setup.trust.trusted) {
+    throw new Error('The repository\'s teardown commands are not trusted yet, so the worktree was kept. Archive or delete it yourself to review them.');
+  }
+  // Two deletes in one project ask once and share the answer: a second prompt
+  // would settle the first as "Not this time" without the user answering it.
+  const key = `${project.path}\n${setup.trust.hash}`;
+  let answer = pendingTeardownAnswers.get(key);
+  if (!answer) {
+    answer = answerSharedTrust(project, setup, 'machine', 'skip').finally(() => pendingTeardownAnswers.delete(key));
+    pendingTeardownAnswers.set(key, answer);
+  }
+  return (await answer) === 'trust'
+    ? setup.teardownWorktree
+    : setup.personal.teardownWorktree;
 };
 
 /** Forget the recorded trust answer, so the next shared command asks again. */

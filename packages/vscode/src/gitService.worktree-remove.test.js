@@ -9,7 +9,7 @@ mock.module('vscode', () => ({
   Uri: { file: (fsPath) => ({ fsPath }) },
 }));
 
-const { createWorktree, getWorktreeBootstrapStatus, removeWorktree, waitForWorktreeRemoval } = await import('./gitService.ts?worktree-remove-test');
+const { createWorktree, getWorktreeBootstrapStatus, removeWorktree, teardownWorktree, waitForWorktreeRemoval } = await import('./gitService.ts?worktree-remove-test');
 
 const tempDirs = [];
 
@@ -90,6 +90,52 @@ describe('VS Code worktree removal instance disposal', () => {
       expect(disposeInstance).toHaveBeenCalledTimes(1);
       expect(observed).toEqual({ realPath: targetRealPath, directoryExists: true });
       expect(fs.existsSync(worktreePath)).toBe(false);
+    });
+  });
+
+  it('runs the teardown command in the worktree first, and keeps the worktree when it fails', async () => {
+    if (!canRunGit()) return;
+
+    await withIsolatedOpenCodeData(async () => {
+      const { repo, worktreePath } = createRepositoryWithWorktree();
+      const scripts = createTempDir();
+      const marker = path.join(scripts, 'teardown-cwd.txt');
+      const failing = path.join(scripts, 'fail.cjs');
+      const recording = path.join(scripts, 'record.cjs');
+      fs.writeFileSync(failing, "process.stderr.write('stack still running\\n'); process.exit(3);\n");
+      fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.cwd());\n`);
+      const run = (script) => `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+      const disposeInstance = mock(async () => undefined);
+
+      await expect(removeWorktree(repo, { directory: worktreePath, teardownCommand: run(failing), disposeInstance }))
+        .rejects.toThrow('stack still running');
+      expect(fs.existsSync(path.join(worktreePath, '.git'))).toBe(true);
+      expect(disposeInstance).not.toHaveBeenCalled();
+
+      const targetRealPath = fs.realpathSync(worktreePath);
+      await expect(removeWorktree(repo, { directory: worktreePath, teardownCommand: run(recording), disposeInstance })).resolves.toBe(true);
+      expect(fs.readFileSync(marker, 'utf8')).toBe(targetRealPath);
+      expect(fs.existsSync(worktreePath)).toBe(false);
+    });
+  });
+
+  it('runs a teardown alone without removing anything, and reports a failure with its code', async () => {
+    if (!canRunGit()) return;
+
+    await withIsolatedOpenCodeData(async () => {
+      const { repo, worktreePath } = createRepositoryWithWorktree();
+      const scripts = createTempDir();
+      const marker = path.join(scripts, 'ran.txt');
+      const recording = path.join(scripts, 'record.cjs');
+      fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.cwd());\n`);
+
+      await expect(teardownWorktree(repo, { directory: worktreePath, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(recording)}` })).resolves.toBe(true);
+      expect(fs.readFileSync(marker, 'utf8')).toBe(fs.realpathSync(worktreePath));
+      expect(fs.existsSync(path.join(worktreePath, '.git'))).toBe(true);
+
+      await expect(teardownWorktree(repo, { directory: worktreePath, teardownCommand: 'exit 3' })).rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED' });
+      await expect(removeWorktree(repo, { directory: worktreePath, teardownCommand: 'exit 3' })).rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED' });
+      expect(fs.existsSync(path.join(worktreePath, '.git'))).toBe(true);
     });
   });
 
