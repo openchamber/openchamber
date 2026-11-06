@@ -22,6 +22,8 @@ export function SecretRequestCard({ part, request }: { part: ToolPart; request: 
     const directory = useSessionDirectory(part.sessionID);
     const [value, setValue] = React.useState('');
     const [busy, setBusy] = React.useState(false);
+    // Display only: turning it on never sends the value anywhere new.
+    const [revealed, setRevealed] = React.useState(false);
     // What this client sent, shown until the call completes with the status
     // OpenCode stores.
     const [sent, setSent] = React.useState<SecretRequestState | null>(null);
@@ -73,20 +75,35 @@ export function SecretRequestCard({ part, request }: { part: ToolPart; request: 
                     if (value.trim() && !busy) void send({ value }, 'saved');
                 }}
             >
-                <Input
-                    type="password"
-                    value={value}
-                    onChange={(event) => setValue(event.target.value)}
-                    placeholder={request.placeholder ?? t('chat.secretRequest.placeholder')}
-                    aria-label={t('chat.secretRequest.inputLabel')}
-                    // Keep password managers from offering to store or fill it.
-                    autoComplete="off"
-                    data-1p-ignore
-                    data-lpignore="true"
-                    data-bwignore
-                    disabled={busy}
-                    className="flex-1"
-                />
+                <div className="relative min-w-0 flex-1">
+                    <Input
+                        type={revealed ? 'text' : 'password'}
+                        value={value}
+                        onChange={(event) => setValue(event.target.value)}
+                        placeholder={request.placeholder ?? t('chat.secretRequest.placeholder')}
+                        aria-label={t('chat.secretRequest.inputLabel')}
+                        // Keep password managers from offering to store or fill it.
+                        autoComplete="off"
+                        data-1p-ignore
+                        data-lpignore="true"
+                        data-bwignore
+                        disabled={busy}
+                        className="w-full pe-9"
+                    />
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute inset-e-1 top-1/2 size-7 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label={t(revealed ? 'chat.secretRequest.hideSecret' : 'chat.secretRequest.showSecret')}
+                        aria-pressed={revealed}
+                        title={t(revealed ? 'chat.secretRequest.hideSecret' : 'chat.secretRequest.showSecret')}
+                        disabled={busy}
+                        onClick={() => setRevealed((current) => !current)}
+                    >
+                        <Icon name={revealed ? 'eye-off' : 'eye'} className="size-4" />
+                    </Button>
+                </div>
                 <Button type="submit" disabled={busy || !value.trim()}>{t('chat.secretRequest.save')}</Button>
             </form>
             <div className="mt-2 flex items-center gap-1.5 typography-meta text-muted-foreground">
