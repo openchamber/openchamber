@@ -2764,6 +2764,37 @@ describe('createWorktree with OpenCode worktree.directory', () => {
     }
   };
 
+  it('returns preview and creation paths that match Git when home is a symlink', async () => {
+    if (!canRunGit()) return;
+    const parent = createTempDir();
+    const realRoot = path.join(parent, 'real');
+    const aliasRoot = path.join(parent, 'alias');
+    fs.mkdirSync(realRoot);
+    fs.symlinkSync(realRoot, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, 'opencode.json'), JSON.stringify({ worktree: null }));
+    vi.stubEnv('OPENCODE_CONFIG', path.join(repo, 'opencode.json'));
+    vi.stubEnv('HOME', aliasRoot);
+    vi.stubEnv('USERPROFILE', aliasRoot);
+    vi.stubEnv('XDG_CONFIG_HOME', path.join(realRoot, '.config'));
+    vi.stubEnv('XDG_DATA_HOME', undefined);
+    try {
+      const input = {
+        mode: 'new', worktreeName: 'canonical-tree', branchName: 'openchamber/canonical-tree',
+        returnAfterDirectoryCreated: true,
+      };
+      const preview = await previewWorktreeCreate(repo, input);
+      const created = await createWorktree(repo, input);
+      await waitForActiveWorktreeBootstrap(created.path);
+      const listed = (await getWorktrees(repo)).find((entry) => entry.branch === created.branch);
+      expect(listed).toBeDefined();
+      expect(created.path.replaceAll('\\', '/')).toBe(listed.path.replaceAll('\\', '/'));
+      expect(preview.path.replaceAll('\\', '/')).toBe(listed.path.replaceAll('\\', '/'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('creates and previews under a configured relative folder', withDataHome(async () => {
     if (!canRunGit()) return;
 
