@@ -1643,6 +1643,25 @@ describe('ModelControls in a pinned column', () => {
     }
   });
 
+  // A pinned chat's agent pick carries the level its composer is on, as a
+  // BTW pick does, instead of the new agent falling back to another level.
+  test('an agent pick carries the effort the pinned composer is on', async () => {
+    const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
+    const { dom, cleanup } = await renderModelControls({ selection: { ...pinnedSelection, variant: 'high' }, sessionId: 'ses_pinned' }, column);
+    try {
+      const stockRow = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.trim() === 'Stock');
+      await act(async () => stockRow?.click());
+      expect(useSelectionStore.getState().sessionAgentSelections.get('ses_pinned')).toBe('stock');
+      expect(saveVariant.mock.calls).toEqual([['ses_pinned', 'stock', 'pinned', 'pinned-model', 'high']]);
+      // The main chat's agent stays its own.
+      expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
+    } finally {
+      saveVariant.mockRestore();
+      await cleanup();
+    }
+  });
+
   test('the main chat keeps the active folder catalog', async () => {
     const { dom, cleanup } = await renderModelControls();
     try {
