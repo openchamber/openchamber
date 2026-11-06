@@ -539,9 +539,14 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;
-  the popup itself may open nothing further. Chromium reports `window.open(url)`
-  without window features as a new tab, the same as a target=_blank link, so the
-  session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
+  the popup itself may open nothing further. The popup runs in the panel's
+  session, with its sign-ins and permission rules. Electron gives such a window
+  the session's plain Chrome user agent only on navigations the app starts
+  (electron/electron#45897), so main cancels the popup's first navigation before
+  it is sent and starts it again itself; later navigations keep that agent. A
+  form posted into a new window is not repeated and keeps Electron's agent.
+  Chromium reports `window.open(url)` without window features as a new tab, the
+  same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
   `window.open` that keeps its opener as a popup. A link aimed at a new tab is
   noopener by default and becomes a panel tab
   (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
