@@ -1,6 +1,6 @@
 import { noteOwnChanges, markSeen, traceChanges } from './cellTraces';
 import { isSqliteFile, openSqlite, queryCapped, readParquetRows, sqliteTables, type SqliteDatabase } from './dataFiles';
-import { DEFAULT_TABLE_ROW_CAP, parseDelimitedText } from './delimitedText';
+import { DEFAULT_TABLE_ROW_CAP, parseDelimitedText, resolveDelimiter } from './delimitedText';
 import type { BookChange, CellNote, CellPatch, DocumentCalls, SheetLayout } from './documentProtocol';
 import { cellKey, type BookCell, type CellChange, type WorkbookDocument } from './workbook/model';
 import { diffWorkbooks } from './workbook/workbookDiff';
@@ -185,8 +185,9 @@ const handlers: Handlers = {
     return { columns, totalRows };
   },
 
-  'delimited.read': async ({ bytes, delimiter, rowCap }, emit) => {
-    const { header, rows, totalRows, columnCount } = parseDelimitedText(new TextDecoder().decode(bytes), delimiter, rowCap);
+  'delimited.read': async ({ bytes, path, rowCap }, emit) => {
+    const text = new TextDecoder().decode(bytes);
+    const { header, rows, totalRows, columnCount } = parseDelimitedText(text, resolveDelimiter(path, text), rowCap);
     streamRows(rows, (chunk) => emit({ rows: chunk }));
     return { columns: header, totalRows, columnCount };
   },

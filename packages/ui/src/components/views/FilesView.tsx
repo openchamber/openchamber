@@ -98,7 +98,7 @@ import { useFileTreeUpload } from './files/useFileTreeUpload';
 import { moveWorkspacePath } from './files/moveWorkspacePath';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
 import { BinaryArtifact } from './files/previews/BinaryArtifact';
-import { delimiterForPath, parseDelimitedText } from './files/previews/delimitedText';
+import { parseDelimitedText, resolveDelimiter } from './files/previews/delimitedText';
 import { ArchiveArtifact } from './files/previews/ArchiveArtifact';
 import { DataFileArtifact } from './files/previews/DataFileArtifact';
 import { NotebookArtifact } from './files/previews/NotebookArtifact';
@@ -3900,7 +3900,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       printHtml(markdownToPrintableHtml(draftContent, selectedFile.name));
       return;
     }
-    const table = isTable ? parseDelimitedText(draftContent, delimiterForPath(selectedFile.path), Number.MAX_SAFE_INTEGER) : null;
+    const table = isTable ? parseDelimitedText(draftContent, resolveDelimiter(selectedFile.path, draftContent), Number.MAX_SAFE_INTEGER) : null;
     const bytes = table ? await rowsToXlsx(selectedFile.name, [table.header, ...table.rows]) : await markdownToDocx(draftContent);
     const stem = selectedFile.path.replace(/\.[^./\\]+$/, '');
     // A file already there is the user's: the export takes the next free name.

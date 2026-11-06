@@ -10,7 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { getFileExtension, isDataFile } from '@/lib/toolHelpers';
 import { BinaryArtifact } from './BinaryArtifact';
 import { quoteSqlName } from './dataFiles';
-import { DEFAULT_TABLE_ROW_CAP, delimiterForPath } from './delimitedText';
+import { DEFAULT_TABLE_ROW_CAP } from './delimitedText';
 import { collectRows, documentTransport, newDocumentId } from './documentClient';
 import { TableGrid } from './TableArtifact';
 
@@ -172,7 +172,7 @@ export const DataFileArtifact: React.FC<{
         if (extension === 'parquet' || !isDataFile(path)) {
           const end = extension === 'parquet'
             ? await call('parquet.read', { bytes, rowCap: DEFAULT_TABLE_ROW_CAP }, collected.add)
-            : await call('delimited.read', { bytes, delimiter: delimiterForPath(path), rowCap: DEFAULT_TABLE_ROW_CAP }, collected.add);
+            : await call('delimited.read', { bytes, path, rowCap: DEFAULT_TABLE_ROW_CAP }, collected.add);
           if (!controller.signal.aborted) setState({ status: 'table', table: { ...end, rows: collected.rows } });
           return;
         }
