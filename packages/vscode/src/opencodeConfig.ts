@@ -7,11 +7,13 @@ import {
   applyEdits,
   createScanner,
   findNodeAtLocation,
+  format,
   modify,
   parse as parseJsonc,
   parseTree,
   printParseErrorCode,
   type Edit,
+  type FormattingOptions,
   type JSONPath,
   type ParseError,
 } from 'jsonc-parser';
@@ -935,6 +937,7 @@ const isJsonObject = (value: JsonValue): value is JsonObject => isPlainObject(va
 
 type ConfigEdit =
   | { type: 'set'; path: JSONPath; value: unknown }
+  | { type: 'append'; path: JSONPath; value: JsonValue }
   | { type: 'remove'; path: JSONPath };
 
 // jsonc-parser's SyntaxKind is an ambient const enum, which cannot be imported
@@ -954,16 +957,47 @@ const deepEqualJsonValue = (a: JsonValue, b: JsonValue): boolean => {
   return false;
 };
 
+// Element edits for an array that only grew at its end or only lost elements;
+// null for any other resize. Removals run from the highest index down, so each
+// one leaves the indices of the next in place.
+const arrayResizeEdits = (current: JsonValue[], next: JsonValue[], basePath: JSONPath): ConfigEdit[] | null => {
+  if (next.length > current.length) {
+    if (!current.every((item, index) => deepEqualJsonValue(item, next[index]))) return null;
+    return next.slice(current.length).map((value, offset) => ({
+      type: 'append',
+      path: [...basePath, current.length + offset],
+      value,
+    }));
+  }
+  const removed: number[] = [];
+  let kept = 0;
+  for (let index = 0; index < current.length; index += 1) {
+    if (kept < next.length && deepEqualJsonValue(current[index], next[kept])) kept += 1;
+    else removed.push(index);
+  }
+  if (kept !== next.length) return null;
+  return removed.reverse().map((index) => ({ type: 'remove', path: [...basePath, index] }));
+};
+
 // Structural diff between the parsed on-disk config and the desired config.
 // Equal-length arrays keep their indices unless a retained value moves between
-// changed positions. Resized arrays and scalars are replaced whole. The desired
-// config must already be JSON-normalized, so absent keys signal removals.
+// changed positions. An array that only grew at its end or only lost elements
+// gets one edit per element; other resized arrays and scalars are replaced
+// whole. The desired config must already be JSON-normalized, so absent keys
+// signal removals.
 const collectConfigEdits = (
   current: JsonValue,
   next: JsonValue,
   basePath: JSONPath,
   edits: ConfigEdit[],
 ): void => {
+  if (Array.isArray(current) && Array.isArray(next) && current.length !== next.length) {
+    const resizeEdits = arrayResizeEdits(current, next, basePath);
+    if (resizeEdits) {
+      edits.push(...resizeEdits);
+      return;
+    }
+  }
   if (Array.isArray(current) && Array.isArray(next) && current.length === next.length) {
     const changedIndices: number[] = [];
     for (let index = 0; index < current.length; index += 1) {
@@ -1014,45 +1048,97 @@ const findSeparatorComma = (text: string, start: number, end: number): number =>
   return -1;
 };
 
-// Removes exactly the property node plus one adjacent separator comma. The
-// scanner-based comma lookup keeps comments in the surrounding gaps (including
-// commas inside comments), and avoids jsonc-parser's own removal leaving a
-// stray comma when the last property of an object is deleted.
-const removePropertyEdits = (text: string, propertyPath: JSONPath): Edit[] => {
+// Removes exactly the property node, or the array element, plus one adjacent
+// separator comma. The scanner-based comma lookup keeps comments in the
+// surrounding gaps (including commas inside comments), and avoids
+// jsonc-parser's own removal, which leaves a stray comma after the last
+// property of an object and deletes the comments next to an array element.
+const removeNodeEdits = (text: string, nodePath: JSONPath): Edit[] => {
   const root = parseTree(text, [], { allowTrailingComma: true });
-  const valueNode = root ? findNodeAtLocation(root, propertyPath) : undefined;
-  const propertyNode = valueNode?.parent;
-  const objectNode = propertyNode?.parent;
+  const valueNode = root ? findNodeAtLocation(root, nodePath) : undefined;
+  const node = valueNode?.parent?.type === 'array' ? valueNode : valueNode?.parent;
+  const container = node?.parent;
   if (
     !valueNode
-    || !propertyNode
-    || !objectNode
-    || objectNode.type !== 'object'
-    || !Array.isArray(objectNode.children)
-    || !objectNode.children.includes(propertyNode)
+    || !node
+    || !container
+    || (container.type !== 'object' && container.type !== 'array')
+    || !Array.isArray(container.children)
+    || !container.children.includes(node)
   ) {
-    throw new Error('Failed to locate config property for removal');
+    throw new Error('Failed to locate config node for removal');
   }
 
-  const siblings = objectNode.children;
-  const index = siblings.indexOf(propertyNode);
-  const propStart = propertyNode.offset;
-  const propEnd = propertyNode.offset + propertyNode.length;
-  const edits: Edit[] = [{ offset: propStart, length: propEnd - propStart, content: '' }];
+  const siblings = container.children;
+  const index = siblings.indexOf(node);
+  const nodeStart = node.offset;
+  const nodeEnd = node.offset + node.length;
+  const edits: Edit[] = [{ offset: nodeStart, length: nodeEnd - nodeStart, content: '' }];
 
-  const objectEnd = objectNode.offset + objectNode.length;
+  const containerEnd = container.offset + container.length;
   const nextSibling = index < siblings.length - 1 ? siblings[index + 1] : null;
-  const afterGapEnd = nextSibling ? nextSibling.offset : objectEnd - 1;
-  let commaOffset = findSeparatorComma(text, propEnd, afterGapEnd);
+  const afterGapEnd = nextSibling ? nextSibling.offset : containerEnd - 1;
+  let commaOffset = findSeparatorComma(text, nodeEnd, afterGapEnd);
   if (commaOffset === -1) {
     const previousSibling = index > 0 ? siblings[index - 1] : null;
     const beforeGapStart = previousSibling
       ? previousSibling.offset + previousSibling.length
-      : objectNode.offset + 1;
-    commaOffset = findSeparatorComma(text, beforeGapStart, propStart);
+      : container.offset + 1;
+    commaOffset = findSeparatorComma(text, beforeGapStart, nodeStart);
+  }
+  const commaBefore = commaOffset !== -1 && commaOffset < nodeStart;
+  // A node alone on its lines leaves with them, so no blank line stays behind.
+  const lineStart = text.lastIndexOf('\n', nodeStart - 1) + 1;
+  const removedEnd = commaOffset >= nodeEnd ? commaOffset + 1 : nodeEnd;
+  const lineEnd = text.indexOf('\n', removedEnd);
+  if (
+    lineEnd !== -1
+    && !text.slice(lineStart, nodeStart).trim()
+    && !text.slice(nodeEnd, removedEnd).replace(',', '').trim()
+    && !text.slice(removedEnd, lineEnd).trim()
+  ) {
+    edits[0] = { offset: lineStart, length: lineEnd + 1 - lineStart, content: '' };
+    if (commaBefore) edits.push({ offset: commaOffset, length: 1, content: '' });
+    return edits;
   }
   if (commaOffset !== -1) {
     edits.push({ offset: commaOffset, length: 1, content: '' });
+  }
+  return edits;
+};
+
+// Adds an element on its own line after the last one, at that element's
+// indentation, so the text of the elements before it stays as written:
+// jsonc-parser's own insertion reformats the whole line it lands on. An empty
+// array, or one whose closing bracket shares a line with an element, goes
+// through jsonc-parser.
+const appendElementEdits = (
+  text: string,
+  elementPath: JSONPath,
+  value: JsonValue,
+  formattingOptions: FormattingOptions & { eol: string },
+): Edit[] => {
+  const root = parseTree(text, [], { allowTrailingComma: true });
+  const arrayNode = root ? findNodeAtLocation(root, elementPath.slice(0, -1)) : undefined;
+  const last = arrayNode?.type === 'array' ? arrayNode.children?.at(-1) : undefined;
+  if (!arrayNode || !last) {
+    return modify(text, elementPath, value, { formattingOptions, isArrayInsertion: true });
+  }
+  const lastEnd = last.offset + last.length;
+  const closeOffset = arrayNode.offset + arrayNode.length - 1;
+  const closeLineStart = text.lastIndexOf('\n', closeOffset - 1) + 1;
+  const indent = text.slice(text.lastIndexOf('\n', last.offset - 1) + 1, last.offset);
+  if (closeLineStart <= lastEnd || indent.trim() || text.slice(closeLineStart, closeOffset).trim()) {
+    return modify(text, elementPath, value, { formattingOptions, isArrayInsertion: true });
+  }
+
+  const serialized = JSON.stringify(value);
+  const lines = applyEdits(serialized, format(serialized, undefined, formattingOptions))
+    .split(/\r?\n/)
+    .map((line) => `${indent}${line}`);
+  const edits: Edit[] = [{ offset: closeLineStart, length: 0, content: `${lines.join(formattingOptions.eol)}${formattingOptions.eol}` }];
+  if (findSeparatorComma(text, lastEnd, closeOffset) === -1) {
+    edits.unshift({ offset: lastEnd, length: 0, content: ',' });
   }
   return edits;
 };
@@ -1066,7 +1152,9 @@ const applyConfigEdits = (existingText: string, edits: ConfigEdit[]): string => 
   let text = existingText;
   for (const edit of edits) {
     if (edit.type === 'remove') {
-      text = applyEdits(text, removePropertyEdits(text, edit.path));
+      text = applyEdits(text, removeNodeEdits(text, edit.path));
+    } else if (edit.type === 'append') {
+      text = applyEdits(text, appendElementEdits(text, edit.path, edit.value, formattingOptions));
     } else {
       text = applyEdits(text, modify(text, edit.path, edit.value, { formattingOptions }));
     }
