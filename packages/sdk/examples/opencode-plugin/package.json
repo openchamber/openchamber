@@ -16,8 +16,5 @@
       },
       "opencodePlugin": "plugin"
     }
-  },
-  "dependencies": {
-    "@openchamber/sdk": "workspace:*"
   }
 }
