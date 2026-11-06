@@ -265,8 +265,9 @@ with `preview`): on desktop one preview tab follows the steps while the tab
 the user started from stays; on the phone the Files surface shows the
 neighbour in place and Back still leads to the folder being browsed. The
 viewer unmounts while the next image loads, so a step remembers its target and
-the viewer showing it within five seconds takes the focus back for the next
-key. A folder that cannot be read shows no arrows.
+every viewer showing it within five seconds takes the focus back for the next
+key, unless the user has put the focus somewhere else meanwhile. The first of them can still hold the previous image's data and is
+replaced once the new image loads, so the step is not used up by it. A folder that cannot be read shows no arrows.
 
 Non-text artifacts the browser must own (PDF, audio, video, fonts) are loaded
 through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with

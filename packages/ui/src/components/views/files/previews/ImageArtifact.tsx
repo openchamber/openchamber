@@ -34,8 +34,9 @@ const touchDistance = (a: Touch, b: Touch): number => Math.hypot(a.clientX - b.c
 export type ImageNeighbor = { name: string; open: () => void };
 
 // FilesView unmounts the viewer while the next image loads, which drops the
-// focus the arrow keys need. A step remembers its target, and the viewer that
-// shows that image shortly after takes the focus back.
+// focus the arrow keys need. A step remembers its target, and every viewer
+// that shows that image shortly after takes the focus back: the first one can
+// still hold the previous image's data and is replaced once the new one loads.
 const STEP_FOCUS_WINDOW_MS = 5_000;
 let lastStep: { name: string; at: number } | null = null;
 
@@ -248,10 +249,11 @@ const ImageArtifactView: React.FC<ImageArtifactProps> = ({ src, name, sizeBytes,
   };
 
   React.useEffect(() => {
-    if (!lastStep || lastStep.name !== name) return;
-    const recent = Date.now() - lastStep.at <= STEP_FOCUS_WINDOW_MS;
-    lastStep = null;
-    if (recent) viewportRef.current?.focus({ preventScroll: true });
+    if (!lastStep || lastStep.name !== name || Date.now() - lastStep.at > STEP_FOCUS_WINDOW_MS) return;
+    // Only focus the unmount dropped; a field the user moved to meanwhile keeps it.
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    viewportRef.current?.focus({ preventScroll: true });
   }, [name]);
 
   const step = (neighbor: ImageNeighbor) => {
