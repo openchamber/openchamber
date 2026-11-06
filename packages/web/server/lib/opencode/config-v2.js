@@ -892,19 +892,24 @@ const skillSwitchRequestSchema = z.object({
   scope: z.enum(['user', 'project']),
 });
 
+/**
+ * An exact deny for the skill in either spelling OpenCode reads: `skill.use`
+ * with the bare id, or the legacy `integration.use` with `skill:<id>`, which
+ * OpenCode decodes into the first and an older OpenChamber wrote.
+ */
 const isSkillDeny = (statement, id) => isRecord(statement)
-  && statement.action === 'integration.use'
-  && statement.resource === `skill:${id}`
-  && statement.effect === 'deny';
+  && statement.effect === 'deny'
+  && ((statement.action === 'skill.use' && statement.resource === id)
+    || (statement.action === 'integration.use' && statement.resource === `skill:${id}`));
 
 /**
  * Turns a skill off or back on in one config object, in place, through
- * OpenCode's `integration.use` policy. Off appends an exact deny to the
- * top-level `policies` unless the file already has one; on removes every
- * exact deny for that id, from `policies` and the deprecated
- * `experimental.policies`, and nothing else: wildcards, allows and other
- * statements stay. A list it empties is removed. Returns whether the config
- * changed.
+ * OpenCode's `skill.use` policy. Off appends an exact deny to the top-level
+ * `policies` unless the file already has one in either spelling; on removes
+ * every exact deny for that id, in either spelling, from `policies` and the
+ * deprecated `experimental.policies`, and nothing else: wildcards, allows and
+ * other statements stay. A list it empties is removed. Returns whether the
+ * config changed.
  */
 function writeSkillDisabled(config, id, disabled) {
   const lists = [
@@ -915,7 +920,7 @@ function writeSkillDisabled(config, id, disabled) {
   if (disabled) {
     if (lists.some(({ owner, key }) => owner[key].some((statement) => isSkillDeny(statement, id)))) return false;
     const policies = Array.isArray(config.policies) ? config.policies : [];
-    config.policies = [...policies, { action: 'integration.use', resource: `skill:${id}`, effect: 'deny' }];
+    config.policies = [...policies, { action: 'skill.use', resource: id, effect: 'deny' }];
     return true;
   }
 
