@@ -2006,7 +2006,7 @@ const emitAgentMemoryChangedEvent = (event) => {
 const readModelCatalog = createModelCatalogReader({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  waitForOpenCodeReady,
+  isOpenCodeDirectoryTrusted: (directory) => openCodeTrust.isTrusted(directory),
 });
 const scheduledTaskService = createScheduledTaskService({
   readSettingsFromDiskMigrated,
