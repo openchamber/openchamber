@@ -479,7 +479,10 @@ Agent selection uses it before old per-agent choices or pinned models.
 agent choices. Both a named effort and explicit `Default` survive reload, with
 the same 150-session persistence bound as the existing selections. Old payloads
 without effort entries remain valid; malformed effort entries grant no authority.
-Session deletion clears these entries. A saved effort choice precedes older
+Session deletion clears these entries. A send saves the effort it carried for
+its session; only a send from the main chat reads the main composer's live
+selection, to tell an explicit Default from no choice, so a `/btw` fork or a
+pinned chat on the main chat's agent and model keeps its own effort. A saved effort choice precedes older
 message history so a reload cannot undo a saved picker change. While a live model
 pick is pending, it and its effort win over external switches. Otherwise the
 session record can switch to another model and effort. The store also
