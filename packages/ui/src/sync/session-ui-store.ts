@@ -87,6 +87,7 @@ import {
   unarchiveSessions as unarchiveSessionsAction,
   updateSessionTitle as updateSessionTitleAction,
   optimisticSend,
+  commitStagedRevert,
   refetchSessionMessages,
   revertToMessage as revertToMessageAction,
   forkFromMessage as forkFromMessageAction,
@@ -246,6 +247,7 @@ export async function routeMessage(params: {
     await params.ready
     assertRuntimeCurrent()
     params.beforeSend?.()
+    await commitStagedRevert(params.sessionId, sendDirectory())
     await opencodeClient.shellSession({
       runtimeKey: params.runtimeKey,
       sessionId: params.sessionId,

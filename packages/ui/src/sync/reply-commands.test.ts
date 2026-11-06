@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { SyncEvent } from '@/lib/opencode/events';
-import type { Message } from '@/lib/opencode/model';
+import type { Message, Session } from '@/lib/opencode/model';
+import { ChildStoreManager } from './child-store';
 import { applyReplyCommandEvents, runReplyCommand } from './reply-commands';
+import { setActionRefs } from './session-actions';
 
 const updated = (info: Message): SyncEvent => ({ type: 'message.updated', properties: { info } });
 const finished = (state: string) => updated({
@@ -73,5 +75,39 @@ describe('runReplyCommand', () => {
     expect(await run).toBeUndefined();
     applyReplyCommandEvents([finished('completed')]);
     expect(continued).toBe(1);
+  });
+
+  // The commit deletes everything admitted past the revert's boundary, the note included (#6319).
+  test('commits a staged revert before the run admits anything', async () => {
+    const childStores = new ChildStoreManager();
+    const session: Session = {
+      id: 'ses_1',
+      projectID: 'project-1',
+      directory: '/repo',
+      title: 'ses_1',
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+      revert: { messageID: 'msg_reverted' },
+    };
+    childStores.ensureChild('/repo', { bootstrap: false }).setState({ session: [session] });
+    setActionRefs(childStores, () => '/repo');
+    let committed: () => void = () => undefined;
+    const commit = spyOn(opencodeClient, 'commitRevert').mockImplementation(() => new Promise<void>((resolve) => { committed = resolve; }));
+    const notesBefore = note.mock.calls.length;
+    const shellsBefore = shell.mock.calls.length;
+    try {
+      void start('ls');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(commit.mock.calls).toEqual([['ses_1', '/repo']]);
+      expect(note.mock.calls.length).toBe(notesBefore);
+      committed();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(note.mock.calls.length).toBe(notesBefore + 1);
+      expect(shell.mock.calls.length).toBe(shellsBefore + 1);
+    } finally {
+      commit.mockRestore();
+      setActionRefs(new ChildStoreManager(), () => '');
+    }
   });
 });
