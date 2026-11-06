@@ -158,6 +158,7 @@ export function createRoutingRuntime({
   listCatalogModels = null,
   readSessionHistory = null,
   readConfigEntries = null,
+  readSessionAgent = null,
   // Whether OpenChamber keeps this session's cache warm itself (`session-warming`).
   isSessionWarm = () => false,
   now = Date.now,
@@ -171,6 +172,9 @@ export function createRoutingRuntime({
   // the client resend the sentinel with every send.
   const autoSessions = new Map();
   const AUTO_SESSION_LIMIT = 1000;
+  // Per session: the agent routing switched it to and the agent it ran as
+  // before (`agentForSend`). Process memory too, so a restart forgets it.
+  const routedAgents = new Map();
 
   const broadcast = (type, properties) => {
     try {
@@ -300,16 +304,57 @@ export function createRoutingRuntime({
 
   // A category without a model of its own means "the fallback pair"; a variant
   // only travels with the model it was chosen for.
-  const chooseSelection = (config, choice, composerAgent) => {
+  const chooseSelection = (config, choice) => {
     const own = Boolean(choice?.model);
     const model = own ? choice.model : config.fallback.model;
     const variant = own ? choice.variant : config.fallback.variant;
     return {
       model: toModelRef(model, variant),
-      // A category agent replaces the composer's; an empty one keeps it.
-      agent: choice?.agent || composerAgent || null,
       decision: { providerID: model.providerID, modelID: model.modelID, variant: variant ?? null, agent: choice?.agent ?? null },
     };
+  };
+
+  const readAgent = readSessionAgent ?? (async ({ sessionId, directory }) => (
+    agentBodySchema.safeParse(await openCodeClient(directory).session.get({ sessionID: sessionId })).data?.agent ?? null
+  ));
+
+  /**
+   * The agent a routed send runs as. A category agent replaces the session's
+   * and is remembered with the agent it replaced. A send whose category names
+   * no agent keeps the composer's, except while the session still runs as the
+   * agent routing set: then it goes back to the one before (#6392). In Auto
+   * the composer shows the session's agent, so it cannot ask for that itself.
+   * A session found on any other agent was switched since, so its agent stays.
+   */
+  const agentForSend = async ({ sessionId, directory, categoryAgent, composerAgent }) => {
+    const routed = routedAgents.get(sessionId);
+    if (!sessionId || (!categoryAgent && !routed)) return categoryAgent || composerAgent;
+    let current;
+    try {
+      current = await readAgent({ sessionId, directory });
+    } catch (error) {
+      console.warn('[routing] session agent unavailable, leaving it as it is:', errorMessage(error));
+      return categoryAgent || composerAgent;
+    }
+    const stillRouted = routed?.agent === current;
+    if (categoryAgent) {
+      const previous = stillRouted ? routed.previous : current;
+      routedAgents.delete(sessionId);
+      // A session without an agent of its own has nothing to go back to.
+      if (previous && previous !== categoryAgent) {
+        routedAgents.set(sessionId, { agent: categoryAgent, previous });
+        while (routedAgents.size > AUTO_SESSION_LIMIT) routedAgents.delete(routedAgents.keys().next().value);
+      }
+      return categoryAgent;
+    }
+    // A composer agent other than the routed one is the caller's own choice.
+    if (!stillRouted || (composerAgent && composerAgent !== routed.agent)) {
+      routedAgents.delete(sessionId);
+      return composerAgent;
+    }
+    // Kept until a read finds the session off the routed agent, so a switch
+    // back that fails is tried again on the next send.
+    return routed.previous;
   };
 
   const readCatalog = listCatalogModels
@@ -381,26 +426,33 @@ export function createRoutingRuntime({
         decision.confidence = result.confidence;
         decision.reason = result.reason;
         decision.ms = ms;
-        const held = await cacheHold({ config, chosen: result.category, composerAgent: agent, lastAnswer, sessionId, directory });
+        // A queued send names the session's agent; while routing set it, a
+        // category without an agent runs as the one before (`agentForSend`).
+        const routed = routedAgents.get(sessionId);
+        const composerAgent = routed && agent === routed.agent ? routed.previous : agent;
+        const held = await cacheHold({ config, chosen: result.category, composerAgent, lastAnswer, sessionId, directory });
         if (held) {
           // The send runs as the category the session is already on;
           // `cacheHold.requested` keeps what Jev asked for.
           decision.category = held.id;
           decision.cacheHold = { requested: result.category.id };
         }
-        selection = chooseSelection(config, held ?? result.category, agent);
+        selection = chooseSelection(config, held ?? result.category);
       } catch (error) {
         decision.reason = 'error';
         decision.error = errorMessage(error);
-        selection = chooseSelection(config, null, agent);
+        selection = chooseSelection(config, null);
       }
     } else {
-      selection = chooseSelection(config, null, agent);
+      selection = chooseSelection(config, null);
     }
     selection = await withKnownVariant(selection, directory);
+    const sendAgent = await agentForSend({
+      sessionId, directory, categoryAgent: selection.decision.agent, composerAgent: agent ?? null,
+    });
     Object.assign(decision, selection.decision);
     broadcast('openchamber:routing.decision', decision);
-    return { model: selection.model, agent: selection.agent, decision };
+    return { model: selection.model, agent: sendAgent, decision };
   };
 
   /**
@@ -411,6 +463,9 @@ export function createRoutingRuntime({
     if (!sessionId) return false;
     if (!isAutoModel(model)) {
       autoSessions.delete(sessionId);
+      // Off Auto the composer shows the session's agent again and the user can
+      // keep or change it, so routing has nothing to put back.
+      routedAgents.delete(sessionId);
       return false;
     }
     autoSessions.delete(sessionId);
