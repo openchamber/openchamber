@@ -9,6 +9,155 @@ import { OpenChamberControlError } from './error.js';
 import { createScheduledTaskService } from '../scheduled-tasks/service.js';
 import { createChatsScope } from '../scheduled-tasks/chats-scope.js';
 import { createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
+import { createProjectConfigRuntime } from '../projects/project-config.js';
+
+const createPersistedScheduleService = async (schedule) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
+  let failRename = false;
+  let syncsUntilFailure = 0;
+  const config = createProjectConfigRuntime({
+    fsPromises: {
+      ...fs,
+      rename: async (...args) => {
+        if (failRename) throw new Error('fixture atomic rename failed');
+        return fs.rename(...args);
+      },
+    },
+    path,
+    projectsDirPath: root,
+  });
+  const history = {
+    createdAt: 100, lastRunAt: 150, lastDurationMs: 20,
+    lastStatus: 'sent', lastSessionId: 'ses_history', lastScheduledFor: 140,
+  };
+  const task = {
+    id: 'task-persisted', name: 'Keep this name', enabled: false,
+    schedule: { ...schedule, timezone: 'Pacific/Auckland' },
+    execution: { prompt: 'Keep this prompt', providerID: 'provider', modelID: 'model', agent: 'build', variant: 'high' },
+    runInWorktree: true, baseBranch: 'main', cleanupWorktree: false, state: { ...history, updatedAt: 200 },
+  };
+  const unrelated = { ...task, id: 'task-other', name: 'Other task' };
+  const file = config.resolveProjectConfigPath('project-1');
+  await fs.writeFile(file, JSON.stringify({ version: 1, custom: { keep: 'settings' }, scheduledTasks: [task, unrelated] }));
+  const readSettingsFromDiskMigrated = async () => ({ projects: [{ id: 'project-1', path: root }] });
+  const scheduledTaskService = createScheduledTaskService({
+    readSettingsFromDiskMigrated,
+    sanitizeProjects: (projects) => projects,
+    projectConfigRuntime: config,
+    // Exercise service and storage together without starting timers or dispatching.
+    scheduledTasksRuntime: {
+      syncProject: async (id) => {
+        if (syncsUntilFailure > 0 && --syncsUntilFailure === 0) throw new Error('fixture scheduler sync failed');
+        return config.listScheduledTasks(id);
+      },
+    },
+  });
+  const upsert = vi.spyOn(scheduledTaskService, 'upsert');
+  const { service } = createService({ scheduledTaskService });
+  return {
+    upsert, task, history, unrelated,
+    update: (input) => service.execute('schedule.update', { projectId: 'project-1', taskId: task.id, ...input }),
+    bytes: () => fs.readFile(file, 'utf8'),
+    read: async () => JSON.parse(await fs.readFile(file, 'utf8')),
+    failWrite: (value) => { failRename = value; },
+    failPostSaveSync: () => { syncsUntilFailure = 2; },
+    cleanup: () => fs.rm(root, { recursive: true, force: true }),
+  };
+};
+
+describe('persisted schedule.update patches', () => {
+  it.each([
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { kind: 'once', date: '2099-05-06', time: '13:45', timezone: 'Pacific/Auckland' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { kind: 'weekly', weekdays: [1, 4], times: ['13:45'], timezone: 'Pacific/Auckland' }],
+  ])('persists a time-only patch for %j with identity, settings and history intact', async (schedule, expected) => {
+    const fixture = await createPersistedScheduleService(schedule);
+    try {
+      const result = await fixture.update({ time: '13:45' });
+      const saved = await fixture.read();
+      expect(result.task.schedule).toEqual(expected);
+      expect(saved.scheduledTasks[0]).toMatchObject({ ...fixture.task, schedule: expected, state: fixture.history });
+      expect(saved.scheduledTasks[1]).toEqual(fixture.unrelated);
+      expect(saved.custom).toEqual({ keep: 'settings' });
+      await fixture.update({ time: '14:15', timezone: 'Europe/Kyiv' });
+      expect((await fixture.read()).scheduledTasks[0].schedule).toEqual({
+        ...expected, ...(schedule.kind === 'once' ? { time: '14:15' } : { times: ['14:15'] }), timezone: 'Europe/Kyiv',
+      });
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    { once: '2099-07-08', time: '11:30' },
+    { weekly: '2,5', time: '11:30' },
+    { daily: '11:30' },
+    { cron: '30 11 * * *' },
+  ])('inherits omitted timezone on schedule replacement %j and accepts an explicit replacement', async (input) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      await fixture.update(input);
+      expect((await fixture.read()).scheduledTasks[0].schedule.timezone).toBe('Pacific/Auckland');
+      await fixture.update({ ...input, timezone: 'Europe/Kyiv' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.timezone).toBe('Europe/Kyiv');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each(['', ' ', '24:00', '12:60', '9:00', 'noon', null, 900])('rejects invalid time %j without changing bytes and permits recovery', async (time) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update({ time })).rejects.toMatchObject({ statusCode: 400 });
+      expect(fixture.upsert).not.toHaveBeenCalled();
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ time: '13:45' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('13:45');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    [{ kind: 'daily', times: ['09:00'] }, { time: '13:45' }],
+    [{ kind: 'cron', cron: '0 9 * * *' }, { time: '13:45' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00', '17:00'] }, { time: '13:45' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { weekly: '1,4', time: '25:00' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { weekly: '1,4', time: '' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { daily: '10:00', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { cron: '0 10 * * *', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { once: '', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { once: '2099-05-06', weekly: '1', time: '13:45' }],
+  ])('rejects incompatible or ambiguous patch %j %j before saving', async (schedule, input) => {
+    const fixture = await createPersistedScheduleService(schedule);
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update(input)).rejects.toMatchObject({ statusCode: 400 });
+      expect(fixture.upsert).not.toHaveBeenCalled();
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ name: 'Recovered' });
+      expect((await fixture.read()).scheduledTasks[0].name).toBe('Recovered');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('preserves bytes on an atomic write failure and recovers on the next update', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      fixture.failWrite(true);
+      await expect(fixture.update({ time: '13:45' })).rejects.toThrow('fixture atomic rename failed');
+      expect(await fixture.bytes()).toBe(before);
+      fixture.failWrite(false);
+      await fixture.update({ time: '14:15' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('14:15');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('reports post-save scheduler failure while retaining the committed patch', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      fixture.failPostSaveSync();
+      await expect(fixture.update({ time: '13:45' })).rejects.toThrow('fixture scheduler sync failed');
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('13:45');
+      await fixture.update({ time: '14:15' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('14:15');
+    } finally { await fixture.cleanup(); }
+  });
+});
 
 const createService = (overrides = {}) => {
   const client = {
