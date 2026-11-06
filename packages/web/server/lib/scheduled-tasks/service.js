@@ -105,12 +105,20 @@ export const createScheduledTaskService = (dependencies) => {
   // Only a model this call actually changes is checked: a task whose stored id
   // has since disappeared must stay retimeable, disableable and deletable, and
   // that is the task a user needs to reach to remove the dead id.
+  //
+  // A task that follows session defaults stores a pair it never runs — the
+  // editor prefills it from the composer pick even while the picker is hidden —
+  // so the pair is only judged once it is what the fire path would dispatch.
+  // That happens when defaults are off, including on the save that turns them
+  // off, where the pair itself has not changed but starts to matter.
   const assertNamedModelKnown = async (projectID, task, previous, resolvedDirectory) => {
     const providerID = asNonEmptyString(task?.execution?.providerID);
     const modelID = asNonEmptyString(task?.execution?.modelID);
     if (!providerID || !modelID) return;
+    if (task?.execution?.useDefaults === true) return;
     const stored = previous?.execution;
-    if (stored?.providerID === providerID && stored?.modelID === modelID) return;
+    const unchanged = stored?.providerID === providerID && stored?.modelID === modelID;
+    if (unchanged && stored?.useDefaults !== true) return;
     if (!readModelCatalog) return;
     // `upsert` resolves the target once for its own guard and hands the result
     // here, so an enabled targeted save reads the session a single time.

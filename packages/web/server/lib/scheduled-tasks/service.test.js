@@ -698,6 +698,44 @@ describe('scheduled-task model check', () => {
     expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
   });
 
+  it('does not judge a model a defaults task never runs', async () => {
+    // The editor prefills the pair from the composer pick even while the
+    // picker is hidden behind "use session defaults", so a defaults task
+    // carries `openchamber/auto` and the run ignores it.
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service, projectConfigRuntime } = createService({ readModelCatalog });
+
+    await expect(service.upsert('project-test', task({
+      prompt: 'Run', providerID: 'openchamber', modelID: 'auto', useDefaults: true,
+    }))).resolves.toHaveProperty('task');
+    expect(readModelCatalog).not.toHaveBeenCalled();
+    expect(projectConfigRuntime.upsertScheduledTask).toHaveBeenCalledOnce();
+  });
+
+  it('judges the stored pair when a save turns session defaults off', async () => {
+    // The pair did not change, but it starts being what the fire dispatches.
+    const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
+    const { service } = createService({
+      readModelCatalog,
+      projectConfigRuntime: {
+        listScheduledTasks: vi.fn(async () => [{
+          id: 'task-1',
+          name: 'Nightly',
+          schedule: { kind: 'cron', cron: '0 9 * * *' },
+          execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead', useDefaults: true },
+        }]),
+      },
+    });
+
+    await expect(service.upsert('project-test', {
+      id: 'task-1',
+      name: 'Nightly',
+      schedule: { kind: 'cron', cron: '0 9 * * *' },
+      execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead', useDefaults: false },
+    })).rejects.toThrow('unknown model: gone/dead');
+    expect(readModelCatalog).toHaveBeenCalledOnce();
+  });
+
   it('validates a targeted task against its worktree without fetching the session twice', async () => {
     const readModelCatalog = vi.fn(async () => [{ providerID: 'p', id: 'm' }]);
     const validateTarget = vi.fn(async () => ({ directory: '/worktree' }));
