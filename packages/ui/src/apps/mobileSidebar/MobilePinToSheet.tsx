@@ -1,12 +1,10 @@
 import React from 'react';
-import { Icon } from '@/components/icon/Icon';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { canAddSidebarSection, closePinToRequest, requestNewPinList, useSidebarSectionsUiStore } from '@/components/session/sidebar/sections/sectionActions';
 import { useI18n } from '@/lib/i18n';
 import { DEFAULT_PIN_LIST, SIDEBAR_PIN_LISTS_MAX } from '@/lib/sidebarSections';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-
-const ROW_CLASS = 'flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-start typography-ui-label text-foreground active:bg-interactive-hover';
 
 /** The phone's Pin to: Pinned, the user's pin lists, a new list, and Unpin while pinned. */
 export const MobilePinToSheet: React.FC = () => {
@@ -18,36 +16,29 @@ export const MobilePinToSheet: React.FC = () => {
     closePinToRequest();
     action();
   };
-  const check = <Icon name="check" className="ms-auto size-4 text-primary" />;
   return (
     <MobileOverlayPanel open={request !== null} title={t('sessions.sidebar.pinTo.label')} onClose={closePinToRequest}>
       {request ? (
-        <div className="flex flex-col gap-0.5 p-2">
-          <button type="button" className={ROW_CLASS} onClick={() => choose(() => { if (request.current !== DEFAULT_PIN_LIST) request.pin(null); })}>
-            <Icon name="pushpin" className="size-4 text-muted-foreground" />
-            <span className="min-w-0 truncate">{t('sessions.sidebar.activity.pinnedTitle')}</span>
-            {request.current === DEFAULT_PIN_LIST ? check : null}
-          </button>
+        <>
+          <MobileSheetRow icon="pushpin" selected={request.current === DEFAULT_PIN_LIST} onClick={() => choose(() => { if (request.current !== DEFAULT_PIN_LIST) request.pin(null); })}>
+            {t('sessions.sidebar.activity.pinnedTitle')}
+          </MobileSheetRow>
           {pinLists.map((list) => (
-            <button key={list.id} type="button" className={ROW_CLASS} onClick={() => choose(() => { if (request.current !== list.id) request.pin(list.id); })}>
-              <Icon name="pushpin" className="size-4 text-muted-foreground" />
-              <span className="min-w-0 truncate" dir="auto">{list.name}</span>
-              {request.current === list.id ? check : null}
-            </button>
+            <MobileSheetRow key={list.id} icon="pushpin" selected={request.current === list.id} onClick={() => choose(() => { if (request.current !== list.id) request.pin(list.id); })}>
+              <span dir="auto">{list.name}</span>
+            </MobileSheetRow>
           ))}
           {canCreateList ? (
-            <button type="button" className={ROW_CLASS} onClick={() => choose(() => requestNewPinList((listId) => request.pin(listId)))}>
-              <Icon name="add" className="size-4 text-muted-foreground" />
-              <span>{t('sessions.sidebar.pinTo.newList')}</span>
-            </button>
+            <MobileSheetRow icon="add" onClick={() => choose(() => requestNewPinList((listId) => request.pin(listId)))}>
+              {t('sessions.sidebar.pinTo.newList')}
+            </MobileSheetRow>
           ) : null}
           {request.current ? (
-            <button type="button" className={ROW_CLASS} onClick={() => choose(request.unpin)}>
-              <Icon name="unpin" className="size-4 text-muted-foreground" />
-              <span>{t('sessions.sidebar.session.menu.unpin')}</span>
-            </button>
+            <MobileSheetRow icon="unpin" onClick={() => choose(request.unpin)}>
+              {t('sessions.sidebar.session.menu.unpin')}
+            </MobileSheetRow>
           ) : null}
-        </div>
+        </>
       ) : null}
     </MobileOverlayPanel>
   );

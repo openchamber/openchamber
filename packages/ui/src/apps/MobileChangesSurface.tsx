@@ -1296,12 +1296,10 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
 
   const renderComparison = () => {
     if (mode === 'pr' && prComparison.diffUnavailable) return <ChangeRequestDiffUnavailable provider={prComparison.provider} className="h-full" />;
-    if (mode === 'pr' && !selectedPr) return <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-      <MobileChangesState loading={prComparison.loading} message={prComparison.error ?? (prComparison.loading
-        ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', prChangeRequestTerm))
-        : t(changeRequestCopy('pullRequestComparison.select', prChangeRequestTerm)))} />
-      {!prComparison.loading && <PullRequestComparisonSelector mobile comparison={prComparison} />}
-    </div>;
+    // The header above already holds the picker.
+    if (mode === 'pr' && !selectedPr) return <MobileChangesState loading={prComparison.loading} message={prComparison.error ?? (prComparison.loading
+      ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', prChangeRequestTerm))
+      : t(changeRequestCopy('pullRequestComparison.select', prChangeRequestTerm)))} />;
     if (mode === 'branch' && !branchComparison.base) {
       return <MobileChangesState
         loading={!branchComparison.resolved}

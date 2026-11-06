@@ -409,7 +409,7 @@
   }
 
   .pwa-overlay-panel .pwa-overlay-scroll {
-    padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) + 12px);
+    padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) + 1rem);
   }
 }
 
@@ -902,4 +902,52 @@
 /* The glass layer is the background, so it is exempt from the fade. */
 .oc-composer-morph-content-fade > :not([data-dictation-glass]) {
   animation: oc-composer-morph-fade 0.18s ease-out 0.26s both;
+}
+
+/* On a phone every dialog is a bottom sheet, like MobileOverlayPanel: dozens of
+   dialogs share one window, so the shape lives here and callers stay as they
+   are. dialog.tsx marks the layer, leaving tablets and a window held to the top
+   (the command palette) where they are. */
+[data-slot="dialog-layer"][data-sheet] {
+  align-items: flex-end;
+  padding: max(0.75rem, env(safe-area-inset-top)) 0 0;
+}
+
+[data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"] {
+  width: 100%;
+  max-width: 32rem;
+  padding: 1rem 1rem calc(1rem + var(--oc-safe-area-bottom-visual, 0px));
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  transform-origin: bottom;
+  transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+[data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"][data-starting-style],
+[data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"][data-ending-style] {
+  opacity: 1;
+  scale: 1;
+  transform: translateY(100%);
+}
+
+[data-slot="dialog-layer"][data-sheet] [data-slot="dialog-header"] {
+  text-align: start;
+  padding-inline-end: 2rem;
+}
+
+[data-slot="dialog-layer"][data-sheet] [data-slot="dialog-title"] {
+  font-size: var(--text-ui-label);
+}
+
+/* Buttons hug their labels here too, at the end of the row. */
+[data-slot="dialog-layer"][data-sheet] [data-slot="dialog-footer"] {
+  flex-flow: row wrap;
+  justify-content: flex-end;
+  padding-bottom: 0 !important;
+}
+
+/* Over the raised keyboard the sheet floats, as MobileOverlayPanel's does. */
+:root.oc-capacitor-app.oc-keyboard-open [data-slot="dialog-layer"][data-sheet] > [data-slot="dialog-content"] {
+  border-end-start-radius: var(--radius-xl, 0.75rem);
+  border-end-end-radius: var(--radius-xl, 0.75rem);
 }

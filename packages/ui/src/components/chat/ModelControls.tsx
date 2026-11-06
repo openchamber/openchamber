@@ -19,6 +19,7 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSection, PICKER_SECTION_HEADER_CLASS } from '@/components/ui/MobileSheetList';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -83,7 +84,6 @@ const selectLatestReplyModelChoice = (messages: Message[], state: State) => find
 );
 
 /** A section caption in the composer's pickers, the same as the model picker's. */
-const PICKER_SECTION_HEADER_CLASS = 'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 px-2 py-1.5';
 
 const AgentDescriptionTooltip: React.FC<{
     description?: string;
@@ -1737,14 +1737,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             >
                 <div className="flex flex-col gap-1.5">
                     {}
-                    <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                    <div className="oc-tile rounded-lg px-3 py-2">
                             <div className="typography-micro text-muted-foreground mb-0.5">{t('chat.modelControls.provider')}</div>
                         <div className="typography-meta text-foreground font-medium">{getProviderDisplayName()}</div>
                     </div>
 
                     {}
                     {currentCapabilityIcons.length > 0 && (
-                        <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                        <div className="oc-tile rounded-lg px-3 py-2">
                             <div className="typography-micro text-muted-foreground mb-1">{t('chat.modelControls.capabilities')}</div>
                             <div className="flex flex-wrap gap-1.5">
                                 {currentCapabilityIcons.map(({ key, icon, label }) => (
@@ -1759,7 +1759,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                     {}
                     {(inputModalityIcons.length > 0 || outputModalityIcons.length > 0) && (
-                        <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                        <div className="oc-tile rounded-lg px-3 py-2">
                             <div className="typography-micro text-muted-foreground mb-1">{t('chat.modelControls.modalities')}</div>
                             <div className="flex flex-col gap-1">
                                 {inputModalityIcons.length > 0 && (
@@ -1783,7 +1783,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     )}
 
                     {}
-                    <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                    <div className="oc-tile rounded-lg px-3 py-2">
                         <div className="typography-micro text-muted-foreground mb-1">{t('chat.modelControls.limits')}</div>
                         <div className="flex flex-col gap-0.5">
                             <div className="flex items-center justify-between">
@@ -1798,7 +1798,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     </div>
 
                     {}
-                    <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                    <div className="oc-tile rounded-lg px-3 py-2">
                         <div className="typography-micro text-muted-foreground mb-1">{t('chat.modelControls.metadata')}</div>
                         <div className="flex flex-col gap-0.5">
                             <div className="flex items-center justify-between">
@@ -1850,13 +1850,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 <div className="flex flex-col gap-1.5">
                     {}
                     {currentAgent.description && (
-                        <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                        <div className="oc-tile rounded-lg px-3 py-2">
                             <div className="typography-meta text-foreground">{currentAgent.description}</div>
                         </div>
                     )}
 
                     {}
-                    <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                    <div className="oc-tile rounded-lg px-3 py-2">
                         <div className="typography-micro text-muted-foreground mb-0.5">{t('chat.modelControls.mode')}</div>
                         <div className="typography-meta text-foreground font-medium">
                             {currentAgent.mode === 'primary'
@@ -1871,7 +1871,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                     {}
                     {(hasModelConfig || hasTemperatureOrTopP) && (
-                        <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                        <div className="oc-tile rounded-lg px-3 py-2">
                             <div className="typography-micro text-muted-foreground mb-1">{t('chat.modelControls.model')}</div>
                             {hasModelConfig && (
                                 <div className="typography-meta text-foreground font-medium mb-1">
@@ -1898,7 +1898,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     )}
 
                     {}
-                    <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                    <div className="oc-tile rounded-lg px-3 py-2">
                         <div className="typography-micro text-muted-foreground mb-1">{t('chat.modelControls.permissions')}</div>
                         <div className="flex flex-col gap-1">
                             <div className="flex items-center justify-between">
@@ -1933,7 +1933,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                     {}
                     {hasCustomPrompt && (
-                        <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-2 py-1.5">
+                        <div className="oc-tile rounded-lg px-3 py-2">
                             <div className="flex items-center justify-between">
                                 <span className="typography-meta text-muted-foreground">{t('chat.modelControls.customPrompt')}</span>
                                 <Icon name="checkbox-circle" className="size-4 text-foreground" />
@@ -2080,41 +2080,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 onClose={closeMobilePanel}
                 title={t('chat.modelControls.thinking')}
             >
-                <div className="flex flex-col gap-1.5">
-                    <button
-                        type="button"
-                        className={cn(
-                            'flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-1.5 text-start',
-                            'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                            isDefault ? 'border-border bg-interactive-selection text-interactive-selection-foreground' : 'border-edge-muted'
-                        )}
-                        onClick={() => handleSelect(undefined)}
-                    >
-                        <span className="typography-meta font-medium text-foreground">{t('chat.modelControls.default')}</span>
-                        {isDefault && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
-                    </button>
-
-                    {targetVariants.map((variant) => {
-                        const selected = selectedVariant === variant;
-                        const label = formatEffortLabel(variant);
-
-                        return (
-                            <button
-                                key={variant}
-                                type="button"
-                                className={cn(
-                                    'flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-1.5 text-start',
-                                    'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                                    selected ? 'border-border bg-interactive-selection text-interactive-selection-foreground' : 'border-edge-muted'
-                                )}
-                                onClick={() => handleSelect(variant)}
-                            >
-                                <span className="typography-meta font-medium text-inherit">{label}</span>
-                                {selected && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
-                            </button>
-                        );
-                    })}
-                </div>
+                <MobileSheetRow selected={isDefault} onClick={() => handleSelect(undefined)}>
+                    {t('chat.modelControls.default')}
+                </MobileSheetRow>
+                {targetVariants.map((variant) => (
+                    <MobileSheetRow key={variant} selected={selectedVariant === variant} onClick={() => handleSelect(variant)}>
+                        {formatEffortLabel(variant)}
+                    </MobileSheetRow>
+                ))}
             </MobileOverlayPanel>
         );
     };
@@ -2131,34 +2104,23 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             .filter((agent) => !isFavoriteAgent(agent))
             .sort((a, b) => a.name.localeCompare(b.name));
 
-        const renderAgentRow = (agent: Agent) => {
-            const isSelected = agent.name === uiAgentName;
-            return (
-                <div
-                    key={agent.name}
-                    className={cn(
-                        // As tall as the model sheet's rows: the touch floor under a finger.
-                        'flex min-h-[31px] items-center gap-1 rounded-md pe-1 [@media(pointer:coarse)]:min-h-11',
-                        isSelected && 'bg-interactive-selection text-interactive-selection-foreground',
-                    )}
-                >
-                    <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-2.5 self-stretch ps-2 text-start touch-manipulation focus:outline-none"
-                        onClick={() => handleAgentChange(agent.name)}
-                    >
-                        <span className="size-1.5 flex-shrink-0 rounded-full" style={{ background: getAgentColor(agent.name).color }} />
-                        <span className="min-w-0 truncate typography-meta font-medium">{agentLabel(agent)}</span>
-                        {isSelected ? <Icon name="check" className="ms-auto size-4 flex-shrink-0 text-inherit" /> : null}
-                    </button>
+        const renderAgentRow = (agent: Agent) => (
+            <MobileSheetRow
+                key={agent.name}
+                selected={agent.name === uiAgentName}
+                leading={<span className="size-1.5 flex-shrink-0 rounded-full" style={{ background: getAgentColor(agent.name).color }} />}
+                action={(
                     <AgentFavoriteToggle
                         className="h-7 w-7 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9"
                         favorite={isFavoriteAgent(agent)}
                         onToggle={() => toggleFavoriteAgent(agent.name)}
                     />
-                </div>
-            );
-        };
+                )}
+                onClick={() => handleAgentChange(agent.name)}
+            >
+                {agentLabel(agent)}
+            </MobileSheetRow>
+        );
 
         return (
             <MobileOverlayPanel
@@ -2169,21 +2131,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             >
                 {favoriteAgentRows.length > 0 ? (
                     <>
-                        <div role="group" aria-label={t('chat.modelControls.favorites')}>
-                            <div className={PICKER_SECTION_HEADER_CLASS}>
-                                <span className="min-w-0 truncate">{t('chat.modelControls.favorites')}</span>
-                                {/* The composer's agent button cycles through these on a tap. */}
-                                <span className="ms-auto flex-shrink-0 normal-case tracking-normal font-normal">
-                                    {t('chat.modelControls.favoriteAgentsTapHint')}
-                                </span>
-                            </div>
+                        {/* The composer's agent button cycles through these on a tap. */}
+                        <MobileSheetSection title={t('chat.modelControls.favorites')} hint={t('chat.modelControls.favoriteAgentsTapHint')}>
                             {favoriteAgentRows.map(renderAgentRow)}
-                        </div>
+                        </MobileSheetSection>
                         {otherAgentRows.length > 0 ? (
-                            <div role="group" aria-label={t('chat.modelControls.agentsSection')} className="pt-2">
-                                <div className={PICKER_SECTION_HEADER_CLASS}>{t('chat.modelControls.agentsSection')}</div>
+                            <MobileSheetSection title={t('chat.modelControls.agentsSection')}>
                                 {otherAgentRows.map(renderAgentRow)}
-                            </div>
+                            </MobileSheetSection>
                         ) : null}
                     </>
                 ) : otherAgentRows.map(renderAgentRow)}

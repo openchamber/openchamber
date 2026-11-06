@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Input } from '@/components/ui/input';
+import { PICKER_SEARCH_INPUT_CLASS } from '@/components/ui/MobileSheetList';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { ChangeRequestTerm } from '@/lib/source-control/providers/descriptor';
@@ -172,7 +173,7 @@ export const ReferenceBrowserSearch: React.FC<{
     return (
         <div className={cn('flex items-center gap-2', !isMobile && 'min-w-[14rem] flex-1')}>
             <div className="relative min-w-0 flex-1">
-                <Icon name="search" className="pointer-events-none absolute inset-s-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Icon name="search" className={cn('pointer-events-none absolute inset-s-2.5 top-1/2 -translate-y-1/2 text-muted-foreground', isMobile ? 'size-3.5' : 'size-4')} />
                 <Input
                     ref={searchRef}
                     autoFocus={!isMobile}
@@ -183,7 +184,7 @@ export const ReferenceBrowserSearch: React.FC<{
                     aria-label={placeholder}
                     title={placeholder}
                     inputSize={isMobile ? 'default' : 'compact'}
-                    className="w-full ps-8 pe-14"
+                    className={cn('w-full', isMobile ? PICKER_SEARCH_INPUT_CLASS : 'ps-8', 'pe-14')}
                 />
                 <div className="absolute inset-e-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
                     {list.refreshing && list.status !== 'loading' ? (

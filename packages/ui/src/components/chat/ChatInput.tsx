@@ -97,6 +97,7 @@ import { setNativeImagePasteEnabled, subscribeToNativeImagePastes } from '@/lib/
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { ReferencePickerDialog } from '@/components/references/ReferencePickerDialog';
 import { useAttachReferences } from '@/components/references/useAttachReferences';
@@ -5409,51 +5410,43 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 title={t('chat.chatInput.actions.addAttachment')}
                 onClose={() => setMobileAttachMenuOpen(false)}
             >
-                <div className="flex flex-col px-3 pb-4 pt-1">
-                    <button
-                        type="button"
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                <MobileSheetRow
+                    icon="attachment-2"
+                    onClick={() => {
+                        // The native file/photo picker takes over next — restoring
+                        // the keyboard in between would flash it open and shut.
+                        mobileShell.cancelOverlayCloseRestore();
+                        setMobileAttachMenuOpen(false);
+                        requestAnimationFrame(handlePickLocalFiles);
+                    }}
+                >
+                    {t('chat.chatInput.actions.attachFiles')}
+                </MobileSheetRow>
+                <MobileSheetRow
+                    leading={<ProviderIcon descriptor={repositoryDescriptor} className="size-4 flex-shrink-0 text-muted-foreground" />}
+                    onClick={() => {
+                        // Hand-off to the picker: don't sync-restore the
+                        // keyboard under the overlay that opens next frame.
+                        mobileShell.skipNextOverlayCloseRestore();
+                        setMobileAttachMenuOpen(false);
+                        requestAnimationFrame(openGitHubPicker);
+                    }}
+                >
+                    {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
+                </MobileSheetRow>
+                {trackerPickers.map((picker) => (
+                    <MobileSheetRow
+                        key={picker.provider}
+                        icon={picker.icon}
                         onClick={() => {
-                            // The native file/photo picker takes over next — restoring
-                            // the keyboard in between would flash it open and shut.
-                            mobileShell.cancelOverlayCloseRestore();
-                            setMobileAttachMenuOpen(false);
-                            requestAnimationFrame(handlePickLocalFiles);
-                        }}
-                    >
-                        <Icon name="attachment-2" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.attachFiles')}
-                    </button>
-                    <button
-                        type="button"
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                        onClick={() => {
-                            // Hand-off to the picker: don't sync-restore the
-                            // keyboard under the overlay that opens next frame.
                             mobileShell.skipNextOverlayCloseRestore();
                             setMobileAttachMenuOpen(false);
-                            requestAnimationFrame(openGitHubPicker);
+                            requestAnimationFrame(picker.open);
                         }}
                     >
-                        <ProviderIcon descriptor={repositoryDescriptor} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t(`chat.chatInput.actions.linkRepositoryItem.${repositoryDescriptor.terminology.changeRequest}`, { provider: repositoryDescriptor.label })}
-                    </button>
-                    {trackerPickers.map((picker) => (
-                        <button
-                            key={picker.provider}
-                            type="button"
-                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                            onClick={() => {
-                                mobileShell.skipNextOverlayCloseRestore();
-                                setMobileAttachMenuOpen(false);
-                                requestAnimationFrame(picker.open);
-                            }}
-                        >
-                            <Icon name={picker.icon} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                            {picker.label}
-                        </button>
-                    ))}
-                </div>
+                        {picker.label}
+                    </MobileSheetRow>
+                ))}
             </MobileOverlayPanel>
         ) : null}
 

@@ -53,12 +53,11 @@ export function BranchComparisonSelector({ branches, currentBranch, base, onSele
     </Button>
   );
   const picker = (
-    <Command shouldFilter={false} className={mobile ? '[&_[data-slot=command-input-wrapper]]:h-11' : undefined} onKeyDown={(event) => {
+    <Command shouldFilter={false} onKeyDown={(event) => {
       if (event.key !== 'Escape') event.stopPropagation();
     }}>
       <CommandInput
         autoFocus={!useSheet}
-        className={mobile ? 'h-11' : undefined}
         value={search}
         onValueChange={setSearch}
         placeholder={t('gitView.branch.searchPlaceholder')}

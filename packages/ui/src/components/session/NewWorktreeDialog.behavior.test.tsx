@@ -104,7 +104,7 @@ mock.module('@/components/ui/command', () => ({
 }));
 
 mock.module('@/components/ui/MobileOverlayPanel', () => ({
-  MobileOverlayPanel: ({ children, open }: React.PropsWithChildren<{ open: boolean }>) => open ? <div>{children}</div> : null,
+  MobileOverlayPanel: ({ children, open, subheader }: React.PropsWithChildren<{ open: boolean; subheader?: React.ReactNode }>) => open ? <div>{subheader}{children}</div> : null,
 }));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 mock.module('@/components/ui/dropdown-trigger', () => ({ dropdownTriggerVariants: () => '' }));

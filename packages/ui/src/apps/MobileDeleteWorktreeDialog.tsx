@@ -3,6 +3,7 @@ import type { Session } from '@/lib/opencode/model';
 
 import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -203,34 +204,10 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
   const worktreeName = worktree.branch || worktree.label || worktree.path;
 
   const toggle = (checked: boolean, onChange: (value: boolean) => void, label: string, disabled?: boolean) => (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={cn(
-        'flex w-full items-center justify-between gap-3 rounded-xl border border-edge px-3.5 py-3 text-start transition-colors',
-        'hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        disabled && 'pointer-events-none opacity-40',
-      )}
-      style={{ touchAction: 'manipulation' }}
-    >
-      <span className="typography-ui-label text-foreground">{label}</span>
-      <span
-        className={cn(
-          'relative h-6 w-10 shrink-0 rounded-full transition-colors',
-          checked ? 'bg-primary' : 'bg-muted-foreground/30',
-        )}
-      >
-        <span
-          className={cn(
-            'absolute top-0.5 size-5 rounded-full bg-white transition-transform',
-            checked ? 'translate-x-[1.125rem] rtl:-translate-x-[1.125rem]' : 'translate-x-0.5 rtl:-translate-x-0.5',
-          )}
-        />
-      </span>
-    </button>
+    <label className={cn('oc-tile flex min-h-11 items-center justify-between gap-3 rounded-lg px-3', disabled && 'opacity-50')}>
+      <span className="typography-meta font-medium text-foreground">{label}</span>
+      <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} />
+    </label>
   );
 
   return (
@@ -260,7 +237,7 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
         </p>
 
         {isDirty ? (
-          <p className="rounded-xl border border-[var(--warning)]/40 bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3.5 py-3 typography-meta text-foreground">
+          <p className="rounded-lg bg-[var(--status-warning-background)] px-3 py-2.5 typography-meta text-foreground">
             {t('mobile.projectEdit.deleteWorktreeDirty')}
           </p>
         ) : null}

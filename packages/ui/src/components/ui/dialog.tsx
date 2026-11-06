@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n'
 import { Icon } from "@/components/icon/Icon";
 import { PopupOverlayScrollbar } from "@/components/ui/AttachedOverlayScrollbar";
 import { DockedPanelSurfaceContext } from "@/hooks/usePageColors";
+import { useDeviceInfo, useTabletLayout } from "@/lib/device";
 
 let openDialogCount = 0;
 
@@ -98,6 +99,10 @@ function DialogContent({
   ...props
 }: DialogContentProps) {
   const { t } = useI18n()
+  const { isMobile } = useDeviceInfo()
+  const { enabled: tabletLayout } = useTabletLayout()
+  const heldToTop = layerClassName?.includes('items-start') ?? false
+  const bottomSheet = isMobile && !tabletLayout && !heldToTop
   const popupRef = React.useRef<HTMLDivElement | null>(null)
   const [popup, setPopup] = React.useState<HTMLDivElement | null>(null)
   const setPopupRef = React.useCallback((node: HTMLDivElement | null) => {
@@ -121,9 +126,10 @@ function DialogContent({
       <DialogOverlay className="rounded-none" {...backdropProps} />
       {/* In the iOS app the layer takes the keyboard into its layout and
           a centred window rides half its travel (mobileNativeChrome), so a
-          field in it stays above the keyboard; a window held to the top
-          (the command palette) does not move. Elsewhere both do nothing. */}
-      <div data-keyboard-rider={layerClassName?.includes('items-start') ? undefined : '0.5'} className={cn("oc-keyboard-inset-surface fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4", layerClassName)}>
+          field in it stays above the keyboard; a phone's bottom sheet (mobile.css)
+          rides all of it; a window held to the top (the command palette) does
+          not move. Elsewhere all of them do nothing. */}
+      <div data-slot="dialog-layer" data-sheet={bottomSheet ? '' : undefined} data-keyboard-rider={heldToTop ? undefined : bottomSheet ? '1' : '0.5'} className={cn("oc-keyboard-inset-surface fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4", layerClassName)}>
         <BaseDialog.Popup
           ref={setPopupRef}
           initialFocus={initialFocus ?? defaultInitialFocus}
