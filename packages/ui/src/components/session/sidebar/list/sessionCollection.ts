@@ -274,8 +274,8 @@ export const useSessionProjectCollection = ({
     [isVisible],
   ));
   const globalSessionIds = React.useMemo(
-    () => new Set(globalActiveSessions.map((session) => session.id)),
-    [globalActiveSessions],
+    () => new Set([...globalActiveSessions, ...rawArchivedSessions].map((session) => session.id)),
+    [globalActiveSessions, rawArchivedSessions],
   );
   // Only the live sessions the global cache does not hold yet: the merge drops
   // a covered session's live copy, so its live bumps (`time.updated` on every
