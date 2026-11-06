@@ -74,6 +74,7 @@ import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/set
 import { useTrackerDescriptors } from '@/lib/trackers/registry';
 import { useSourceControlProviders } from '@/lib/source-control/providers/registry';
 import { acknowledgeNewSettingPage, getNewSettingPages } from '@/lib/settings/newSettings';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
 // UI Kit: fixed split-page sidebar width
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
@@ -1094,27 +1095,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       {isMobile ? (
         <div
           className={cn(
-            'flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3',
+            MOBILE_HEADER_CLASS,
             // The root nav list reads as a single quiet page — no divider and
             // no back arrow (the X on the right is the only way out); subpages
             // keep both.
-            mobileStage !== 'nav' && 'border-b',
+            mobileStage !== 'nav' && 'border-b border-edge',
             'bg-background'
           )}
-          style={mobileStage !== 'nav' ? { borderColor: 'var(--interactive-border)' } : undefined}
         >
           {showBackButton ? (
             <button
               type="button"
               onClick={handleBack}
               aria-label={mobileBackButtonLabel}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={MOBILE_HEADER_BUTTON_CLASS}
             >
-              <Icon name="arrow-left-s" className="h-5 w-5" />
+              <Icon name="arrow-left" className="h-5 w-5" />
             </button>
           ) : null}
 
-          <div className="min-w-0 flex-1 px-2 typography-ui-label font-medium text-foreground truncate flex items-center gap-2">
+          <div className={cn('flex min-w-0 flex-1 items-center gap-2 truncate px-1', MOBILE_HEADER_TITLE_CLASS)}>
             <span className="truncate">
               {mobileStage === 'nav'
                 ? t('settings.view.home.title')
@@ -1131,7 +1131,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               onClick={onClose}
               aria-label={t('settings.view.actions.closeSettings')}
               title={closeSettingsTitle}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={MOBILE_HEADER_BUTTON_CLASS}
             >
               <Icon name="close" className="h-5 w-5" />
             </button>

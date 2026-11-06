@@ -231,6 +231,44 @@ Controls in one row share one height.
 - Tooltips on dense rows open above their element so they never cover the
   neighbouring actions.
 
+## The phone
+
+The same control stays under the same spot of the thumb from screen to screen.
+Differences of a few pixels between screens read as drift, so reuse these
+instead of restating them.
+
+- **Top bar.** Every screen and drawer takes `MOBILE_HEADER_CLASS`,
+  `MOBILE_HEADER_BUTTON_CLASS` and `MOBILE_HEADER_TITLE_CLASS` from
+  `components/ui/mobileHeader.ts`: 56px tall, 40px round buttons centred 28px
+  from the edge, the title starting at 60px. Back is `arrow-left`, close is
+  `close`, in that bar, never drawn ad hoc.
+- **Touch sizes.** List rows are 44px (`min-h-11`), other touch controls at
+  least 36px. The in-app browser runs with a mouse and hides these: measure with
+  touch emulation (`scripts/perf/cdp.mjs`), and leave keyboard, camera and
+  native gestures to a real device.
+- **What opens.** Picking a value or searching opens a sheet
+  (`MobileOverlayPanel`, `MobileSheetList`): flat rows, a fill and a check on the
+  selected one, uppercase captions, flat search. A short list of 2 to 5 actions
+  stays a dropdown. Every dialog on a phone is a bottom sheet. The menu icon is
+  the horizontal `more`.
+- **Words over icons.** A phone has no tooltips. An icon stands alone only when
+  it reads by itself; otherwise the control says what it does in words. When
+  three worded actions do not fit one row, the most familiar icon gives up its
+  word.
+- **Hidden gestures.** A long press only repeats an action or guards a dangerous
+  one. Anything important also has a visible way in, through `···`.
+- **Less than the desktop.** Fine control stays off the phone when it costs
+  height: the editor's find is one row with no replace or options, the diff has
+  no whitespace toggle. Clear what a wider layout set, so a hidden option cannot
+  keep changing the result.
+- **Long names.** Lead with the file name, whole; the folder goes on a muted
+  line below and truncates first.
+- **Numbers.** Only what the client really knows. A long session holds just its
+  tail, so never sum over loaded messages and call it the session's total, and
+  label a figure with what it covers. Tokens read compact (`13.7M`).
+- **Colour marks state.** A control at rest is muted; colour means something
+  happened.
+
 ## Review before finishing
 
 A UI change is done when each holds on the changed screens:

@@ -28,6 +28,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
 // The full desktop file editor, loaded on demand — it's a heavy chunk and only
 // needed once a file is actually opened.
@@ -241,18 +242,18 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
     // nudge, touch menus); this host only adds the back row.
     return (
       <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-        <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b border-edge px-3 text-foreground">
+        <header className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge text-foreground')}>
           <button
             type="button"
-            className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('header.actions.backAria')}
             onClick={() => setRoute({ type: 'browser', directory: route.returnDirectory })}
             style={{ touchAction: 'manipulation' }}
           >
-            <RiArrowLeftLine className="size-5" />
+            <Icon name="arrow-left" className="size-5" />
           </button>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate typography-ui-header text-foreground">{getNameFromPath(route.path)}</h2>
+            <h2 className={cn('truncate', MOBILE_HEADER_TITLE_CLASS)}>{getNameFromPath(route.path)}</h2>
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-hidden">

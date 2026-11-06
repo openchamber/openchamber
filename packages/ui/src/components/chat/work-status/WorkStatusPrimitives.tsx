@@ -353,8 +353,7 @@ export const WorkStatusCallout: React.FC<{ children: React.ReactNode }> = ({ chi
 export const WorkStatusMeter: React.FC<{ percent: number; color: string }> = ({ percent, color }) => {
   const touch = React.useContext(WorkStatusTouchContext);
   return (
-    // On the phone it starts under the row's label, past the icon column.
-    <div className={cn('h-1 overflow-hidden rounded-full bg-[var(--chat-divider)]', touch ? 'mb-2 ms-[2.625rem] me-2.5' : 'mx-1 mb-1')}>
+    <div className={cn('h-1 overflow-hidden rounded-full bg-[var(--chat-divider)]', touch ? 'mx-2.5 mb-2' : 'mx-1 mb-1')}>
       <div
         className="h-full rounded-full"
         style={{ width: `${Math.max(0, Math.min(100, percent))}%`, backgroundColor: color }}

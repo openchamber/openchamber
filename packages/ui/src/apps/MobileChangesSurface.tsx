@@ -105,6 +105,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { findFileRepository } from '@/lib/nestedRepositories';
 import { isSameRepoFile, toAbsoluteFilePath } from '@/lib/path-utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -1174,11 +1175,11 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const renderListState = (state: React.ReactNode) => (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
       {networkDialogs}
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3 text-foreground">
+      <header className={cn(MOBILE_HEADER_CLASS, 'text-foreground')}>
         {onClose ? (
           <button
             type="button"
-            className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -1187,7 +1188,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           </button>
         ) : null}
         <div className="min-w-0 flex-1 px-1">
-          <h2 className="typography-ui-label text-foreground">{t('mobile.nav.changes')}</h2>
+          <h2 className={MOBILE_HEADER_TITLE_CLASS}>{t('mobile.nav.changes')}</h2>
           <p className="truncate typography-micro text-muted-foreground">
             {status?.current || currentDirectory || ''}
           </p>
@@ -1354,7 +1355,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         {onClose ? (
           <button
             type="button"
-            className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -1533,7 +1534,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             />
           </div>
           {/* Held at the bottom of the panel: it rides the keyboard over the list. */}
-          <div data-keyboard-rider="" className="shrink-0 border-t border-edge-muted bg-background px-4 py-3">
+          <div data-keyboard-rider="" className="oc-mobile-commit-bar shrink-0 border-t border-edge-muted bg-background px-4 py-3">
             <CommitSection
               stagedCount={stagedChangeEntries.length}
               commitMessage={commitMessage}
@@ -1658,10 +1659,10 @@ const MobileDiffDetail: React.FC<{
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-1 border-b border-edge-muted px-2 text-foreground">
+      <header className={cn(MOBILE_HEADER_CLASS, 'border-b border-edge text-foreground')}>
         <button
           type="button"
-          className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground touch-manipulation focus:outline-none active:bg-interactive-hover"
+          className={MOBILE_HEADER_BUTTON_CLASS}
           aria-label={t('header.actions.backAria')}
           onClick={onBack}
         >
@@ -1669,7 +1670,7 @@ const MobileDiffDetail: React.FC<{
         </button>
         {/* The file reads first and whole; where it lives and what it is compared in follow. */}
         <div className="min-w-0 flex-1 px-1" title={path}>
-          <h2 dir="ltr" className="oc-ui-start-align truncate typography-ui-label font-medium">{fileName}</h2>
+          <h2 dir="ltr" className={cn('oc-ui-start-align truncate', MOBILE_HEADER_TITLE_CLASS)}>{fileName}</h2>
           <p className="flex min-w-0 items-baseline gap-1.5 typography-micro text-muted-foreground">
             {folder ? <span dir="ltr" className="oc-ui-start-align min-w-0 truncate">{folder}</span> : null}
             {folder && subtitle ? <span aria-hidden className="shrink-0 opacity-60">·</span> : null}
@@ -1679,7 +1680,7 @@ const MobileDiffDetail: React.FC<{
         <button
           type="button"
           className={cn(
-            'flex size-9 shrink-0 items-center justify-center rounded-full touch-manipulation focus:outline-none active:bg-interactive-hover',
+            MOBILE_HEADER_BUTTON_CLASS,
             wholeFileComment.isOpen ? 'text-foreground' : 'text-muted-foreground',
           )}
           aria-label={t('inlineComment.actions.commentOnFile')}

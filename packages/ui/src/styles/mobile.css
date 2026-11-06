@@ -1001,3 +1001,10 @@
 .oc-compact-search .cm-panels .cm-search button[name="prev"] { order: 10; }
 .oc-compact-search .cm-panels .cm-search button[name="next"] { order: 11; }
 .oc-compact-search .cm-panels .cm-search button[name="close"] { order: 12; position: static; }
+
+/* The commit bar ends the screen: on iOS its text would sit in the rounded
+   corners. Android's surface already pads the inset, and the keyboard takes the
+   room over. */
+:root.oc-capacitor-app:not(.oc-platform-android) .oc-mobile-commit-bar {
+  padding-bottom: calc(0.75rem + max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px))));
+}
