@@ -1375,6 +1375,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.enterCommitMessage': '請輸入提交訊息',
   'gitView.toast.fetchedFromRemote': '已從 {name} Fetch',
   'gitView.toast.pulledFromRemote': '已從 {name} Pull',
+  'gitView.toast.remoteUrlUserinfo': '請刪除遠端 URL 中 @ 前面的名稱',
   'gitView.toast.generateCommitMessageFailed': '生成提交訊息失敗',
   'gitView.toast.mergeAborted': '合併已中止',
   'gitView.toast.mergeCompleted': '合併完成',

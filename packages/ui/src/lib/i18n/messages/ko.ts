@@ -1356,6 +1356,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.enterCommitMessage': '커밋 메시지를 입력하세요',
   'gitView.toast.fetchedFromRemote': '{name}에서 가져왔습니다',
   'gitView.toast.pulledFromRemote': '{name}에서 풀했습니다',
+  'gitView.toast.remoteUrlUserinfo': '원격 URL에서 @ 앞의 이름을 삭제하세요',
   'gitView.toast.generateCommitMessageFailed': '커밋 메시지 생성 실패',
   'gitView.toast.mergeAborted': 'merge 중단됨',
   'gitView.toast.mergeCompleted': 'merge 완료됨',

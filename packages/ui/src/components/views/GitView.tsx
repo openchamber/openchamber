@@ -57,6 +57,7 @@ import { getSessionWorktreeRepairActions, getMutationBlockingReasons } from '@/s
 import { IntegrateCommitsSection } from './git/IntegrateCommitsSection';
 
 import { GitHeader } from './git/GitHeader';
+import { gitRequestErrorMessage } from './git/gitRequestErrorMessage';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
 import { StashesDialog } from './git/StashesDialog';
 import { ChangesPanel, type ChangesGroupConfig } from './git/ChangesPanel';
@@ -1253,7 +1254,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
               ? t('gitView.toast.contributorPublishCancelled')
               : t('gitView.toast.syncActionFailed', { action: actionLabel })
           : err instanceof Error
-          ? err.message
+          ? gitRequestErrorMessage(err, t)
           : t('gitView.toast.syncActionFailed', { action: actionLabel });
       toast.error(message);
     } finally {
@@ -1357,7 +1358,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
           : err.code === 'contributor-publish-cancelled'
             ? t('gitView.toast.contributorPublishCancelled')
             : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') })
-        : err instanceof Error ? err.message : t('gitView.toast.createCommitFailed');
+        : err instanceof Error ? gitRequestErrorMessage(err, t) : t('gitView.toast.createCommitFailed');
       toast.error(message);
     } finally {
       recovery?.finish();

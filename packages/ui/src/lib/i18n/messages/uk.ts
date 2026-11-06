@@ -3731,6 +3731,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.branchCreatedLocally': 'Branch created locally, but failed to set upstream.',
   'gitView.toast.pushedToUpstream': 'Pushed to {name}',
   'gitView.toast.pulledFromRemote': 'Отримано зміни з {name}',
+  'gitView.toast.remoteUrlUserinfo': 'Приберіть імʼя перед @ з адреси remote',
   'chat.formCard.inputNeeded': 'Потрібна відповідь',
   'chat.formCard.fromSubagent': 'від субагента',
   'chat.formCard.required': 'Обовʼязково',

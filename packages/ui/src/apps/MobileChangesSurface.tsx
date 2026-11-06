@@ -22,6 +22,7 @@ import { CommitSection } from '@/components/views/git/CommitSection';
 import { ConflictDialog } from '@/components/views/git/ConflictDialog';
 import { DirtyBranchSwitchDialog } from '@/components/views/git/DirtyBranchSwitchDialog';
 import { SyncActions } from '@/components/views/git/SyncActions';
+import { gitRequestErrorMessage } from '@/components/views/git/gitRequestErrorMessage';
 import { ContributorDestinationDialog } from '@/components/views/git/ContributorDestinationDialog';
 import { useContributorDestinationChooser } from '@/components/views/git/contributorDestination';
 import { RepositoryConfigurationDialog } from '@/components/sections/openchamber/SourceControlBindingSettings';
@@ -878,7 +879,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           : error.code === 'contributor-publish-cancelled'
             ? t('gitView.toast.contributorPublishCancelled')
             : t('gitView.toast.syncActionFailed', { action: actionLabel })
-        : error instanceof Error ? error.message : t('gitView.toast.syncActionFailed', { action: actionLabel }));
+        : error instanceof Error ? gitRequestErrorMessage(error, t) : t('gitView.toast.syncActionFailed', { action: actionLabel }));
     } finally {
       recovery.finish();
       if (recovery.isCurrent()) setSyncAction(null);
@@ -1041,7 +1042,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           : error.code === 'contributor-publish-cancelled'
             ? t('gitView.toast.contributorPublishCancelled')
             : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') })
-        : error instanceof Error ? error.message : t('gitView.toast.createCommitFailed'));
+        : error instanceof Error ? gitRequestErrorMessage(error, t) : t('gitView.toast.createCommitFailed'));
     } finally {
       recovery?.finish();
       setCommitAction(null);

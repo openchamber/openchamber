@@ -1289,6 +1289,7 @@ export const dict = {
   'gitView.toast.enterCommitMessage': 'יש להזין הודעת קומיט',
   'gitView.toast.fetchedFromRemote': 'בוצעה הבאה מ-{name}',
   'gitView.toast.pulledFromRemote': 'בוצעה משיכה מ-{name}',
+  'gitView.toast.remoteUrlUserinfo': 'הסירו את השם שלפני @ מכתובת ה-URL המרוחקת',
   'gitView.toast.generateCommitMessageFailed': 'יצירת הודעת הקומיט נכשלה',
   'gitView.toast.mergeAborted': 'המיזוג בוטל',
   'gitView.toast.mergeCompleted': 'המיזוג הושלם',
