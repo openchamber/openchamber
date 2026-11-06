@@ -318,9 +318,15 @@ instead of riding along with the next prompt, and the reverted user message is
 the first user message at or after the marker. Sending or compacting past the
 marker commits it: OpenCode deletes the boundary message and everything after
 it in one `session.revert.committed` event, with no `message.removed` per
-record. `events.ts` translates it into a `session.revert.committed` sync
-event, which the reducer applies by trimming messages and parts from the
-boundary and dropping the marker in one step, followed by the plain
+record. A UI block answer, a command run from a reply and a `!` command commit
+it first (`commitStagedRevert`): OpenCode admits them past the boundary without
+committing, so the next prompt's commit would delete them, and a block answer
+would not even start a turn. Committing makes the revert final the way a send
+does; refusing that input while a revert is staged would leave the user a block
+they cannot answer and no hint why. `events.ts` translates OpenCode's event
+into a `session.revert.committed` sync event, which the reducer applies by
+trimming messages and parts from the boundary and dropping the marker in one
+step, followed by the plain
 `revert: null` patch the global session list needs. The loaded window is
 always the transcript's tail, so a boundary the window does not hold is
 older than everything loaded: the reducer empties the window when the store's
