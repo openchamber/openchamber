@@ -512,6 +512,25 @@ describe('skill switches', () => {
     expect(writeSkillDisabled(config, 'deploy', false)).toBe(false);
   });
 
+  it('counts a deny as off only when no exact allow for the skill follows it', () => {
+    const allow = { action: 'skill.use', resource: 'report', effect: 'allow' };
+    const legacyAllow = { action: 'integration.use', resource: 'skill:report', effect: 'allow' };
+
+    const overridden = { policies: [deny('report'), allow] };
+    expect(writeSkillDisabled(overridden, 'report', true)).toBe(true);
+    expect(overridden.policies).toEqual([deny('report'), allow, deny('report')]);
+
+    const legacyOverridden = { policies: [deny('report'), legacyAllow] };
+    expect(writeSkillDisabled(legacyOverridden, 'report', true)).toBe(true);
+
+    const alreadyOff = { policies: [allow, deny('report'), { action: 'skill.use', resource: 'other', effect: 'allow' }] };
+    expect(writeSkillDisabled(alreadyOff, 'report', true)).toBe(false);
+
+    const deprecatedDeny = { experimental: { policies: [deny('report')] }, policies: [allow] };
+    expect(writeSkillDisabled(deprecatedDeny, 'report', true)).toBe(true);
+    expect(deprecatedDeny.policies).toEqual([allow, deny('report')]);
+  });
+
   it('turns on a deny written by hand, in the deprecated key too, and drops what it empties', () => {
     const config = { policies: [deny('deploy')], experimental: { policies: [deny('deploy')] } };
     expect(writeSkillDisabled(config, 'deploy', true)).toBe(false);

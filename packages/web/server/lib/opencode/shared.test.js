@@ -713,7 +713,7 @@ describe('writeConfig preserves JSONC comments (issue #3587)', () => {
 
   const retainedObject = { package: 'example-plugin-a', options: { timeoutMs: 5000 } };
   for (const [name, next] of [
-    ['append', [retainedObject, 'b', 'c', 'd']],
+    ['insert in the middle', [retainedObject, 'x', 'b', 'c']],
     ['reorder', ['b', 'd', 'c']],
   ]) {
     it(`round-trips a whole-array replacement for ${name}`, () => {
@@ -737,6 +737,38 @@ describe('writeConfig preserves JSONC comments (issue #3587)', () => {
       expect(readConfigFile(file)).toEqual({ values: next });
     });
   }
+
+  it('appends and removes array elements in place, keeping the other elements and comments', () => {
+    const original = [
+      '{',
+      '  "values": [',
+      '    // a',
+      '    { "id": "a" }, // after a',
+      '    // b',
+      '    "b",',
+      '    "c", // after c',
+      '  ],',
+      '}',
+      '',
+    ].join('\r\n');
+    const file = writeFixture('array-elements.jsonc', original);
+
+    writeConfig({ values: [{ id: 'a' }, 'b', 'c', 'd'] }, file);
+    expect(fs.readFileSync(file, 'utf8')).toBe(original.replace('  ],', '    "d"\r\n  ],'));
+
+    writeConfig({ values: [{ id: 'a' }, 'c'] }, file);
+    expect(fs.readFileSync(file, 'utf8')).toBe([
+      '{',
+      '  "values": [',
+      '    // a',
+      '    { "id": "a" }, // after a',
+      '    // b',
+      '    "c" // after c',
+      '  ],',
+      '}',
+      '',
+    ].join('\r\n'));
+  });
 
   it('preserves CRLF line endings and comments', () => {
     const file = writeFixture('crlf.jsonc', [

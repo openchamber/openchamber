@@ -102,4 +102,57 @@ describe('setSkillEnabled', () => {
     expect(() => setSkillEnabled({ id: 'deploy', enabled: false, scope: 'user', directory: projectDir })).toThrow();
     expect(fs.readFileSync(globalConfig, 'utf8')).toBe('{ "policies": [');
   });
+
+  it('adds and removes only its own statement in a JSONC file, every other line stays as written', async () => {
+    const rules = [
+      '{',
+      '  // my model',
+      '  "policies": [',
+      '    // team rule: no internal skills',
+      '    { "action": "skill.use", "resource": "internal-*", "effect": "deny" },',
+      '    // keep the demo skill off',
+      '    { "action": "integration.use", "resource": "skill:demo", "effect": "deny" }',
+    ];
+    const original = [...rules, '  ]', '}', ''].join('\n');
+    const jsoncConfig = writeText(path.join(root, 'xdg', 'opencode', 'opencode.jsonc'), original);
+    const { setSkillEnabled } = await loadSkillSwitch();
+
+    expect(setSkillEnabled({ id: 'deploy', enabled: false, scope: 'user', directory: projectDir }))
+      .toEqual({ changed: [jsoncConfig] });
+    expect(fs.readFileSync(jsoncConfig, 'utf8')).toBe([
+      ...rules.slice(0, -1),
+      `${rules.at(-1)},`,
+      '    {',
+      '      "action": "skill.use",',
+      '      "resource": "deploy",',
+      '      "effect": "deny"',
+      '    }',
+      '  ]',
+      '}',
+      '',
+    ].join('\n'));
+
+    setSkillEnabled({ id: 'deploy', enabled: true, scope: 'user', directory: projectDir });
+    expect(fs.readFileSync(jsoncConfig, 'utf8')).toBe(original);
+
+    setSkillEnabled({ id: 'demo', enabled: true, scope: 'user', directory: projectDir });
+    expect(fs.readFileSync(jsoncConfig, 'utf8')).toBe([
+      ...rules.slice(0, 4),
+      rules[4].slice(0, -1),
+      rules[5],
+      '  ]',
+      '}',
+      '',
+    ].join('\n'));
+  });
+
+  it('turns off a skill whose deny is followed by an allow in the same file', async () => {
+    const allow = { action: 'skill.use', resource: 'report', effect: 'allow' };
+    write(globalConfig, { policies: [deny('report'), allow] });
+    const { setSkillEnabled } = await loadSkillSwitch();
+
+    expect(setSkillEnabled({ id: 'report', enabled: false, scope: 'user', directory: projectDir }))
+      .toEqual({ changed: [globalConfig] });
+    expect(read(globalConfig)).toEqual({ policies: [deny('report'), allow, deny('report')] });
+  });
 });
