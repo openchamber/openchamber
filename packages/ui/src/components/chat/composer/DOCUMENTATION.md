@@ -954,6 +954,32 @@ row. An index answer of nothing keeps the query searching until the second
 answer, so "no matches" still means both finished.
 `../FileMentionAutocomplete.test.tsx` covers these states.
 
+### Why the `/` list is as wide as the `@` list
+
+At the 420px every other list takes, command descriptions were cut after a
+few words (#6160). The `/` list reads the `@` list's width constant
+(`MENTION_LIST_WIDTH` in `state/useAutocompletePosition.ts`, with the matching
+`max-w` class cap), so the two stay equal if either changes; a narrower
+composer still narrows both.
+
+## Effort label color
+
+The effort after the model name (`ModelControls`, `MobileEffortButton` on the
+phone) takes a status text color by level through `getEffortTone` in
+`../mobileControlsUtils.ts`: grey only for `default`; info for `none`,
+`minimal`, `low`, `thinking` and any unknown name; warning for `medium` and
+`high`; error for `xhigh` and `max`. The level menu stays uncolored.
+
+### Why the effort label is colored, unlike other composer metadata
+
+Composer metadata is muted unless it shows a state (`openchamber-ui-guidance`,
+*Quiet at rest*), and the effort followed that until #6160: a grey label at
+every level hid that the next send goes out at `max`. The maintainer chose
+status colors by level as the one exception. Colored labels sit at `opacity`
+0.75 so they stay quiet beside the model name; plain opacity and the computed
+`--status-*-text` colors are used because `color-mix` and Tailwind `/NN`
+alpha break on old Android WebViews.
+
 ## Other sessions as context
 
 Another session, or one message of it, is mentioned in the text itself: as

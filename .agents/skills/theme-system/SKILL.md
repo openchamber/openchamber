@@ -11,7 +11,7 @@ description: Use when creating or modifying OpenChamber UI components, styling, 
 - Use shared UI primitives before introducing feature-local controls.
 - Every dropdown-style value-picker trigger takes its chrome from `dropdownTriggerVariants` in `packages/ui/src/components/ui/dropdown-trigger.ts`; call sites add layout classes only. Deliberately chrome-less pickers in composers or headers are the exception.
 - Apply hover tokens only to interactive elements.
-- Use status colors only for actual status/feedback. The composer's effort label is the one exception (`openchamber-ui-guidance`, *Quiet at rest*).
+- Use status colors only for actual status/feedback.
 - Use selection tokens for selected state and primary tokens for primary actions.
 
 ## Load References By Task

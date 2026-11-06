@@ -67,10 +67,8 @@ design within it; the budget only tells you when a zone has grown loud.
 - **Colour carries state, and only state.** Blue (info): working. Green
   (success): finished, waiting to be read. Yellow (warning): waiting on the
   user (a question, a permission). Red: an error. Everything that is not a
-  state (a pin, an agent's label text, a mode chip) is muted or plain text;
-  an agent keeps its colour on its icon only. The composer's effort label is
-  the one deliberate exception (#6160): it takes a status text colour by level
-  at reduced opacity (`getEffortTone`), grey only for `default`. One state per
+  state (a pin, a picked effort, an agent's label text, a mode chip) is muted
+  or plain text; an agent keeps its colour on its icon only. One state per
   spot: while a session waits on the user, its running mark and timer step
   aside for the yellow mark. A state's colour stays visible at rest; making
   it lighter means fewer coloured pixels (a glyph instead of a tinted pad or
@@ -245,6 +243,5 @@ A UI change is done when each holds on the changed screens:
   no toolbar wraps;
 - controls hug their content; only form fields and canvases fill;
 - icons sit inline, rows read in one line where they fit;
-- the zone stays within its rest budget, and colour marks only state (the
-  composer's effort label excepted);
+- the zone stays within its rest budget, and colour marks only state;
 - the screen was checked in both light and dark themes.
