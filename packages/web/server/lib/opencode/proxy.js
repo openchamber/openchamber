@@ -142,6 +142,22 @@ export const createOpenCodeProxyAgent = (target) => (
 );
 
 /**
+ * Applies the archive state OpenChamber retained before OpenCode owned it.
+ * A number archives, null explicitly restores, and an absent entry preserves
+ * the upstream record.
+ */
+export const applyOwnedArchiveState = (session, archivedById) => {
+  if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
+  if (!archivedById || !Object.prototype.hasOwnProperty.call(archivedById, session.id)) return session;
+  const archivedAt = archivedById[session.id];
+  const time = session.time && typeof session.time === 'object' ? session.time : {};
+  if (typeof archivedAt === 'number') return { ...session, time: { ...time, archived: archivedAt } };
+  if (!('archived' in time)) return session;
+  const { archived: _dropped, ...rest } = time;
+  return { ...session, time: rest };
+};
+
+/**
  * Lazily resolves the proxy agent, memoized per scheme.
  *
  * The scheme cannot be decided at registration time: `setupProxy()` runs before
@@ -461,22 +477,6 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   };
 
-  // A number archives, `null` is an explicit unarchive (drops the stamp OpenCode
-  // carries), and a session the file does not mention keeps whatever OpenCode
-  // says.
-  const withArchivedAt = (session, archived) => {
-    if (!session || typeof session !== 'object' || typeof session.id !== 'string') return session;
-    if (!Object.prototype.hasOwnProperty.call(archived, session.id)) return session;
-    const archivedAt = archived[session.id];
-    const time = session.time && typeof session.time === 'object' ? session.time : {};
-    if (typeof archivedAt === 'number') {
-      return { ...session, time: { ...time, archived: archivedAt } };
-    }
-    if (!('archived' in time)) return session;
-    const { archived: _dropped, ...rest } = time;
-    return { ...session, time: rest };
-  };
-
   /**
    * A legacy entry is the newest metadata its session has, including {}, so it
    * replaces the upstream record until migration pushes it there.
@@ -490,7 +490,7 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const overlaySession = (session, { archived, stored, unreadSince }) => {
     let result = session;
-    if (archived) result = withArchivedAt(result, archived);
+    if (archived) result = applyOwnedArchiveState(result, archived);
     if (stored) result = withStoredMetadata(result, stored);
     if (unreadSince !== null) result = withUnreadBaseline(result, unreadSince);
     return result;

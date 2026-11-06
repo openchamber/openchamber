@@ -102,6 +102,7 @@ import { createTrackerSessionStatus } from './lib/trackers/session-status.js';
 import { sourceControlProviderDescriptors } from './lib/source-control/provider-descriptors.js';
 import { createSessionKnowledgeRuntime } from './lib/session-knowledge/runtime.js';
 import { createMessageSearchRuntime } from './lib/message-search/runtime.js';
+import { applyOwnedArchiveState } from './lib/opencode/proxy.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { resolveSessionDefaults } from './lib/scheduled-tasks/session-defaults.js';
 import { createChatsScope } from './lib/scheduled-tasks/chats-scope.js';
@@ -1421,6 +1422,8 @@ const messageSearchRuntime = createMessageSearchRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   globalEventHub: globalMessageStreamHub,
+  getArchivedSessions: () => openChamberSessionService.archiveStore.getAll(),
+  applyOwnedArchiveState,
   readSettings: async () => {
     const settings = await readSettingsFromDisk();
     return { enabled: settings.messageSearchEnabled === true, reasoning: settings.messageSearchReasoningEnabled === true };
