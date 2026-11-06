@@ -375,12 +375,11 @@ type ModelControlsProps = {
      */
     rememberVariantPicks?: boolean;
 } & (
-    | { selection?: never; sessionId?: never; agentSelectable?: never; modelSelectorOpen?: never; onModelSelectorOpenChange?: never }
+    | { selection?: never; sessionId?: never; modelSelectorOpen?: never; onModelSelectorOpenChange?: never }
     | {
         selection: BtwSelection;
+        /** The session an agent pick is saved for: a chat pinned in the side panel, or a BTW fork. */
         sessionId: string | null;
-        /** Offers the agent picker and saves the pick for `sessionId` (a chat pinned in the side panel). */
-        agentSelectable?: boolean;
         /**
          * The model picker's open state, owned by a composer that answers the
          * model and effort shortcuts for this selection (BTW). The tooltips
@@ -404,7 +403,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     agentOnly = false,
     selection,
     sessionId: controlledSessionId,
-    agentSelectable = false,
     rememberVariantPicks = true,
     modelSelectorOpen: controlledModelSelectorOpen,
     onModelSelectorOpenChange,
@@ -651,12 +649,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Handle agent selector close behavior
     const [agentSearchQuery, setAgentSearchQuery] = React.useState('');
     React.useEffect(() => {
-        if (!selection && !isAgentSelectorOpen) {
-            setAgentSearchQuery('');
-            if (!isCompact) {
-                requestAnimationFrame(focusColumnInput);
-            }
-        }
+        if (isAgentSelectorOpen) return;
+        // Every picker drops its query, so the next open lists every agent.
+        setAgentSearchQuery('');
+        // The focus return is the main composer's: a controlled picker's own
+        // column owns where the caret goes.
+        if (!selection && !isCompact) requestAnimationFrame(focusColumnInput);
     }, [focusColumnInput, isAgentSelectorOpen, isCompact, selection]);
 
     const selectableDesktopAgents = React.useMemo(() => {
@@ -1524,13 +1522,27 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
         if (selection) {
-            if (!agentSelectable || !controlledSessionId) return;
+            if (!controlledSessionId) return;
             // The pick belongs to the controlled session only; the app-wide
             // agent stays the main chat's.
             pickSessionAgent(controlledSessionId, agentName);
+            // An effort is remembered per agent and model, so an agent this
+            // session has not run yet has none for the current model. Carry
+            // the level the composer is on, including an explicit Default;
+            // without it a BTW fork loses the effort it copied from the main
+            // chat the moment its agent changes.
+            if (
+                currentProviderId && currentModelId && selection.variant !== undefined
+                && getAgentModelVariantForSession(controlledSessionId, agentName, currentProviderId, currentModelId) === undefined
+            ) {
+                saveAgentModelVariantForSession(controlledSessionId, agentName, currentProviderId, currentModelId, selection.variant);
+            }
             addRecentAgent(agentName);
             if (options?.closeModelSelector ?? true) {
                 setAgentMenuOpen(false);
+            }
+            if (isCompact) {
+                closeMobilePanel();
             }
             return;
         }
@@ -1553,12 +1565,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
     }, [
         addRecentAgent,
-        agentSelectable,
         closeMobilePanel,
         controlledSessionId,
+        currentModelId,
+        currentProviderId,
         currentSessionId,
+        getAgentModelVariantForSession,
         isCompact,
         pickSessionAgent,
+        saveAgentModelVariantForSession,
         setAgent,
         setAgentMenuOpen,
         selection,
@@ -3057,16 +3072,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         {renderModelSelector()}
                         {renderVariantSelector()}
                     </div>
-                    {(!selection || agentSelectable) && !isAutoSelected && renderAgentSelector()}
+                    {!isAutoSelected && renderAgentSelector()}
                 </div>
             </div>
 
             {renderMobileModelPanel()}
             {renderMobileModelDetails()}
             {renderMobileVariantPanel()}
-            {!selection && !isAutoSelected && renderMobileAgentPanel()}
+            {!isAutoSelected && renderMobileAgentPanel()}
             {renderMobileModelTooltip()}
-            {!selection && !isAutoSelected && renderMobileAgentTooltip()}
+            {!isAutoSelected && renderMobileAgentTooltip()}
         </>
     );
 
