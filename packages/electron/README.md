@@ -58,8 +58,8 @@ remote or SSH default instance, local server not skipped) main navigates the
 splash to the application as soon as the login-shell probe has resolved,
 before the local server is imported, and the renderer parses, fetches and
 compiles the application while the server starts. The runtime values the
-application needs before any request (local origin, API base, client token)
-do not exist yet, so that document ends with a parser-blocking
+application needs before any request (local origin, API base, client token,
+request headers) do not exist yet, so that document ends with a parser-blocking
 `<script src="/__runtime-config.js">`; main answers it once `activateMainWindow`
 has the resolved runtime (`packaged-runtime-config.mjs`). Module scripts run only
 after parsing ends, so no application code runs before the values are set.
@@ -71,6 +71,13 @@ through the preload bridge, and main answers only the top frame of a window on
 the packaged origin. The scheme answers every frame in the session, including
 sandboxed ones, and a request to it carries nothing that says who is asking, so
 main decides by the IPC sender's frame.
+
+The main window is created before startup resolves, so its preload has no
+request headers and leaves the headers global unset: a global the preload
+exposes is read-only, and an exposed empty set would keep the document from
+receiving the headers of a remote startup host. Main answers with the asking
+window's own headers, so a window opened for another host never receives the
+main window's.
 
 A launch runs one startup. The tray, a second launch, a deep link, a shortcut or
 macOS `activate` can ask for a window while that startup still runs, and

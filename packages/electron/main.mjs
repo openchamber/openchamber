@@ -5976,6 +5976,9 @@ ipcMain.on('openchamber:read-runtime-config', (event) => {
       localOrigin: state.localOrigin || state.sidecarUrl || '',
       apiBaseUrl: state.apiBaseUrl || state.sidecarUrl || '',
       clientToken: state.clientToken || '',
+      // The asking window's own: a window opened for another host must not
+      // send the main window's headers there.
+      requestHeaders: sanitizeRuntimeRequestHeaders(BrowserWindow.fromWebContents(event.sender)?.__ocRuntimeConfig?.requestHeaders || {}),
     }
     : null;
 });
