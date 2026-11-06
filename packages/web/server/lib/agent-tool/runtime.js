@@ -258,7 +258,7 @@ const RENDER_PAGE_HTML_DESCRIPTION = [
 
 const RENDER_PAGE_AWAIT_DESCRIPTION = [
   "Wait for the user to choose, fill in fields, or both, on the page. With ui, the form adds its own Send button; add a Button only when the choice is between actions, and any Button sends the whole form. With html, give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
-  "The call returns summary and data, or answered: false when the user wrote in the chat instead; their message follows.",
+  "The call returns summary and data, or answered: false when the user declined or wrote in the chat instead; the note says which and what to do.",
   "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button; data-variant=\"outline\" for a secondary action, \"destructive\" for a dangerous one).",
 ].join(' ');
 

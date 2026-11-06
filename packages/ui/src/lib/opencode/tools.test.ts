@@ -277,6 +277,8 @@ describe("renderedPage", () => {
       .toEqual({ kind: "answered-in-chat" })
     expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: true, answer: { answered: false, reason: "chat-sent-earlier" } } }))?.ask)
       .toEqual({ kind: "chat-sent-earlier" })
+    expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: true, answer: { answered: false, reason: "declined" } } }))?.ask)
+      .toEqual({ kind: "declined" })
     const stopped: ToolState = { status: "error", input, error: "aborted", time: { start: 1, end: 2 } }
     expect(renderedPage("openchamber_render", stopped)?.ask).toEqual({ kind: "unanswered" })
   })

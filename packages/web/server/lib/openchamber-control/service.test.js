@@ -950,6 +950,19 @@ describe('render.page', () => {
       await other;
     });
 
+    it('ends without an answer when the user declines, and tells the agent not to choose for them', async () => {
+      const { service } = createService();
+      const pending = service.execute('render.page', ask, '/repo', call);
+      await settle();
+
+      expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toEqual({ answered: false });
+      const result = await pending;
+
+      expect(result).toMatchObject({ title: 'Pick a layout', answer: { answered: false, reason: 'declined' } });
+      expect(result.note).toContain('declined');
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toThrow(expect.objectContaining({ statusCode: 404 }));
+    });
+
     it('announces when the page starts and stops waiting', async () => {
       const onPageWaitChange = vi.fn();
       const { service } = createService({ onPageWaitChange });
