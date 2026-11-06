@@ -60,7 +60,7 @@ five-second loop generated idle requests whenever the header was mounted.
 
 ### Why older Bun uses node-pty
 
-bun-pty 0.6.0 imports successfully on Bun below stable 1.4.0 but throws when spawning. Provider selection checks the Bun version before caching the provider, so older Bun, 1.4.0 prereleases, and Node use node-pty. Early 1.4.0 canaries lack the required FFI buffer_length type. The bun-pty patch retains up to 512 KiB of UTF-8-safe output until the first data listener attaches; 0.6.0 does not yet include that upstream fix.
+bun-pty 0.6.0 imports successfully on Bun below stable 1.4.0 but throws when spawning. Provider selection checks the Bun version before caching the provider, so older Bun, 1.4.0 prereleases, and Node use node-pty. Early 1.4.0 canaries lack the required FFI buffer_length type. node-pty under Bun spawns a shell that never delivers output, so a server on older Bun has no working terminal. `openchamber serve` therefore starts the server on Bun only when `bun --version` passes the same rule, `bunVersionRunsBunPty` in `bun-pty-support.js`, and on Node otherwise (#6322). The update restart reruns the CLI with the server's own runtime, so a CLI running on such a Bun starts the server with `node` from `PATH`. The bun-pty patch retains up to 512 KiB of UTF-8-safe output until the first data listener attaches; 0.6.0 does not yet include that upstream fix.
 
 ### Why replay parsing carries bounded fragments
 
