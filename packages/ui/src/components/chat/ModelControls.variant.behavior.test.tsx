@@ -1651,14 +1651,14 @@ describe('ModelControls in a pinned column', () => {
     // on the live state: `mockRestore` reaches only the object spied on.
     const saveOriginal = useSelectionStore.getState().saveAgentModelVariantForSession;
     const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
-    saveVariant.mockClear();
+    const callsBefore = saveVariant.mock.calls.length;
     const { dom, cleanup } = await renderModelControls({ selection: { ...pinnedSelection, variant: 'high' }, sessionId: 'ses_pinned' }, column);
     try {
       const stockRow = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
         .find((button) => button.textContent?.trim() === 'Stock');
       await act(async () => stockRow?.click());
       expect(useSelectionStore.getState().sessionAgentSelections.get('ses_pinned')).toBe('stock');
-      expect(saveVariant.mock.calls).toEqual([['ses_pinned', 'stock', 'pinned', 'pinned-model', 'high']]);
+      expect(saveVariant.mock.calls.slice(callsBefore)).toEqual([['ses_pinned', 'stock', 'pinned', 'pinned-model', 'high']]);
       // The main chat's agent stays its own.
       expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
     } finally {
