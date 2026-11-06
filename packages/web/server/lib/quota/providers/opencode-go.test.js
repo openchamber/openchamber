@@ -231,10 +231,10 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
     expect(windows['5h'].resetAt).toBe(Date.parse('2026-08-12T12:00:00.000Z'));
   });
 
-  it('supports Go Plus', async () => {
+  it.each(['go-plus', 'go-teams'])('supports the %s plan', async (product) => {
     const result = await fetchQuota({
       readAuth: async () => consoleAuth(),
-      fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product: 'go-plus' }))),
+      fetchImpl: async () => new Response(JSON.stringify(consolePayload({ product }))),
     });
     expect(result.ok).toBe(true);
     expect(result.usage.windows['5h'].usedPercent).toBe(25);
