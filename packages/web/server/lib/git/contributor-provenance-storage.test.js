@@ -55,8 +55,9 @@ describe('contributor provenance storage', () => {
     await expect(isContributorForkGitDirectory({ filePath, gitDirectory })).resolves.toBe(true);
     await expect(isContributorForkGitDirectory({ filePath, gitDirectory: other })).resolves.toBe(false);
 
-    // A later checkout in the same folder is another git directory on disk.
-    await fs.rm(gitDirectory, { recursive: true });
+    // A later checkout in the same folder is another git directory on disk. The old
+    // one stays on disk elsewhere: ext4 hands a removed directory's inode to the next one.
+    await fs.rename(gitDirectory, path.join(root, 'old-git'));
     await fs.mkdir(gitDirectory);
     await expect(isContributorForkGitDirectory({ filePath, gitDirectory })).resolves.toBe(false);
 
