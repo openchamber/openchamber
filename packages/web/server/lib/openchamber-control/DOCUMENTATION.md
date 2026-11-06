@@ -24,8 +24,9 @@ other.
   `schedule.create` and `schedule.update` accept `targetSessionId`, validated
   by the scheduled-task service. An empty `targetSessionId` on update clears
   the target. Create
-  without a model inherits the target selection; an explicit agent overrides
-  it. A task without a target still requires a model. When a call names a
+  without a model inherits the target selection; a model or agent the task
+  names switches the target session to it on every run, so the tool
+  descriptions say so. A task without a target still requires a model. When a call names a
   model, it is checked against the execution directory's catalog first. The
   scheduled-task service resolves the project checkout or Chats root through
   its storage/public ID mapping. A target task uses the target session's own

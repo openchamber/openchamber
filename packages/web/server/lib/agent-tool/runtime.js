@@ -98,8 +98,8 @@ const SCHEDULE_PARAMETER_NAMES = [...SCHEDULE_ONLY_PARAMETER_NAMES, 'projectId',
  * picks them for every run, so the schedule tool says what they mean there.
  */
 const SCHEDULE_PARAMETER_OVERRIDES = {
-  model: { type: 'string', description: 'provider/model; required unless targetSessionId is set, which keeps that session\'s model' },
-  agent: { type: 'string', description: 'Only when the user asks. Default: build' },
+  model: { type: 'string', description: 'provider/model; required unless targetSessionId is set. With targetSessionId, the task\'s model becomes that session\'s model; create the task without one to keep the session\'s own' },
+  agent: { type: 'string', description: 'Only when the user asks. Default: build for a new session. With targetSessionId, the task\'s agent becomes that session\'s agent; without one the session keeps its own' },
 };
 
 /**
