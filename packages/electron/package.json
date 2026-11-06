@@ -126,7 +126,8 @@
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "extendInfo": {
         "CFBundleIconName": "AppIcon",
-        "NSLocalNetworkUsageDescription": "OpenChamber needs access to devices and services on your local network."
+        "NSLocalNetworkUsageDescription": "OpenChamber needs access to devices and services on your local network.",
+        "NSAppleEventsUsageDescription": "Lets commands that you or an agent run in OpenChamber control other apps."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
