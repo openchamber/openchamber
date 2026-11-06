@@ -950,16 +950,35 @@ describe('render.page', () => {
       await other;
     });
 
-    it('ends without an answer when the user declines, and tells the agent not to choose for them', async () => {
-      const { service } = createService();
-      const pending = service.execute('render.page', ask, '/repo', call);
+    it('declines through the matching runtime without resolving the waiting call as an answer', async () => {
+      const { service, client } = createService();
+      const controller = new AbortController();
+      const pending = service.execute('render.page', ask, '/repo', { ...call, signal: controller.signal });
+      const ended = expect(pending).rejects.toMatchObject({ statusCode: 499 });
+      const stop = vi.fn(async () => { controller.abort(); return { cancelled: true }; });
+      client.rpc = vi.fn(() => ({ cancel: stop }));
       await settle();
+      expect(() => service.answerPage({ sessionId: 'ses_2', callId: 'call_1', declined: true })).toThrow(expect.objectContaining({ statusCode: 404 }));
+      await expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).resolves.toEqual({ answered: false });
+      await ended;
+      expect(stop).toHaveBeenCalledWith({ sessionId: 'ses_1', callId: 'call_1' });
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toThrow(expect.objectContaining({ statusCode: 404 }));
+    });
 
-      expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toEqual({ answered: false });
-      const result = await pending;
-
-      expect(result).toMatchObject({ title: 'Pick a layout', answer: { answered: false, reason: 'declined' } });
-      expect(result.note).toContain('declined');
+    it('reserves decline against another client and restores the wait when the runtime refuses it', async () => {
+      const { service, client } = createService();
+      let rejectCancel;
+      client.rpc = vi.fn(() => ({ cancel: () => new Promise((_resolve, reject) => { rejectCancel = reject; }) }));
+      const pending = service.execute('render.page', { ui: 'root = Stack([])', awaitAnswer: true }, '/repo', call);
+      await settle();
+      const declining = service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true });
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Draft' })).toThrow(expect.objectContaining({ statusCode: 409 }));
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toThrow(expect.objectContaining({ statusCode: 409 }));
+      await settle();
+      rejectCancel(new Error('OpenCode unavailable'));
+      await expect(declining).rejects.toThrow('OpenCode unavailable');
+      service.answerPage({ sessionId: 'ses_1', callId: 'call_1', summary: 'Submitted', data: { scope: 'API' } });
+      await expect(pending).resolves.toMatchObject({ answer: { answered: true, summary: 'Submitted', data: { scope: 'API' } } });
       expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toThrow(expect.objectContaining({ statusCode: 404 }));
     });
 

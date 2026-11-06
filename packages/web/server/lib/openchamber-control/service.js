@@ -6,7 +6,7 @@ import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
-import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { createPageAnswers, createRenderPageAction, RENDER_PAGE_CANCEL_RPC } from './render-page.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
@@ -382,7 +382,14 @@ export const createOpenChamberControlService = (dependencies) => {
       return false;
     }
   };
-  const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
+  const pageAnswers = createPageAnswers({
+    onWaitChange: onPageWaitChange,
+    cancelWait: async ({ sessionId, callId, directory }) => {
+      const client = await getClient(directory);
+      const result = await client.rpc(RENDER_PAGE_CANCEL_RPC).cancel({ sessionId, callId });
+      if (result?.cancelled !== true) throw new OpenChamberControlError('The page was not declined', 503);
+    },
+  });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers, hasUnreadChat });
   const secretRequests = createSecretRequests({ isEnabled: isSecretToolEnabled, files: secretFiles, onWaitChange: onPageWaitChange, hasUnreadChat });
   const generateImage = createImageGenerationAction({

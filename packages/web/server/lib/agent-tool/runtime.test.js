@@ -51,6 +51,7 @@ const loadTools = async (dataDir, tag, hooks = {}, removed = []) => {
   const pluginModule = await import(`${pathToFileURL(entrypoint).href}?${tag}=${Date.now()}`);
   const registered = {};
   await pluginModule.default.setup({
+    rpc: { register: async () => {} },
     tool: {
       transform: (edit) => {
         edit({ add: (tool) => { registered[tool.name] = tool; }, remove: (id) => { removed.push(id); } });
@@ -773,6 +774,57 @@ describe('managed agent tool runtime', () => {
       // Claude Code before 2.1.296 cuts an MCP tool description at 2048
       // characters, and OpenCode's Claude Agent provider cuts at 2048 itself.
       expect(tool.description.length).toBeLessThanOrEqual(2048);
+    }
+  });
+
+  it('refuses cancellation when a prompt released the call while progress was pending', async () => {
+    const { runtime } = await createRuntime();
+    const prepared = await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeRender: true });
+    const plugin = (await import(pathToFileURL(path.join(prepared.pluginDirectory, 'index.js')).href)).default;
+    const deferred = () => {
+      let resolve;
+      const promise = new Promise((done) => { resolve = done; });
+      return { promise, resolve };
+    };
+    const fetched = deferred(), marker = deferred(), release = deferred();
+    let render, cancel, prompt;
+    const interrupt = vi.fn(async () => ({ interrupted: true }));
+    await plugin.setup({
+      rpc: { register: async (_definition, methods) => { cancel = methods.cancel; } },
+      tool: { transform: (edit) => edit({ add: (tool) => { render = tool; } }) },
+      session: { hook: async (_name, hook) => { prompt = hook; }, interrupt, wait: async () => {} },
+    });
+    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL, originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = prepared.OPENCHAMBER_AGENT_TOOL_URL;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, { signal }) => {
+      fetched.resolve();
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }));
+    });
+    try {
+      const page = render.execute({ parameters: { html: '<p>Pick</p>', awaitAnswer: true } }, {
+        sessionID: 'ses_caller', id: 'call_1', signal: new AbortController().signal,
+        progress: async (metadata) => {
+          if (metadata.openchamber?.answer?.reason !== 'declined') return;
+          marker.resolve();
+          await release.promise;
+        },
+      });
+      await fetched.promise;
+      const cancellation = cancel({ sessionId: 'ses_caller', callId: 'call_1' }).then((value) => ({ value }), (error) => ({ error }));
+      await marker.promise;
+      await prompt({ sessionID: 'ses_caller' });
+      expect(JSON.parse((await page).content).data.answer.reason).toBe('chat');
+      release.resolve();
+      expect((await cancellation).error).toBeInstanceOf(Error);
+      expect(interrupt).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      fetchSpy.mockRestore();
+      if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
+      if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
     }
   });
 

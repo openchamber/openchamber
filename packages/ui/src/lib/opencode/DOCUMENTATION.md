@@ -26,6 +26,13 @@ to the shared UI domain model. Sync owns transcript membership and store writes.
 
 ## Decisions
 
+### Why an interrupted page can be declined
+
+A native page cancellation ends the tool in an error state. OpenCode retains
+its last progress, so `renderedPage` reads the explicit `openchamber.answer`
+declined marker there as well as on historical completed calls. A running
+marker remains waiting; progress alone does not confirm the stop.
+
 ### Why fresh provider reads wait for post-call requests
 
 Provider, model and default-model reads share one catalog promise per directory

@@ -68,6 +68,7 @@ export function UiPageFrame({ part, source, ask }: { part: ToolPart; source: str
             {UiBlock
                 ? (
                     <UiBlock
+                        key={ask.kind === 'declined' || decline === 'declined' ? 'declined' : part.id}
                         source={source}
                         complete
                         host={host}

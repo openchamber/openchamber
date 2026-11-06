@@ -71,6 +71,14 @@ the user can want independently:
   agent reads the message next. A message sent before the page appeared
   fired the hook too early; the server finds it in the inbox instead
   (`render-page.js`).
+  Decline uses `openchamber.render.cancel` RPC to reach the plugin executing
+  that session/call pair. The plugin persists `openchamber.answer` with
+  `{ answered: false, reason: 'declined' }`, rechecks that the call still waits,
+  then calls native `session.interrupt({ resume: false })` and waits for idle.
+  A prompt that released the call while progress was pending wins; its stale
+  callback cannot stop later work. A refused interruption restores ordinary
+  progress and rejects the RPC. Unlike a normal tool result asking the model
+  to stop, native interruption ends the current turn without another model step.
 - `openchamber_image` — `image.generate`, images made or edited by the image
   model the user chose in Settings (`../openchamber-control/generate-image.js`).
   Off by default: enabled only while `agentImageToolEnabled` is `true`, and

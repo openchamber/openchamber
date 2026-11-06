@@ -281,6 +281,9 @@ describe("renderedPage", () => {
       .toEqual({ kind: "declined" })
     const stopped: ToolState = { status: "error", input, error: "aborted", time: { start: 1, end: 2 } }
     expect(renderedPage("openchamber_render", stopped)?.ask).toEqual({ kind: "unanswered" })
+    const declined = { openchamber: { ok: true, answer: { answered: false, reason: "declined" } } }
+    expect(renderedPage("openchamber_render", { status: "running", input, time: { start: 1 }, metadata: declined })?.ask).toEqual({ kind: "waiting" })
+    expect(renderedPage("openchamber_render", { ...stopped, metadata: declined })?.ask).toEqual({ kind: "declined" })
   })
 
   test("reads a ui page, which waits and is answered like an html page", () => {

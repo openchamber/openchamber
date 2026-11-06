@@ -31,6 +31,7 @@ import {
 import { MAX_AGENTS_PER_RUN, MAX_CONCURRENT_AGENTS } from '../workflows/runtime.js';
 import {
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
+  RENDER_PAGE_CANCEL_RPC,
   RENDER_PAGE_IMAGE_BUDGET_BYTES,
   RENDER_PAGE_MAX_HTML_LENGTH,
   RENDER_PAGE_MAX_TITLE_LENGTH,
@@ -258,7 +259,7 @@ const RENDER_PAGE_HTML_DESCRIPTION = [
 
 const RENDER_PAGE_AWAIT_DESCRIPTION = [
   "Wait for the user to choose, fill in fields, or both, on the page. With ui, the form adds its own Send button; add a Button only when the choice is between actions, and any Button sends the whole form. With html, give it one button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary the choice in a few words of the user's language, shown under the page. submit works only from a click on a waiting page and returns a promise; disable the button once it resolves.",
-  "The call returns summary and data, or answered: false when the user declined or wrote in the chat instead; the note says which and what to do.",
+  "The call returns summary and data, or answered: false when the user wrote in the chat instead; their message follows. Decline stops the current turn without returning an answer; wait for the user's next prompt.",
   "Reloaded, the page gets openchamber.answer set to its data, to show the choice. Base classes: .oc-options (a grid), .oc-option on a <button> (aria-pressed=\"true\" when chosen), .oc-button (the send button; data-variant=\"outline\" for a secondary action, \"destructive\" for a dangerous one).",
 ].join(' ');
 
@@ -435,15 +436,33 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
  * arrives, whichever way it was sent. The call then returns "answered in the
  * chat" and the agent reads the message next.
  */
-const answerWaitSetup = (waitsWhen) => String.raw`        const chatController = new AbortController()
+const answerWaitSetup = (waitsWhen, cancellable) => String.raw`        const chatController = new AbortController()
         const waiting = ${waitsWhen}
         if (waiting) {
           const set = pagesWaitingForChat.get(context.sessionID) ?? new Set()
           set.add(chatController)
           pagesWaitingForChat.set(context.sessionID, set)
         }
-        const releaseWait = () => {
-          const set = pagesWaitingForChat.get(context.sessionID)
+${cancellable ? `        const cancelKey = context.sessionID + "\\u0000" + context.id
+        const cancelPage = async () => {
+          if (chatController.signal.aborted || context.signal?.aborted) throw new Error("This page no longer waits")
+          // Native interruption retains this progress on the tool. No draft is returned.
+          await context.progress({ openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, ok: true, answer: { answered: false, reason: "declined" } } })
+          // A prompt may release this call while progress is being persisted.
+          if (chatController.signal.aborted || context.signal?.aborted || cancellablePages.get(cancelKey) !== cancelPage) throw new Error("This page no longer waits")
+          try {
+            const stopped = await ctx.session.interrupt({ sessionID: context.sessionID, resume: false })
+            if (!stopped.interrupted) throw new Error("The page's execution is no longer active")
+          } catch (error) {
+            await progress()
+            throw error
+          }
+          await ctx.session.wait({ sessionID: context.sessionID })
+          return { cancelled: true }
+        }
+        if (waiting) cancellablePages.set(cancelKey, cancelPage)
+` : ''}        const releaseWait = () => {
+${cancellable ? '          if (cancellablePages.get(cancelKey) === cancelPage) cancellablePages.delete(cancelKey)\n' : ''}          const set = pagesWaitingForChat.get(context.sessionID)
           if (!set) return
           set.delete(chatController)
           if (set.size === 0) pagesWaitingForChat.delete(context.sessionID)
@@ -635,7 +654,7 @@ ${reviveDependsOn}${actionSchema.normalize}${normalizeBooleans}        const act
         if (!endpoint || !token) {
           return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
         }
-${answers ? answerWaitSetup(answers.waitsWhen) : ''}
+${answers ? answerWaitSetup(answers.waitsWhen, answers.cancellable) : ''}
         try {
           const response = await fetch(endpoint, {
             method: "POST",
@@ -748,7 +767,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       // script, the call is only an entry in execute's list, so the page
       // never showed and an answer had no call to reach.
       codeMode: false,
-      answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE },
+      answers: { waitsWhen: 'args.awaitAnswer === true', closedInChatNote: RENDER_PAGE_CLOSED_IN_CHAT_NOTE, cancellable: true },
     }));
   }
   if (includeSecret) {
@@ -813,12 +832,20 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
 // Session id -> abort controllers of the calls that wait for the user's answer
 // (a page, or a secret card).
 const pagesWaitingForChat = new Map()
+${includeRender ? 'const cancellablePages = new Map()' : ''}
 
 export default {
   id: ${JSON.stringify(PLUGIN_ID)},
   setup: async (ctx) => {
     exemptCallbackFromProxy()
-    await ctx.tool.transform((tools) => {
+${includeRender ? `    await ctx.rpc.register(${JSON.stringify(RENDER_PAGE_CANCEL_RPC)}, {
+      cancel: async ({ sessionId, callId }) => {
+        const cancel = cancellablePages.get(sessionId + "\\u0000" + callId)
+        if (!cancel) throw new Error("This page no longer waits")
+        return cancel()
+      },
+    })
+` : ''}    await ctx.tool.transform((tools) => {
 ${entries.join('')}    })${includeRender || includeSecret ? `
     await ctx.session.hook("prompt", (event) => {
       for (const controller of pagesWaitingForChat.get(event.sessionID) ?? []) controller.abort()

@@ -129,11 +129,21 @@ export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the p
 
 const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
 
-const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for them and don't ask the same question again. Stop here: say in one short line that you left it, and wait for their next message.";
-
 const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
 
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
+
+// Only the plugin executing this call may stop its turn.
+export const RENDER_PAGE_CANCEL_RPC = {
+  id: 'openchamber.render',
+  methods: {
+    cancel: {
+      input: { type: 'object', properties: { sessionId: { type: 'string' }, callId: { type: 'string' } }, required: ['sessionId', 'callId'], additionalProperties: false },
+      output: { type: 'object', properties: { cancelled: { const: true } }, required: ['cancelled'], additionalProperties: false },
+    },
+  },
+  events: {},
+};
 
 /**
  * Pages that wait for the user's answer, keyed by session and tool call. The
@@ -146,7 +156,7 @@ const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
  * `onWaitChange` hears when a page starts and stops waiting, so the server can
  * show the session as waiting for the user the way it does for a form.
  */
-export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
+export const createPageAnswers = ({ onWaitChange = () => {}, cancelWait = null } = {}) => {
   const waiting = new Map();
 
   // A listener failure must not break the call the user is answering.
@@ -173,11 +183,14 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
       reject(new OpenChamberControlError('The page stopped waiting before the user answered', 499));
     };
     signal?.addEventListener('abort', onAbort, { once: true });
-    waiting.set(key, (answer) => {
-      waiting.delete(key);
-      signal?.removeEventListener('abort', onAbort);
-      announce({ type: 'settled', sessionId, callId });
-      resolve(answer);
+    waiting.set(key, {
+      directory, cancelling: false,
+      resolve: (answer) => {
+        waiting.delete(key);
+        signal?.removeEventListener('abort', onAbort);
+        announce({ type: 'settled', sessionId, callId });
+        resolve(answer);
+      },
     });
     announce({ type: 'waiting', sessionId, callId, title, directory: directory || null });
   });
@@ -188,6 +201,9 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
     if (!sessionId || !callId) {
       throw new OpenChamberControlError('sessionId and callId are required', 400);
     }
+    const key = pageKey(sessionId, callId);
+    const entry = waiting.get(key);
+    if (entry?.cancelling) throw new OpenChamberControlError('This page is being declined', 409);
     // A client that cannot draw a page's ui reports it, so the agent hears the
     // parser's errors instead of waiting on fields nobody can see.
     if (Array.isArray(input.notDrawn)) {
@@ -196,17 +212,32 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
       if (!resolveNotDrawn) {
         throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
       }
-      resolveNotDrawn({ answered: false, reason: 'ui-not-drawn', errors });
+      resolveNotDrawn.resolve({ answered: false, reason: 'ui-not-drawn', errors });
       return { answered: false };
     }
-    // The user declined: the call ends without an answer they did not mean.
+    // Reserve the exact wait before the RPC yields, so another client cannot
+    // submit it while the executing plugin interrupts its native turn.
     if (input.declined === true) {
-      const resolveDeclined = waiting.get(pageKey(sessionId, callId));
-      if (!resolveDeclined) {
+      if (!entry) {
         throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
       }
-      resolveDeclined({ answered: false, reason: 'declined' });
-      return { answered: false };
+      if (!cancelWait) throw new OpenChamberControlError('Page cancellation is unavailable', 503);
+      entry.cancelling = true;
+      return (async () => {
+        try {
+          await cancelWait({ sessionId, callId, directory: entry.directory });
+        } catch (error) {
+          entry.cancelling = false;
+          throw error;
+        }
+        // Interruption normally aborts the callback. Never resolve it as an
+        // answer, which could resume a second OpenCode process on this database.
+        if (waiting.get(key) === entry) {
+          waiting.delete(key);
+          announce({ type: 'settled', sessionId, callId });
+        }
+        return { answered: false };
+      })();
     }
     const summary = isString(input.summary) ? input.summary.trim() : '';
     if (!summary) {
@@ -224,7 +255,7 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
     if (!resolve) {
       throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
     }
-    resolve({ answered: true, summary, data });
+    resolve.resolve({ answered: true, summary, data });
     return { answered: true };
   };
 
@@ -299,9 +330,6 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat }
   const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
   if (answer.reason === 'ui-not-drawn') {
     return { title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [UI_NOT_DRAWN_NOTE, ...answer.errors].join('\n') };
-  }
-  if (answer.reason === 'declined') {
-    return { title, answer, note: DECLINED_NOTE };
   }
   return withHidden({ title, answer }, ANSWERED_NOTE);
 };

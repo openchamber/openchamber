@@ -415,7 +415,11 @@ export function renderedPage(
   // answer (the user stopped the turn), so the question it asked is still there.
   if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true) {
     if (state.status === "running") return { ...page, title, ask: { kind: "waiting" } }
-    if (state.status === "error") return { ...page, title, ask: { kind: "unanswered" } }
+    if (state.status === "error") {
+      const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
+      const declined = result?.ok === true && result.answer?.answered === false && result.answer.reason === "declined"
+      return { ...page, title, ask: { kind: declined ? "declined" : "unanswered" } }
+    }
   }
   if (state.status !== "completed") return null
   const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
