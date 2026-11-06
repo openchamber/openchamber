@@ -2625,6 +2625,7 @@ export const dict = {
   'chat.chatInput.largeTextPaste.inline': 'הדבק בתוך ההודעה',
   'chat.chatInput.toast.addedFileMentions': 'נוספו {count} אזכורי קבצים',
   'chat.chatInput.toast.attachFileFailed': 'לא ניתן היה לצרף את הקובץ',
+  'chat.chatInput.mentionChip.editHint': 'לחיצה כפולה לעריכה כטקסט',
   'chat.chatInput.toast.attachNamedFailed': 'לא ניתן היה לצרף את {name}',
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} לא תומך בקלט מסוג {modalities} שנדרש עבור {files}. עדיין אפשר לשלוח את ההודעה, אבל ייתכן שהקבצים המצורפים האלה יתעלמו.',
   'chat.chatInput.toast.imagesSaving': 'שומר את {files}…',

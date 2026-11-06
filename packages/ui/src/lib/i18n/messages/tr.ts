@@ -2540,6 +2540,7 @@ export const dict = {
   'chat.chatInput.largeTextPaste.inline': 'Satır içi yapıştır',
   'chat.chatInput.toast.addedFileMentions': '{count} dosya bahsi eklendi',
   'chat.chatInput.toast.attachFileFailed': 'Dosya eklenemedi',
+  'chat.chatInput.mentionChip.editHint': 'Metin olarak düzenlemek için çift tıklayın',
   'chat.chatInput.toast.attachNamedFailed': '{name} eklenemedi',
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model}, {files} için gereken {modalities} girişini desteklemiyor. Mesajı yine de gönderebilirsiniz ancak bu ekler yok sayılabilir.',
   'chat.chatInput.toast.imagesSaving': '{files} kaydediliyor…',

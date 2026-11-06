@@ -2409,6 +2409,7 @@ export const dict = {
   'chat.chatInput.largeTextPaste.inline': 'Coller en ligne',
   'chat.chatInput.toast.addedFileMentions': 'Ajout des mentions du fichier {count}',
   'chat.chatInput.toast.attachFileFailed': 'Impossible de joindre le fichier',
+  'chat.chatInput.mentionChip.editHint': 'Double-cliquez pour modifier comme texte',
   'chat.chatInput.toast.attachNamedFailed': 'Échec de la connexion du {name}',
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} ne prend pas en charge l’entrée {modalities} requise par {files}. Vous pouvez tout de même envoyer le message, mais ces pièces jointes risquent d’être ignorées.',
   'chat.chatInput.toast.imagesSaving': 'Enregistrement de {files}…',

@@ -2711,6 +2711,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.largeTextPaste.inline': '본문에 붙여넣기',
   'chat.chatInput.toast.addedFileMentions': '파일 멘션 {count}개 추가됨',
   'chat.chatInput.toast.attachFileFailed': '첨부 파일 실패',
+  'chat.chatInput.mentionChip.editHint': '두 번 클릭하여 텍스트로 편집',
   'chat.chatInput.toast.attachNamedFailed': '첨부 {name} 실패',
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model}은(는) {files}에 필요한 {modalities} 입력을 지원하지 않습니다. 메시지를 보낼 수는 있지만 해당 첨부 파일이 무시될 수 있습니다.',
   'chat.chatInput.toast.imagesSaving': '{files} 저장 중…',

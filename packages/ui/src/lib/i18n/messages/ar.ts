@@ -2625,6 +2625,7 @@ export const dict = {
   'chat.chatInput.largeTextPaste.inline': 'لصق مباشرة',
   'chat.chatInput.toast.addedFileMentions': 'تمت إضافة إشارات إلى {count} ملف',
   'chat.chatInput.toast.attachFileFailed': 'تعذّر إرفاق الملف',
+  'chat.chatInput.mentionChip.editHint': 'انقر نقرًا مزدوجًا للتعديل كنص',
   'chat.chatInput.toast.attachNamedFailed': 'تعذّر إرفاق {name}',
   'chat.chatInput.toast.unsupportedAttachmentModalities': 'لا يدعم {model} إدخال {modalities} المطلوب لـ {files}. لا يزال بإمكانك إرسال الرسالة، لكن قد يتم تجاهل هذه المرفقات.',
   'chat.chatInput.toast.imagesSaving': 'جارٍ حفظ {files}…',

@@ -2711,6 +2711,7 @@ export const dict = {
   'chat.chatInput.largeTextPaste.inline': 'Inline plakken',
   'chat.chatInput.toast.addedFileMentions': '{count} bestandsvermelding(en) toegevoegd',
   'chat.chatInput.toast.attachFileFailed': 'Kan het bestand niet toevoegen',
+  'chat.chatInput.mentionChip.editHint': 'Dubbelklik om als tekst te bewerken',
   'chat.chatInput.toast.attachNamedFailed': 'Kan {name} niet toevoegen',
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} ondersteunt geen {modalities}-invoer die {files} vereist. U kunt het bericht toch verzenden, maar deze bijlagen worden mogelijk genegeerd.',
   'chat.chatInput.toast.imagesSaving': '{files} opslaan…',

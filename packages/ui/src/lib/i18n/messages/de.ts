@@ -2425,6 +2425,7 @@ export const dict = {
   'chat.chatInput.largeTextPaste.inline': 'Direkt einfügen',
   'chat.chatInput.toast.addedFileMentions': '{count} Datei(er) hinzugefügt',
   'chat.chatInput.toast.attachFileFailed': 'Fehler beim Anhängen der Datei',
+  'chat.chatInput.mentionChip.editHint': 'Doppelklicken, um als Text zu bearbeiten',
   'chat.chatInput.toast.attachNamedFailed': 'Fehler beim Anhängen von {name}',
   'chat.chatInput.toast.someFilesSkipped': 'Einige Dateien wurden übersprungen:\n{summary}',
   'chat.chatInput.toast.vscodePickFailed': 'Fehler beim Auswählen der Dateien in VS Code',

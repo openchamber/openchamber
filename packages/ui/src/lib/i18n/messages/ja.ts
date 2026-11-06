@@ -2710,6 +2710,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.commit.aiHighlights.insertAria': '挿入のariaラベル',
   'gitView.commit.aiHighlights.insertTooltip': '挿入のツールチップ',
   'gitView.commit.commitAria': 'コミットのariaラベル',
+  'chat.chatInput.mentionChip.editHint': 'ダブルクリックしてテキストとして編集',
   'chat.chatInput.toast.attachNamedFailed': '{name}の添付に失敗しました',
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} は {files} に必要な {modalities} 入力をサポートしていません。メッセージは送信できますが、これらの添付ファイルは無視される可能性があります。',
   'chat.chatInput.toast.imagesSaving': '{files} を保存中…',

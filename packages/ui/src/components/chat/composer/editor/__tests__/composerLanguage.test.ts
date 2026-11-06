@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { EditorState } from '@codemirror/state';
 import { Direction, EditorView } from '@codemirror/view';
 
+import { confirmMention, dismissMention } from '../../language/mentions';
 import type { ComposerLanguageContext } from '../../language/tokenize';
 import { composerLanguage, setLanguageContext } from '../composerLanguage';
 
@@ -202,12 +203,31 @@ describe('composerLanguage — attachment citations', () => {
     });
 
     test('chips file and agent mentions and snippets; commands keep their color only', () => {
-        const state = stateWith('ask @build about @docs/README.md with #sig then /review x');
+        const state = stateWith(
+            'ask @build about @docs/README.md with #sig then /review x',
+            context({ confirmedMentions: new Set(['docs/README.md']) }),
+        );
         expect(citationChips(state)).toEqual([
             ['@build', 'build'],
             ['@docs/README.md', 'README.md'],
             ['#sig', 'sig'],
         ]);
+    });
+
+    test('a path becomes a chip when a check confirms it, and text again when dismissed', () => {
+        const mentions = new Set<string>();
+        const ctx = context({ confirmedMentions: mentions });
+        const unchecked = stateWith('see @types/node now', ctx);
+        expect(citationChips(unchecked)).toEqual([]);
+
+        confirmMention('types/node', mentions);
+        const checked = unchecked.update({ effects: setLanguageContext.of({ ...ctx, confirmedMentionsRevision: 1 }) }).state;
+        expect(citationChips(checked)).toEqual([['@types/node', 'node']]);
+
+        dismissMention('types/node', mentions);
+        const dismissed = checked.update({ effects: setLanguageContext.of(ctx) }).state;
+        expect(citationChips(dismissed)).toEqual([]);
+        expect(dismissed.doc.toString()).toBe('see @types/node now');
     });
 
     test('draws a citation as a chip while its file is still attaching', () => {

@@ -2667,6 +2667,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.largeTextPaste.inline": "Вставити в повідомлення",
   "chat.chatInput.toast.addedFileMentions": "Додано згадки файлів {count}",
   "chat.chatInput.toast.attachFileFailed": "Не вдалося прикріпити файл",
+  "chat.chatInput.mentionChip.editHint": "Двічі клацніть, щоб редагувати як текст",
   "chat.chatInput.toast.attachNamedFailed": "Не вдалося прикріпити {name}",
   "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} не підтримує вхідні дані {modalities}, потрібні для {files}. Повідомлення все одно можна надіслати, але ці вкладення можуть бути проігноровані.",
   "chat.chatInput.toast.imagesSaving": "Зберігаю {files}…",

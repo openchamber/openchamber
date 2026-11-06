@@ -17,6 +17,7 @@
 import React from 'react';
 import { useInputStore } from '@/sync/input-store';
 import { isBtwPendingComposerKey } from '@/lib/btw';
+import { isMentionEntryInText } from '../language/mentions';
 import { useLinkedReferenceDrafts } from '../linkedReferenceDrafts';
 
 import {
@@ -143,7 +144,7 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
         // user deleted must not resurrect as a file reference on restore.
         const activeMentions = new Set<string>();
         for (const mention of confirmedMentionsRef.current) {
-            if (draft.includes(`@${mention}`)) activeMentions.add(mention);
+            if (isMentionEntryInText(mention, draft)) activeMentions.add(mention);
         }
         confirmedMentionsRef.current = activeMentions;
 

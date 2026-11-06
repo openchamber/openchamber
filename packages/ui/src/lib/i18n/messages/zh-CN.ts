@@ -2677,6 +2677,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.largeTextPaste.inline': '直接粘贴',
   'chat.chatInput.toast.addedFileMentions': '已添加 {count} 个文件提及',
   'chat.chatInput.toast.attachFileFailed': '附加文件失败',
+  'chat.chatInput.mentionChip.editHint': '双击以文本形式编辑',
   'chat.chatInput.toast.attachNamedFailed': '附加 {name} 失败',
   'chat.chatInput.toast.unsupportedAttachmentModalities': '{model} 不支持 {files} 所需的 {modalities} 输入。你仍可发送消息，但这些附件可能会被忽略。',
   'chat.chatInput.toast.imagesSaving': '正在保存 {files}…',

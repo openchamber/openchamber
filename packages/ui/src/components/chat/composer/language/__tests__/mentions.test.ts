@@ -3,7 +3,12 @@ import { describe, expect, test } from 'bun:test';
 import {
     classifyMention,
     cleanMentionName,
+    confirmMention,
+    dismissMention,
+    isFileMentionCandidate,
     isMentionBoundary,
+    isMentionDismissed,
+    isMentionEntryInText,
     looksLikeFilePath,
     scanMentions,
 } from '../mentions';
@@ -123,10 +128,11 @@ describe('classifyMention', () => {
         expect(classifyMention('Build', classifier)).toBe('agent');
     });
 
-    test('a path-like name classifies as a file', () => {
-        expect(classifyMention('src/app.ts', classifier)).toBe('file');
-        expect(classifyMention('README.md', classifier)).toBe('file');
-        expect(classifyMention('win\\path', classifier)).toBe('file');
+    test('a path-like name is only a candidate until it is confirmed', () => {
+        expect(classifyMention('src/app.ts', classifier)).toBeNull();
+        expect(isFileMentionCandidate('src/app.ts', classifier)).toBe(true);
+        expect(isFileMentionCandidate('README.md', classifier)).toBe(true);
+        expect(isFileMentionCandidate('win\\path', classifier)).toBe(true);
     });
 
     test('a picker-confirmed extensionless name classifies as a file', () => {
@@ -149,12 +155,73 @@ describe('classifyMention', () => {
             confirmedMentions: new Set<string>(),
         };
         expect(classifyMention('a.ts', shadowed)).toBe('agent');
+        expect(isFileMentionCandidate('a.ts', shadowed)).toBe(false);
+    });
+
+    test('calls, URLs and versions are not shaped like a path until confirmed', () => {
+        for (const name of [
+            'app.route("/x', 'click="a.b', 'https://example.com/a', '1.2.3', 'v19.2.0-rc.1',
+            'angular/core@19', 'scope.name@2',
+        ]) {
+            expect(looksLikeFilePath(name, new Set())).toBe(false);
+            expect(looksLikeFilePath(name, new Set([name]))).toBe(true);
+        }
+    });
+
+    test('brackets and an @ folder stay shaped like a path', () => {
+        for (const name of ['app/(auth)/page.tsx', 'app/[id]/page.tsx', 'node_modules/@types/node/index.d.ts', 'v2.config.ts']) {
+            expect(looksLikeFilePath(name, new Set())).toBe(true);
+        }
+    });
+
+    test('a dismissed name is no reference until it is confirmed again', () => {
+        const mentions = new Set(['src/app.ts']);
+        const dismissed = { knownAgentNames: new Set(['build']), confirmedMentions: mentions };
+
+        dismissMention('src/app.ts', mentions);
+        dismissMention('build', mentions);
+        expect(isMentionDismissed('src/app.ts', mentions)).toBe(true);
+        expect(classifyMention('src/app.ts', dismissed)).toBeNull();
+        expect(isFileMentionCandidate('src/app.ts', dismissed)).toBe(false);
+        expect(classifyMention('Build', dismissed)).toBeNull();
+
+        confirmMention('src/app.ts', mentions);
+        confirmMention('build', mentions);
+        expect(classifyMention('src/app.ts', dismissed)).toBe('file');
+        expect(classifyMention('build', dismissed)).toBe('agent');
     });
 
     test('looksLikeFilePath is independent of the agent list', () => {
         expect(looksLikeFilePath('a/b', new Set())).toBe(true);
         expect(looksLikeFilePath('plain', new Set())).toBe(false);
         expect(looksLikeFilePath('plain', new Set(['plain']))).toBe(true);
+    });
+});
+
+describe('isMentionEntryInText', () => {
+    const entry = (name: string) => {
+        const mentions = new Set<string>();
+        dismissMention(name, mentions);
+        return [...mentions][0]!;
+    };
+
+    test('a confirmed path must appear exactly', () => {
+        expect(isMentionEntryInText('src/a.ts', 'see @src/a.ts')).toBe(true);
+        expect(isMentionEntryInText('src/a.ts', 'see @SRC/a.ts')).toBe(false);
+    });
+
+    test('a dismissal lasts while its mention does, in any case', () => {
+        expect(isMentionEntryInText(entry('build'), 'ask @Build now')).toBe(true);
+        expect(isMentionEntryInText(entry('build'), 'ask nobody')).toBe(false);
+    });
+});
+
+describe('scanMentions — dismissed paths with spaces', () => {
+    test('a dismissed spaced path stays whole, so no part of it reads as a file', () => {
+        const mentions = new Set(['docs/my file.md']);
+        dismissMention('docs/my file.md', mentions);
+        expect(scanMentions('see @docs/my file.md', mentions).map((token) => token.name)).toEqual(['docs/my file.md']);
+        expect(isFileMentionCandidate('docs/my file.md', { knownAgentNames: new Set(), confirmedMentions: mentions })).toBe(false);
     });
 });
 

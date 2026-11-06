@@ -2667,6 +2667,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.largeTextPaste.inline": "Colar no corpo",
   "chat.chatInput.toast.addedFileMentions": "Foram adicionadas {count} menção(es) de arquivo",
   "chat.chatInput.toast.attachFileFailed": "Não foi possível anexar o arquivo",
+  "chat.chatInput.mentionChip.editHint": "Clique duas vezes para editar como texto",
   "chat.chatInput.toast.attachNamedFailed": "Não foi possível anexar {name}",
   "chat.chatInput.toast.unsupportedAttachmentModalities": "{model} não oferece suporte à entrada de {modalities} exigida por {files}. Você ainda pode enviar a mensagem, mas esses anexos podem ser ignorados.",
   "chat.chatInput.toast.imagesSaving": "Salvando {files}…",
