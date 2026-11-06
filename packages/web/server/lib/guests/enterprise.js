@@ -12,7 +12,9 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
  *   permission requests) posted to that process, so it is gated with it;
  * - `sessionControl`: that process starting sessions and sending to them;
  * - `instructions` and `skills`: text every agent reads, which can steer what
- *   it sends where.
+ *   it sends where;
+ * - `opencodePlugin`: code that runs inside OpenCode itself, with every
+ *   provider call and tool result in reach.
  * Such a package installs and runs only from a Git repository listed in the
  * policy (`allowedExtensions`; an entry ending in `/` allows every
  * repository under it, such as a whole organization), or from a local folder
@@ -21,7 +23,7 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
  * The list names repositories, not package ids: a package declares its own
  * id, so an id would let a user ship any code under an allowed name.
  */
-const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service', 'transcript', 'sessionControl', 'instructions', 'skills'];
+const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service', 'transcript', 'sessionControl', 'instructions', 'skills', 'opencodePlugin'];
 
 /** `host/path` of a clone URL (https or scp-style ssh), for comparing two spellings of one repository. */
 const repositoryKey = (value) => {

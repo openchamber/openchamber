@@ -1,0 +1,23 @@
+{
+  "name": "@openchamber/example-opencode-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.6.1"
+    },
+    "contributes": {
+      "panel": {
+        "id": "teapot-tools",
+        "name": "Teapot Tools",
+        "icon": "cup"
+      },
+      "opencodePlugin": "plugin"
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

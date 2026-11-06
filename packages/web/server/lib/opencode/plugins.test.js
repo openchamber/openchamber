@@ -86,6 +86,42 @@ describe('opencode plugins data layer', () => {
     expect(() => plugins.writePluginDirFile({ fileName: 'foo.txt', content: '', scope: 'project' }, projectDir)).toThrow('Plugin file name');
   });
 
+  test('the global entry helpers write the global file, never OPENCODE_CONFIG, and add a folder once', () => {
+    const pluginDir = fs.mkdtempSync(path.join(rootDir, 'plugin-'));
+    const globalPath = path.join(globalDir, 'opencode.json');
+    expect(plugins.readGlobalPluginEntries()).toEqual({ path: globalPath, targets: [] });
+
+    expect(plugins.addGlobalPluginEntry(pluginDir)).toEqual({ path: globalPath, added: true });
+    expect(readJson(globalPath).plugins).toEqual([pluginDir]);
+    expect(fs.existsSync(userConfigPath)).toBe(false);
+    expect(plugins.readGlobalPluginEntries().targets).toEqual([fs.realpathSync(pluginDir)]);
+
+    // Idempotent, also through another spelling of the same folder.
+    expect(plugins.addGlobalPluginEntry(`${pluginDir}/`)).toEqual({ path: globalPath, added: false });
+    expect(readJson(globalPath).plugins).toEqual([pluginDir]);
+
+    // The folder the plugins page lists for the user scope is the same entry.
+    expect(plugins.listPluginEntries(projectDir).map((entry) => [entry.spec, entry.scope, entry.sourcePath])).toEqual([[pluginDir, 'user', globalPath]]);
+  });
+
+  test('the global entry goes beside an existing opencode.jsonc and refuses a global file that does not parse', () => {
+    const pluginDir = fs.mkdtempSync(path.join(rootDir, 'plugin-'));
+    const jsoncPath = path.join(globalDir, 'opencode.jsonc');
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(jsoncPath, '{\n  // mine\n  "model": "test/model"\n}\n', 'utf8');
+    expect(plugins.addGlobalPluginEntry(pluginDir)).toEqual({ path: jsoncPath, added: true });
+    const written = fs.readFileSync(jsoncPath, 'utf8');
+    expect(written).toContain('// mine');
+    expect(written).toContain(pluginDir);
+    expect(plugins.readGlobalPluginEntries()).toEqual({ path: jsoncPath, targets: [fs.realpathSync(pluginDir)] });
+
+    fs.writeFileSync(jsoncPath, '{ "plugins": [', 'utf8');
+    const error = thrownBy(() => plugins.addGlobalPluginEntry(pluginDir));
+    expect(error.code).toBe('CONFIG_INVALID');
+    expect(error.message).toContain(jsoncPath);
+    expect(fs.readFileSync(jsoncPath, 'utf8')).toBe('{ "plugins": [');
+  });
+
   test('creates string and object entries with duplicate rejection', () => {
     plugins.createPluginEntry({ spec: 'plain-plugin', scope: 'user' }, projectDir);
     plugins.createPluginEntry({ spec: 'tuple-plugin', options: { apiKey: 'x' }, scope: 'user' }, projectDir);

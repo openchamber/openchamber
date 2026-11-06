@@ -54,6 +54,7 @@ Ein Panel anzeigen und lesen, welches Projekt und welche Sitzung offen sind, bra
 - **Lesen, was der Agent im Hintergrund sagt**: die endgültige Antwort jedes Zugs, die Fragen, die der Agent stellt, und wofür er um Erlaubnis bittet, in jedem Projekt, gesendet an den lokalen Dienst der Erweiterung. Erlaube das nur, wenn du vertraust, wohin die Erweiterung es schickt.
 - **Selbstständig Sitzungen starten und Nachrichten senden**: ihr lokaler Dienst tut das ohne geöffnetes Fenster, was Tokens kostet und Tools ausführen kann.
 - **Ergänzen, was Agenten lesen**: Text in den Anweisungen deiner Sitzungen und Skills, die jedem Agenten angeboten werden, solange die Erweiterung aktiv ist.
+- **Ein Plugin zu OpenCode hinzufügen**: Das Plugin des Pakets wird in dein OpenCode geladen, solange die Erweiterung aktiv ist. Plugin-Code läuft innerhalb von OpenCode mit deinem vollen Zugriff, wie ein lokaler Dienst; erlaube es nur, wenn du dem Autor vertraust.
 
 Ein lokaler Dienst kann auch weiterlaufen, solange OpenChamber läuft, oder nach Zeitplan aufwachen. Der Dialog sagt das unter **Lokalen Dienst ausführen**, und er sagt auch, wann das, was du nach `@` tippst, an den Dienst geht. Eine Erweiterung kann dem `@`-Menü eigene Zeilen und Agentenantworten eigene Blöcke hinzufügen. Das Pausieren der Erweiterung nimmt all das wieder weg.
 
@@ -66,6 +67,14 @@ Wenn eine neuere Version mehr verlangt, als du erlaubt hast, zeigt die Karte **F
 Neben ihrem Panel in der Leiste kann eine Erweiterung Einträge in Menüs ergänzen, die du ohnehin benutzt: die Aktionen an einer Chat-Nachricht, das Menü einer Sitzung, das +-Menü neben dem Chatfeld und Slash-Befehle wie `/task ABC-12`, die etwas anhängen, ohne etwas zu öffnen. Sie kann ihren eigenen Tools auch ein richtiges Symbol, einen Titel und ein Ausgabelayout im Chat geben, so wie es die eingebauten Tools von OpenChamber haben. Die Erweiterung entscheidet, welche davon sie anbietet; alle bleiben aus, bis du die Erweiterung erlaubst.
 
 Manche Erweiterungen zeigen statt eines eigenen Panels ein Live-Bild: das, worin ein Agent auf dem Server gerade arbeitet, etwa einen Browser oder einen Simulator. Klicke in das Bild oder tippe, um die Steuerung zu übernehmen; die Statuszeile zeigt dann **Du steuerst**, und die Browser-Aktionen des Agenten werden abgelehnt, bis du **An Agent zurückgeben** drückst. Kopieren und Einfügen funktionieren wie gewohnt. Ein gleichzeitig verbundenes anderes Gerät sieht, wer steuert, und kann die Steuerung nicht übernehmen. Eine solche Erweiterung kann neben dem Bild eigene Bedienelemente zeigen, zum Beispiel eine Adressleiste darüber oder eine Werkzeugspalte daneben.
+
+## Eine Erweiterung mit einem OpenCode-Plugin
+
+Eine Erweiterung kann ein OpenCode-Plugin mitliefern, sodass du eine Sache installierst statt zwei. Ihr Berechtigungsdialog hat eine Zeile, die mit **Ein Plugin zu OpenCode hinzufügen** beginnt. Sobald du es erlaubst, fügt OpenChamber das Plugin innerhalb weniger Sekunden dem OpenCode hinzu, das es für dich ausführt, ohne Neustart; Deaktivieren oder Entfernen der Erweiterung nimmt es auf demselben Weg wieder heraus. In deine eigene `opencode.json` wird nichts geschrieben, sodass das Plugin die Erweiterung nie überlebt und nie in dem OpenCode läuft, das du im Terminal startest.
+
+Wenn OpenChamber das OpenCode, mit dem es spricht, nicht gestartet hat, oder deine Umgebung ein eigenes `OPENCODE_CONFIG` setzt, erreicht die Konfiguration von OpenChamber dieses OpenCode nicht. Die Seite der Erweiterung sagt das und bietet **Zur globalen Konfiguration hinzufügen** an. Das schreibt den Ordner des Plugins in deine globale OpenCode-Konfiguration: Es läuft dann in jedem OpenCode auf diesem Rechner, auch im Terminal, bleibt aktiv, während die Erweiterung aus ist, und gehört dir zur Verwaltung unter **Einstellungen → Plugins**. Wenn du die Erweiterung entfernst, führt OpenCode diesen Eintrag als fehlgeschlagenes Plugin und läuft weiter, bis du den Eintrag dort löschst. Ein OpenCode auf einem anderen Rechner kann keinen Ordner von diesem laden; die Seite sagt das.
+
+VS Code und die Mobile-App laden keine Erweiterungen. Eine Sitzung in einem isolierten Space läuft mit einem eigenen OpenCode, das das Plugin nie erhält. Im Enterprise-Modus zählt das Plugin wie ein lokaler Dienst: Die Erweiterung installiert sich nur aus einem Repository, das dein Administrator freigegeben hat.
 
 ## Eine Erweiterung als Git-Host
 

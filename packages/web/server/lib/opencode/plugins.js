@@ -5,6 +5,7 @@ import {
   AGENT_SCOPE,
   OPENCODE_CONFIG_DIR,
   getFolderConfigPaths,
+  getLayerError,
   getProjectConfigCandidates,
   readConfigFile,
   readConfigLayer,
@@ -295,6 +296,44 @@ function getPluginEntry(id, workingDirectory) {
   return listPluginEntries(workingDirectory).find((entry) => entry.id === id) || null;
 }
 
+/**
+ * The plugin entries of the user's global config files (`opencode.json`, and
+ * `opencode.jsonc` beside it), as the file new entries go to and the canonical
+ * folder each local entry names. `OPENCODE_CONFIG` is left out: that file is
+ * not the global config, whatever the plugins page's user scope treats it as.
+ *
+ * @returns {{ path: string, targets: string[] }}
+ */
+function readGlobalPluginEntries(layers = readConfigLayers(null)) {
+  const sources = [{ config: layers.userConfig, filePath: layers.paths.userPath }];
+  if (layers.paths.userOverridePath) sources.push({ config: layers.userOverrideConfig, filePath: layers.paths.userOverridePath });
+  const targets = sources.flatMap((source) => readPluginList(source.config)
+    .map((item) => resolveLocalPluginPath(item.entry.package, source.filePath))
+    .filter((target) => typeof target === 'string'));
+  return { path: layers.paths.userPath, targets };
+}
+
+/**
+ * Write a local plugin folder into the user's global config, the file every
+ * OpenCode on this machine reads and watches, whatever `OPENCODE_CONFIG` names.
+ * The entry is the user's from then on: nothing here removes it. Idempotent:
+ * a folder already listed in a global file is left as it is.
+ *
+ * @param {string} directory absolute plugin folder
+ * @returns {{ path: string, added: boolean }}
+ */
+function addGlobalPluginEntry(directory) {
+  const spec = requireLoadablePluginSpec(validatePluginSpec(directory));
+  const layers = readConfigLayers(null);
+  const targetPath = layers.paths.userPath;
+  const failed = getLayerError(layers, targetPath);
+  if (failed) throw codedError(failed.message, 'CONFIG_INVALID');
+  if (readGlobalPluginEntries(layers).targets.includes(canonicalPluginPath(spec))) return { path: targetPath, added: false };
+  pluginArrayForWrite(layers.userConfig).push(serializePluginEntry({ spec }));
+  writeConfig(layers.userConfig, targetPath);
+  return { path: targetPath, added: true };
+}
+
 function createPluginEntry(entry, workingDirectory) {
   const spec = requireLoadablePluginSpec(validatePluginSpec(entry?.spec));
   const scope = entry?.scope || AGENT_SCOPE.USER;
@@ -417,6 +456,8 @@ function deletePluginDirFile(id, workingDirectory) {
 export {
   listPluginEntries,
   getPluginEntry,
+  readGlobalPluginEntries,
+  addGlobalPluginEntry,
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,

@@ -426,6 +426,42 @@ describe('actions and commands on the public row', () => {
   });
 });
 
+describe('an OpenCode plugin in the package', () => {
+  const writePluginGuest = async (root, plugin) => {
+    await fs.mkdir(root, { recursive: true });
+    await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({
+      name: '@openchamber/teapot', version: '1.0.0',
+      openchamber: { apiVersion: 1, contributes: { panel: { id: 'teapot', name: 'Teapot', icon: 'cup' }, opencodePlugin: 'plugin' } },
+    }));
+    if (plugin) {
+      await fs.mkdir(path.join(root, 'plugin'), { recursive: true });
+      await fs.writeFile(path.join(root, 'plugin', 'package.json'), JSON.stringify(plugin));
+      await fs.writeFile(path.join(root, 'plugin', 'index.js'), 'export default { id: "teapot", setup: async () => {} }');
+    }
+  };
+
+  test('the install refuses a missing folder or a package.json with no entry, and lists a good one on the row', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-plugin-'));
+    const root = path.join(dir, 'teapot');
+    await writePluginGuest(root, null);
+    expect(await inspectGuestPackage(root)).toEqual({ ok: false, code: 'invalid-opencode-plugin' });
+    await writePluginGuest(root, { name: 'teapot-plugin', version: '1.0.0', type: 'module' });
+    expect(await inspectGuestPackage(root)).toEqual({ ok: false, code: 'invalid-opencode-plugin' });
+    await writePluginGuest(root, { name: 'teapot-plugin', version: '1.0.0', type: 'module', main: 'index.js' });
+    const inspected = await inspectGuestPackage(root);
+    expect(inspected.ok).toBe(true);
+    if (inspected.ok) {
+      expect(inspected.guest.opencodePlugin).toBe('plugin');
+      const row = toPublicGuest({ ...inspected.guest, source: 'path', path: root, capabilityGrants: [] });
+      expect(row.opencodePlugin).toBe(true);
+      expect(row.capabilities).toEqual({ requested: ['opencodePlugin'], granted: [] });
+      // The plugin folder stays on the server: the row says only that there is one.
+      expect(JSON.stringify(row)).not.toContain(path.join(root, 'plugin'));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+});
+
 describe('grant scopes', () => {
   const writeScopedGuest = async (root, filesystem) => {
     await fs.mkdir(path.join(root, 'panel'), { recursive: true });

@@ -638,6 +638,8 @@ const contributesSchema = z.object({
   sessionControl: z.object({ content: z.literal(true).optional() }).strict().optional(),
   instructions: z.literal(true).optional(),
   skills: z.string().trim().refine(isSafeAssetPath).optional(),
+  // The value becomes a filesystem path OpenCode executes code from, so only a folder inside the package.
+  opencodePlugin: z.string().trim().refine(isSafeAssetPath).optional(),
   mentions: z.object({ label: z.string().trim().min(1).max(GUEST_MENTIONS_LABEL_MAX) }).strict().optional(),
   blocks: blocksSchema.optional(),
 });
@@ -1010,6 +1012,9 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   }
   if (path === 'contributes.skills') {
     return fail('invalid-skills', 'contributes.skills is a folder inside the package.');
+  }
+  if (path === 'contributes.opencodePlugin') {
+    return fail('invalid-opencode-plugin', 'contributes.opencodePlugin is a plugin folder inside the package: a directory with a package.json whose entry OpenCode loads.');
   }
   if (path === 'contributes.mentions' || path.startsWith('contributes.mentions.')) {
     return fail('invalid-mentions', issue.code === 'custom' ? issue.message : `contributes.mentions is { label: 1 to ${GUEST_MENTIONS_LABEL_MAX} characters }.`);

@@ -54,6 +54,7 @@ Panel göstermek ve hangi proje ile oturumun açık olduğunu okumak izin gerekt
 - **Ajanın arka planda söylediklerini okuma**: her turun son yanıtı, ajanın sorduğu sorular ve ne için izin istediği, her projede, uzantının yerel servisine gönderilir. Yalnızca uzantının bunları gönderdiği yere güveniyorsanız izin verin.
 - **Kendi başına oturum başlatma ve mesaj gönderme**: yerel servisi bunu açık bir pencere olmadan yapar, bu jeton harcar ve araç çalıştırabilir.
 - **Ajanların okuduklarına ekleme**: oturumlarınızın talimatlarındaki metin ve uzantı açıkken her ajana sunulan beceriler.
+- **OpenCode'a eklenti ekleme**: paketin eklentisi, uzantı açıkken OpenCode'unuza yüklenir. Eklenti kodu yerel bir servis gibi tüm erişiminizle OpenCode'un içinde çalışır; bu yüzden yalnızca yazara güveniyorsanız izin verin.
 
 Yerel bir servis ayrıca OpenChamber çalıştığı sürece çalışmaya devam edebilir veya bir takvime göre uyanabilir. İletişim kutusu bunu **Yerel servis çalıştırma** altında söyler ve `@` işaretinden sonra yazdıklarınızın servise ne zaman gittiğini de belirtir. Bir uzantı `@` menüsüne kendi satırlarını, ajan yanıtlarına da kendi bloklarını ekleyebilir. Uzantıyı duraklatmak bunların hepsini kaldırır.
 
@@ -66,6 +67,14 @@ Daha yeni bir sürüm izin verdiğinizden fazlasını istediğinde kart **Onay g
 Raydaki panelinin yanı sıra bir uzantı, zaten kullandığınız menülere girdiler ekleyebilir: bir sohbet mesajındaki eylemler, bir oturumun menüsü, sohbet kutusunun yanındaki + menüsü ve hiçbir şey açmadan bir şey iliştiren `/task ABC-12` gibi eğik çizgi komutları. Ayrıca kendi araçlarına, OpenChamber'ın yerleşik araçlarında olduğu gibi sohbette düzgün bir simge, başlık ve çıktı düzeni verebilir. Bunlardan hangilerini sunacağına uzantı karar verir; uzantıya izin verene kadar hepsi kapalıdır.
 
 Bazı uzantılar kendi paneli yerine canlı bir görüntü gösterir: bir ajanın sunucuda içinde çalıştığı şey, örneğin bir tarayıcı veya bir simülatör. Kontrolü almak için görüntüye tıklayın ya da yazın; durum satırı **Kontrol sizde** der ve **Ajana geri ver** düğmesine basana kadar ajanın tarayıcı eylemleri reddedilir. Kopyalama ve yapıştırma her zamanki gibi çalışır. Aynı anda bağlı başka bir cihaz kontrolün kimde olduğunu görür ve onu devralamaz. Böyle bir uzantı, görüntünün yanına kendi kontrollerini ekleyebilir, örneğin üstüne bir adres çubuğu veya yanına bir araç sütunu.
+
+## OpenCode eklentisi olan bir uzantı
+
+Bir uzantı bir OpenCode eklentisi getirebilir; böylece iki şey yerine tek şey kurarsınız. İzin iletişim kutusunda **OpenCode'a eklenti ekleme** ile başlayan bir satır bulunur. İzin verdiğinizde OpenChamber, sizin için çalıştırdığı OpenCode'a eklentiyi birkaç saniye içinde, yeniden başlatmadan ekler; uzantıyı kapatmak ya da kaldırmak onu aynı yoldan çıkarır. Kendi `opencode.json` dosyanıza hiçbir şey yazılmaz, bu yüzden eklenti uzantıdan uzun yaşamaz ve terminalde başlattığınız OpenCode'da asla çalışmaz.
+
+OpenChamber konuştuğu OpenCode'u başlatmadıysa ya da ortamınız kendi `OPENCODE_CONFIG` değerini ayarlıyorsa, OpenChamber'ın yapılandırması o OpenCode'a ulaşmaz. Uzantının ekranı bunu söyler ve **Genel yapılandırmaya ekle** seçeneğini sunar. Bu, eklentinin klasörünü genel OpenCode yapılandırmanıza yazar: artık bu bilgisayardaki her OpenCode'da, terminal dahil, çalışır; uzantı kapalıyken de açık kalır ve **Ayarlar → Eklentiler** altında yönetimi size aittir. Uzantıyı kaldırırsanız OpenCode bu kaydı başarısız bir eklenti olarak listeler ve siz kaydı orada silene kadar çalışmaya devam eder. Başka bir makinedeki OpenCode bu makinedeki bir klasörü yükleyemez; ekran bunu söyler.
+
+VS Code ve mobil uygulama uzantı yüklemez. Yalıtılmış bir alandaki oturum kendi OpenCode'unu çalıştırır ve eklentiyi hiç almaz. Kurumsal modda eklenti yerel bir servis gibi sayılır: uzantı yalnızca yöneticinizin listelediği bir depodan kurulur.
 
 ## Git sunucusu olarak bir uzantı
 

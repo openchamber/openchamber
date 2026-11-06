@@ -108,9 +108,28 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 | `files` | 열린 프로젝트 안의 파일 읽고 쓰기(상대 경로를 쓰는 `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | 세션 밖에서 사용자의 Small Model로 일회성 텍스트 생성(`generate`) |
 
-아홉 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`([작업, 명령, 배지](#작업-명령-배지) 참고), `sessionEvents`나 `sessionControl`이 `content`를 요청하면 `transcript`([세션 이벤트](/sdk/host/#세션-이벤트) 참고), 서비스가 세션을 다루면 `sessionControl`([OpenChamber 호출](/sdk/host/#서비스에서-openchamber-호출하기) 참고), 에이전트가 읽는 내용에 추가하면 `instructions`, `contributes.skills`를 선언하면 `skills`입니다. `contributes.skills`는 패키지 안의 스킬 폴더로, 확장이 켜져 있는 동안 모든 에이전트에게 전달됩니다.
+열 가지가 자동으로 추가됩니다. `integration`을 선언하면 `network`, `service`를 선언하면 `service`, `filesystem` 패턴을 선언하면 `filesystem`, `origins`를 선언하면 `origins`, 세션 작업이 메시지를 요청하면 `conversation`([작업, 명령, 배지](#작업-명령-배지) 참고), `sessionEvents`나 `sessionControl`이 `content`를 요청하면 `transcript`([세션 이벤트](/sdk/host/#세션-이벤트) 참고), 서비스가 세션을 다루면 `sessionControl`([OpenChamber 호출](/sdk/host/#서비스에서-openchamber-호출하기) 참고), 에이전트가 읽는 내용에 추가하면 `instructions`, `contributes.skills`를 선언하면 `skills`입니다. `contributes.skills`는 패키지 안의 스킬 폴더로, 확장이 켜져 있는 동안 모든 에이전트에게 전달됩니다. `contributes.opencodePlugin`을 선언하면 `opencodePlugin`도 추가됩니다(아래 참고).
 
 사용자는 확장을 설치할 때 전체 목록을 한 번 보고, 승인하거나 확장을 제거합니다. 새 버전이 더 많은 권한을 요구하면 대화상자가 다시 나타납니다. 사용자가 승인하지 않은 권한이 필요한 호출은 `NOT_GRANTED`로 실패합니다.
+
+## 패키지에 OpenCode 플러그인 포함하기
+
+확장은 OpenCode 플러그인을 함께 제공할 수 있어서 사용자가 두 가지 대신 하나만 설치하면 됩니다. `"opencodePlugin": "plugin"`을 선언하세요. 패키지 안의 폴더이며, 그 `package.json`의 `main`이 플러그인 진입 파일을 가리킵니다. 진입 파일은 OpenCode가 불러오는 형태인 `{ id, setup }`을 기본 내보내기 합니다. OpenCode는 아무것도 설치되지 않은 당신의 폴더에서 단순한 `import()`로 불러오므로 진입 파일은 아무것도 가져오지 않습니다. 도구의 `input`은 순수 JSON Schema이고, `execute`는 `{ content }`를 답합니다.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+승인 대화상자에 **OpenCode에 플러그인 추가** 행이 하나 더 생기며, 플러그인 코드가 사용자의 모든 권한으로 OpenCode 안에서 실행된다고 분명히 말합니다. 허용되면 OpenChamber는 자신이 관리하는 OpenCode 설정, 즉 `contributes.skills`를 싣는 것과 같은 파일에 당신의 폴더를 넣습니다. OpenChamber가 실행하는 OpenCode는 그 파일을 감시하고 몇 초 안에 플러그인을 불러옵니다. 확장을 끄거나 제거하면 같은 방식으로 빠집니다. 사용자의 `opencode.json`에는 아무것도 쓰지 않습니다. 그 파일은 사용자의 것이며, 거기 있는 플러그인은 확장보다 오래 남아 이 컴퓨터의 모든 OpenCode에서 실행될 것이기 때문입니다.
+
+그 파일이 OpenCode에 닿지 않는 경우 확장의 화면이 그렇게 말하고 **전역 설정에 추가**를 제안합니다. 이는 당신의 폴더를 사용자의 전역 OpenCode 설정에, 그때부터 사용자 소유인 항목으로 씁니다. OpenChamber가 대화 상대인 OpenCode를 시작하지 않았을 때, 또는 서버 환경이 자체 `OPENCODE_CONFIG`를 설정했을 때(이때 플러그인은 다음 OpenCode 시작 시 불러와집니다) 해당합니다. 다른 컴퓨터의 OpenCode는 이 컴퓨터의 폴더를 불러올 수 없습니다. 화면은 그렇게 말하고 아무것도 제안하지 않습니다. 불러오기에 실패한 플러그인은 항목이 있을 때 설정 → Plugins에서 OpenCode가 보고합니다. 어느 경우든 확장은 계속 동작합니다. 플러그인 폴더가 없거나 그 `package.json`에 진입 파일이 없는 패키지는 설치가 거부됩니다.
+
+VS Code와 모바일 앱은 확장을 불러오지 않으므로 플러그인도 전달되지 않습니다. 격리된 공간 안의 세션은 자체 OpenCode를 실행하며 호스트의 설정을 읽지 않습니다. 엔터프라이즈 모드는 플러그인을 로컬 서비스처럼 다룹니다. 관리자가 등록한 저장소에서만 설치됩니다. SDK에는 동작하는 예제 `examples/opencode-plugin`이 있습니다.
 
 ## 텍스트 생성
 

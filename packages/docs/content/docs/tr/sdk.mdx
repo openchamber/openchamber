@@ -108,9 +108,28 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | kullanıcının Small Model'iyle tek seferlik metin üretimi (`generate`), herhangi bir oturumun dışında |
 
-Dokuz tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)), `sessionEvents` veya `sessionControl` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)), servisiniz oturumlar üzerinde işlem yaptığında `sessionControl` (bkz. [OpenChamber'ı çağırma](/sdk/host/#openchamberı-servisinizden-çağırma)), ajanların okuduklarına ekleme yaptığında `instructions` ve `contributes.skills` tanımladığınızda `skills`. `contributes.skills`, eklenti açıkken her ajana ulaşan skill'lerin bulunduğu bir paket klasörüdür.
+On tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins`, bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)), `sessionEvents` veya `sessionControl` `content` istediğinde `transcript` (bkz. [Oturum olayları](/sdk/host/#oturum-olayları)), servisiniz oturumlar üzerinde işlem yaptığında `sessionControl` (bkz. [OpenChamber'ı çağırma](/sdk/host/#openchamberı-servisinizden-çağırma)), ajanların okuduklarına ekleme yaptığında `instructions` ve `contributes.skills` tanımladığınızda `skills`. `contributes.skills`, eklenti açıkken her ajana ulaşan skill'lerin bulunduğu bir paket klasörüdür. `contributes.opencodePlugin` tanımladığınızda `opencodePlugin` de eklenir (aşağıya bakın).
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
+
+## Paketinizde bir OpenCode eklentisi
+
+Bir uzantı bir OpenCode eklentisi getirebilir; böylece insanlar iki şey yerine tek şey kurar. `"opencodePlugin": "plugin"` tanımlayın: paketin içinde, `package.json` dosyasındaki `main` alanı eklentinin giriş dosyasını gösteren bir klasör. Giriş dosyası, OpenCode'un yüklediği biçim olan `{ id, setup }` nesnesini varsayılan olarak dışa aktarır; hiçbir şey içe aktarmaz, çünkü OpenCode onu hiçbir şeyin kurulu olmadığı klasörünüzden düz bir `import()` ile yükler. Bir aracın `input` alanı düz JSON Schema'dır ve `execute` işlevi `{ content }` döndürür.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+Onay iletişim kutusuna bir satır daha gelir: **OpenCode'a eklenti ekleme**. Bu satır, eklenti kodunun kullanıcının tüm erişimiyle OpenCode'un içinde çalıştığını açıkça söyler. İzin verildikten sonra OpenChamber, klasörünüzü yönettiği OpenCode yapılandırmasına, yani `contributes.skills` ile aynı dosyaya ekler; OpenChamber'ın çalıştırdığı OpenCode bu dosyayı izler ve eklentiyi birkaç saniye içinde yükler. Uzantıyı kapatmak veya kaldırmak eklentiyi aynı yoldan çıkarır. Kullanıcının kendi `opencode.json` dosyasına hiçbir şey yazılmaz: o dosya kullanıcıya aittir ve oradaki bir eklenti uzantınızdan uzun yaşar, makinedeki her OpenCode'da çalışırdı.
+
+Bu dosyanın OpenCode'a ulaşmadığı yerde uzantının ekranı bunu söyler ve **Genel yapılandırmaya ekle** seçeneğini sunar; bu, klasörünüzü kullanıcının genel OpenCode yapılandırmasına, o andan itibaren kullanıcıya ait bir kayıt olarak yazar. Bu durum, OpenChamber konuştuğu OpenCode'u başlatmadığında ya da sunucunun ortamı kendi `OPENCODE_CONFIG` değerini ayarladığında olur (eklenti o zaman OpenCode'un bir sonraki başlatılışında yüklenir). Başka bir makinedeki OpenCode bu makinedeki bir klasörü yükleyemez; ekran bunu söyler ve hiçbir şey sunmaz. Yüklenemeyen bir eklentiyi, orada bir kaydı varsa OpenCode Ayarlar → Eklentiler altında bildirir; uzantınız her durumda çalışmaya devam eder. Kurulum, eklenti klasörü olmayan ya da `package.json` dosyası bir giriş dosyası belirtmeyen paketi reddeder.
+
+VS Code ve mobil uygulamalar uzantı yüklemez, bu yüzden onlara eklenti ulaşmaz. Yalıtılmış bir alandaki oturum kendi OpenCode'unu çalıştırır ve ana makinenin yapılandırmasını hiç okumaz. Kurumsal mod eklentiyi yerel bir servis gibi ele alır: yalnızca yöneticinin listelediği bir depodan kurulur. SDK'da çalışan bir örnek vardır: `examples/opencode-plugin`.
 
 ## Metin üretme
 

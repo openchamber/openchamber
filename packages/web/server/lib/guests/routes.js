@@ -37,6 +37,8 @@ import { createGuestFrameGrants } from './frame-grants.js';
 import { injectGuestAssetTokens, parseGuestUrlToken } from './html-tokens.js';
 import { injectGuestDocumentStyles } from './html-styles.js';
 import { installGuest, installGuestFromZipBuffer, parseInstallRequest, uninstallGuest } from './install.js';
+import { enterpriseBlockedCapabilities } from './enterprise.js';
+import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
 import { guestUploadMaxBytes, readGuestUploadBody } from './upload.js';
 import { checkAllGuestUpdates, updateGuest, withGuestUpdate } from './updates.js';
 import { extensionsPersistPath, readExtensionStore, setCapabilityGrants } from './persist.js';
@@ -248,6 +250,13 @@ export const registerGuestRoutes = (app, {
   surfaceViewerHeaders = () => null,
   // The tracker registry: a host-auth guest borrows its tracker's sign-in.
   trackers = null,
+  // How an extension's OpenCode plugin reaches OpenCode, and the user's global
+  // OpenCode config the card's button writes (`opencode-plugin.js`).
+  opencodePlugins = {
+    delivery: () => 'file',
+    readGlobalEntries: () => ({ path: '', targets: [] }),
+    addGlobalEntry: () => { throw new Error('No global OpenCode config here.'); },
+  },
 }) => {
   const persistPath = extensionsPersistPath(openchamberDataDir);
   const authPath = guestAuthPersistPath(openchamberDataDir);
@@ -359,15 +368,104 @@ export const registerGuestRoutes = (app, {
     }
   });
 
+  /**
+   * What the extension cards say about OpenCode plugins: how the managed
+   * config reaches OpenCode right now, and which extensions' plugin folders the
+   * user's global config already lists. Both come from server state that
+   * exists without OpenCode running; the global config is read only while a
+   * package ships a plugin.
+   */
+  const describeOpenCodePlugins = async (guests) => {
+    const delivery = opencodePlugins.delivery();
+    const withPlugin = guests.filter((guest) => guest.opencodePlugin);
+    if (withPlugin.length === 0) return { delivery, globalConfigPath: null, inGlobalConfig: [] };
+    let globalEntries;
+    try {
+      globalEntries = opencodePlugins.readGlobalEntries();
+    } catch (error) {
+      // The user's global OpenCode config could not be read: the cards keep
+      // their rows and the button stays; pressing it answers the reason.
+      console.warn('Could not read the global OpenCode config for the extension list:', error?.message ?? error);
+      return { delivery, globalConfigPath: null, inGlobalConfig: [] };
+    }
+    const { path: globalConfigPath, targets } = globalEntries;
+    const inGlobalConfig = [];
+    for (const guest of withPlugin) {
+      const directory = await resolveOpenCodePluginFolder(fs, guest.packageRoot, guest.opencodePlugin);
+      if (directory && targets.includes(directory)) inGlobalConfig.push(guest.id);
+    }
+    return { delivery, globalConfigPath, inGlobalConfig };
+  };
+
   app.get('/api/guests', async (_req, res) => {
     try {
       const guests = await listInstalledGuests({ persistPath });
       res.json({
         guests: guests.map((guest) => toPublicGuest(withGuestUpdate(guest, persistPath))),
+        opencodePlugins: await describeOpenCodePlugins(guests),
       });
     } catch (error) {
       console.error('Failed to list guests:', error);
       res.status(500).json({ error: 'Failed to list guests' });
+    }
+  });
+
+  // "Add to global config" on the card: the plugin folder goes into the user's
+  // global OpenCode config, the file every OpenCode on this machine reads. Only
+  // where the managed config does not reach OpenCode, and only for a plugin the
+  // user approved and left on; the entry is theirs from then on.
+  /** Why the plugin of `guest` is not loaded on purpose right now, or null while it is meant to be. */
+  const pluginRefusal = (guest) => {
+    if (!guest) return { status: 404, body: { error: 'not-found' } };
+    if (!guest.opencodePlugin) return { status: 404, body: { error: 'no-plugin' } };
+    if (guest.enterpriseBlocked?.includes('opencodePlugin')) return { status: 403, body: { error: 'enterprise-mode' } };
+    const approved = requestedGuestCapabilities(guest).every((capability) => guest.capabilityGrants.includes(capability));
+    if (guest.enabled === false || !approved || !guest.capabilityGrants.includes('opencodePlugin')) {
+      return { status: 409, body: { error: 'inactive' } };
+    }
+    return null;
+  };
+
+  app.post('/api/guests/:id/opencode-plugin/global-config', async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      const refused = pluginRefusal(guest);
+      if (refused) {
+        return res.status(refused.status).json(refused.body);
+      }
+      const delivery = opencodePlugins.delivery();
+      if (delivery !== 'restart' && delivery !== 'none') {
+        return res.status(409).json({ error: 'not-needed', delivery });
+      }
+      const directory = await resolveOpenCodePluginFolder(fs, guest.packageRoot, guest.opencodePlugin);
+      if (!directory) {
+        return res.status(409).json({ error: 'plugin-missing' });
+      }
+      // The row and the policy are read again right before the write: a Pause,
+      // a withdrawn approval or a policy change meanwhile must not reach the
+      // user's file, which outlives the extension.
+      const current = await loadGuest(guest.id);
+      const refusedNow = pluginRefusal(current);
+      if (refusedNow) {
+        return res.status(refusedNow.status).json(refusedNow.body);
+      }
+      if (enterpriseBlockedCapabilities(current, { source: current.source, gitUrl: current.gitOrigin?.url }).includes('opencodePlugin')) {
+        return res.status(403).json({ error: 'enterprise-mode' });
+      }
+      let written;
+      try {
+        written = opencodePlugins.addGlobalEntry(directory);
+      } catch (error) {
+        if (error?.code === 'CONFIG_INVALID') {
+          return res.status(409).json({ error: 'config-invalid', message: error.message });
+        }
+        throw error;
+      }
+      if (written.added) announce();
+      res.json({ path: written.path });
+    } catch (error) {
+      console.error('Failed to add an extension plugin to the global OpenCode config:', error);
+      res.status(500).json({ error: 'write-failed', message: error?.message ?? 'Failed to write the OpenCode config.' });
     }
   });
 

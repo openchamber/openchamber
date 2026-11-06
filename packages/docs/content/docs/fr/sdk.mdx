@@ -108,9 +108,28 @@ Dessiner un panneau et lire la session en cours ne demandent aucune permission. 
 | `files` | lire et écrire des fichiers dans le projet ouvert (`readFile`, `writeFile`, `listDir`, `stat` avec un chemin relatif) |
 | `model` | génération de texte ponctuelle avec le Small Model de l'utilisateur (`generate`), en dehors de toute session |
 
-Neuf autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `filesystem` quand vous déclarez des motifs `filesystem`, `origins` quand vous déclarez `origins`, `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)), `transcript` quand `sessionEvents` ou `sessionControl` demande `content` (voir [Événements de session](/sdk/host/#événements-de-session)), `sessionControl` quand votre service agit sur des sessions (voir [Appeler OpenChamber](/sdk/host/#appeler-openchamber-depuis-votre-service)), `instructions` quand il complète ce que lisent les agents, et `skills` quand vous déclarez `contributes.skills`, un dossier du paquet contenant des skills qui atteignent chaque agent tant que l'extension est active.
+Dix autres sont ajoutées pour vous : `network` quand vous déclarez une `integration`, `service` quand vous déclarez un `service`, `filesystem` quand vous déclarez des motifs `filesystem`, `origins` quand vous déclarez `origins`, `conversation` quand une action de session demande les messages (voir [Actions, commandes et le badge](#actions-commandes-et-le-badge)), `transcript` quand `sessionEvents` ou `sessionControl` demande `content` (voir [Événements de session](/sdk/host/#événements-de-session)), `sessionControl` quand votre service agit sur des sessions (voir [Appeler OpenChamber](/sdk/host/#appeler-openchamber-depuis-votre-service)), `instructions` quand il complète ce que lisent les agents, et `skills` quand vous déclarez `contributes.skills`, un dossier du paquet contenant des skills qui atteignent chaque agent tant que l'extension est active, et `opencodePlugin` quand vous déclarez `contributes.opencodePlugin` (voir plus bas).
 
 L'utilisateur voit la liste complète une seule fois, à l'installation de l'extension, et l'approuve ou supprime l'extension. Si une nouvelle version demande davantage, la boîte de dialogue réapparaît. Un appel qui a besoin d'une capacité non approuvée par l'utilisateur échoue avec `NOT_GRANTED`.
+
+## Un plugin OpenCode dans votre paquet
+
+Une extension peut embarquer un plugin OpenCode, pour que les gens installent une seule chose au lieu de deux. Déclarez `"opencodePlugin": "plugin"`, un dossier du paquet avec un `package.json` dont le `main` nomme le fichier d'entrée du plugin. L'entrée exporte par défaut `{ id, setup }`, la forme qu'OpenCode charge ; elle n'importe rien, car OpenCode la charge avec un simple `import()` depuis votre dossier, où rien n'est installé. L'`input` d'un outil est du JSON Schema brut, et son `execute` répond `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+Le dialogue d'approbation gagne une ligne, **Ajouter un plugin à OpenCode**, qui dit clairement que le code du plugin s'exécute dans OpenCode avec tous les accès de l'utilisateur. Une fois autorisé, OpenChamber liste votre dossier dans la configuration OpenCode qu'il gère, le même fichier que pour `contributes.skills` ; l'OpenCode qu'il fait tourner surveille ce fichier et charge le plugin en quelques secondes. Désactiver ou supprimer l'extension le retire de la même façon. Rien n'est écrit dans l'`opencode.json` de l'utilisateur : ce fichier est le sien, et un plugin qui s'y trouverait survivrait à votre extension et tournerait dans chaque OpenCode de la machine.
+
+Là où ce fichier n'atteint pas OpenCode, l'écran de l'extension le dit et propose **Ajouter à la configuration globale**, qui écrit votre dossier dans la configuration OpenCode globale de l'utilisateur comme une entrée qui lui appartient désormais. C'est le cas quand OpenChamber n'a pas démarré l'OpenCode auquel il parle, ou quand l'environnement du serveur définit son propre `OPENCODE_CONFIG` (le plugin se charge alors au prochain démarrage d'OpenCode). Un OpenCode sur une autre machine ne peut pas charger un dossier de celle-ci ; l'écran le dit et ne propose rien. Un plugin qui ne se charge pas est signalé par OpenCode dans Réglages → Plugins quand il y a une entrée ; votre extension continue de fonctionner dans tous les cas. L'installation refuse un paquet dont le dossier du plugin manque ou dont le `package.json` ne nomme aucun fichier d'entrée.
+
+VS Code et les applications mobiles ne chargent aucune extension, donc aucun plugin ne les atteint. Une session dans un espace isolé fait tourner son propre OpenCode, qui ne lit jamais la configuration de l'hôte. Le mode entreprise traite le plugin comme un service local : il ne s'installe que depuis un dépôt listé par l'administrateur. Le SDK a un exemple fonctionnel, `examples/opencode-plugin`.
 
 ## Générer du texte
 

@@ -108,9 +108,28 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 | `files` | 读写打开项目中的文件（使用相对路径的 `readFile`、`writeFile`、`listDir`、`stat`） |
 | `model` | 使用用户的 Small Model 进行一次性文本生成（`generate`），不在任何会话中 |
 
-另有九项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，声明了 `origins` 时加上 `origins`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)），`sessionEvents` 或 `sessionControl` 请求 `content` 时加上 `transcript`（见[会话事件](/sdk/host/#会话事件)），服务操作会话时加上 `sessionControl`（见[调用 OpenChamber](/sdk/host/#从服务调用-openchamber)），补充智能体读取的内容时加上 `instructions`，声明了 `contributes.skills` 时加上 `skills`。`contributes.skills` 是包内的一个技能文件夹，扩展开启期间这些技能会提供给每个智能体。
+另有十项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，声明了 `origins` 时加上 `origins`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)），`sessionEvents` 或 `sessionControl` 请求 `content` 时加上 `transcript`（见[会话事件](/sdk/host/#会话事件)），服务操作会话时加上 `sessionControl`（见[调用 OpenChamber](/sdk/host/#从服务调用-openchamber)），补充智能体读取的内容时加上 `instructions`，声明了 `contributes.skills` 时加上 `skills`。`contributes.skills` 是包内的一个技能文件夹，扩展开启期间这些技能会提供给每个智能体。声明了 `contributes.opencodePlugin` 时加上 `opencodePlugin`（见下文）。
 
 用户在安装扩展时会看到完整列表一次，然后批准或移除扩展。如果新版本请求更多权限，对话框会再次出现。调用需要用户尚未批准的能力时，会以 `NOT_GRANTED` 失败。
+
+## 在你的包里带上一个 OpenCode 插件
+
+扩展可以自带一个 OpenCode 插件，这样用户只装一样东西而不是两样。声明 `"opencodePlugin": "plugin"`：包内的一个文件夹，其中的 `package.json` 用 `main` 指向插件的入口文件。入口文件默认导出 `{ id, setup }`，也就是 OpenCode 加载的形状；它不导入任何东西，因为 OpenCode 用一个简单的 `import()` 从你的文件夹加载它，而那里什么都没有安装。工具的 `input` 是普通的 JSON Schema，它的 `execute` 返回 `{ content }`。
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+批准对话框会多出一行 **向 OpenCode 添加插件**，明确说明插件代码在 OpenCode 内部以用户的全部权限运行。允许之后，OpenChamber 会把你的文件夹写进它管理的 OpenCode 配置，也就是承载 `contributes.skills` 的同一个文件；它运行的 OpenCode 监视该文件，几秒内加载插件。停用或移除扩展会以同样的方式把插件拿掉。用户自己的 `opencode.json` 不会被写入任何内容：那是用户的文件，写在那里的插件会比你的扩展活得更久，并且在这台机器上的每个 OpenCode 中运行。
+
+当该文件无法到达 OpenCode 时，扩展的页面会说明情况并提供 **添加到全局配置**，它会把你的文件夹写入用户的全局 OpenCode 配置，成为从此由用户拥有的条目。这发生在 OpenChamber 没有启动它所对话的 OpenCode 时，或者服务器环境设置了自己的 `OPENCODE_CONFIG` 时（此时插件在 OpenCode 下次启动时加载）。另一台机器上的 OpenCode 无法加载这台机器上的文件夹；页面会说明这一点，不提供任何按钮。加载失败的插件，在设置 → 插件中有条目时由 OpenCode 报告；无论如何你的扩展都继续工作。插件文件夹不存在、或其 `package.json` 没有指定入口文件的包，安装会被拒绝。
+
+VS Code 和移动端应用不加载扩展，所以插件不会到达那里。隔离空间内的会话运行自己的 OpenCode，它从不读取宿主机的配置。企业模式把插件当作本地服务对待：只能从管理员列出的仓库安装。SDK 中有一个可运行的示例 `examples/opencode-plugin`。
 
 ## 生成文本
 
