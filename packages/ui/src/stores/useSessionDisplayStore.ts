@@ -140,10 +140,17 @@ export const migrateSessionDisplayState = (
     // project's works, listed by activity like the rest.
     delete state.worktreeSortOrder;
   }
-  if (version < 12 && surface === 'mobile' && state.sidebarViewMode !== 'projects') {
-    // v12 gives the phone the works view, two-line by default. Its List always
-    // drew two lines, so a phone on List keeps them; Tree keeps its choice.
-    state.detailedZoneRows = true;
+  if (version < 12) {
+    // v12 added keepWorkInPlace. A profile from before it kept In work
+    // sessions under their projects and never had the choice, so preserve
+    // that view instead of silently applying the new default.
+    state.keepWorkInPlace = true;
+    if (surface === 'mobile' && state.sidebarViewMode !== 'projects') {
+      // v12 gives the phone the works view, two-line by default. Its List
+      // always drew two lines, so a phone on List keeps them; Tree keeps its
+      // choice.
+      state.detailedZoneRows = true;
+    }
   }
   return state;
 };
@@ -218,7 +225,9 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // v7→v8 turned Recent off by default.
       // v8→v9 added worktreeSortOrder; v10→v11 drops it again.
       // v9→v10 drops showRecentSection (Recent is gone).
-      // v11→v12 turns two-line rows on for a phone that was on List.
+      // v11→v12 turns two-line rows on for a phone that was on List, and adds
+      // keepWorkInPlace; a profile from before v12 kept In work sessions under
+      // their projects, so the migration turns that on.
       migrate: migrateSessionDisplayState,
       // Sections cached by another build (an older one before a filter field
       // existed) are read through the same rules as the stored setting.

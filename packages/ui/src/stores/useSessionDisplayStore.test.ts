@@ -28,6 +28,73 @@ describe('useSessionDisplayStore detailed rows', () => {
   });
 });
 
+describe('useSessionDisplayStore In work visibility migration', () => {
+  test('v10 and v11 keep In work sessions under their projects', () => {
+    expect(migrateSessionDisplayState({}, 10, 'desktop').keepWorkInPlace).toBe(true);
+    expect(migrateSessionDisplayState({}, 11, 'desktop').keepWorkInPlace).toBe(true);
+  });
+
+  test('v12 preserves a saved choice', () => {
+    expect(migrateSessionDisplayState({ keepWorkInPlace: false }, 12, 'desktop').keepWorkInPlace).toBe(false);
+    expect(migrateSessionDisplayState({ keepWorkInPlace: true }, 12, 'desktop').keepWorkInPlace).toBe(true);
+  });
+
+  test('v10 still gets the mobile two-line rows migration', () => {
+    const migrated = migrateSessionDisplayState(
+      { sidebarViewMode: 'timeline', detailedZoneRows: false },
+      10,
+      'mobile',
+    );
+
+    expect(migrated.keepWorkInPlace).toBe(true);
+    expect(migrated.detailedZoneRows).toBe(true);
+  });
+
+  test('a fresh install keeps the current default', () => {
+    expect(useSessionDisplayStore.getInitialState().keepWorkInPlace).toBe(false);
+  });
+
+  test('a v10 profile rehydrates with In work kept in place', async () => {
+    const initialState = useSessionDisplayStore.getState();
+    const originalStorage = useSessionDisplayStore.persist.getOptions().storage;
+    const stored = JSON.stringify({ version: 10, state: { sidebarViewMode: 'timeline' } });
+    const storage = createJSONStorage<Partial<ReturnType<typeof useSessionDisplayStore.getState>>>(() => ({
+      getItem: () => stored,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    }));
+    useSessionDisplayStore.persist.setOptions({ storage });
+    try {
+      await useSessionDisplayStore.persist.rehydrate();
+
+      expect(useSessionDisplayStore.getState().keepWorkInPlace).toBe(true);
+    } finally {
+      useSessionDisplayStore.persist.setOptions({ storage: originalStorage });
+      useSessionDisplayStore.setState(initialState);
+    }
+  });
+
+  test('a v12 profile rehydrates with its saved choice', async () => {
+    const initialState = useSessionDisplayStore.getState();
+    const originalStorage = useSessionDisplayStore.persist.getOptions().storage;
+    const stored = JSON.stringify({ version: 12, state: { keepWorkInPlace: false } });
+    const storage = createJSONStorage<Partial<ReturnType<typeof useSessionDisplayStore.getState>>>(() => ({
+      getItem: () => stored,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    }));
+    useSessionDisplayStore.persist.setOptions({ storage });
+    try {
+      await useSessionDisplayStore.persist.rehydrate();
+
+      expect(useSessionDisplayStore.getState().keepWorkInPlace).toBe(false);
+    } finally {
+      useSessionDisplayStore.persist.setOptions({ storage: originalStorage });
+      useSessionDisplayStore.setState(initialState);
+    }
+  });
+});
+
 describe('useSessionDisplayStore project sorting', () => {
   test('defaults to manual ordering', () => {
     expect(useSessionDisplayStore.getState().projectSortOrder).toBe('manual');
