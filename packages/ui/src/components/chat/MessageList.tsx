@@ -15,7 +15,7 @@ import { useTurnFoldContexts } from './components/useTurnFold';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from './components/liveActivityContext';
 import { MessageSliceContext } from './message/messageSliceContext';
 import { PendingWorkflowApprovals } from './workflows/PendingWorkflowApprovals';
-import { getTurnsWithLaterAssistant } from './lib/turns/liveActivity';
+import { getTurnsWithLaterAssistant, uiPageMessageId } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { buildHistoryEntries, findFirstVisibleMessageId, type TimelineEntry } from './lib/turns/timelineEntries';
@@ -141,6 +141,8 @@ interface MessageListProps {
 }
 
 export interface MessageListHandle {
+    resolveUiPageMessageId: (messageId: string, partId: string) => string;
+    scrollToUiPageRow: (messageId: string) => boolean;
     scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior }) => boolean;
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior }) => boolean;
     captureViewportAnchor: () => MessageViewportAnchor | null;
@@ -1008,6 +1010,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         sessionKey,
         showTurnChangedFiles,
     });
+    const uiPageProjectionRef = React.useRef({ projection, defaultActivityExpanded });
+    React.useLayoutEffect(() => {
+        uiPageProjectionRef.current = { projection, defaultActivityExpanded };
+    }, [projection, defaultActivityExpanded]);
     const hasUngroupedStaticEntries = projection.ungroupedMessageIds.size > 0;
     const tailHasAssistant = Boolean(streamingTurn?.assistantMessages.length);
     const turnsWithLaterAssistant = React.useMemo(() => {
@@ -1422,6 +1428,19 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         }
 
         const handle: MessageListHandle = {
+            resolveUiPageMessageId: (messageId, partId) => {
+                const { projection: current, defaultActivityExpanded: expanded } = uiPageProjectionRef.current;
+                const turnId = current.indexes.messageToTurnId.get(messageId);
+                const turn = turnId ? current.indexes.turnById.get(turnId) : undefined;
+                return uiPageMessageId(turn, expanded, messageId, partId);
+            },
+            scrollToUiPageRow: (messageId) => {
+                const turnId = uiPageProjectionRef.current.projection.indexes.messageToTurnId.get(messageId);
+                const index = turnId ? rowIndexByKey.get(`pages:${turnId}`) : undefined;
+                if (index === undefined) return false;
+                cancelNavigationRef.current?.();
+                return scrollHistoryIndexIntoView(index);
+            },
             scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior }) => {
                 cancelNavigationRef.current?.();
                 const behavior = options?.behavior ?? 'auto';
@@ -1509,7 +1528,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             if (objectRef.current === handle) objectRef.current = null;
         };
-    }, [alignViewportAnchor, findAnchorElement, findMessageElement, messageIndexMap, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
+    }, [alignViewportAnchor, findAnchorElement, findMessageElement, messageIndexMap, resolveScrollContainer, revealFoldedMessage, rowIndexByKey, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
 
     const rowContext = React.useMemo(() => ({
         scrollToBottom: stableScrollToBottom,

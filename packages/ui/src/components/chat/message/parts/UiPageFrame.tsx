@@ -60,10 +60,10 @@ export function UiPageFrame({ part, source, ask }: { part: ToolPart; source: str
     }, [waiting]);
 
     return (
-        <div ref={blockRef} className="my-2" data-waiting-page={waiting ? part.id : undefined}>
+        <div ref={blockRef} className="my-2" data-ui-render-part={part.id} data-ui-render-message={part.messageID} data-waiting-page={waiting ? part.id : undefined}>
             {UiBlock
                 ? <UiBlock source={source} complete host={host} onNotDrawn={reportNotDrawn} />
-                : <pre dir="ltr"><code>{source}</code></pre>}
+                : <pre dir="ltr" data-chat-quote-pending="true"><code>{source}</code></pre>}
             <PageAskStatus ask={ask} answeredSummary={ask.kind === 'answered' ? ask.summary : sentSummary ?? undefined} />
         </div>
     );
