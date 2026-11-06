@@ -189,7 +189,9 @@ export const createWorkflowAgentSessions = ({
   /**
    * Creates the agent's session under `parentSessionId` and runs `text` in it.
    * `onSession(sessionId)` hears the id as soon as the session exists, so a
-   * stop can interrupt it. Resolves to `{ sessionId, outcome }`, where outcome
+   * stop can interrupt it. Its checkpoint must resolve before any prompt; a
+   * rejected checkpoint leaves the already-created empty child in OpenCode.
+   * Resolves to `{ sessionId, outcome }`, where outcome
    * is dispatch-results' `{ state, text, errorMessage }`.
    */
   const start = async ({ directory, parentSessionId, title, agent, model, allowTools = [], text, signal, onSession }) => {
@@ -216,7 +218,7 @@ export const createWorkflowAgentSessions = ({
       ];
     }
     const created = sessionSchema.parse(await client.session.create(request));
-    onSession(created.id);
+    await onSession(created.id);
     if (signal.aborted) throw new WorkflowAgentStopped();
     const outcome = await prompt(client, created.id, text, signal);
     return { sessionId: created.id, outcome };
