@@ -3071,6 +3071,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         'flex items-center min-w-0 flex-1',
                         // A phone lays the row out as the main composer's: model left, agent right.
                         inlineMobileSelection ? 'justify-between' : 'justify-end',
+                        // No overflow-hidden: mobile.css makes it a vertical scroller,
+                        // and the 36px triggers in this 26px row would draw its thumb.
                         inlineGapClass,
                     )}
                 >
