@@ -32,6 +32,10 @@ const SKILL_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
 const PROMPT_FILE_PATTERN = /^\{file:(.+)\}$/i;
 
+/** OpenCode's data directory: `$XDG_DATA_HOME/opencode`, else `~/.local/share/opencode`. */
+const getOpenCodeDataDir = (env = process.env) =>
+  path.join(env.XDG_DATA_HOME?.trim() || path.join(os.homedir(), '.local', 'share'), 'opencode');
+
 // ============== SCOPE TYPE CONSTANTS ==============
 
 const AGENT_SCOPE = {
@@ -1084,6 +1088,7 @@ function deleteSkillSupportingFile(skillDir, relativePath) {
 }
 
 export {
+  getOpenCodeDataDir,
   OPENCODE_CONFIG_DIR,
   AGENT_DIR,
   COMMAND_DIR,
