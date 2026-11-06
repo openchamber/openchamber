@@ -13,7 +13,7 @@ The person asking rarely knows where an extension can reach. Your job is to find
 ## Steps
 
 1. **Design.** Read *Choose where it lives* and pick the points that fit. Tell the user the plan in a few plain lines: what they will see, where, and when it needs them. With no request yet, ask what they want it to do, in one question, and stop. Otherwise ask only what the request leaves open, at most: private or public, and a value you cannot guess (an account, a URL). Done when the plan is stated. If the user said to proceed without questions, state it and go on.
-2. **Create.** Use the folder the user named, else `~/openchamber-extensions/<id>`, never the project they are working in. Run `bun init -y`, then `bun add @openchamber/sdk`. Write `package.json` from *Manifest*, then the code from the recipes. Everything you need is in this file and the two reference files under *Where to read more*: start writing, and open those only for a detail you miss. Build what the plan says and stop there, because each extra feature is one more thing the user has to approve and maintain.
+2. **Create.** Use the folder the user named, else `~/openchamber-extensions/<id>`, never the project they are working in. Run `bun init -y`, then `bun add @openchamber/sdk@{{sdkVersion}}`. Write `package.json` from *Manifest*, then the code from the recipes. Everything you need is in this file and the two reference files under *Where to read more*: start writing, and open those only for a detail you miss. Build what the plan says and stop there, because each extra feature is one more thing the user has to approve and maintain.
 3. **Build.** Bundle every page script and the service:
    ```sh
    bunx openchamber-guest-bundle panel/main.ts panel/main.js
@@ -67,7 +67,7 @@ Example, "I want my Docker containers at hand and the agent to know them": `stat
   "type": "module",
   "openchamber": {
     "apiVersion": 1,
-    "engines": { "openchamber": ">=2.6.1" },
+    "engines": { "openchamber": ">={{engineFloor}}" },
     "id": "deploys",
     "name": "Deploys",
     "icon": "rocket",
@@ -76,9 +76,11 @@ Example, "I want my Docker containers at hand and the agent to know them": `stat
       "statusSection": { "source": { "path": "/status", "interval": 5000 }, "title": "Deploys" }
     }
   },
-  "dependencies": { "@openchamber/sdk": "latest" }
+  "dependencies": { "@openchamber/sdk": "{{sdkVersion}}" }
 }
 ```
+
+The SDK version and `engines.openchamber` come from the app the user is running, so everything in the SDK works there. Keep both exactly as written here.
 
 `id` is the extension's identity, in kebab-case. Add `"panel": { "entry": "panel/index.html" }` under `contributes` only when it needs a page on the rail. `icon` is a Remixicon name without `Ri` and `Line` (`git-merge`), or a `.svg` in the package for a brand mark. The app carries a subset of Remixicon, and a name it lacks shows a generic icon, so for anything specific ship the `.svg`.
 

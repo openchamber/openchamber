@@ -58,6 +58,7 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * @param {object|null} [dependencies.limitFailoverRuntime] `../limit-failover/runtime.js`; its plugin calls back through the agent tool's address
  * @param {() => Promise<object|null>} dependencies.readSettings
  * @param {() => Promise<string[]>} [dependencies.listExtensionSkillDirectories] skill folders of active extensions
+ * @param {string} [dependencies.openchamberVersion] the running app, which the extension-writing skill pins its SDK to
  */
 export const createManagedConfigRuntime = ({
   fsPromises,
@@ -68,6 +69,7 @@ export const createManagedConfigRuntime = ({
   limitFailoverRuntime = null,
   readSettings,
   listExtensionSkillDirectories = async () => [],
+  openchamberVersion,
 }) => {
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
@@ -123,7 +125,7 @@ export const createManagedConfigRuntime = ({
     }
     directories.push(await materializeSessionTitlePlugin({ fsPromises, path, instanceDir }));
     const disabled = includeImage ? [...DISABLED_BUILTIN_PLUGINS, BUILTIN_IMAGE_PLUGIN] : DISABLED_BUILTIN_PLUGINS;
-    const authoring = await materializeAuthoringSkill({ fsPromises, instanceDir });
+    const authoring = await materializeAuthoringSkill({ fsPromises, instanceDir, openchamberVersion });
     const skills = [authoring.skillsRoot, ...await listExtensionSkillDirectories()];
     return { disabled, directories, permissions, skills, commands: { [EXTENSION_AUTHORING_COMMAND]: authoring.command } };
   };

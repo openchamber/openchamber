@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { GUEST_BLOCK_RESERVED_NAMES, isGuestApproved, requestedGuestCapabilities } from '@openchamber/sdk';
+import { GUEST_BLOCK_RESERVED_NAMES, isGuestApproved, parseOpenChamberVersion, requestedGuestCapabilities } from '@openchamber/sdk';
 
 /**
  * What extensions add to agents: the text and block components a session is
@@ -80,16 +80,29 @@ export const createGuestAgentContext = ({ listGuests, instructions }) => {
 };
 
 /**
+ * The skill pinned to the running app, so an agent never has to work out which
+ * SDK fits it. Canary and Stable publish the SDK at the app's exact version.
+ * An engine floor takes `X.Y.Z` only, so a Canary build gives its core version.
+ */
+const pinAuthoringSkill = (template, openchamberVersion) => {
+  const core = parseOpenChamberVersion(openchamberVersion);
+  return template
+    .replaceAll('{{sdkVersion}}', core ? openchamberVersion : 'latest')
+    .replaceAll('{{engineFloor}}', core ? `${core.major}.${core.minor}.${core.patch}` : '0.0.0');
+};
+
+/**
  * The extension-writing skill as a file OpenCode can scan, under the instance
  * directory: the packaged source may sit inside an archive OpenCode cannot read.
  * @returns {Promise<{ skillsRoot: string, command: { description: string, template: string } }>}
  */
-export const materializeAuthoringSkill = async ({ fsPromises, instanceDir }) => {
+export const materializeAuthoringSkill = async ({ fsPromises, instanceDir, openchamberVersion }) => {
   const skillsRoot = path.join(instanceDir, 'skills');
   const directory = path.join(skillsRoot, AUTHORING_SKILL_NAME);
   const target = path.join(directory, 'SKILL.md');
   await fsPromises.mkdir(directory, { recursive: true });
-  await fsPromises.writeFile(target, await fsPromises.readFile(AUTHORING_SKILL_SOURCE, 'utf8'), 'utf8');
+  const template = await fsPromises.readFile(AUTHORING_SKILL_SOURCE, 'utf8');
+  await fsPromises.writeFile(target, pinAuthoringSkill(template, openchamberVersion), 'utf8');
   return {
     skillsRoot,
     command: {

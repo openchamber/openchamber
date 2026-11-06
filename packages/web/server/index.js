@@ -2413,6 +2413,7 @@ async function main(options = {}) {
     limitFailoverRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
     listExtensionSkillDirectories: guestAgentContext.skillDirectories,
+    openchamberVersion: OPENCHAMBER_VERSION,
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 

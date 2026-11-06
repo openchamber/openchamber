@@ -11,7 +11,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirectories } = {}) => {
+const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirectories, openchamberVersion } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
   temporaryDirectories.push(dataDir);
   const agentToolRuntime = {
@@ -36,6 +36,7 @@ const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirect
     agentToolRuntime,
     readSettings: () => current.settings,
     listExtensionSkillDirectories,
+    openchamberVersion,
   });
   const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
   return { dataDir, runtime, agentToolRuntime, current, readConfigFile, titleDirectory };
@@ -64,6 +65,20 @@ describe('managed OpenCode config file', () => {
     await runtime.buildManagedChildEnv();
     const skill = await fs.readFile(path.join(dataDir, 'skills', 'openchamber-extensions', 'SKILL.md'), 'utf8');
     expect(skill).toContain('disable-model-invocation: true');
+  });
+
+  it.each([
+    ['2.6.1', '2.6.1', '2.6.1'],
+    ['2.6.2-canary.20261105.7', '2.6.2-canary.20261105.7', '2.6.2'],
+    ['unknown', 'latest', '0.0.0'],
+  ])('pins the extension-writing skill to app %s', async (openchamberVersion, sdkVersion, engineFloor) => {
+    const { dataDir, runtime } = await createHarness({ settings: {}, openchamberVersion });
+    await runtime.buildManagedChildEnv();
+    const skill = await fs.readFile(path.join(dataDir, 'skills', 'openchamber-extensions', 'SKILL.md'), 'utf8');
+    expect(skill).toContain(`bun add @openchamber/sdk@${sdkVersion}\``);
+    expect(skill).toContain(`"@openchamber/sdk": "${sdkVersion}"`);
+    expect(skill).toContain(`"openchamber": ">=${engineFloor}"`);
+    expect(skill).not.toContain('{{');
   });
 
   it('lists the skill folders of active extensions and leaves them out once none is', async () => {
