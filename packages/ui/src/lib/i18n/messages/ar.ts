@@ -2515,6 +2515,7 @@ export const dict = {
   'chat.textSelection.comment.attach': 'إرفاق',
   'chat.textSelection.comment.save': 'حفظ التعليق',
   'chat.textSelection.comment.attachFailed': 'تعذّر إرفاق التعليق. اختصره أو أزل سياقًا مرفقًا آخر، ثم حاول مرة أخرى.',
+  'chat.textSelection.comment.saveFailed': 'تعذّر حفظ التعليق. اختصره أو أزل سياقًا مرفقًا آخر، ثم حاول مرة أخرى.',
   'chat.textSelection.actions.addToNotes': 'إضافة إلى الملاحظات',
   'chat.textSelection.title.addToCurrentChat': 'إضافة إلى المحادثة الحالية',
   'chat.textSelection.title.saveInsightToNotes': 'حفظ النص المحدد في الملاحظات',

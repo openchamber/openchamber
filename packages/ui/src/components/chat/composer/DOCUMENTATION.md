@@ -347,6 +347,15 @@ its scrollable content is capped by the space between the host and the chat
 column's top edge, so a long preview does not hide its entry actions behind the
 chat header.
 
+A mouse opens the preview on hover and a click toggles it; a tap only toggles
+it. The hover handlers are pointer events that act only for
+`pointerType === 'mouse'`: a tap, by finger or by a pen without hover, fires
+its enter right before its `click`, so a
+mouse-hover handler opened the preview and the click closed it again in the
+same tap, and phones could not open it at all. On desktop the preview's pencil
+edits the comment in place; on mobile it opens the comment shell (see "Mobile
+comment mode").
+
 ## Layers
 
 | Directory | Owns |
@@ -1438,6 +1447,26 @@ inserted transcript open for editing or retry, with a localized error toast.
 A stale runtime closes the comment without writing to the new runtime.
 Desktop's floating comment input also remains open when the store rejects
 an attachment, using the same localized error.
+
+Editing an attached comment on mobile reuses the same shell. The pencil in the
+context-chip preview calls `openEdit` with the draft's id, quoted text and
+comment, inside the tap (`flushSync`, for the soft keyboard), and the shell
+opens with the caret after the text, a Save (check) action and Cancel editing
+on its close button. Save goes through the same attach path, but the plan
+carries `draftId`, so `applyMobileCommentAttach` calls `updateDraft` with the
+new text and writes nothing else; Cancel writes nothing. `openEdit` accepts
+only a draft of the published scope. A rejected update keeps the shell open
+with its own localized error, as a rejected attach does; a draft removed while
+the shell was open closes it, since a retry could never succeed.
+
+### Why the mobile pencil opens the comment shell and not the preview editor
+
+The preview's in-place editor is a desktop field in a floating panel. On a
+phone the comment was written in the shell above the keyboard, and the issue
+asked that editing look and behave the same way, with save and cancel. The
+shell already owns the scope capture, generation guards, dictation and
+keyboard handoff, so an edit mode on it is one id more than a second mobile
+field would be.
 
 `comment/useMobileCommentComposerMode.ts` is ChatInput's seam: subscription,
 scope ownership, and the attach/cancel transitions, flushed inside the tap and

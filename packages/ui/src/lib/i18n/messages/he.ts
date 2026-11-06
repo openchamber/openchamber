@@ -2515,6 +2515,7 @@ export const dict = {
   'chat.textSelection.comment.attach': 'צרף',
   'chat.textSelection.comment.save': 'שמור תגובה',
   'chat.textSelection.comment.attachFailed': 'לא ניתן היה לצרף את התגובה. יש לקצר אותה או להסיר הקשר מצורף אחר, ולנסות שוב.',
+  'chat.textSelection.comment.saveFailed': 'לא ניתן היה לשמור את התגובה. יש לקצר אותה או להסיר הקשר מצורף אחר, ולנסות שוב.',
   'chat.textSelection.actions.addToNotes': 'הוסף להערות',
   'chat.textSelection.title.addToCurrentChat': 'הוסף לצ\'אט הנוכחי',
   'chat.textSelection.title.saveInsightToNotes': 'שמור את הטקסט שנבחר בהערות',

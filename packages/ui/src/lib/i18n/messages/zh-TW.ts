@@ -2578,6 +2578,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.comment.attach': '附加',
   'chat.textSelection.comment.save': '儲存留言',
   'chat.textSelection.comment.attachFailed': '無法附加評論。請縮短評論或移除其他已附加的上下文，然後重試。',
+  'chat.textSelection.comment.saveFailed': '無法儲存評論。請縮短評論或移除其他已附加的上下文，然後重試。',
   'chat.textSelection.actions.addToNotes': '加入筆記',
   'chat.textSelection.title.addToCurrentChat': '加入目前聊天',
   'chat.textSelection.title.saveInsightToNotes': '將選取文字儲存到筆記',
