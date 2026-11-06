@@ -129,7 +129,14 @@ export const WorkStatusUsageSection: React.FC<{ visible?: boolean }> = ({ visibl
                 <span className="min-w-0 truncate font-semibold text-foreground">{group.providerName}</span>
                 <span dir="auto" className="ms-auto max-w-[calc(100%-2rem)] shrink-0 truncate">{group.status}</span>
               </span>
-            ) : <span className="font-semibold text-foreground">{group.providerName}</span>}
+            ) : (
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 font-semibold text-foreground">{group.providerName}</span>
+                {group.accountLabel ? (
+                  <span className="min-w-0 truncate" title={group.accountLabel}>{group.accountLabel}</span>
+                ) : null}
+              </span>
+            )}
             tooltip={group.status && group.rows.length === 0 ? group.status : undefined}
           />
           {group.rows.map((row) => {

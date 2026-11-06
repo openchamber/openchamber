@@ -1514,6 +1514,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': 'Refreshing usage...',
   'settings.usage.page.header.lastUpdated': 'Last updated: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · last updated: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': 'Account: {account} · last updated: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'Show in work status panel',
   'settings.usage.page.options.showInWorkStatus': 'Show in work status panel',
   'settings.usage.page.options.showInWorkStatusTooltip': 'When enabled, this provider\'s usage will be visible in the work status panel.',

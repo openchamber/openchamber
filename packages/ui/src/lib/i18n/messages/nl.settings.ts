@@ -1515,6 +1515,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': 'Gebruik vernieuwen...',
   'settings.usage.page.header.lastUpdated': 'Laatst bijgewerkt: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · Laatst bijgewerkt: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': 'Account: {account} · Laatst bijgewerkt: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'Tonen in werkstatuspaneel',
   'settings.usage.page.options.showInWorkStatus': 'Tonen in werkstatuspaneel',
   'settings.usage.page.options.showInWorkStatusTooltip': 'Indien ingeschakeld is het gebruik van deze provider zichtbaar in het werkstatuspaneel.',

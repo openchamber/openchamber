@@ -2418,6 +2418,7 @@ export const settingsDict = {
   'settings.usage.page.empty.selectProvider': 'Wybierz dostawcę, aby wyświetlić szczegóły użycia.',
   'settings.usage.page.header.lastUpdated': 'Ostatnio aktualizowano: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · Ostatnia aktualizacja: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': 'Konto: {account} · Ostatnia aktualizacja: {time}',
   'settings.usage.page.header.providerUsage': 'Użycie {provider}',
   'settings.usage.page.header.refreshing': 'Odświeżanie użycia...',
   'settings.usage.page.options.showInWorkStatus': 'Pokaż w panelu statusu pracy',

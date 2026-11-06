@@ -1482,6 +1482,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': '사용량 새로고침 중...',
   'settings.usage.page.header.lastUpdated': '마지막 업데이트: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': '플랜: {plan} · 마지막 업데이트: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': '계정: {account} · 마지막 업데이트: {time}',
   'settings.usage.page.options.showInWorkStatusAria': '작업 상태 패널에 표시',
   'settings.usage.page.options.showInWorkStatus': '작업 상태 패널에 표시',
   'settings.usage.page.options.showInWorkStatusTooltip': '활성화하면 이 제공업체의 사용량이 작업 상태 패널에 표시됩니다.',

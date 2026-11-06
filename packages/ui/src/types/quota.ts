@@ -101,6 +101,8 @@ export interface ProviderResult {
   error?: string;
   /** Subscription tier reported by the provider, when it exposes one. */
   planLabel?: string | null;
+  /** Whose numbers these are, when they come from a sign-in other than the one OpenChamber chats as. */
+  accountLabel?: string | null;
   usage: ProviderUsage | null;
   fetchedAt: number;
 }

@@ -1482,6 +1482,7 @@ export const settingsDict = {
   "settings.usage.page.header.refreshing": "Atualizando uso...",
   "settings.usage.page.header.lastUpdated": "Última atualização: {time}",
   "settings.usage.page.header.lastUpdatedWithPlan": "Plano: {plan} · Última atualização: {time}",
+  "settings.usage.page.header.lastUpdatedWithAccount": "Conta: {account} · Última atualização: {time}",
   "settings.usage.page.options.showInWorkStatusAria": "Mostrar no painel de status do trabalho",
   "settings.usage.page.options.showInWorkStatus": "Mostrar no painel de status do trabalho",
   "settings.usage.page.options.showInWorkStatusTooltip": "Quando habilitado, o uso deste provedor ficará visível no painel de status do trabalho.",
