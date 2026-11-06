@@ -5,6 +5,8 @@ import { Window } from 'happy-dom';
 import { I18nProvider } from '@/lib/i18n';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { SidebarHeader } from './SidebarHeader';
+import { closeSectionsManager, useSidebarSectionsUiStore } from '../sections/sectionActions';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 const baseProps = {
   hideDirectoryControls: false,
@@ -47,6 +49,7 @@ let root: Root;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
 
 beforeEach(() => {
+  closeSectionsManager();
   browser = new Window({ url: 'http://localhost' });
   for (const [key, value] of Object.entries({
     window: browser,
@@ -83,6 +86,40 @@ afterEach(async () => {
 });
 
 describe('SidebarHeader', () => {
+  for (const query of ['token project:/repo in:archived', 'token']) test(`save as section seeds only the topic from ${query}`, async () => {
+    let closed = 0;
+    await act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery sessionSearchQuery={query} closeSessionSearch={() => { closed += 1; }} /></TooltipProvider></I18nProvider>));
+    expect(document.querySelector('input')?.value).toBe(query);
+    const savedSections = useSessionDisplayStore.getState().sections;
+    const save = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save as section');
+    expect(save).toBeDefined();
+    await act(async () => {
+      save!.click();
+      const editor = useSidebarSectionsUiStore.getState();
+      expect(editor.managerOpen).toBe(true);
+      expect(editor.draftIsNew).toBe(true);
+      expect(editor.draft?.name).toBe('token');
+      expect(editor.draft?.filter.text).toEqual(['token']);
+      expect(useSessionDisplayStore.getState().sections).toBe(savedSections);
+      closeSectionsManager();
+    });
+    expect(closed).toBe(1);
+  });
+
+  for (const query of ['project:/repo in:archived', 'in:archived ses_123']) test(`a non-topic query cannot seed a section: ${query}`, async () => {
+    await act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery sessionSearchQuery={query} /></TooltipProvider></I18nProvider>));
+    expect([...document.querySelectorAll('button')].some((button) => button.textContent === 'Save as section')).toBe(false);
+    expect(useSidebarSectionsUiStore.getState().draft).toBeNull();
+  });
+
+  test('unknown totals omit the count hint while an exact zero remains visible', async () => {
+    const render = (count: number | null) => act(async () => root.render(<I18nProvider><TooltipProvider><SidebarHeader {...baseProps} isSessionSearchOpen hasSessionSearchQuery searchMatchCount={count} /></TooltipProvider></I18nProvider>));
+    await render(null);
+    const hint = () => document.getElementById(document.querySelector('input')!.getAttribute('aria-describedby')!);
+    expect(hint()?.textContent).toBe('');
+    await render(0);
+    expect(hint()?.textContent).toContain('0');
+  });
   test('compact variant renders a persistent search input and no directory controls', async () => {
     await act(async () => root.render(
       <I18nProvider>

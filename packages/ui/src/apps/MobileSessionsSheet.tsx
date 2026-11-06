@@ -25,6 +25,8 @@ import type { IconName } from '@/components/icon/icons';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
+import { SearchScopeMenu } from '@/components/search/SearchScopeMenu';
+import { parseOmniQuery, setOmniFlag } from '@/lib/search/omniQuery';
 import type { SessionProjectListProps } from '@/components/session/sidebar/projects/SessionProjectScroller';
 import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
 import { Button } from '@/components/ui/button';
@@ -177,6 +179,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const grouping = useSessionDisplayStore(resolveSidebarGrouping);
@@ -198,6 +201,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const hasChats = useGlobalSessionsStore((state) => state.activeSessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
   const [query, setQuery] = React.useState('');
+  const omniQuery = React.useMemo(() => parseOmniQuery(query), [query]);
+  const setSearchFilter = React.useCallback((key: keyof typeof omniQuery.filters, value: string | null) => {
+    setQuery(setOmniFlag(query, key, value));
+  }, [query]);
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   const [worktreeToDelete, setWorktreeToDelete] = React.useState<{ project: { id: string; path: string }; worktree: WorktreeMetadata } | null>(null);
   const [directoryDialogOpen, setDirectoryDialogOpen] = React.useState(false);
@@ -495,7 +502,20 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               mobile
               placeholder={t('mobile.sessions.search.placeholder')}
               clearLabel={t('mobile.sessions.clearSearchAria')}
+              mode="live"
             />
+            <div className="mt-2" data-mobile-session-search-filters>
+              <SearchScopeMenu
+                filters={omniQuery.filters}
+                defaults={{ lifecycle: 'active', searchIn: 'everything' }}
+                options={{ lifecycle: true, project: null, searchIn: true, author: true }}
+                projectOptions={projects.map((project) => ({ value: project.path, label: project.label || project.path.split('/').pop() || project.path }))}
+                worktreeOptions={[...availableWorktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.label || worktree.branch })))}
+                onChange={setSearchFilter}
+                resultCount={null}
+                layout="mobile"
+              />
+            </div>
           </div>
         ) : null}
         {empty ? (

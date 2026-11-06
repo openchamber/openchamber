@@ -58,6 +58,9 @@ import {
   type StartSessionWorktreeMenuLoadArgs,
 } from './sidebar/sessionWorktreeMenu';
 import { resolveProjectRef } from '@/lib/worktreeSessionCreator';
+import { SearchScopeMenu } from '@/components/search/SearchScopeMenu';
+import { parseOmniQuery, setOmniFlag } from '@/lib/search/omniQuery';
+import { isSidebarSearchActive } from './sidebar/sidebarConversationSearch';
 
 const PROJECT_ACTIVE_SESSION_STORAGE_KEY = 'oc.sessions.activeSessionByProject';
 const activeSessionByProjectSchema = z.record(z.string(), z.string().min(1).catch(''));
@@ -106,7 +109,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     clearPhoneSearch?.();
   }, [clearPhoneSearch]);
   // Reported by the session list below: the header cannot see what matched.
-  const [searchMatchCount, setSearchMatchCount] = React.useState(0);
+  const [searchMatchCount, setSearchMatchCount] = React.useState<number | null>(0);
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
   const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const [editingProjectDialogId, setEditingProjectDialogId] = React.useState<string | null>(null);
@@ -154,12 +157,15 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const setWorktreesPageProjectId = useUIStore((state) => state.setWorktreesPageProjectId);
 
   const searchQuery = phone ? phone.searchQuery : sessionSearchQuery;
-  const normalizedSessionSearchQuery = React.useMemo(
-    () => searchQuery.trim().toLowerCase(),
-    [searchQuery],
-  );
+  const omniQuery = React.useMemo(() => parseOmniQuery(searchQuery), [searchQuery]);
+  const sidebarLifecycle = omniQuery.filters.lifecycle ?? 'active';
+  const sidebarSearchIn = omniQuery.filters.searchIn ?? 'everything';
+  const setOmniSearchFilter = React.useCallback((key: keyof typeof omniQuery.filters, value: string | null) => {
+    setSessionSearchQuery(setOmniFlag(sessionSearchQuery, key, value));
+  }, [sessionSearchQuery]);
+  const normalizedSessionSearchQuery = React.useMemo(() => omniQuery.text.trim().toLowerCase(), [omniQuery.text]);
 
-  const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
+  const hasSessionSearchQuery = isSidebarSearchActive(omniQuery);
 
 
   useSessionSearchEffects({
@@ -648,6 +654,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         isVisible,
         hasSessionSearchQuery,
         normalizedSessionSearchQuery,
+        omniSearch: { text: omniQuery.text, lifecycle: sidebarLifecycle, searchIn: sidebarSearchIn, author: omniQuery.filters.author ?? 'any', project: omniQuery.filters.project, worktree: omniQuery.filters.worktree },
         activeProjectId,
         showInlineArchived,
         useGroupedSections,
@@ -725,6 +732,16 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         setSessionSearchQuery={setSessionSearchQuery}
         hasSessionSearchQuery={hasSessionSearchQuery}
         searchMatchCount={searchMatchCount}
+        searchScope={isSessionSearchOpen ? <SearchScopeMenu
+          filters={omniQuery.filters}
+          defaults={{ lifecycle: 'active', searchIn: 'everything' }}
+          options={{ lifecycle: true, project: { currentAvailable: Boolean(activeProjectId) }, searchIn: true, author: false }}
+          projectOptions={normalizedProjects.map((project) => ({ value: project.normalizedPath, label: project.label ?? project.normalizedPath.split('/').pop() ?? project.normalizedPath }))}
+          worktreeOptions={isVSCode ? undefined : [...availableWorktreesByProject.values()].flatMap((worktrees) => worktrees.map((worktree) => ({ value: worktree.path, label: worktree.label || worktree.branch })))}
+          onChange={setOmniSearchFilter}
+          resultCount={searchMatchCount}
+          layout="sidebar"
+        /> : null}
         collapseAll={projectView.actions.collapseAll}
         expandAll={projectView.actions.expandAll}
         showStats={!isVSCode}
