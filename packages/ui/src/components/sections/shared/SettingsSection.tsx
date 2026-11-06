@@ -34,8 +34,10 @@ export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
  * clips its own digits once the interface font is scaled up. The explicit
  * `typography-ui-label` pins `ch` to the same scaled font the inner numeric
  * field renders in, since the wrapper would otherwise inherit an unscaled one.
+ * The rem part holds the two buttons, which are wider on a phone than `ch`
+ * grows; the `ch` part holds five digits, the longest value (a port).
  */
-export const SETTINGS_NUMBER_INPUT_CLASS = 'typography-ui-label w-[16ch]';
+export const SETTINGS_NUMBER_INPUT_CLASS = 'typography-ui-label w-[calc(5.75rem+5ch)]';
 
 /** Compact reset / icon action next to a settings control (matches h-8 controls). */
 export const SETTINGS_ICON_BUTTON_CLASS =
@@ -50,9 +52,6 @@ export const SETTINGS_CUSTOM_TRIGGER_CLASS = cn(
 
 /** Shared width for stacked control clusters (select/input + reset). */
 export const SETTINGS_CONTROL_CLUSTER_CLASS = 'w-full max-w-[24rem]';
-
-/** Fill a control cluster the same way as a full-width select. */
-export const SETTINGS_CLUSTER_CONTROL_CLASS = 'min-w-0 flex-1';
 
 /**
  * Row wrapping a NumberInput + unit label + reset.
