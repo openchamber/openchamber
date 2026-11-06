@@ -301,13 +301,17 @@ const TerminalSection: React.FC = () => {
 };
 
 /** How the window behaves: header tabs, panel motion, where links open. */
-const PanelsAndLinksSection: React.FC = () => {
+const PanelsAndLinksSection: React.FC<{ vscode: boolean }> = ({ vscode }) => {
   const { t } = useI18n();
+  // VS Code keeps only the command palette preference; the other rows need the desktop or web host.
+  const hostRows = !vscode;
   const { isMobile } = useDeviceInfo();
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
   const setSessionTabsEnabled = useUIStore((state) => state.setSessionTabsEnabled);
   const sessionTabsPerWorkspace = useUIStore((state) => state.sessionTabsPerWorkspace);
   const setSessionTabsPerWorkspace = useUIStore((state) => state.setSessionTabsPerWorkspace);
+  const commandPaletteShowArchivedSessions = useUIStore((state) => state.commandPaletteShowArchivedSessions);
+  const setCommandPaletteShowArchivedSessions = useUIStore((state) => state.setCommandPaletteShowArchivedSessions);
   const layoutAnimations = useUIStore((state) => state.layoutAnimations);
   const setLayoutAnimations = useUIStore((state) => state.setLayoutAnimations);
   const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel);
@@ -319,7 +323,7 @@ const PanelsAndLinksSection: React.FC = () => {
 
   return (
     <SettingsSection title={t('settings.layout.general.panels.title')} contentClassName={SETTINGS_OPTION_STACK_CLASS}>
-      {!isMobile ? (
+      {hostRows && !isMobile ? (
         <SettingsCheckboxRow
           checked={sessionTabsEnabled}
           onChange={setSessionTabsEnabled}
@@ -329,7 +333,7 @@ const PanelsAndLinksSection: React.FC = () => {
           settingsItem="appearance.session-tabs"
         />
       ) : null}
-      {!isMobile && sessionTabsEnabled ? (
+      {hostRows && !isMobile && sessionTabsEnabled ? (
         <SettingsCheckboxRow
           checked={sessionTabsPerWorkspace}
           onChange={setSessionTabsPerWorkspace}
@@ -339,7 +343,15 @@ const PanelsAndLinksSection: React.FC = () => {
           className="ps-6"
         />
       ) : null}
-      {!isMobile ? (
+      <SettingsCheckboxRow
+        checked={commandPaletteShowArchivedSessions}
+        onChange={setCommandPaletteShowArchivedSessions}
+        label={t('settings.openchamber.commandPalette.showArchived.label')}
+        ariaLabel={t('settings.openchamber.commandPalette.showArchived.label')}
+        info={t('settings.openchamber.commandPalette.showArchived.info')}
+        settingsItem="general.command-palette-show-archived-sessions"
+      />
+      {hostRows && !isMobile ? (
         <SettingsCheckboxRow
           checked={layoutAnimations}
           onChange={setLayoutAnimations}
@@ -349,7 +361,7 @@ const PanelsAndLinksSection: React.FC = () => {
           settingsItem="appearance.layout-animations"
         />
       ) : null}
-      {isDesktopShell() && !isMobile ? (
+      {hostRows && isDesktopShell() && !isMobile ? (
         <SettingsCheckboxRow
           checked={openLinksInBrowserPanel}
           onChange={setOpenLinksInBrowserPanel}
@@ -359,15 +371,17 @@ const PanelsAndLinksSection: React.FC = () => {
           settingsItem="appearance.open-links-in-browser-panel"
         />
       ) : null}
-      <SettingsCheckboxRow
-        checked={openTrackerLinksOnBoard}
-        onChange={setOpenTrackerLinksOnBoard}
-        label={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
-        ariaLabel={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
-        info={t('settings.openchamber.visual.field.openTrackerLinksOnBoardInfo')}
-        settingsItem="appearance.open-tracker-links-on-board"
-      />
-      {isDesktopShell() && !isMobile ? (
+      {hostRows ? (
+        <SettingsCheckboxRow
+          checked={openTrackerLinksOnBoard}
+          onChange={setOpenTrackerLinksOnBoard}
+          label={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
+          ariaLabel={t('settings.openchamber.visual.field.openTrackerLinksOnBoard')}
+          info={t('settings.openchamber.visual.field.openTrackerLinksOnBoardInfo')}
+          settingsItem="appearance.open-tracker-links-on-board"
+        />
+      ) : null}
+      {hostRows && isDesktopShell() && !isMobile ? (
         <SettingsFieldRow
           label={t('settings.openchamber.visual.field.liveBrowserTabs')}
           info={t('settings.openchamber.visual.field.liveBrowserTabsInfo')}
@@ -396,7 +410,7 @@ const PanelsAndLinksSection: React.FC = () => {
 
 /**
  * The workspace part of General: files and the editor, the terminal, and how
- * panels and links behave. VS Code keeps only the editor settings it applies.
+ * panels and links behave. VS Code keeps applicable editor settings and the command palette preference.
  */
 export const GeneralWorkspaceSettings: React.FC<{
   /** The page opens on these sections (no desktop app section above them). */
@@ -408,7 +422,7 @@ export const GeneralWorkspaceSettings: React.FC<{
     <>
       <FilesAndEditorSection divider={!firstSection} />
       {isVSCode ? null : <TerminalSection />}
-      {isVSCode ? null : <PanelsAndLinksSection />}
+      <PanelsAndLinksSection vscode={isVSCode} />
       {isMobile ? <MobileWorkspaceTabsSettings /> : null}
     </>
   );
