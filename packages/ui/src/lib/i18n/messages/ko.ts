@@ -2601,6 +2601,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.comment.attach': '첨부',
   'chat.textSelection.comment.save': '댓글 저장',
   'chat.textSelection.comment.attachFailed': '댓글을 첨부하지 못했습니다. 댓글을 줄이거나 다른 첨부 컨텍스트를 제거한 후 다시 시도하세요.',
+  'chat.textSelection.comment.saveFailed': '댓글을 저장하지 못했습니다. 댓글을 줄이거나 다른 첨부 컨텍스트를 제거한 후 다시 시도하세요.',
   'chat.textSelection.actions.addToNotes': '메모에 추가',
   'chat.textSelection.title.addToCurrentChat': '현재 채팅에 추가',
   'chat.textSelection.title.saveInsightToNotes': '선택한 텍스트를 메모에 저장',

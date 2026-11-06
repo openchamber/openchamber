@@ -4602,6 +4602,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             draftTarget={inlineDraftTarget}
             colors={currentTheme.colors}
             previewHost={contextPreviewHost}
+            isMobile={isMobile}
         />
     ) : null;
     // The suggested follow-up is the composer's own top row on every surface

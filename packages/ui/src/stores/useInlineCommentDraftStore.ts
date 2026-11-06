@@ -51,7 +51,8 @@ interface InlineCommentDraftActions {
   // `id` lets an external owner (the VS Code editor comment thread) choose the
   // draft id up front. Omitted by every in-app caller, which gets a generated one.
   addDraft: (target: InlineCommentDraftTarget, draft: Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'> & { id?: string }) => string | null;
-  updateDraft: (target: InlineCommentDraftTarget, draftId: string, updates: Partial<Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>>) => void;
+  // Returns false when the draft is gone or the bounds reject the update.
+  updateDraft: (target: InlineCommentDraftTarget, draftId: string, updates: Partial<Omit<InlineCommentDraft, 'id' | 'createdAt' | 'sessionKey'>>) => boolean;
   removeDraft: (target: InlineCommentDraftTarget, draftId: string) => void;
   clearDrafts: (target: InlineCommentDraftTarget) => void;
   getDrafts: (target: InlineCommentDraftTarget) => InlineCommentDraft[];
@@ -294,7 +295,8 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
         },
         updateDraft: (target, draftId, updates) => {
           const key = getCurrentKey(target);
-          if (!key) return;
+          if (!key) return false;
+          let accepted = false;
           set((state) => {
             const current = state.drafts[key] ?? [];
             if (!current.some((draft) => draft.id === draftId)) return state;
@@ -304,8 +306,11 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
               { ...state.touchedAt, [key]: Date.now() },
               key,
             );
-            return bounded ?? state;
+            if (!bounded) return state;
+            accepted = true;
+            return bounded;
           });
+          return accepted;
         },
         removeDraft: (target, draftId) => {
           const key = getCurrentKey(target);

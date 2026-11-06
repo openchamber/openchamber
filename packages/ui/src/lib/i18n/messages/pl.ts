@@ -1173,6 +1173,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.comment.attach': 'Załącz',
   'chat.textSelection.comment.save': 'Zapisz komentarz',
   'chat.textSelection.comment.attachFailed': 'Nie udało się załączyć komentarza. Skróć go lub usuń inny załączony kontekst i spróbuj ponownie.',
+  'chat.textSelection.comment.saveFailed': 'Nie udało się zapisać komentarza. Skróć go lub usuń inny załączony kontekst i spróbuj ponownie.',
   'chat.textSelection.actions.addToNotes': 'Dodaj do notatek',
   'chat.textSelection.title.addToCurrentChat': 'Dodaj do obecnego czatu',
   'chat.textSelection.title.saveInsightToNotes': 'Zapisz zaznaczony tekst do notatek',

@@ -3607,6 +3607,7 @@ export const dict = {
   'chat.textSelection.comment.attach': 'Ekle',
   'chat.textSelection.comment.save': 'Yorumu kaydet',
   'chat.textSelection.comment.attachFailed': 'Yorum eklenemedi. Yorumu kısaltın veya ekli diğer bağlamı kaldırıp tekrar deneyin.',
+  'chat.textSelection.comment.saveFailed': 'Yorum kaydedilemedi. Yorumu kısaltın veya ekli diğer bağlamı kaldırıp tekrar deneyin.',
   'commandPalette.item.cycleTheme': 'Temayı değiştir',
   'commandPalette.item.showOpenCodeStatus': 'Tanılama zaman çizelgesini göster',
   'commandPalette.item.restartOpenCode': 'OpenCode\'u yeniden başlat',

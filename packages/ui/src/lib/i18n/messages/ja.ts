@@ -2597,6 +2597,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.textSelection.comment.attach': '添付',
   'chat.textSelection.comment.save': 'コメントを保存',
   'chat.textSelection.comment.attachFailed': 'コメントを添付できませんでした。コメントを短くするか、他の添付コンテキストを削除してから、もう一度お試しください。',
+  'chat.textSelection.comment.saveFailed': 'コメントを保存できませんでした。コメントを短くするか、他の添付コンテキストを削除してから、もう一度お試しください。',
   'chat.textSelection.actions.addToNotes': 'メモに追加',
   'chat.textSelection.title.addToCurrentChat': '現在のチャットに追加',
   'chat.textSelection.title.saveInsightToNotes': '選択テキストをメモに保存',

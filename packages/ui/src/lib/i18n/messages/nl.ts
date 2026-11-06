@@ -2601,6 +2601,7 @@ export const dict = {
   'chat.textSelection.comment.attach': 'Toevoegen',
   'chat.textSelection.comment.save': 'Reactie opslaan',
   'chat.textSelection.comment.attachFailed': 'Kan de reactie niet toevoegen. Maak de reactie korter of verwijder andere toegevoegde context en probeer het opnieuw.',
+  'chat.textSelection.comment.saveFailed': 'Kan de reactie niet opslaan. Maak de reactie korter of verwijder andere toegevoegde context en probeer het opnieuw.',
   'chat.textSelection.actions.addToNotes': 'Aan notities toevoegen',
   'chat.textSelection.title.addToCurrentChat': 'Aan de huidige chat toevoegen',
   'chat.textSelection.title.saveInsightToNotes': 'Geselecteerde tekst opslaan in notities',

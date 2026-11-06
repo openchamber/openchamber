@@ -2569,6 +2569,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.textSelection.comment.attach": "Adjuntar",
   "chat.textSelection.comment.save": "Guardar comentario",
   "chat.textSelection.comment.attachFailed": "No se pudo adjuntar el comentario. Acórtalo o elimina otro contexto adjunto e inténtalo de nuevo.",
+  "chat.textSelection.comment.saveFailed": "No se pudo guardar el comentario. Acórtalo o elimina otro contexto adjunto e inténtalo de nuevo.",
   "chat.textSelection.actions.addToNotes": "Añadir a las notas",
   "chat.textSelection.title.addToCurrentChat": "Añadir al chat actual",
   "chat.textSelection.title.saveInsightToNotes": "Guardar texto seleccionado en notas",
