@@ -14,6 +14,7 @@ import { SessionMessageLoader, setImperativeSessionMessageLoader, type SessionMe
 import { DraftSendError, useSessionUIStore, type NewSessionDraftState, type PendingDraftSend } from "./session-ui-store"
 import { readLastActiveSession } from "./last-session-cache"
 import { setSyncRefs } from "./sync-refs"
+import { useSelectionStore } from "./selection-store"
 
 // The first message of a new session, sent from the draft. The real stores,
 // loader and send path run; only OpenCode's answers are scripted, and the
@@ -124,6 +125,42 @@ test("a recovered answer uses the real send path without consuming the main comp
   } finally {
     useSessionGoalArmStore.getState().setArmed(false)
     resetRecoverableQuestions()
+  }
+})
+
+test("a /btw fork on the main chat's agent and model keeps its own level from one send to the next", async () => {
+  const main = sessionRecord("ses_main", DIRECTORY)
+  const fork = sessionRecord("ses_fork", DIRECTORY)
+  childStores.ensureChild(DIRECTORY, { bootstrap: false }).setState({ session: [main, fork] })
+  useSessionUIStore.setState({ currentSessionId: main.id, currentSessionDirectory: DIRECTORY })
+  // The main chat on Build / low, as its composer shows it.
+  useConfigStore.setState({
+    currentProviderId: "provider",
+    currentModelId: "model",
+    currentAgentName: "build",
+    currentVariant: "low",
+    currentVariantSelection: { override: "low", inherited: "low" },
+  })
+  // The /btw composer picked high for the fork, as `startBtwSession` saves it.
+  const selection = useSelectionStore.getState()
+  selection.saveAgentModelVariantForSession(fork.id, "build", "provider", "model", "high")
+  const forkLevel = () => useSelectionStore.getState().getAgentModelVariantForSession(fork.id, "build", "provider", "model")
+  const sendToFork = (content: string) => useSessionUIStore.getState().sendMessage(
+    content, "provider", "model", "build", undefined, undefined, undefined, forkLevel(), "normal",
+    { userInitiated: true, sessionId: fork.id, directory: DIRECTORY, target: { runtimeKey: getRuntimeKey(), sessionId: fork.id, directory: DIRECTORY } },
+  )
+
+  try {
+    await sendToFork("first")
+    expect(forkLevel()).toBe("high")
+    await sendToFork("second")
+
+    expect(sendCalls.map((call) => [call.id, call.model?.variant])).toEqual([[fork.id, "high"], [fork.id, "high"]])
+    expect(forkLevel()).toBe("high")
+    expect(useConfigStore.getState().currentVariantSelection.override).toBe("low")
+  } finally {
+    selection.clearSessionSelections(fork.id)
+    selection.clearSessionSelections(main.id)
   }
 })
 

@@ -1098,8 +1098,10 @@ move to the fork's draft identity. Normal and BTW drafts remain independent,
 including in memory when persistence is disabled.
 
 Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
-caret at the end. BTW copies the main model/effort once, including explicit
-Default, and uses `plan` or the first selectable agent. Its controlled model
+caret at the end. BTW copies its chat's model/effort once, including explicit
+Default (in a chat pinned in the side panel, that chat's, never the main
+chat's), and uses `plan` or the first selectable agent. From then on the fork
+keeps its own effort, also on the main chat's agent and model. Its controlled model
 path only writes BTW selections. The model, effort and cycle-favorite-model
 shortcuts act on the BTW selection its chips show: the model shortcut toggles
 the BTW model picker, whose open state `ChatInput` owns for that reason; the
