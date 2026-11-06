@@ -346,10 +346,17 @@ agent tool and the Scheduled tasks editor both save through
 `scheduledTaskService.upsert`, so both reject a `provider/model` the catalog
 does not serve, with `unknown model: provider/model`. The check follows the
 directory the run will happen in — a target-session task against that session's
-worktree, everything else against the project — and stands down on an empty
-catalog, which is a location OpenCode has not started in yet. Only a model the
-call changes is checked: a task whose stored model has since disappeared stays
-editable, retimeable and deletable. A loop file's model is checked when the
+worktree, everything else against the project — and stands down when there is
+nothing to compare against: a catalog that is empty because OpenCode has not
+started in that location yet, or because the runtime cannot be reached at all.
+A folder the user has not trusted is the exception to standing down — the save
+is refused with the same 403 the control layer gives, since the user can act on
+it. Only a model the call changes is checked: a task whose stored model has
+since disappeared stays editable, retimeable and deletable. A task that follows
+session defaults is not checked at all, because the pair it stores is whatever
+the editor prefilled and the fire path ignores it — the check lands on the save
+that turns defaults off, where that stored pair starts to run. A loop file's
+model is checked when the
 loop is enabled from the app, since that is the point a person is present to be
 told.
 
