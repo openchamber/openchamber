@@ -132,14 +132,15 @@ interface IdentityIconProps {
   icon?: string | null;
   className?: string;
   colorToken?: string | null;
+  quiet?: boolean;
 }
 
-const IdentityIcon: React.FC<IdentityIconProps> = ({ icon, className, colorToken }) => {
+const IdentityIcon: React.FC<IdentityIconProps> = ({ icon, className, colorToken, quiet = false }) => {
   // Identities made from a connected account carry the provider's mark: their icon key is the provider id.
   const providers = useSourceControlProviderRegistry((state) => state.byId);
   const iconName = IDENTITY_ICON_MAP[icon ?? 'branch'];
   const provider = !iconName && icon ? providers.get(icon) : undefined;
-  const style = { color: getIdentityColor(colorToken) };
+  const style = quiet ? undefined : { color: getIdentityColor(colorToken) };
   if (provider) {
     return (
       <span className="inline-flex shrink-0" style={style}>
@@ -183,6 +184,8 @@ interface IdentityDropdownProps {
   menuAlign?: 'start' | 'end';
   /** Called when the menu opens, so connected accounts can be re-read before choosing. */
   onOpen?: () => void;
+  /** The trigger leaves out the identity's colour; the menu keeps it. */
+  quiet?: boolean;
 }
 
 export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
@@ -197,6 +200,7 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
   triggerClassName,
   menuAlign = 'end',
   onOpen,
+  quiet = false,
 }) => {
   const { t } = useI18n();
   const isDisabled = isApplying || identities.length === 0;
@@ -210,7 +214,7 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
               variant="ghost"
               size="sm"
               className={cn('min-w-0 max-w-[15rem] justify-start gap-1.5 px-2 py-1 typography-ui-label', triggerClassName)}
-              style={{ color: getIdentityColor(activeProfile?.color) }}
+              style={quiet ? undefined : { color: getIdentityColor(activeProfile?.color) }}
               disabled={isDisabled}
               aria-label={t('gitView.header.identityTooltip')}
             >
@@ -220,7 +224,8 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
                 <IdentityIcon
                   icon={activeProfile?.icon}
                   colorToken={activeProfile?.color}
-                  className="size-4"
+                  quiet={quiet}
+                  className={cn('size-4', quiet && 'text-muted-foreground')}
                 />
               )}
               {!iconOnly && (

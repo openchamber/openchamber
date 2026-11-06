@@ -3401,7 +3401,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                         <Icon name="search-eye" className="size-4" />
                                     )}
                                     <span className="diff-toolbar__review-label typography-ui-label">
-                                        {t('diffView.actions.review')}
+                                        {t('chat.work.reviewHint.aiReview')}
                                     </span>
                                 </Button>
                             </span>

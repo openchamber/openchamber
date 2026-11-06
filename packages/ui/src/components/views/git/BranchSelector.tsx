@@ -184,7 +184,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
           disabled={disabled}
           onClick={() => setIsOpen(true)}
         >
-          <Icon name="git-branch" className="size-4 text-primary" />
+          <Icon name="git-branch" className="size-4 text-muted-foreground" />
           <span className="min-w-0 truncate font-medium text-start">
             {currentBranch || t('gitView.branch.detachedHead')}
           </span>

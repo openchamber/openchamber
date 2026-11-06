@@ -159,8 +159,6 @@ export const ReviewSubmitButton: React.FC<{
     const [open, setOpen] = React.useState(false);
     const count = reviewDraftCount(review);
     const label = count > 0 ? t('review.submit.buttonWithCount', { count }) : t('review.submit.button');
-    // A phone's header has no room for the word, so the button is its icon and the count.
-    const shortLabel = count > 0 ? String(count) : null;
     const form = <ReviewSubmitForm review={review} provider={provider} voteLabels={voteLabels} onDone={() => setOpen(false)} />;
     const content = (
         <>
@@ -173,9 +171,9 @@ export const ReviewSubmitButton: React.FC<{
     if (isMobile) {
         return (
             <>
-                <Button size="sm" className={cn('h-7 flex-shrink-0 gap-1.5 px-2', className)} aria-label={label} onClick={() => setOpen(true)}>
+                <Button variant="outline" className={cn('flex-shrink-0', className)} aria-label={label} onClick={() => setOpen(true)}>
                     <Icon name="search-eye" className="size-4" />
-                    {shortLabel ? <span className="typography-ui-label">{shortLabel}</span> : null}
+                    {label}
                 </Button>
                 <MobileOverlayPanel open={open} onClose={() => setOpen(false)} title={t('review.submit.button')}>
                     <div className="p-3">{form}</div>

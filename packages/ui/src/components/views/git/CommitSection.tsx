@@ -1,3 +1,4 @@
+import React from 'react';
 import { Button } from '@/components/ui/button';
 import { CommitInput } from './CommitInput';
 import { AIHighlightsBox } from './AIHighlightsBox';
@@ -47,18 +48,35 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   const hasStagedFiles = stagedCount > 0;
   const canCommit = commitMessage.trim() && hasStagedFiles && commitAction === null && !hasPendingIndexMutation;
   const { isMobile, hasTouchInput } = useDeviceInfo();
+  const [formFocused, setFormFocused] = React.useState(false);
   const commitBlockedHint = !hasStagedFiles
     ? t('contextTooltips.git.stageFilesFirst')
     : !commitMessage.trim()
       ? t('contextTooltips.git.writeMessageFirst')
       : null;
 
+  // On a phone the form waits for something to commit: the list gets the height.
+  // It stays while focused, so clearing a draft does not take the field and the
+  // keyboard away from under the typing.
+  if (isMobile && !formFocused && !hasStagedFiles && !commitMessage.trim() && generatedHighlights.length === 0) {
+    return (
+      <section className="flex items-baseline gap-2">
+        <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.commit.title')}</h3>
+        <span className="min-w-0 truncate typography-meta text-muted-foreground">{t('gitView.commit.stageFilesHint')}</span>
+      </section>
+    );
+  }
+
   const containerClassName = 'border-0 bg-transparent rounded-none';
   const headerClassName = 'flex w-full items-baseline gap-2 px-0 pt-2 pb-1';
   const contentClassName = 'flex flex-col gap-3 px-0 pt-1 pb-3';
 
   return (
-    <section className={containerClassName}>
+    <section
+      className={containerClassName}
+      onFocus={() => setFormFocused(true)}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFormFocused(false); }}
+    >
       <div className={headerClassName}>
         <h3 className="typography-ui-header font-semibold text-foreground">{t('gitView.commit.title')}</h3>
         {!hasStagedFiles ? (
