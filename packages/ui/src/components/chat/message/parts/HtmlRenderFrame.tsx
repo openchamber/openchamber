@@ -94,6 +94,10 @@ interface HtmlRenderDocumentProps {
     answerState?: HtmlRenderAnswerState;
     /** Delivers what the page sent with `openchamber.submit`; rejects with the reason it was not delivered. */
     onSubmit?: (submission: HtmlRenderSubmission) => Promise<void>;
+    /** The user clicked the Decline the page shows beside its last button. */
+    onDecline?: () => void;
+    /** Whether the page found a button to put its Decline beside. */
+    onDeclinePlaced?: (placed: boolean) => void;
     onContentHeight?: (height: number) => void;
     /** Receives the frame, for a caller that drives the page from outside (annotation). */
     frameRef?: React.RefObject<HTMLIFrameElement | null>;
@@ -106,13 +110,17 @@ interface HtmlRenderDocumentProps {
  * state its script holds survives. The page's selections, quote marks and
  * reveals pass through here to the chat (see pageQuoteBridge.ts).
  */
-function HtmlRenderDocument({ partId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onContentHeight, frameRef: outerFrameRef }: HtmlRenderDocumentProps) {
+function HtmlRenderDocument({
+    partId, html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onDecline, onDeclinePlaced, onContentHeight, frameRef: outerFrameRef,
+}: HtmlRenderDocumentProps) {
+    const { t } = useI18n();
     const theme = useHtmlRenderTheme();
     const [initialTheme] = React.useState(theme);
     const [initialAnswerState] = React.useState(answerState);
+    const [declineLabel] = React.useState(() => t('chat.htmlRender.decline'));
     const srcDoc = React.useMemo(
-        () => buildHtmlRenderDocument(html, initialTheme, { contained, answerState: initialAnswerState }),
-        [contained, html, initialAnswerState, initialTheme],
+        () => buildHtmlRenderDocument(html, initialTheme, { contained, answerState: initialAnswerState, declineLabel }),
+        [contained, declineLabel, html, initialAnswerState, initialTheme],
     );
     const frameRef = React.useRef<HTMLIFrameElement>(null);
     const setFrame = React.useCallback((node: HTMLIFrameElement | null) => {
@@ -133,10 +141,10 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
     }, [answerState, theme]);
     React.useEffect(postState, [postState]);
 
-    const submitRef = React.useRef({ answerState, onSubmit });
+    const submitRef = React.useRef({ answerState, onSubmit, onDecline, onDeclinePlaced });
     React.useLayoutEffect(() => {
-        submitRef.current = { answerState, onSubmit };
-    }, [answerState, onSubmit]);
+        submitRef.current = { answerState, onSubmit, onDecline, onDeclinePlaced };
+    }, [answerState, onSubmit, onDecline, onDeclinePlaced]);
 
     const postMarks = React.useCallback(() => {
         frameRef.current?.contentWindow?.postMessage(htmlRenderMarksMessage(getPageMarks(partId)), '*');
@@ -228,6 +236,17 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
                 if (!message.submission.summary) return reply('summary is required: the choice in a few words');
                 deliver(message.submission).then(() => reply(), (error) => reply(error instanceof Error ? error.message : String(error)));
             }
+            if (message?.kind === 'decline') {
+                const { answerState: current, onDecline: decline } = submitRef.current;
+                // Like an answer, only a click while the page waits declines it.
+                // Refused, the page gets its state back, which turns its Decline on again.
+                if (!decline || !current.waiting || (navigator.userActivation && !navigator.userActivation.isActive)) {
+                    frame.contentWindow?.postMessage(htmlRenderAnswerStateMessage(current), '*');
+                } else {
+                    decline();
+                }
+            }
+            if (message?.kind === 'decline-placed') submitRef.current.onDeclinePlaced?.(message.placed);
             if (message?.kind === 'selection') {
                 const handle = handleRef.current;
                 if (message.text) {
@@ -282,7 +301,7 @@ function HtmlRenderDocument({ partId, html, title, className, style, contained =
  * tall as it needs. The dialog grows with it up to the window and the page
  * scrolls inside past that, so a short page leaves no empty half-screen.
  */
-function FullscreenPage({ partId, messageId, html, title, initialHeight, answerState, onSubmit, decline }: {
+function FullscreenPage({ partId, messageId, html, title, initialHeight, answerState, onSubmit, onDecline, decline }: {
     partId: string;
     messageId: string;
     html: string;
@@ -290,7 +309,8 @@ function FullscreenPage({ partId, messageId, html, title, initialHeight, answerS
     initialHeight: number;
     answerState: HtmlRenderAnswerState;
     onSubmit: (submission: HtmlRenderSubmission) => Promise<void>;
-    /** The page's Decline while it waits, so the dialog need not be closed to decline. */
+    onDecline: () => void;
+    /** The host's Decline for a page without a button of its own, so the dialog need not be closed to decline. */
     decline: React.ReactNode;
 }) {
     const [height, setHeight] = React.useState(initialHeight);
@@ -306,6 +326,7 @@ function FullscreenPage({ partId, messageId, html, title, initialHeight, answerS
                 contained
                 answerState={answerState}
                 onSubmit={onSubmit}
+                onDecline={onDecline}
                 onContentHeight={handleContentHeight}
             />
             {decline ? <div className="mt-2 shrink-0">{decline}</div> : null}
@@ -452,7 +473,10 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
     const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined';
-    const declineButton = waiting
+    // The page puts Decline beside its own last button; only a page without
+    // one gets it under the page. Unknown until the page has loaded.
+    const [declineInPage, setDeclineInPage] = React.useState<boolean | null>(null);
+    const declineButton = waiting && declineInPage === false
         ? <DeclinePageButton onDecline={sendDecline} disabled={submitting || decline === 'sending'} />
         : null;
     // The chat brings a page that waits for an answer into view, and again
@@ -497,6 +521,8 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                     className="block size-full border-0 bg-transparent"
                     answerState={answerState}
                     onSubmit={handleSubmit}
+                    onDecline={sendDecline}
+                    onDeclinePlaced={setDeclineInPage}
                     onContentHeight={handleContentHeight}
                     frameRef={frameRef}
                 />
@@ -515,6 +541,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                                     initialHeight={height}
                                     answerState={answerState}
                                     onSubmit={handleSubmit}
+                                    onDecline={sendDecline}
                                     decline={declineButton}
                                 />
                             ) : null}
