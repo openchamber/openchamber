@@ -688,6 +688,22 @@
   min-height: 0;
 }
 
+/* Android WebViews before Chromium 108 have no dvh, so both rules above and the
+   shell's h-[100dvh] are dropped: the shell shrinks to its header and the chat and
+   composer collapse to zero height (#6356). The native app has no collapsing
+   browser bar, so vh is the same height there. A vh line placed before the dvh
+   one would not help: with var() inside, the dvh line still wins the cascade and
+   only fails later, computing to auto. */
+@supports not (height: 100dvh) {
+  :root.oc-capacitor-app .oc-mobile-app-shell {
+    height: calc(100vh - var(--oc-kb-layout, 0px));
+  }
+
+  :root.oc-capacitor-app .oc-keyboard-fill-screen {
+    height: calc(100vh - var(--oc-keyboard-inset, 0px));
+  }
+}
+
 /* Keyboard slide choreography: the composer (and the draft title, see
    .oc-draft-center note below) are moved with INLINE transform/transition set
    by useNativeMobileChrome — WebKit does not reliably start transitions when a
