@@ -969,8 +969,10 @@ export const listConfiguredQuotaProviders = async () => {
 const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const codexErrorBodySchema = z.object({ error: z.object({ type: z.string() }) });
 
+// A fixed origin with a bearer token: a redirect would carry the token elsewhere.
 const requestCodexUsage = (accessToken: string, accountId: string | null | undefined): Promise<Response> => fetch(CODEX_USAGE_URL, {
   method: 'GET',
+  redirect: 'error',
   headers: {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',

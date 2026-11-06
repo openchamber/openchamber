@@ -22,8 +22,10 @@ export const isConfigured = (auth) => {
   return Boolean(entry?.access || entry?.token);
 };
 
+// A fixed origin with a bearer token: a redirect would carry the token elsewhere.
 const requestUsage = (accessToken, accountId) => fetch(USAGE_URL, {
   method: 'GET',
+  redirect: 'error',
   headers: {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
