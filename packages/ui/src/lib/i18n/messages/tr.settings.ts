@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Saklama süresi arşivleme anından itibaren sayılır. Süresi dolan oturumlar silinir.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Saklama süresi oturumun son etkinliğinden itibaren sayılır. Süresi dolan oturumlar arşivlenir.',
@@ -553,6 +554,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktree'ler",
   "settings.projects.worktrees.removeForEveryone": "Herkes için kaldır",
   "settings.projects.worktrees.skipped": "Senin için atlandı",
+  "settings.projects.worktrees.teardownCommandAria": "Temizlik komutu {position}",
   'settings.projects.shared.invalid': '{path} içindeki proje yapılandırması okunamadı: {reason}',
   'settings.projects.shared.plansDir': 'Planlar klasörü',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1119,10 +1121,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Devam eden oturumlar',
   'settings.openchamber.sessionWork.info': 'Üzerinde çalıştığınız oturumlar için kenar çubuğunda sohbetlerin altındaki bölüm. Bir oturum, mesaj gönderdiğinizde burada görünür. Varsayılan olarak yalnızca bu bölümde görünür. Projesinde de görünmesi için kenar çubuğu menüsünden "Devam eden işleri projelerin altında da göster" seçeneğini açın. VS Code oturumları her zaman projelerinde gösterir. Onay işaretiyle veya oturum menüsünden tamamlandı olarak işaretleyin. Bir tur işin sonu gibi göründüğünde onay işareti ipucu olarak griye döner.',
   'settings.openchamber.sessionWork.field.enabled': 'Devam eden oturumları göster',
-  'settings.openchamber.sessionRetention.archivedTooltip': 'Saklama süresi dolan arşivlenmiş oturumları siler. En son arşivlenen 5 oturumu, açık oturumu, çalışan ve paylaşılan oturumları korur. Bir üst oturumun silinmesi korunan bir alt oturumu da silecekse üst oturum korunur.',
-  'settings.openchamber.sessionRetention.tooltip': 'Arşivlenmemiş oturumları son etkinliğe göre arşivler veya siler. En yeni 5 oturumu, açık oturumu, çalışan ve paylaşılan oturumları korur. Arşivlenmiş oturumlar korunur. Bir üst oturumun silinmesi korunan bir alt oturumu da silecekse üst oturum korunur.',
+  'settings.openchamber.sessionRetention.archivedTooltip': 'Saklama süresi dolan arşivlenmiş oturumları siler. En son arşivlenen 5 oturumu, açık oturumu, çalışan ve sabitlenen oturumları korur. Bir üst oturumun silinmesi korunan bir alt oturumu da silecekse üst oturum korunur.',
+  'settings.openchamber.sessionRetention.tooltip': 'Arşivlenmemiş oturumları son etkinliğe göre arşivler veya siler. En yeni 5 oturumu, açık oturumu, çalışan ve sabitlenen oturumları korur. "Devam eden" bölümündeki oturumlar da dahil etmediğiniz sürece korunur. Arşivlenmiş oturumlar korunur. Bir üst oturumun silinmesi korunan bir alt oturumu da silecekse üst oturum korunur.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Otomatik temizlemeyi etkinleştir',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Otomatik Temizlemeyi Etkinleştir',
+  'settings.openchamber.sessionRetention.field.includeInWork': '"Devam eden" oturumları dahil et',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '"Devam eden" bölümündeki oturumlar, tamamlandı olarak işaretleyene kadar korunur. Diğer oturumlar gibi süreleri dolsun istiyorsanız bunu açın. Sabitlenen oturumlar her zaman korunur.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Saklama Süresi',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Gün cinsinden saklama süresi',
   'settings.openchamber.sessionRetention.field.days': 'gün',
@@ -1570,6 +1574,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': 'Komut ekle',
   'settings.openchamber.worktrees.setup.waitForCommands': 'Session oluşturmadan veya göndermeden önce kurulum komutlarının tamamlanmasını bekle',
   'settings.openchamber.worktrees.setup.toast.saveFailed': 'Worktree kurulum komutları kaydedilemedi',
+  'settings.openchamber.worktrees.teardown.title': 'Temizlik komutları',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': 'Bir worktree silinmeden veya arşivlenmeden önce worktree dizininde çalışır. Biri başarısız olursa worktree korunur. Şunu kullanın:',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': 'proje kökü için.',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': 'örn. docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': 'Worktree temizlik komutları kaydedilemedi',
   'settings.openchamber.worktrees.list.title': 'Mevcut worktree\'ler',
   'settings.openchamber.worktrees.list.tooltip': 'Bir worktree\'yi silmek, ona bağlı session\'ları da kaldırır.',
   'settings.openchamber.worktrees.list.loading': 'Worktree\'ler yükleniyor...',
@@ -2653,6 +2662,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.tr,
   ...thirdPartyIntegrationI18n.tr,
   ...extensionCatalogI18n.tr,
+  ...extensionPowersI18n.tr,
   'settings.agents.page.field.steps': 'En fazla adım',
   'settings.agents.page.field.stepsTooltip': 'Ajanın bir turda durmadan önce yapabileceği araç adımı sayısı.',
   'settings.agents.page.field.clearStepsAria': 'En fazla adımı temizle',

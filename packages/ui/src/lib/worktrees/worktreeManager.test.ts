@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import type { GitNetworkOperation, GitNetworkOperationPlan, GitWorktreeCreateResult, RemoveGitWorktreePayload, SourceControlBindingRead } from '@/lib/api/types';
+import type { GitNetworkOperation, GitNetworkOperationPlan, GitWorktreeCreateResult, RemoveGitWorktreePayload, SourceControlBindingRead, TeardownGitWorktreePayload } from '@/lib/api/types';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -33,6 +33,10 @@ const bootstrapWatcherOptions: Array<{ onReady?: () => void }> = [];
 const warningToasts: string[] = [];
 const infoToasts: string[] = [];
 const removeCalls: Array<{ directory: string; payload: RemoveGitWorktreePayload }> = [];
+const teardownCalls: Array<{ directory: string; payload: TeardownGitWorktreePayload }> = [];
+let teardownImplementation: (() => Promise<{ success: boolean }>) | undefined;
+// The order of what a removal sends out: the teardown alone, the remote delete, the removal.
+const steps: string[] = [];
 
 const sessionState = {
   availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
@@ -46,6 +50,16 @@ const attachmentState = {
 mock.module('@/lib/openchamberConfig', () => ({
   substituteCommandVariables: (command: string) => command,
 }));
+
+let teardownCommands: string[] = [];
+let teardownResolutions = 0;
+mock.module('@/lib/sharedTrustConfirmation', () => ({
+  resolveWorktreeTeardownCommands: async () => {
+    teardownResolutions += 1;
+    return teardownCommands;
+  },
+}));
+const failedBootstraps = new Set<string>();
 
 mock.module('@/components/ui', () => ({
   toast: {
@@ -61,6 +75,7 @@ mock.module('@/lib/i18n', () => ({
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
   clearWorktreeBootstrapState: mock(),
+  getWorktreeBootstrapState: (directory: string) => (failedBootstraps.has(directory) ? { status: 'failed', phase: 'directory-created', error: null, updatedAt: 1 } : null),
   markWorktreeBootstrapPending: mock(),
   setWorktreeBootstrapState: mock(),
   startWorktreeBootstrapWatcher: (directory: string, options?: { onReady?: () => void }) => {
@@ -116,8 +131,14 @@ mock.module('@/lib/gitApi', () => ({
         return Promise.resolve({ ok: true, errors: [] });
       }),
       remove: mock((directory: string, payload: RemoveGitWorktreePayload) => {
+        steps.push(`remove ${payload.teardownCommand ?? 'without teardown'}`);
         removeCalls.push({ directory, payload });
         return removeImplementation?.() ?? Promise.resolve({ success: true });
+      }),
+      teardown: mock((directory: string, payload: TeardownGitWorktreePayload) => {
+        steps.push(`teardown ${payload.teardownCommand}`);
+        teardownCalls.push({ directory, payload });
+        return teardownImplementation?.() ?? Promise.resolve({ success: true });
       }),
     },
   },
@@ -591,6 +612,8 @@ describe('worktreeManager list invalidation', () => {
         expect(isWorktreeRemoving(target.path)).toBe(true);
         expect(sessionState.availableWorktrees).toEqual([target]);
 
+        // The teardown commands resolve before git is asked.
+        await new Promise((resolve) => setTimeout(resolve, 0));
         answerGit({ success: true });
         await removal;
         expect(isWorktreeRemoving(target.path)).toBe(false);
@@ -608,6 +631,32 @@ describe('worktreeManager list invalidation', () => {
         expect(sessionState.availableWorktrees).toEqual([target]);
       } finally {
         removeImplementation = undefined;
+      }
+    });
+
+    test('the teardown commands go to the server as one chain that stops at the first failure', async () => {
+      teardownCommands = ['docker compose down', ' rm -f .pid '];
+      removeCalls.length = 0;
+      try {
+        await removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target);
+        expect(removeCalls.map((call) => call.payload.teardownCommand)).toEqual(['docker compose down && rm -f .pid']);
+      } finally {
+        teardownCommands = [];
+      }
+    });
+
+    test('a checkout whose bootstrap failed is removed without resolving teardown, as the server skips it', async () => {
+      teardownCommands = ['docker compose down'];
+      teardownResolutions = 0;
+      removeCalls.length = 0;
+      failedBootstraps.add(target.path);
+      try {
+        await removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target);
+        expect(teardownResolutions).toBe(0);
+        expect(removeCalls.map((call) => call.payload.teardownCommand)).toEqual([undefined]);
+      } finally {
+        teardownCommands = [];
+        failedBootstraps.clear();
       }
     });
   });
@@ -980,6 +1029,92 @@ describe('worktreeManager remote deletion ordering', () => {
       expect(removeCalls).toEqual([]);
     });
   }
+
+  const target: WorktreeMetadata = { path: '/repo-feature', branch: 'feature/delete-me', projectDirectory: '/repo', label: 'delete-me' };
+  const deleteRemoteOptions = (onRemoteDelete: () => void) => ({
+    deleteRemoteBranch: true,
+    deleteLocalBranch: true,
+    remoteName: 'origin',
+    network: {
+      sourceControl: { repositoryBinding: async () => bindingRead },
+      git: {
+        planNetworkOperation: async () => plan,
+        executeNetworkOperation: async (): Promise<GitNetworkOperation> => {
+          onRemoteDelete();
+          return { ...plan, state: 'succeeded' };
+        },
+        getNetworkOperation: async (): Promise<GitNetworkOperation> => ({ ...plan, state: 'succeeded' }),
+      },
+    },
+  });
+
+  test('a delete with the remote branch runs the teardown alone first, then the remote delete, then the removal', async () => {
+    teardownCommands = ['docker compose down'];
+    steps.length = 0;
+    try {
+      await removeProjectWorktree({ id: 'project-one', path: '/repo' }, target, deleteRemoteOptions(() => steps.push('remote delete')));
+      expect(steps).toEqual(['teardown docker compose down', 'remote delete', 'remove without teardown']);
+      expect(teardownCalls.at(-1)).toEqual({ directory: '/repo', payload: { directory: '/repo-feature', teardownCommand: 'docker compose down' } });
+    } finally {
+      teardownCommands = [];
+    }
+  });
+
+  test('a remote that refuses the delete stops it before the teardown runs', async () => {
+    teardownCommands = ['docker compose down'];
+    steps.length = 0;
+    try {
+      await expect(removeProjectWorktree({ id: 'project-one', path: '/repo' }, target, {
+        ...deleteRemoteOptions(() => steps.push('remote delete')),
+        remoteName: 'upstream',
+      })).rejects.toThrow('binding-remote-missing');
+      expect(steps).toEqual([]);
+    } finally {
+      teardownCommands = [];
+    }
+  });
+
+  test('a failing teardown never reaches the remote delete', async () => {
+    teardownCommands = ['docker compose down'];
+    teardownImplementation = () => Promise.reject(Object.assign(new Error('Worktree teardown command failed, so the worktree was kept: no compose file'), { code: 'WORKTREE_TEARDOWN_FAILED' }));
+    steps.length = 0;
+    try {
+      await expect(removeProjectWorktree({ id: 'project-one', path: '/repo' }, target, deleteRemoteOptions(() => steps.push('remote delete'))))
+        .rejects.toThrow('Worktree teardown command failed');
+      expect(steps).toEqual(['teardown docker compose down']);
+    } finally {
+      teardownCommands = [];
+      teardownImplementation = undefined;
+    }
+  });
+
+  test('"Delete without teardown" repeats the delete with every option the user picked and no teardown', async () => {
+    teardownCommands = ['docker compose down'];
+    teardownResolutions = 0;
+    steps.length = 0;
+    try {
+      await removeProjectWorktree({ id: 'project-one', path: '/repo' }, target, { ...deleteRemoteOptions(() => steps.push('remote delete')), skipTeardown: true });
+      expect(teardownResolutions).toBe(0);
+      expect(steps).toEqual(['remote delete', 'remove without teardown']);
+      expect(removeCalls.at(-1)?.payload).toEqual({ directory: '/repo-feature', deleteLocalBranch: true, teardownCommand: undefined });
+    } finally {
+      teardownCommands = [];
+    }
+  });
+
+  test('a contributor-fork checkout is removed without resolving teardown, as the server runs none there', async () => {
+    teardownCommands = ['./scripts/stop.sh'];
+    teardownResolutions = 0;
+    steps.length = 0;
+    try {
+      const fork: WorktreeMetadata = { ...target, provenance: { kind: 'contributor-fork', revision: 1, trust: 'untrusted', push: 'destination-selection-required' } };
+      await removeProjectWorktree({ id: 'project-one', path: '/repo' }, fork, { deleteLocalBranch: true });
+      expect(teardownResolutions).toBe(0);
+      expect(steps).toEqual(['remove without teardown']);
+    } finally {
+      teardownCommands = [];
+    }
+  });
 });
 
 describe('worktreeManager missing worktrees', () => {

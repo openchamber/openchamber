@@ -17,14 +17,20 @@ export const CANARY_UPDATER_FEED = Object.freeze({
 
 // Where the app takes its updates from: the releases, or the nightly Canary
 // build. The person picks it in Settings → About; the app installs the next
-// update from that channel and keeps following it. Anything else stored
-// (unset, an older build's value) is Stable.
+// update from that channel and keeps following it. Without a pick (unset, an
+// older build's value) the app follows its own build, so a Canary build
+// installed from the canary pre-release does not offer the older release as
+// an update nobody asked for.
 export const isUpdateChannel = (value) => value === 'stable' || value === 'canary';
-export const normalizeUpdateChannel = (value) => (value === 'canary' ? 'canary' : 'stable');
 
 // A Canary build's version is the release it leads to with a `canary`
 // pre-release part: 2.5.4-canary.20261030.123.
 export const isCanaryVersion = (version) => /-canary\./.test(String(version ?? ''));
+
+export const normalizeUpdateChannel = (value, appVersion) => {
+  if (isUpdateChannel(value)) return value;
+  return isCanaryVersion(appVersion) ? 'canary' : 'stable';
+};
 
 const isLoopbackHostname = (hostname) => {
   if (hostname === '::1' || hostname === '[::1]') return true;

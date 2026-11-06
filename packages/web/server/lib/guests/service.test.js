@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  forgetServiceFailure,
+  getServiceFailure,
   getServiceStatus,
   beginGuestServiceHost,
   beginGuestServiceShutdown,
@@ -160,6 +162,61 @@ describe('guest service proxy', () => {
       expect(getServiceStatus('docker')).toBe('ready');
       await stopGuestService('docker');
       expect(getServiceStatus('docker')).toBe('stopped');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps what a service printed when it fails to start, until a clean start', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    const entry = path.join(packageRoot, 'service', 'main.js');
+    const working = await fs.readFile(entry, 'utf8');
+    const request = () => proxyGuestServiceRequest({
+      guestId: 'docker',
+      packageRoot,
+      service: { entry: 'service/main.js', permissions: { exec: ['docker'] } },
+      granted: ['service'],
+      persistPath,
+      method: 'GET',
+      path: '/ping',
+    });
+    try {
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      await fs.writeFile(entry, "console.error('no docker socket'); process.exit(3);");
+      await expect(request()).rejects.toThrow();
+      expect(getServiceFailure('docker')?.output).toContain('no docker socket');
+      await fs.writeFile(entry, working);
+      await request();
+      expect(getServiceFailure('docker')).toBeNull();
+      await stopGuestService('docker');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps a service killed from outside as a failure, and forgets it on request', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    const entry = path.join(packageRoot, 'service', 'main.js');
+    await fs.appendFile(entry, "\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(new URL('./pid', import.meta.url), String(process.pid));\n");
+    try {
+      await setCapabilityGrants('docker', persistPath, ['service']);
+      await proxyGuestServiceRequest({
+        guestId: 'docker',
+        packageRoot,
+        service: { entry: 'service/main.js', permissions: { exec: ['docker'] } },
+        granted: ['service'],
+        persistPath,
+        method: 'GET',
+        path: '/ping',
+      });
+      process.kill(Number(await fs.readFile(path.join(packageRoot, 'service', 'pid'), 'utf8')), 'SIGKILL');
+      for (let tries = 0; tries < 100 && !getServiceFailure('docker'); tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(getServiceFailure('docker')?.output).toContain('Stopped by SIGKILL.');
+      forgetServiceFailure('docker');
+      expect(getServiceFailure('docker')).toBeNull();
+      await stopGuestService('docker');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

@@ -1998,6 +1998,31 @@ const takePendingSessionDeepLinks = () => {
   return taken;
 };
 
+// `openchamber://extensions/install?url=…`: any web page can raise this link, so
+// only an https repository passes, and the app asks before it fetches anything.
+const extensionInstallUrl = (link) => {
+  if (link.value !== 'install') return null;
+  const value = readDeepLinkQueryParam(link.raw, 'url');
+  try {
+    const url = new URL(value ?? '');
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+};
+
+const takePendingExtensionInstalls = () => {
+  const taken = [];
+  for (let index = pendingDeepLinks.length - 1; index >= 0; index -= 1) {
+    const link = pendingDeepLinks[index];
+    if (link.type !== 'extensions') continue;
+    pendingDeepLinks.splice(index, 1);
+    const url = extensionInstallUrl(link);
+    if (url) taken.unshift(url);
+  }
+  return taken;
+};
+
 const parseDeepLink = (raw) => {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
@@ -2163,6 +2188,16 @@ const dispatchDeepLink = (link) => {
     emitToPrimaryWindow('openchamber:open-session', sessionDeepLinkTarget(link));
     return;
   }
+  if (link.type === 'extensions') {
+    const url = extensionInstallUrl(link);
+    if (!url) {
+      log.warn('[electron] invalid extension install link');
+      return;
+    }
+    focusForegroundWindow();
+    emitToPrimaryWindow('openchamber:install-extension', { url });
+    return;
+  }
   if (link.type === 'host' && link.value) {
     void switchToHostById(link.value);
     return;
@@ -2178,7 +2213,7 @@ const flushPendingDeepLinks = ({ includeSessions }) => {
   const kept = [];
   while (pendingDeepLinks.length > 0) {
     const link = pendingDeepLinks.shift();
-    if (link.type === 'session' && !includeSessions) {
+    if ((link.type === 'session' || link.type === 'extensions') && !includeSessions) {
       kept.push(link);
       continue;
     }
@@ -2201,7 +2236,7 @@ const handleDeepLinks = (urls) => {
   for (const raw of urls) {
     const parsed = parseDeepLink(raw);
     if (!parsed) continue;
-    if (isMainWindowReadyForDeepLink() && (parsed.type !== 'session' || mainWindowSessionLinkGate.isListening())) {
+    if (isMainWindowReadyForDeepLink() && ((parsed.type !== 'session' && parsed.type !== 'extensions') || mainWindowSessionLinkGate.isListening())) {
       dispatchDeepLink(parsed);
     } else {
       pendingDeepLinks.push(parsed);
@@ -3620,7 +3655,7 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
 const UPDATER_E2E_BUILD = typeof __OPENCHAMBER_UPDATER_E2E_BUILD__ !== 'undefined'
   && __OPENCHAMBER_UPDATER_E2E_BUILD__ === true;
 
-const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().desktopUpdateChannel);
+const readUpdateChannel = () => normalizeUpdateChannel(readSettingsRoot().desktopUpdateChannel, APP_VERSION);
 
 /**
  * Points the updater at the chosen channel's feed; every check re-reads the
@@ -5347,6 +5382,10 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
       return pendingHostActions.splice(0, pendingHostActions.length);
 
+    case 'desktop_take_pending_extension_installs':
+      // Install links open in the main window only.
+      if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
+      return takePendingExtensionInstalls();
     case 'desktop_take_pending_session_links':
       // Session links open in the main window only.
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
@@ -5746,12 +5785,12 @@ contextMenu({
   showCopyLink: true,
 });
 
-const loadUrlInsideWebContents = (contents, rawUrl) => {
+const loadUrlInsideWebContents = (contents, rawUrl, loadOptions) => {
   try {
     const url = new URL(rawUrl);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     if (contents.isDestroyed()) return false;
-    void contents.loadURL(url.toString()).catch((error) => {
+    void contents.loadURL(url.toString(), loadOptions).catch((error) => {
       log.warn('[webview] failed to load popup URL in place:', error);
     });
     return true;
@@ -5806,6 +5845,31 @@ const trackBrowserPanelPopup = (contents, popup) => {
   });
 };
 
+/**
+ * Gives a popup the panel's user agent. The popup already runs in the panel's
+ * session, but Electron applies that session's user agent to a window.open
+ * window only on navigations the app starts (electron/electron#45897): the
+ * opener's own navigation sends Electron's default agent, and every later
+ * navigation in the popup inherits it. So the first navigation is cancelled
+ * before it sends anything and started again from here. A form posted into a
+ * new window keeps Electron's agent: starting it again would drop the form.
+ */
+const loadBrowserPanelPopupWithPanelUserAgent = (popup, { url, referrer }) => {
+  const contents = popup.webContents;
+  contents.once('will-navigate', (event, navigationUrl) => {
+    if (navigationUrl !== url) return;
+    event.preventDefault();
+    setImmediate(() => {
+      // The page may close its popup before this runs.
+      if (contents.isDestroyed()) return;
+      loadUrlInsideWebContents(contents, url, {
+        userAgent: contents.session.getUserAgent(),
+        httpReferrer: referrer,
+      });
+    });
+  });
+};
+
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() === 'window') {
     guardAttachedWebviews(contents);
@@ -5817,7 +5881,7 @@ app.on('web-contents-created', (_event, contents) => {
   // theirs would leave the space's session for the user's.
   const isUserPanelPage = () => contents.session === session.fromPartition(BROWSER_PANEL_PARTITION);
 
-  contents.setWindowOpenHandler(({ url, disposition, postBody }) => {
+  contents.setWindowOpenHandler(({ url, disposition, postBody, referrer }) => {
     const target = isUserPanelPage()
       ? browserPanelWindowOpenTarget({ url, disposition, hasPostBody: Boolean(postBody) })
       : 'in-place';
@@ -5830,6 +5894,13 @@ app.on('web-contents-created', (_event, contents) => {
           autoHideMenuBar: true,
           webPreferences: BROWSER_PANEL_POPUP_WEB_PREFERENCES,
         },
+        // Created here so the window is tied to this request and its form body.
+        createWindow: (options) => {
+          const popup = new BrowserWindow(options);
+          trackBrowserPanelPopup(contents, popup);
+          if (!postBody) loadBrowserPanelPopupWithPanelUserAgent(popup, { url, referrer });
+          return popup.webContents;
+        },
       };
     }
     if (target === 'tab' || target === 'background-tab') {
@@ -5838,10 +5909,6 @@ app.on('web-contents-created', (_event, contents) => {
       loadUrlInsideWebContents(contents, url);
     }
     return { action: 'deny' };
-  });
-
-  contents.on('did-create-window', (popup) => {
-    trackBrowserPanelPopup(contents, popup);
   });
 });
 
@@ -5937,6 +6004,9 @@ ipcMain.on('openchamber:read-runtime-config', (event) => {
       localOrigin: state.localOrigin || state.sidecarUrl || '',
       apiBaseUrl: state.apiBaseUrl || state.sidecarUrl || '',
       clientToken: state.clientToken || '',
+      // The asking window's own: a window opened for another host must not
+      // send the main window's headers there.
+      requestHeaders: sanitizeRuntimeRequestHeaders(BrowserWindow.fromWebContents(event.sender)?.__ocRuntimeConfig?.requestHeaders || {}),
     }
     : null;
 });

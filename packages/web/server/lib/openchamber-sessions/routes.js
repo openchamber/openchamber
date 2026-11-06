@@ -339,12 +339,15 @@ const applySessionSelection = async ({ client, sessionID, model, agent, variant 
   if (agent) await client.session.switchAgent({ sessionID, agent });
 };
 
-const createSession = async ({ client, directory, title, titleByUser = false }) => {
+const createSession = async ({ client, directory, title, titleByUser = false, startedByExtension = null }) => {
   const input = { location: { directory } };
+  const openchamberMetadata = {};
   if (title) {
     input.title = title;
-    if (titleByUser) input.metadata = { openchamber: { workTitle: { title, by: 'user' } } };
+    if (titleByUser) openchamberMetadata.workTitle = { title, by: 'user' };
   }
+  if (startedByExtension) openchamberMetadata.startedByExtension = startedByExtension;
+  if (Object.keys(openchamberMetadata).length > 0) input.metadata = { openchamber: openchamberMetadata };
   const session = await client.session.create(input);
   const sessionID = asNonEmptyString(session?.id);
   if (!sessionID) throw new Error('failed to create session');
@@ -548,6 +551,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     waitForOpenCodeReady,
     emitSessionCreatedEvent,
     broadcastGlobalUiEvent,
+    onSessionArchived = null,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
     worktreeBootstrapStore,
@@ -619,6 +623,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       type: 'openchamber:session-archived',
       properties: { sessionID, archivedAt },
     });
+    onSessionArchived?.(sessionID, archivedAt);
   };
   const sessionArchive = createSessionArchive({
     store: archiveStore,
@@ -1119,7 +1124,8 @@ export const createOpenChamberSessionService = (dependencies) => {
     return sessionArchive.unarchive(parsed.ids);
   };
 
-  const createInDirectory = async (payload, { titleByUser = false } = {}, onCreated = () => {}) => {
+  // `options` come from this server, never from a request body.
+  const createInDirectory = async (payload, { titleByUser = false, startedByExtension = null } = {}, onCreated = () => {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
     const goalInput = resolveGoalInput(payload, prompt);
@@ -1238,6 +1244,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       directory: sessionDirectory,
       ...(title ? { title } : {}),
       titleByUser,
+      startedByExtension,
     });
     onCreated();
 

@@ -28,6 +28,29 @@ export const getAuthoritativeSessionFolderOwnerKey = (
   return chatsRoot ? getSessionFolderOwnerKey(null, chatsRoot) : null;
 };
 
+const WORK_FOLDER_OWNER_PREFIX = 'work:';
+
+/**
+ * A worktree or a space lists its own sessions and is filed whole, so its
+ * sessions are not the project's to file: they own only the folders inside it.
+ */
+export const getWorkFolderOwnerKey = (directory: string): string => `${WORK_FOLDER_OWNER_PREFIX}${directory}`;
+
+export const getGroupFolderOwnerKey = (
+  projectId: string | null | undefined,
+  group: Pick<SessionGroup, 'isMain' | 'isArchivedBucket' | 'directory' | 'worktree' | 'space'>,
+): string | null => {
+  const directory = normalizePath(group.directory ?? null);
+  return !group.isMain && !group.isArchivedBucket && (group.worktree !== null || group.space) && directory
+    ? getWorkFolderOwnerKey(directory)
+    : getSessionFolderOwnerKey(projectId, group.directory);
+};
+
+/** The directory of the worktree or space whose folders an owner key names, or null. */
+export const getWorkFolderScope = (ownerKey: string | null | undefined): string | null => (
+  ownerKey?.startsWith(WORK_FOLDER_OWNER_PREFIX) ? ownerKey.slice(WORK_FOLDER_OWNER_PREFIX.length) : null
+);
+
 export const getSessionFolderScopes = (
   group: Pick<SessionGroup, 'folderScopes' | 'folderScopeKey' | 'directory'>,
 ): SessionGroupFolderScope[] => {

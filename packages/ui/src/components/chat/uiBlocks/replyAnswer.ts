@@ -3,6 +3,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { ascendingId } from '@/lib/opencode/ids';
 import type { Message } from '@/lib/opencode/model';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { commitStagedRevert } from '@/sync/session-actions';
 import { useSessionMessagesSelector } from '@/sync/sync-context';
 import { UI_BLOCK_ANSWER_METADATA_KEY, uiBlockAnswerRecord, type UiBlockReplyAnswerData } from './answer';
 
@@ -25,9 +26,11 @@ const inputIdFor = (target: ReplyBlock): string => {
  * synthetic input that starts the agent's next turn, so the chat shows no
  * user message for them; the input's metadata records the answer for the block.
  */
-export function sendUiBlockReplyAnswer(target: ReplyBlock, answer: UiBlockReplyAnswerData, text: string): Promise<void> {
-  return opencodeClient.resumeWithSyntheticInput({
-    runtimeKey: getRuntimeKey(),
+export async function sendUiBlockReplyAnswer(target: ReplyBlock, answer: UiBlockReplyAnswerData, text: string): Promise<void> {
+  const runtimeKey = getRuntimeKey();
+  await commitStagedRevert(target.sessionId, target.directory);
+  await opencodeClient.resumeWithSyntheticInput({
+    runtimeKey,
     id: inputIdFor(target),
     sessionId: target.sessionId,
     directory: target.directory,

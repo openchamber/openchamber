@@ -28,7 +28,7 @@ No es un callback de montaje único. Monta la UI y registra suscripciones una ve
 | `locale` | la etiqueta de idioma de la app |
 | `directory` | el directorio del proyecto actual, o `null` |
 | `session` | `{ id, title, busy }` o `null`. Si no hay título, se usa el id de la sesión. `busy` es el estado en vivo. `model` y `agent` (el agente de OpenCode) aparecen cuando la sesión los tiene. |
-| `surface` | `panel` en la barra lateral, `dialog` en la ventana de adjuntar, `page` a pantalla completa, `status` en el panel Work Status, `file` como editor de archivos en Files |
+| `surface` | `panel` en la barra lateral, `dialog` en la ventana de adjuntar, `page` a pantalla completa, `status` en el panel Work Status, `file` como editor de archivos en Files, `block` en un bloque de UI del chat |
 | `item` | para qué se abrió esta superficie, o `null`: el elemento adjunto en el que el usuario hizo clic (los mismos campos que pasaste a `attach`, incluido `data`), un mensaje (`kind: "message"`) o una sesión (`kind: "session"`) desde una de tus acciones declaradas. Ver [Acciones](/sdk/#acciones-comandos-y-la-insignia). |
 | `connection` | `{ connected, account }` de tu integración |
 | `settings` | los valores de los campos que declaraste en `integration.settings` |
@@ -195,7 +195,7 @@ Tu página solo sabe de una sesión mientras está abierta. Tu servicio puede sa
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-Los cuatro eventos son `turn-finished` (el agente ha terminado y no espera nada: ningún subagente en marcha, ningún permiso ni pregunta pendiente, ningún paso de objetivo), `turn-failed`, `permission-asked` y `question-asked`. Un turno que el usuario detuvo no envía nada. Aprobar la extensión es la suscripción; el diálogo enumera los eventos bajo la línea del servicio. Sin `content`, el servicio recibe solo identificadores: la sesión, el directorio de su proyecto y los elementos que el usuario le vinculó. Con `"content": true`, el manifiesto pide además un permiso que el usuario ve como una línea propia, **Leer lo que dice el agente en segundo plano**, y cada evento lleva la respuesta final del agente, los campos de la pregunta o el detalle del permiso.
+Los eventos son `turn-started`, `session-created`, `session-archived`, `session-deleted`, `turn-finished` (el agente ha terminado y no espera nada: ningún subagente en marcha, ningún permiso ni pregunta pendiente, ningún paso de objetivo), `turn-failed`, `permission-asked` y `question-asked`. Un turno que el usuario detuvo no envía nada. Aprobar la extensión es la suscripción; el diálogo enumera los eventos bajo la línea del servicio. Sin `content`, el servicio recibe solo identificadores: la sesión, el directorio de su proyecto y los elementos que el usuario le vinculó. Con `"content": true`, el manifiesto pide además un permiso que el usuario ve como una línea propia, **Leer lo que dice el agente en segundo plano**, y cada evento lleva la respuesta final del agente, los campos de la pregunta o el detalle del permiso.
 
 Cada evento llega como un `POST /session-events` con el bearer del servicio. Léelo con `readSessionEventRequest` y responde `{ "ok": true }`:
 
@@ -215,6 +215,71 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 Se envían los eventos de todos los proyectos; compara `event.project.directory` con tu propia configuración y responde `{ "ok": true }` para el resto. La entrega es como mucho una vez y en orden, una petición a la vez; una respuesta fallida descarta tus eventos durante 30 segundos, y nada se reenvía después de que OpenChamber o tu servicio estuvieran caídos. El servicio no necesita panel para esto. El ejemplo `session-events-log` registra cada evento en un archivo.
+
+## Llamar a OpenChamber desde tu servicio
+
+Un servicio puede actuar sin ninguna ventana abierta. `createServiceHost` es su camino de vuelta a OpenChamber:
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`, `sessions.send`, `sessions.retry` y `sessions.status` necesitan `contributes.sessionControl`, que el usuario aprueba como una línea propia. `sessions.lastReply` necesita `sessionControl: { content: true }`. `setInstructions` necesita `contributes.instructions` y añade contenido a lo que leen los agentes, en una carpeta o, con `null`, en todas partes.
+
+`emit` llega a tus frames abiertos mediante `host.onServiceEvent`, así un panel deja de hacer sondeos. Nada se reenvía, por lo que un frame que se abre más tarde lee primero el estado actual. `readSettings` da al servicio la configuración de la integración, incluidos los campos `secret`, y `needsConfiguration` muestra un mensaje en la tarjeta de la extensión.
+
+## Ejecución sin que nadie lo pida
+
+Un servicio arranca con la primera petición, y el servicio de un rol se detiene cuando está inactivo. `service.keepRunning: true` lo arranca junto con OpenChamber y lo vuelve a levantar cuando se detiene. `service.schedule` lo despierta según un horario:
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+Una ejecución es un `POST /schedule`. Léela con `readServiceScheduleRequest` y responde 200. Una ejecución perdida mientras OpenChamber estaba caído no se recupera. Un servicio que necesita eventos externos mantiene su propia conexión o hace sondeos.
+
+## Filas en el menú @
+
+`contributes.mentions: { label }` añade una sección al menú `@` del cuadro de chat. Tu servicio responde a `POST /mentions/search` con `{ items: [{ id, title, subtitle?, url? }] }` en un máximo de 2 segundos, y a `POST /mentions/resolve` con `{ text }` para la fila que elige el usuario. El texto va al agente con el mensaje, y el usuario ve un chip. Un servicio lento no añade filas y nunca retiene los archivos; una fila que no se puede leer no deja chip y lo indica.
+
+## Bloques en el chat
+
+`contributes.blocks` añade componentes que los agentes pueden escribir en un bloque de UI. Tu propia página dibuja cada uno, en el mismo sandbox y con los mismos permisos que tu panel.
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+El agente escribe `JiraIssue("OPE-1")`, y tu página lee la llamada:
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+Llama a `host.setHeight(px)` desde un `ResizeObserver` sobre tu elemento raíz. El frame llena su caja sin padding, así que añade el tuyo. Hasta 4 componentes por extensión, porque cada firma es texto que lee cada sesión.
+
+Un bloque puede responder al agente, como hace un botón dentro de un bloque. Llama a `host.answerBlock(text)` desde un clic: el agente recibe el texto y empieza su siguiente turno. Hay una respuesta por bloque, y `block.answered` la conserva tras recargar, así que entonces dibuja el bloque como respondido.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
+
+Pon `"answers": true` en un componente que haga esto. Se indica a los agentes que pregunten con él en lugar de con la elección integrada cuando su descripción encaje, y una página que espera una respuesta omite su botón Enviar. Debajo de un bloque así, OpenChamber ofrece el mismo campo de nota que en sus propios formularios: el agente lee la nota junto con tu respuesta, y una nota sola también es una respuesta.
+
+Los argumentos los escribe un modelo, así que el texto de una página web o de un ticket puede dirigirlos. Trátalos como no confiables y no hagas nada con efectos secundarios hasta que el usuario haga clic.
 
 ## Canales de notificación
 

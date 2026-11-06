@@ -12,6 +12,7 @@ import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-re
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
+import { bunVersionRunsBunPty } from './bun-pty-support.js';
 import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
 const MAX_SESSIONS = 20;
@@ -182,9 +183,7 @@ const appendHistory = (history, text) => {
 };
 
 export async function loadTerminalPtyProvider(bunVersion = globalThis.Bun?.version, importPty = (name) => import(name)) {
-  // bun-pty 0.6 imports on older Bun, including early 1.4.0 canaries, but cannot spawn there.
-  const [bunMajor, bunMinor] = (bunVersion ?? '').split('.').map(Number);
-  if ((bunMajor > 1 || (bunMajor === 1 && bunMinor >= 4)) && !bunVersion.startsWith('1.4.0-')) {
+  if (bunVersionRunsBunPty(bunVersion)) {
     try { const pty = await importPty('bun-pty'); return { spawn: pty.spawn, backend: 'bun-pty' }; } catch { /* fall through */ }
   }
   const pty = await importPty('node-pty');

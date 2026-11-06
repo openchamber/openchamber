@@ -358,6 +358,7 @@ mock.module("../session-actions", () => ({
   shareSession: mock(async () => undefined),
   unshareSession: mock(async () => undefined),
   optimisticSend: mock(async () => undefined),
+  commitStagedRevert: mock(async () => undefined),
   refetchSessionMessages: mock(async () => undefined),
   revertToMessage: mock(async () => undefined),
   unrevertSession: mock(async () => undefined),
@@ -380,11 +381,13 @@ mock.module("@/lib/openchamberConfig", () => ({
 }))
 mock.module("@/lib/sharedTrustConfirmation", () => ({
   resolveWorktreeSetupCommands: async () => [],
+  resolveWorktreeTeardownCommands: async () => [],
 }))
 
 mock.module("@/lib/worktrees/worktreeBootstrap", () => ({
   waitForWorktreeBootstrap: async () => undefined,
   clearWorktreeBootstrapState: () => undefined,
+  getWorktreeBootstrapState: () => null,
   markWorktreeBootstrapPending: () => undefined,
   setWorktreeBootstrapState: () => undefined,
   startWorktreeBootstrapWatcher: () => undefined,

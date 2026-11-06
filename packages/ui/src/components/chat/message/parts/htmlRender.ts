@@ -345,7 +345,11 @@ const ANNOTATION_BRIDGE = `(function(C){window.addEventListener("message",functi
 // with every bar's height added under it, up to the height cap. The bar then
 // sits over the bottom of that content. The bar comes and goes with the
 // page's width without resizing the root, so the tooltip check below also
-// sizes the page again when the bar's height changed.
+// sizes the page again when the bar's height changed. While the bar stays, the
+// page keeps the tallest height it saw for it: both heights it is read from
+// are rounded, so at a fractional display scale the 10 px bar read as 9 in a
+// 515 frame and 10 in a 514 frame, the frame swung between the two, and the
+// chat under the page moved with it.
 //
 // A height less than 1 px off the frame's is the frame's own. At a fractional
 // display scale (175%) the browser snaps the frame to device pixels, so
@@ -424,12 +428,12 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(POINTER_MESSAGE)})return;if(d.over===true)document.documentElement.setAttribute("data-oc-pointer","");else document.documentElement.removeAttribute("data-oc-pointer");});`
     + `document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null,u;if(!a)return;try{u=new URL(a.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol))return;e.preventDefault();window.parent.postMessage({type:${JSON.stringify(OPEN_LINK_MESSAGE)},url:u.href},"*");},true);`
     + ANNOTATION_BRIDGE
-    + `var h,G=0,HN=0,HF=new WeakMap(),z=function(){var r=document.documentElement,d=document.body,v=r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height,i,b,k,g;`
+    + `var h,G=0,HN=0,HF=new WeakMap(),Y=function(){var i=window.innerHeight-document.documentElement.clientHeight;return i&&Math.max(i,G);},z=function(){var r=document.documentElement,d=document.body,v=r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height,i,b,k,g;`
     + `if(d&&!/^(?:hidden|clip|scroll|auto)$/.test(getComputedStyle(d).overflowY)){b=d.getBoundingClientRect();b=b.top+window.scrollY+(d.clientTop+d.scrollHeight)*(d.offsetHeight?b.height/d.offsetHeight:1);if(b>v)v=b;}if(N){N=0;W();}`
     + `for(i=0;i<P.length;i++){b=P[i].getBoundingClientRect();if(getComputedStyle(P[i]).position==="absolute"&&(b.width||b.height)&&b.bottom+window.scrollY>v)v=b.bottom+window.scrollY;}`
     + `for(i=-1;i<SC.length;i++){b=i<0?d:SC[i];if(!b||b.scrollHeight<=b.clientHeight+1||i<0&&!/^(?:scroll|auto)$/.test(getComputedStyle(b).overflowY))continue;k=b.getBoundingClientRect();`
     + `if(k.top>1||Math.abs(k.bottom-window.innerHeight)>1)continue;g=HF.get(b);if(g&&Math.abs(g[0]-k.height)<.5){if(HN>g[2]+1)continue;k=g[1];}else{g=k.height;k=window.innerHeight+b.scrollHeight-b.clientHeight;HF.set(b,[g,k,HN]);}if(k>v)v=k;}`
-    + `i=window.innerHeight-r.clientHeight;v=Math.abs(v-window.innerHeight)<1?window.innerHeight:Math.ceil(v);if(i&&!(i===G&&v===window.innerHeight))v+=i;G=i;r.style.overflowY=v>window.innerHeight+1?"auto":"hidden";if(v===h)return;h=v;HN++;window.parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:v},"*");};window.addEventListener("resize",z);`
+    + `i=Y();v=Math.abs(v-window.innerHeight)<1?window.innerHeight:Math.ceil(v);if(i&&!(i===G&&v===window.innerHeight))v+=i;G=i;r.style.overflowY=v>window.innerHeight+1?"auto":"hidden";if(v===h)return;h=v;HN++;window.parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:v},"*");};window.addEventListener("resize",z);`
     + `if(window.ResizeObserver){var o=new ResizeObserver(z);o.observe(document.documentElement);document.addEventListener("DOMContentLoaded",function(){if(document.body)o.observe(document.body);});}`
     + `document.addEventListener("DOMContentLoaded",z);window.addEventListener("load",z);`
     + `window.addEventListener("keydown",function(e){var t=e.composedPath()[0],f;if(!e.isTrusted||e.isComposing||!(e.metaKey||e.ctrlKey)||/^[acvxyz]$/i.test(e.key)&&!e.altKey||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;`
@@ -470,7 +474,7 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `if(!e.isTrusted||e.defaultPrevented||Math.abs(dy)<=Math.abs(dx))return;if(dy<0)GS("down");else if(!GU(e.target))GS("up");},{passive:true});`
     + `var P=[],SC=[],Q=0,N=1,C=function(e){for(var a=e.parentElement;a&&a!==document.body;a=a.parentElement){var o=getComputedStyle(a);if(o.overflowX!=="visible"||o.overflowY!=="visible")return 1;}return 0;},`
     + `W=function(){P=[];SC=[];var a=document.body?document.body.getElementsByTagName("*"):[];for(var i=0;i<a.length&&i<5000;i++){var o=getComputedStyle(a[i]),p=o.position;if((p==="absolute"||p==="fixed")&&!C(a[i]))P.push(a[i]);if(/^(?:scroll|auto)$/.test(o.overflowY))SC.push(a[i]);}},`
-    + `F=function(){Q=0;if(window.innerHeight-document.documentElement.clientHeight!==G)z();if(N){N=0;W();}var w=document.documentElement.clientWidth;for(var i=0;i<P.length;i++){var e=P[i],x=e.__ocx||0,y=e.__ocy||0,r=e.getBoundingClientRect(),l=r.left-x,g=r.right-x,t=r.top-y,b=r.bottom-y,nx=0,ny=0;if(!r.width&&!r.height)continue;`
+    + `F=function(){Q=0;if(Y()!==G)z();if(N){N=0;W();}var w=document.documentElement.clientWidth;for(var i=0;i<P.length;i++){var e=P[i],x=e.__ocx||0,y=e.__ocy||0,r=e.getBoundingClientRect(),l=r.left-x,g=r.right-x,t=r.top-y,b=r.bottom-y,nx=0,ny=0;if(!r.width&&!r.height)continue;`
     + `if(g>0&&l<w&&r.width<=w){if(g>w)nx=w-g;if(l+nx<0)nx=-l;}if(t<0&&b>0)ny=-t;if(nx!==x||ny!==y){e.__ocx=nx;e.__ocy=ny;e.style.translate=nx||ny?nx+"px "+ny+"px":"";}}},`
     + `U=function(r){if(r)N=1;if(!Q)Q=requestAnimationFrame(F);};`
     + `new MutationObserver(function(m){for(var i=0;i<m.length;i++)if(m[i].type==="childList"||m[i].attributeName==="class")N=1;U(0);}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["style","class"]});`

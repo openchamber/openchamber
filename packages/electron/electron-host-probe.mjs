@@ -85,6 +85,9 @@ export const probeElectronHostWithDeadline = async ({
       headers,
       signal: controller.signal,
       redirect: 'manual',
+      // Reachability is a question for the server: a cached answer could
+      // report a host that is down as up.
+      cache: 'no-store',
     });
     if (controller.signal.aborted) {
       await discardBody(response);

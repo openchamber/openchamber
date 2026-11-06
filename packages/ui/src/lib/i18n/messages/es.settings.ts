@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Cuenta el periodo de retención desde el archivado. Las sesiones caducadas se eliminan.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Cuenta el periodo de retención desde la última actividad de la sesión. Las sesiones caducadas se archivan.',
@@ -548,6 +549,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktrees",
   "settings.projects.worktrees.removeForEveryone": "Quitar para todos",
   "settings.projects.worktrees.skipped": "Omitido para ti",
+  "settings.projects.worktrees.teardownCommandAria": "Comando de limpieza {position}",
   "settings.projects.shared.invalid": "No se pudo leer la configuración del proyecto en {path}: {reason}",
   "settings.projects.shared.plansDir": "Carpeta de planes",
   "settings.projects.shared.plansDirPlaceholder": ".openchamber/plans",
@@ -1114,10 +1116,12 @@ export const settingsDict = {
   "settings.openchamber.sessionWork.title": "Sesiones en curso",
   "settings.openchamber.sessionWork.info": "Un bloque en la barra lateral, debajo de los chats, para las sesiones en las que estás trabajando. La sesión aparece ahí cuando envías un mensaje. De forma predeterminada, solo aparece en este bloque. Activa «Mostrar también lo que está en curso bajo los proyectos» en el menú de la barra lateral para mantenerla también en su proyecto. En VS Code, las sesiones siempre se muestran en sus proyectos. Márcala como terminada con la marca o el menú de la sesión. Cuando un turno parece el final del trabajo, la marca se vuelve gris como pista.",
   "settings.openchamber.sessionWork.field.enabled": "Mostrar sesiones en curso",
-  "settings.openchamber.sessionRetention.archivedTooltip": "Elimina sesiones archivadas cuyo periodo de retención ha vencido. Conserva las 5 sesiones archivadas más recientemente, la sesión abierta, las sesiones en ejecución y las compartidas. Una sesión principal se conserva si eliminarla también eliminaría una sesión secundaria protegida.",
-  "settings.openchamber.sessionRetention.tooltip": "Archiva o elimina sesiones no archivadas según su última actividad. Conserva las 5 sesiones más recientes, la sesión abierta, las sesiones en ejecución y las compartidas. Las sesiones archivadas se conservan. Una sesión principal se conserva si eliminarla también eliminaría una sesión secundaria protegida.",
+  "settings.openchamber.sessionRetention.archivedTooltip": "Elimina sesiones archivadas cuyo periodo de retención ha vencido. Conserva las 5 sesiones archivadas más recientemente, la sesión abierta, las sesiones en ejecución y las ancladas. Una sesión principal se conserva si eliminarla también eliminaría una sesión secundaria protegida.",
+  "settings.openchamber.sessionRetention.tooltip": "Archiva o elimina sesiones no archivadas según su última actividad. Conserva las 5 sesiones más recientes, la sesión abierta, las sesiones en ejecución y las ancladas. Las sesiones del bloque «En curso» también se conservan, salvo que las incluyas. Las sesiones archivadas se conservan. Una sesión principal se conserva si eliminarla también eliminaría una sesión secundaria protegida.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Habilitar limpieza automática",
   "settings.openchamber.sessionRetention.field.enableAutoCleanup": "Habilitar limpieza automática",
+  "settings.openchamber.sessionRetention.field.includeInWork": "Incluir sesiones «En curso»",
+  "settings.openchamber.sessionRetention.field.includeInWorkInfo": "Las sesiones del bloque «En curso» se conservan hasta que las marcas como hechas. Activa esta opción para que caduquen como cualquier otra sesión. Las sesiones ancladas siempre se conservan.",
   "settings.openchamber.sessionRetention.field.retentionPeriod": "Periodo de retención",
   "settings.openchamber.sessionRetention.field.retentionPeriodAria": "Período de retención en días",
   "settings.openchamber.sessionRetention.field.days": "días",
@@ -1643,6 +1647,11 @@ export const settingsDict = {
   "settings.openchamber.worktrees.setup.addCommand": "Añadir comando",
   "settings.openchamber.worktrees.setup.waitForCommands": "Esperar a que terminen los comandos de configuración antes de crear o enviar una sesión",
   "settings.openchamber.worktrees.setup.toast.saveFailed": "Error al guardar los comandos de configuración del worktree",
+  "settings.openchamber.worktrees.teardown.title": "Comandos de limpieza",
+  "settings.openchamber.worktrees.teardown.tooltipPrefix": "Se ejecutan dentro del directorio del worktree antes de eliminarlo o archivarlo. Si uno falla, el worktree se conserva. Usa",
+  "settings.openchamber.worktrees.teardown.tooltipSuffix": "para la raíz del proyecto.",
+  "settings.openchamber.worktrees.teardown.commandPlaceholder": "ej.: docker compose down",
+  "settings.openchamber.worktrees.teardown.toast.saveFailed": "Error al guardar los comandos de limpieza del worktree",
   "settings.openchamber.worktrees.list.title": "Worktrees existentes",
   "settings.openchamber.worktrees.list.tooltip": "Eliminar un worktree también elimina las sesiones vinculadas.",
   "settings.openchamber.worktrees.list.loading": "Cargando worktrees...",
@@ -2660,6 +2669,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.es,
   ...thirdPartyIntegrationI18n.es,
   ...extensionCatalogI18n.es,
+  ...extensionPowersI18n.es,
   ...guestIntegrationsI18n.es,
   ...extensionsSettingsI18n.es,
   ...settingsLayoutI18n.es,

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 import {
+  SESSION_EVENT_ARCHIVE_DEDUPE_MS,
   SESSION_EVENT_FAILURE_BACKOFF_MS,
   SESSION_EVENT_IDLE_DEDUPE_MS,
   createExtensionSessionEvents,
@@ -572,5 +573,108 @@ describe('delivery', () => {
     stopping.runtime.processPayload(idle('ses_1'));
     await settle();
     expect(stopping.calls).toHaveLength(0);
+  });
+});
+
+describe('session lifecycle events', () => {
+  const lifecycle = (overrides = {}) => subscriber({ sessionEvents: { events: ['turn-started', 'session-created', 'session-archived', 'session-deleted'] }, ...overrides });
+  const busy = { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } };
+  const typesPosted = (calls) => calls.map((call) => JSON.parse(call.body).event.type);
+
+  test('a turn is announced once however often its status repeats, and the next one again', async () => {
+    const { runtime, calls } = harness({ catalog: [lifecycle()] });
+    runtime.processPayload(busy, '/repo');
+    runtime.processPayload(busy, '/repo');
+    await settle();
+    expect(typesPosted(calls)).toEqual(['turn-started']);
+    runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'idle' } } }, '/repo');
+    runtime.processPayload(busy, '/repo');
+    await settle();
+    expect(typesPosted(calls)).toEqual(['turn-started', 'turn-started']);
+  });
+
+  test('a session created and deleted reach a subscriber', async () => {
+    const { runtime, calls } = harness({ catalog: [lifecycle()] });
+    runtime.processPayload({ type: 'session.created', properties: { sessionID: 'ses_1', info: { id: 'ses_1' } } }, '/repo');
+    runtime.processPayload({ type: 'session.deleted', properties: { sessionID: 'ses_1', info: { id: 'ses_1' } } }, '/repo');
+    await settle();
+    expect(typesPosted(calls)).toEqual(['session-created', 'session-deleted']);
+  });
+
+  test('archiving announces, restoring does not', async () => {
+    const { runtime, calls } = harness({ catalog: [lifecycle()] });
+    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: null } }, '');
+    runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: 'ses_1', archivedAt: 5 } }, '');
+    await settle();
+    expect(typesPosted(calls)).toEqual(['session-archived']);
+  });
+
+  test('an archive is announced once whoever reports it, and again after a restore or a while', async () => {
+    const { runtime, calls, advance } = harness({ catalog: [lifecycle()] });
+    const opencode = (type, id) => {
+      for (const payload of translateWireEvent({ type, id: `evt_${id}`, created: 1_000, data: { sessionID: id } })) runtime.processPayload(payload, '/repo');
+    };
+    const fromFile = (id, archivedAt) => runtime.processPayload({ type: 'openchamber:session-archived', properties: { sessionID: id, archivedAt } }, '');
+    const announced = async () => { await settle(); return calls.map((call) => JSON.parse(call.body).event.session.id); };
+    opencode('session.archived', 'ses_1');
+    fromFile('ses_1', 5);
+    fromFile('ses_2', 5);
+    opencode('session.archived', 'ses_2');
+    expect(await announced()).toEqual(['ses_1', 'ses_2']);
+    opencode('session.unarchived', 'ses_1');
+    opencode('session.archived', 'ses_1');
+    fromFile('ses_2', null);
+    fromFile('ses_2', 5);
+    expect(await announced()).toEqual(['ses_1', 'ses_2', 'ses_1', 'ses_2']);
+    // A restore this server never heard of must not silence the next archive.
+    advance(SESSION_EVENT_ARCHIVE_DEDUPE_MS);
+    opencode('session.archived', 'ses_1');
+    expect(await announced()).toEqual(['ses_1', 'ses_2', 'ses_1', 'ses_2', 'ses_1']);
+  });
+
+  test('an archive report dropped under backlog leaves the other report to announce it', async () => {
+    let release;
+    let started;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const reading = new Promise((resolve) => { started = resolve; });
+    const h = harness({ catalog: [lifecycle()], beforeFetch: async (url) => {
+      if (url.endsWith('/api/session/ses_0')) { started(); await gate; }
+    } });
+    const archived = (type, id) => ({ type, properties: { sessionID: id, archivedAt: 5 } });
+    h.runtime.processPayload(archived('session.archived', 'ses_0'));
+    await reading;
+    for (let i = 1; i <= SESSION_EVENT_PENDING_MAX + 1; i += 1) h.runtime.processPayload(archived('session.archived', `ses_${i}`));
+    h.runtime.processPayload(archived('session.archived', 'ses_late'));
+    release();
+    await settle();
+    h.runtime.processPayload(archived('openchamber:session-archived', 'ses_late'));
+    await settle();
+    expect(h.bodies().at(-1).event.session.id).toBe('ses_late');
+  });
+
+  test('a subscriber of none of them hears nothing and costs no read', async () => {
+    const { runtime, calls, fetched } = harness({ catalog: [subscriber()] });
+    runtime.processPayload(busy, '/repo');
+    await settle();
+    expect(calls).toEqual([]);
+    expect(fetched).toEqual([]);
+  });
+
+  test('the title comes only with transcript', async () => {
+    const catalog = [lifecycle({ sessionEvents: { events: ['session-created'], content: true }, capabilityGrants: ['service', 'transcript'] })];
+    const { runtime, calls } = harness({ catalog, sessions: { ses_1: { id: 'ses_1', title: 'Fix it' } } });
+    runtime.processPayload({ type: 'session.created', properties: { sessionID: 'ses_1', info: { id: 'ses_1' } } }, '/repo');
+    await settle();
+    expect(JSON.parse(calls[0].body).content).toEqual({ type: 'session-created', sessionTitle: 'Fix it' });
+  });
+});
+
+describe('content scope', () => {
+  test('a transcript grant from session control does not open a metadata subscription', async () => {
+    const catalog = [subscriber({ sessionControl: { content: true }, capabilityGrants: ['service', 'transcript', 'sessionControl'] })];
+    const { runtime, bodies } = harness({ catalog });
+    runtime.processPayload(idle(), '/repo');
+    await settle();
+    expect(bodies()[0].content).toBeUndefined();
   });
 });

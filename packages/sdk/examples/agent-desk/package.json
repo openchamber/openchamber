@@ -1,0 +1,47 @@
+{
+  "name": "@openchamber/example-agent-desk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.6.0"
+    },
+    "id": "agent-desk",
+    "name": "Agent Desk",
+    "icon": "robot-2",
+    "contributes": {
+      "panel": { "entry": "panel/index.html" },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "keepRunning": true,
+        "schedule": [{ "id": "tick", "cron": "* * * * *" }]
+      },
+      "sessionControl": { "content": true },
+      "instructions": true,
+      "skills": "skills",
+      "mentions": { "label": "Desk notes" },
+      "blocks": [
+        {
+          "name": "DeskChart",
+          "description": "A small bar chart of comma-separated numbers",
+          "args": ["title", "values"],
+          "entry": "blocks/chart.html",
+          "height": 140,
+          "answers": true
+        }
+      ],
+      "actions": [
+        { "id": "note-selection", "label": "Save to desk", "where": "selection", "mode": "background" },
+        { "id": "note-file", "label": "Pin to desk", "where": "file", "mode": "background" },
+        { "id": "note-lines", "label": "Pin lines to desk", "where": "diff", "mode": "background" }
+      ],
+      "background": { "entry": "panel/background.html" }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

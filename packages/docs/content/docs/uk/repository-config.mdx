@@ -37,6 +37,9 @@ OpenChamber зберігає їх у файлі `.openchamber/project.json` у �
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ OpenChamber зберігає їх у файлі `.openchamber/project.json` у �
 Обов'язковий лише `version`. Усі інші ключі необов'язкові, і OpenChamber записує тільки ті, що щось містять.
 
 `setupWorktree` — список shell-команд, які OpenChamber виконує всередині нового worktree одразу після його створення, по порядку. Використовуйте `$ROOT_PROJECT_PATH` для шляху до основного checkout. `setupWorktreeWait: true` змушує OpenChamber дочекатися цих команд, перш ніж запускати сесію у worktree.
+
+`teardownWorktree` містить список shell-команд, які OpenChamber виконує всередині worktree безпосередньо перед його видаленням або архівуванням, по порядку, наприклад `docker compose down` для стеку, який запустив worktree. Якщо одна з них завершиться помилкою, worktree залишиться, а OpenChamber покаже помилку команди. Спершу виконуються команди з репозиторію, потім ваші, навіть якщо ви використовуєте лише власні команди налаштування. На них поширюється те саме питання про довіру, що й на команди налаштування.
 
 `projectActions` є списком дій проєкту, тих, які ви запускаєте з Work Status, діалогу дій проєкту та палітри команд. `id`, `name` і `command` обов'язкові. `icon` необов'язкова і за замовчуванням це іконка play; OpenChamber знає такі назви: `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` і `file`. `autoOpenUrl: true` відкриває адресу, яку виводить команда, див. [Перегляд і dev-сервери](/preview/). `platforms` обмежує дію до `macos`, `linux` або `windows`. `runIn: "parent"` виконує дію в основному checkout, а не в поточному worktree.
 

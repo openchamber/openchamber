@@ -1,3 +1,26 @@
+/**
+ * A delete stopped by the project's teardown commands. The server, the
+ * extension host and the bridge carry the code on the error they throw.
+ */
+export const isWorktreeTeardownFailure = (error: Error): boolean => (
+  'code' in error && error.code === 'WORKTREE_TEARDOWN_FAILED'
+);
+
+/**
+ * The failure toast's options for a delete its teardown commands stopped: an
+ * action that repeats the delete with every option the user picked and no
+ * teardown. Only a click runs it; nothing skips a teardown on its own. The
+ * toast stays until it is answered or closed, like the app's other toasts that
+ * wait for a decision.
+ */
+export const deleteWithoutTeardownToast = (
+  error: Error,
+  label: string,
+  retryWithoutTeardown: () => void,
+): { action: { label: string; onClick: () => void }; duration: number } | undefined => (
+  isWorktreeTeardownFailure(error) ? { action: { label, onClick: retryWithoutTeardown }, duration: Infinity } : undefined
+);
+
 export type SessionArchiveResult = {
   archivedIds: string[];
   failedIds: string[];

@@ -266,12 +266,15 @@ shows the `claude auth login` command, which works in both cases.
 
 ### Policy-blocked MCP servers and skills
 
-OpenCode drops an MCP server or skill an `integration.use` deny names
-(`mcp:<name>`, `skill:<id>`, wildcards allowed) from its own lists, while the
+OpenCode drops an MCP server or skill an `mcp.use` or `skill.use` deny names
+(the server name or skill id, wildcards allowed) from its own lists, while the
 MCP and Skills pages list what the config files and the disk hold.
 `shared/useIntegrationPolicyBlock.ts` reads the statements from
 `/api/config` (`readIntegrationPolicies`, decided like OpenCode: documents
-reversed, last match wins) and the MCP page marks such a row "Blocked by
+reversed, last match wins) as `mcp:<name>` and `skill:<id>` resources. It also
+takes the legacy `integration.use` statement with that prefix, which OpenCode
+decodes into the new actions (since 2.2.3 `/api/config` serves only those), and
+no other `integration.use`, which decides providers and accounts. The MCP page marks such a row "Blocked by
 policy" and disables Connect and Test. Statements from a connected OpenCode
 Console workspace are not in `/api/config`, so a server blocked only there is
 not marked.
@@ -280,10 +283,11 @@ The Skills page reads the same statements from the skills store. One choice,
 "Agents use it" (`skills/SkillUseField.tsx`), answers when agents get a skill:
 Automatically, When called (the skill file's `disable-model-invocation` flag)
 or Off. A skill's id is its `SKILL.md` folder name, not its display name. Off
-writes an exact `skill:<id>` deny where the skill lives (project config for a
+writes an exact `skill.use` deny for the id where the skill lives (project config for a
 project skill, global config otherwise) and leaves the file's flag alone;
-leaving Off removes the exact deny from every config file OpenCode reads for
-the directory, hand-written ones included. A skill an exact deny turns off
+leaving Off removes the exact deny, in either spelling (`skill.use` `<id>` or
+the legacy `integration.use` `skill:<id>` an older OpenChamber wrote), from
+every config file OpenCode reads for the directory, hand-written ones included. A skill an exact deny turns off
 reads "Off" in the sidebar. A wildcard deny is someone else's rule: the choice
 is locked, the row reads "Blocked", and the page names the rule and its file.
 An allow that decides the skill is named the same way.

@@ -13,6 +13,14 @@ const enterprise = (allowedExtensions = []) => ({ enterpriseMode: true, allowedE
 const withOrigins = { origins: ['https://api.acme.test'] };
 
 describe('enterpriseBlockedCapabilities', () => {
+  test('refuses what acts on sessions or steers agents, unless the repository is allowed', () => {
+    const guest = { service: { entry: 'service/main.js', runtime: 'host' }, sessionControl: {}, instructions: true, skills: 'skills' };
+    const refused = ['service', 'sessionControl', 'instructions', 'skills'];
+    expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise()).sort()).toEqual([...refused].sort());
+    expect(enterpriseBlockedCapabilities({ skills: 'skills' }, { source: 'path' }, enterprise())).toEqual(['skills']);
+    expect(enterpriseBlockedCapabilities(guest, { source: 'git', gitUrl: 'https://github.com/acme/ext' }, enterprise(['https://github.com/acme/ext']))).toEqual([]);
+  });
+
   test('refuses nothing outside enterprise mode', () => {
     expect(enterpriseBlockedCapabilities({ origins: withOrigins.origins }, { source: 'zip' }, { enterpriseMode: false, allowedExtensions: [] })).toEqual([]);
   });

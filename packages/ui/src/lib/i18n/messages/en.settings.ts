@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Counts the retention period from archiving. Expired sessions are deleted.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Counts the retention period from the session\'s last activity. Expired sessions are archived.',
@@ -580,6 +581,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktrees",
   "settings.projects.worktrees.removeForEveryone": "Remove for everyone",
   "settings.projects.worktrees.skipped": "Skipped for you",
+  "settings.projects.worktrees.teardownCommandAria": "Teardown command {position}",
   'settings.projects.shared.invalid': 'The project config in {path} could not be read: {reason}',
   'settings.projects.shared.plansDir': 'Plans folder',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1146,10 +1148,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Sessions in work',
   'settings.openchamber.sessionWork.info': 'A block in the sidebar, under Chats, for the sessions you\'re working in. A session goes there when you send a message in it. By default, it appears only in this block; turn on "Also show in work under projects" in the sidebar menu to keep it in its project too. VS Code always shows sessions in their projects. Mark a session done with the check or the session menu. When a turn looks like the end of the work, the check turns grey as a hint.',
   'settings.openchamber.sessionWork.field.enabled': 'Show sessions in work',
-  'settings.openchamber.sessionRetention.archivedTooltip': 'Deletes expired archived sessions. Keeps the 5 most recently archived sessions, the open session, running sessions and shared sessions. A parent is kept if deleting it would also delete a protected child.',
-  'settings.openchamber.sessionRetention.tooltip': 'Archives or deletes unarchived sessions based on last activity. Keeps the 5 most recent sessions, the open session, running sessions and shared sessions. Archived sessions are kept. A parent is kept if deleting it would also delete a protected child.',
+  'settings.openchamber.sessionRetention.archivedTooltip': 'Deletes expired archived sessions. Keeps the 5 most recently archived sessions, the open session, running sessions and pinned sessions. A parent is kept if deleting it would also delete a protected child.',
+  'settings.openchamber.sessionRetention.tooltip': 'Archives or deletes unarchived sessions based on last activity. Keeps the 5 most recent sessions, the open session, running sessions and pinned sessions. Sessions in the In work block are kept too unless you include them. Archived sessions are kept. A parent is kept if deleting it would also delete a protected child.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Enable auto-cleanup',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Enable Auto-Cleanup',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Include sessions in In work',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Sessions in the In work block stay until you mark them done. Turn this on to let them expire like any other session. Pinned sessions always stay.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Retention period',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Retention period in days',
   'settings.openchamber.sessionRetention.field.days': 'days',
@@ -1675,6 +1679,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': 'Add command',
   'settings.openchamber.worktrees.setup.waitForCommands': 'Wait for setup commands before creating or sending a session',
   'settings.openchamber.worktrees.setup.toast.saveFailed': 'Failed to save worktree setup commands',
+  'settings.openchamber.worktrees.teardown.title': 'Teardown commands',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': 'Run inside the worktree directory before a worktree is deleted or archived. If one fails, the worktree is kept. Use',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': 'for the project root.',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': 'e.g., docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': 'Failed to save worktree teardown commands',
   'settings.openchamber.worktrees.list.title': 'Existing worktrees',
   'settings.openchamber.worktrees.list.tooltip': 'Deleting a worktree also removes its linked sessions.',
   'settings.openchamber.worktrees.list.loading': 'Loading worktrees...',
@@ -2650,6 +2659,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.en,
   ...thirdPartyIntegrationI18n.en,
   ...extensionCatalogI18n.en,
+  ...extensionPowersI18n.en,
   ...guestIntegrationsI18n.en,
   ...extensionsSettingsI18n.en,
   ...settingsLayoutI18n.en,

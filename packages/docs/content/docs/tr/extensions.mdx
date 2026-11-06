@@ -52,6 +52,10 @@ Panel göstermek ve hangi proje ile oturumun açık olduğunu okumak izin gerekt
 - **Bir oturumun konuşmasını okuma**: yalnızca o oturumda uzantının eylemini çalıştırdığınızda.
 - **Yerel servis çalıştırma**: kullanıcı hesabınızın tüm erişimine sahip ayrı bir program. Yalnızca yazara güveniyorsanız izin verin. Uzantı oturumlarınızda olanların kendisine bildirilmesini istiyorsa bu satır haber alacağı anları da listeler: bir tur biter, bir tur başarısız olur, ajan izin ister, ajan soru sorar. Bunları her projede, açık bir pencere olmadan öğrenir ve yalnızca tanımlayıcıları alır: oturum, projesi ve oturuma iliştirdiğiniz öğeler.
 - **Ajanın arka planda söylediklerini okuma**: her turun son yanıtı, ajanın sorduğu sorular ve ne için izin istediği, her projede, uzantının yerel servisine gönderilir. Yalnızca uzantının bunları gönderdiği yere güveniyorsanız izin verin.
+- **Kendi başına oturum başlatma ve mesaj gönderme**: yerel servisi bunu açık bir pencere olmadan yapar, bu jeton harcar ve araç çalıştırabilir.
+- **Ajanların okuduklarına ekleme**: oturumlarınızın talimatlarındaki metin ve uzantı açıkken her ajana sunulan beceriler.
+
+Yerel bir servis ayrıca OpenChamber çalıştığı sürece çalışmaya devam edebilir veya bir takvime göre uyanabilir. İletişim kutusu bunu **Yerel servis çalıştırma** altında söyler ve `@` işaretinden sonra yazdıklarınızın servise ne zaman gittiğini de belirtir. Bir uzantı `@` menüsüne kendi satırlarını, ajan yanıtlarına da kendi bloklarını ekleyebilir. Uzantıyı duraklatmak bunların hepsini kaldırır.
 
 Bildirimlerinizi Slack'e, Matrix'e ya da kendi sunucusuna ileten bir uzantı bunu da **Yerel servis çalıştırma** altında, **Bildirimlerinizi** sözcüğüyle başlayan bir satırla söyler. [Ayarlar → Entegrasyonlar](/tr/integrations/#uzantı-bildirim-kanalları)'da onun için bir hesap bağlamadan önce hiçbir şey dışarı çıkmaz; sonrasında telefonunuzun alacağını alır ve uzantıyı duraklatmak bunu durdurur.
 

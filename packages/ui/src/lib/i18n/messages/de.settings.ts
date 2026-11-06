@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Zählt die Aufbewahrungsdauer ab der Archivierung. Abgelaufene Sitzungen werden gelöscht.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Zählt die Aufbewahrungsdauer ab der letzten Aktivität der Sitzung. Abgelaufene Sitzungen werden archiviert.',
@@ -556,6 +557,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktrees",
   "settings.projects.worktrees.removeForEveryone": "Für alle entfernen",
   "settings.projects.worktrees.skipped": "Für dich übersprungen",
+  "settings.projects.worktrees.teardownCommandAria": "Aufräumbefehl {position}",
   'settings.projects.shared.invalid': 'Die Projektkonfiguration in {path} konnte nicht gelesen werden: {reason}',
   'settings.projects.shared.plansDir': 'Ordner für Pläne',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1096,10 +1098,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Sitzungen in Arbeit',
   'settings.openchamber.sessionWork.info': 'Ein Bereich in der Seitenleiste unter den Chats für die Sitzungen, an denen Sie arbeiten. Eine Sitzung erscheint dort, sobald Sie eine Nachricht senden. Standardmäßig wird sie nur in diesem Bereich angezeigt. Aktivieren Sie im Seitenleistenmenü „In Arbeit auch unter Projekten“, damit sie auch in ihrem Projekt erscheint. In VS Code werden Sitzungen immer in ihren Projekten angezeigt. Markieren Sie eine Sitzung über den Haken oder das Sitzungsmenü als erledigt. Sieht ein Durchgang nach dem Ende der Arbeit aus, wird der Haken als Hinweis grau.',
   'settings.openchamber.sessionWork.field.enabled': 'Sitzungen in Arbeit anzeigen',
-  'settings.openchamber.sessionRetention.archivedTooltip': 'Löscht archivierte Sitzungen nach Ablauf der Aufbewahrungsdauer. Behält die 5 zuletzt archivierten Sitzungen, die geöffnete Sitzung sowie laufende und geteilte Sitzungen. Eine übergeordnete Sitzung bleibt erhalten, wenn ihre Löschung auch eine geschützte untergeordnete Sitzung löschen würde.',
-  'settings.openchamber.sessionRetention.tooltip': 'Archiviert oder löscht nicht archivierte Sitzungen anhand ihrer letzten Aktivität. Behält die 5 neuesten Sitzungen, die geöffnete Sitzung sowie laufende und geteilte Sitzungen. Archivierte Sitzungen bleiben erhalten. Eine übergeordnete Sitzung bleibt erhalten, wenn ihre Löschung auch eine geschützte untergeordnete Sitzung löschen würde.',
+  'settings.openchamber.sessionRetention.archivedTooltip': 'Löscht archivierte Sitzungen nach Ablauf der Aufbewahrungsdauer. Behält die 5 zuletzt archivierten Sitzungen, die geöffnete Sitzung sowie laufende und angeheftete Sitzungen. Eine übergeordnete Sitzung bleibt erhalten, wenn ihre Löschung auch eine geschützte untergeordnete Sitzung löschen würde.',
+  'settings.openchamber.sessionRetention.tooltip': 'Archiviert oder löscht nicht archivierte Sitzungen anhand ihrer letzten Aktivität. Behält die 5 neuesten Sitzungen, die geöffnete Sitzung sowie laufende und angeheftete Sitzungen. Sitzungen im Bereich „In Arbeit“ bleiben ebenfalls erhalten, sofern Sie sie nicht einbeziehen. Archivierte Sitzungen bleiben erhalten. Eine übergeordnete Sitzung bleibt erhalten, wenn ihre Löschung auch eine geschützte untergeordnete Sitzung löschen würde.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Automatische Bereinigung aktivieren',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Automatische Bereinigung aktivieren',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Sitzungen „In Arbeit“ einbeziehen',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Sitzungen im Bereich „In Arbeit“ bleiben erhalten, bis Sie sie als erledigt markieren. Aktivieren Sie diese Option, damit sie wie jede andere Sitzung ablaufen. Angeheftete Sitzungen bleiben immer erhalten.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Aufbewahrungszeitraum',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Aufbewahrungszeitraum in Tagen',
   'settings.openchamber.sessionRetention.field.days': 'Tage',
@@ -1617,6 +1621,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': 'Befehl hinzufügen',
   'settings.openchamber.worktrees.setup.waitForCommands': 'Warten auf Setup-Befehle vor dem Erstellen oder Senden einer Sitzung',
   'settings.openchamber.worktrees.setup.toast.saveFailed': 'Speichern der Worktree-Setup-Befehle fehlgeschlagen',
+  'settings.openchamber.worktrees.teardown.title': 'Aufräumbefehle',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': 'Laufen im Worktree-Verzeichnis, bevor ein Worktree gelöscht oder archiviert wird. Schlägt einer fehl, bleibt der Worktree erhalten. Verwenden Sie',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': 'für das Projektstammverzeichnis.',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': 'z. B. docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': 'Speichern der Worktree-Aufräumbefehle fehlgeschlagen',
   'settings.openchamber.worktrees.list.title': 'Vorhandene Worktrees',
   'settings.openchamber.worktrees.list.tooltip': 'Worktrees befinden sich außerhalb des Repos (von OpenCode verwaltet). Das Löschen eines Worktrees entfernt auch verknüpfte Sitzungen.',
   'settings.openchamber.worktrees.list.loading': 'Worktrees werden geladen...',
@@ -2651,6 +2660,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.de,
   ...thirdPartyIntegrationI18n.de,
   ...extensionCatalogI18n.de,
+  ...extensionPowersI18n.de,
   ...guestIntegrationsI18n.de,
   ...extensionsSettingsI18n.de,
   ...settingsLayoutI18n.de,

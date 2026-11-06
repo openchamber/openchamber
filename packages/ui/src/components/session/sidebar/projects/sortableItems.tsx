@@ -130,6 +130,7 @@ interface SortableProjectItemProps extends ProjectIdentityProps {
   onManageSpaces?: () => void;
   /** The issues and PRs board on this project's repository; absent in VS Code. */
   onOpenSourceBoard?: () => void;
+  onNewFolder?: () => void;
   onOpenFolder?: () => void;
   onRenameStart: () => void;
   /** Archives the project's sessions except pinned, running and In work ones. */
@@ -167,6 +168,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onManageWorktrees,
   onManageSpaces,
   onOpenSourceBoard,
+  onNewFolder,
   onOpenFolder,
   onRenameStart,
   onArchiveAll,
@@ -229,6 +231,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Item onClick={onOpenSourceBoard}>
           <Icon name="git-pull-request" className="me-1.5 h-4 w-4" />
           {t('sourceBoard.title')}
+        </Item>
+      )}
+      {!hideDirectoryControls && onNewFolder && (
+        <Item onClick={onNewFolder}>
+          <Icon name="folder-add" className="me-1.5 h-4 w-4" />
+          {t('sessions.sidebar.folders.newFolderEllipsis')}
         </Item>
       )}
       {onOpenFolder && (

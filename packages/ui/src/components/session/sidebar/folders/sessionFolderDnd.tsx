@@ -86,12 +86,13 @@ export const DroppableFolderWrapper: React.FC<{
     isOver: boolean,
   ) => React.ReactNode;
 }> = ({ folderId, scopeKey, ownerKey, disabled = false, children }) => {
-  const { setNodeRef, isOver } = useDroppable({
+  const { active, setNodeRef, isOver } = useDroppable({
     id: getSessionFolderDropId(scopeKey, folderId),
     disabled: disabled || isArchivedFolderScope(scopeKey),
     data: { type: 'folder', folderId, scopeKey, ownerKey },
   });
-  return <>{children(setNodeRef, isOver)}</>;
+  // A session of another owner cannot land here, so the folder does not offer to take it.
+  return <>{children(setNodeRef, isOver && active?.data.current?.ownerKey === ownerKey)}</>;
 };
 
 const ROW_DRAG_MODIFIERS = [keepRowInList];

@@ -58,7 +58,7 @@ export function onFrameScroll(container: HTMLElement, listener: (direction: Fram
 }
 
 // The reader opened a row (a tool, an agent task, a reasoning block, folded
-// work). The row raises this event from its element as it opens, so the
+// work, a long user message). The row raises this event from its element as it opens, so the
 // timeline holding it lets go of the end before the row grows: the content
 // opens below the header the reader clicked, instead of the end pulling the
 // header up and out of view.

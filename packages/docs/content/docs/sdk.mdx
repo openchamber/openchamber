@@ -38,7 +38,7 @@ Point `index.html` at `main.js` with a normal `<script src="main.js"></script>`.
 
 OpenChamber reads the manifest and shows a dialog listing what the extension asks for (see [Capabilities](#capabilities)). Approve it, and your icon appears on the rail. Click it and your page loads.
 
-You can also add a local `.zip` or an https link to a git repository or a zip file. A git install is the one that can update: raise `version` in `package.json` and push, and OpenChamber offers the update the next time the user opens Settings → Extensions. A `#tag` or `#branch` on the URL pins which one it follows. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
+You can also add a local `.zip` or an https link to a git repository or a zip file. A git install is the one that can update: raise `version` in `package.json` and push, and OpenChamber checks soon after it opens and every few hours, tells the user once, and offers the update in Settings → Extensions. A link to `openchamber://extensions/install?url=<encoded repository URL>` on any page opens the desktop app with that repository in the add dialog, so you can offer an install button. A `#tag` or `#branch` on the URL pins which one it follows. Those are copied into OpenChamber's data folder and run from that copy, so ship the built files, not `node_modules` or TypeScript sources. Removing the extension deletes the copy. A folder install runs from your folder directly, so you can edit, rebuild, and reload.
 
 ## Manifest
 
@@ -49,13 +49,11 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
   "openchamber": {
     "apiVersion": 1,
     "engines": { "openchamber": ">=1.24.0" },
+    "id": "acme-hello",
+    "name": "Hello",
+    "icon": "window",
     "contributes": {
-      "panel": {
-        "id": "acme-hello",
-        "name": "Hello",
-        "icon": "window",
-        "entry": "panel/index.html"
-      },
+      "panel": { "entry": "panel/index.html" },
       "attach": "dialog",
       "page": true,
       "capabilities": ["prompt", "sessions"],
@@ -80,7 +78,7 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
 
 `engines.openchamber` is optional. Set the oldest OpenChamber version your extension works with, as `1.24.0` or `>=1.24.0`. Older builds refuse to install it instead of failing later.
 
-`contributes.panel` describes the rail entry. `id` is kebab-case and must be unique among installed extensions. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG file inside your folder, like `icon.svg`. `entry` is the HTML file inside your folder; leave it out for an extension that only declares `tools` (see [Your tools in the chat](#your-tools-in-the-chat)).
+`id`, `name` and `icon` name the extension. `id` is kebab-case and must be unique among installed extensions. `icon` is a Remixicon name (`RiWindowLine` becomes `window`) or an SVG file inside your folder, like `icon.svg`. `contributes.panel` is the extension's panel on the rail: its `entry` is the HTML file inside your folder. An extension with no rail panel leaves `panel` out. Older packages keep `id`, `name` and `icon` inside `panel`, and that keeps working.
 
 `contributes.attach` is optional. It adds your extension to the + menu next to the chat box, so the user can pick a task and attach it to a session.
 
@@ -89,7 +87,7 @@ You can also add a local `.zip` or an https link to a git repository or a zip fi
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` opens a separate page of yours in the window, so the picker does not have to share code with the rail panel
 - omit it and the extension stays off that menu
 
-Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, `page`, or `status`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, + menu, or full-screen page menu starts without an item.
+Your page can tell where it is from `ctx.surface`: `panel`, `dialog`, `page`, `status`, or `block`. When the user clicks an attached item, its `data` comes back in `ctx.item`. Opening from the rail, + menu, or full-screen page menu starts without an item.
 
 `contributes.page: true` makes your panel available full-screen from the Extension pages menu above the session list. Use `{ "entry": "panel/page.html", "title": "Board" }` for separate HTML and an optional title. Ship that HTML and its built scripts. A page requires `panel.entry`, uses the same sandbox and permissions, and opens only when the user selects it. Reload, pause, removal, or a server switch closes it.
 
@@ -111,7 +109,7 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
 | `shells` | watch the shell commands your agents run in the background, read their output, and stop them (`onRunningShells`, `readShellOutput`, `stopShell`) |
 
-Six more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), and `transcript` when `sessionEvents` asks for `content` (see [Session events](/sdk/host/#session-events)).
+Nine more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), `transcript` when `sessionEvents` or `sessionControl` asks for `content` (see [Session events](/sdk/host/#session-events)), `sessionControl` when your service acts on sessions (see [Calling OpenChamber](/sdk/host/#calling-openchamber-from-your-service)), `instructions` when it adds to what agents read, and `skills` when you declare `contributes.skills`, a package folder of skills that reach every agent while the extension is on.
 
 The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
 
@@ -158,7 +156,7 @@ What each `scheme` sends:
 | `"bearer"` | `Authorization: Bearer <token>` | the API documents a bearer or personal access token |
 | `"basic"` | `Authorization: Basic base64(username:token)` | the API documents HTTP Basic auth with a username (often an email) and an API token; the card asks for both, and `usernameLabel` names the first field |
 
-`settings` adds plain text fields to the card. Their values arrive in `ctx.settings`.
+`settings` adds plain text fields to the card. Their values arrive in `ctx.settings`. A field with `"secret": true` is masked on the card and never reaches a page; your service reads it with `readSettings()`.
 
 ## Files
 
@@ -265,6 +263,8 @@ Beyond the rail and the + menu, an extension can appear in three more places. Al
   { "id": "summarize", "label": "Summarize session", "where": "session", "payload": ["messages"] }
 ]
 ```
+
+`where` also takes `selection` (text selected in a message), `file` (a row in Files) and `diff` (selected lines of a file or a diff). Their items carry `kind` of the same name: `selection` has the text, `file` the path, `diff` the path and the line range. On a selection, `display` says how the action shows: `label` (the default), `icon` with the label as its tooltip, or `both`.
 
 A message action opens your extension with `ctx.item` of `kind: "message"`: the session id and title, the project directory, the message id, its role, and its text. A session action opens it with `kind: "session"` and the session id, title, and directory. Add `"payload": ["messages"]` and the item also carries the whole conversation, oldest first, the same text the Markdown export produces. That needs the `conversation` capability, which the user sees as a separate line in the approval dialog. `item.action` tells you which entry was clicked.
 

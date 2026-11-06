@@ -27,6 +27,8 @@ import {
   getRepositoryRoot,
   getUnpushedBranchCounts,
   getRangeDiff,
+  getCommitFileDiff,
+  getRangeFileVersions,
   getBranchBase,
   getCommitDiff,
   getCommitFiles,
@@ -51,6 +53,7 @@ import {
   populateWorktreeWithLockRecovery,
   previewWorktreeCreate,
   removeWorktree,
+  teardownWorktree,
   waitForWorktreeRemoval,
   snapshotWorktree,
   archiveWorktree,
@@ -2069,6 +2072,32 @@ describe('createWorktree', () => {
     expect(fs.existsSync(created.path)).toBe(false);
     // Every file was on disk, so the snapshot records no change.
     expect(runGit(repo, ['diff', '--name-only', archived.head, archived.commit]).trim()).toBe('');
+  });
+
+  it('removes a worktree whose bootstrap failed without its teardown command, since setup never ran there', async () => {
+    if (!canRunGit()) return;
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    const hydrateCheckout = vi.fn(async () => ({
+      status: 'cancelled',
+      submodules: [{ path: 'vendor/slow', status: 'cancelled', error: { code: 'TIMEOUT', message: 'Checkout hydration timed out' } }],
+      lfs: [],
+    }));
+    const bootstrapStore = createWorktreeBootstrapStore({ filePath: path.join(createTempDir(), 'bootstrap.json') });
+    const created = await createWorktree(repo, {
+      mode: 'new', branchName: 'feature/never-set-up', worktreeName: 'never-set-up',
+      returnAfterDirectoryCreated: true,
+    }, { hydrateCheckout, bootstrapStore });
+    await expect.poll(
+      async () => (await getWorktreeBootstrapStatus(created.path, { bootstrapStore })).status,
+      { timeout: 5_000 },
+    ).toBe('failed');
+
+    await expect(removeWorktree(repo, { directory: created.path, teardownCommand: 'exit 1' }, { bootstrapStore })).resolves.toBe(true);
+    expect(fs.existsSync(created.path)).toBe(false);
   });
 
   it('hydrates a checkout made from a local branch through the branch\'s own remote', async () => {
@@ -4734,6 +4763,141 @@ describe('removeWorktree', () => {
     expect(fs.existsSync(metadata)).toBe(false);
   });
 
+  it('runs the teardown command inside the worktree first, and keeps the worktree when it fails', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const scripts = createTempDir();
+    const worktree = path.join(createTempDir(), 'with-teardown');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'teardown', worktree]);
+    const marker = path.join(scripts, 'teardown-cwd.txt');
+    const failing = path.join(scripts, 'fail.cjs');
+    const recording = path.join(scripts, 'record.cjs');
+    fs.writeFileSync(failing, "process.stderr.write('stack still running\\n'); process.exit(3);\n");
+    fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.cwd());\n`);
+    const run = (script) => `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`;
+    const disposeInstance = vi.fn();
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: run(failing), disposeInstance }))
+      .rejects.toThrow(/teardown command failed, so the worktree was kept: [\s\S]*stack still running/);
+    expect(fs.existsSync(path.join(worktree, '.git'))).toBe(true);
+    expect(runGit(repo, ['worktree', 'list', '--porcelain'])).toContain('branch refs/heads/teardown');
+    expect(disposeInstance).not.toHaveBeenCalled();
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: run(recording), disposeInstance })).resolves.toBe(true);
+    expect(fs.readFileSync(marker, 'utf8')).toBe(path.join(fs.realpathSync(path.dirname(worktree)), 'with-teardown'));
+    expect(fs.existsSync(worktree)).toBe(false);
+  });
+
+  it('gives the teardown command no input to wait for', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'reads-stdin');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'reads-stdin', worktree]);
+    // Waits for the end of its input, as a command asking a question would.
+    const reading = path.join(createTempDir(), 'read.cjs');
+    fs.writeFileSync(reading, "process.stdin.resume(); process.stdin.on('end', () => process.exit(0));\n");
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(reading)}` }))
+      .resolves.toBe(true);
+    expect(fs.existsSync(worktree)).toBe(false);
+  }, 10_000);
+
+  it('skips the teardown of a contributor-fork checkout, and keeps the worktree with the teardown code when that cannot be told', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'fork');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'fork', worktree]);
+    const unknown = path.join(createTempDir(), 'unknown');
+    runGit(repo, ['worktree', 'add', '-b', 'unknown', unknown]);
+    const unreadable = async () => { throw new Error('provenance store unreadable'); };
+
+    await expect(removeWorktree(repo, { directory: unknown, teardownCommand: 'exit 1', isContributorCheckout: unreadable }))
+      .rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED', message: expect.stringContaining('provenance store unreadable') });
+    expect(fs.existsSync(path.join(unknown, '.git'))).toBe(true);
+    // "Delete without teardown" sends no command, so nothing has to be told.
+    await expect(removeWorktree(repo, { directory: unknown, isContributorCheckout: unreadable })).resolves.toBe(true);
+    expect(fs.existsSync(unknown)).toBe(false);
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: 'exit 1', isContributorCheckout: async () => true })).resolves.toBe(true);
+    expect(fs.existsSync(worktree)).toBe(false);
+  });
+
+  it('runs a teardown alone without removing anything, and reports a failure with its code', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const scripts = createTempDir();
+    const worktree = path.join(createTempDir(), 'teardown-only');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'teardown-only', worktree]);
+    const marker = path.join(scripts, 'ran.txt');
+    const recording = path.join(scripts, 'record.cjs');
+    fs.writeFileSync(recording, `require('fs').writeFileSync(${JSON.stringify(marker)}, process.cwd());\n`);
+
+    await expect(teardownWorktree(repo, { directory: worktree, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(recording)}` })).resolves.toBe(true);
+    expect(fs.readFileSync(marker, 'utf8')).toBe(path.join(fs.realpathSync(path.dirname(worktree)), 'teardown-only'));
+    expect(runGit(repo, ['worktree', 'list', '--porcelain'])).toContain('branch refs/heads/teardown-only');
+
+    await expect(teardownWorktree(repo, { directory: worktree, teardownCommand: 'exit 3' })).rejects.toMatchObject({ code: 'WORKTREE_TEARDOWN_FAILED' });
+    await expect(teardownWorktree(repo, { directory: repo, teardownCommand: 'exit 3' })).rejects.toThrow('primary workspace');
+    expect(fs.existsSync(path.join(worktree, '.git'))).toBe(true);
+  });
+
+  it('keeps only the end of a long teardown failure in the error', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'chatty');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'chatty', worktree]);
+    const chatty = path.join(createTempDir(), 'chatty.cjs');
+    fs.writeFileSync(chatty, "process.stderr.write('log line\\n'.repeat(5000) + 'daemon not running\\n'); process.exit(1);\n");
+
+    const error = await removeWorktree(repo, { directory: worktree, teardownCommand: `${JSON.stringify(process.execPath)} ${JSON.stringify(chatty)}` })
+      .then(() => null, (reason) => reason);
+    expect(error.message).toMatch(/^Worktree teardown command failed, so the worktree was kept: \.\.\./);
+    expect(error.message).toMatch(/daemon not running$/);
+    expect(error.message.length).toBeLessThan(2200);
+    expect(fs.existsSync(path.join(worktree, '.git'))).toBe(true);
+  });
+
+  it('skips the teardown command when the worktree folder is already gone', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    const worktree = path.join(createTempDir(), 'folder-gone');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    runGit(repo, ['commit', '--allow-empty', '-m', 'Initial commit']);
+    runGit(repo, ['worktree', 'add', '-b', 'folder-gone', worktree]);
+    fs.rmSync(worktree, { recursive: true, force: true });
+
+    await expect(removeWorktree(repo, { directory: worktree, teardownCommand: 'exit 1' })).resolves.toBe(true);
+    expect(runGit(repo, ['worktree', 'list', '--porcelain'])).not.toContain('folder-gone');
+  });
+
   const canRunGitAnnex = () => {
     try {
       execFileSync('git-annex', ['version'], { stdio: 'ignore', timeout: 10_000 });
@@ -6884,5 +7048,79 @@ describe('worktree task titles', () => {
     expect(entry?.pinnedAt).toBe(1234);
     expect(entry?.pinList).toBeUndefined();
     await expect(setWorktreePinned(linked, true, 'bad list')).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe.runIf(canRunGit())('getRangeFileVersions', () => {
+  it('reads a binary file at the merge base and at the head, untouched', async () => {
+    const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-range-versions-'));
+    const run = (...args) => execFileSync('git', args, { cwd: repository });
+    run('init', '-q', '-b', 'main');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    const before = Buffer.from([0x50, 0x4b, 0x00, 0xff, 0x01]);
+    const after = Buffer.from([0x50, 0x4b, 0x00, 0xff, 0x02]);
+    fs.writeFileSync(path.join(repository, 'book.xlsx'), before);
+    run('add', '.');
+    run('commit', '-qm', 'base');
+    run('switch', '-qc', 'feature');
+    fs.writeFileSync(path.join(repository, 'book.xlsx'), after);
+    run('commit', '-qam', 'change');
+    const versions = await getRangeFileVersions(repository, { base: 'main', head: 'feature', path: 'book.xlsx' });
+    expect(versions.original).toBe(`data:application/octet-stream;base64,${before.toString('base64')}`);
+    expect(versions.modified).toBe(`data:application/octet-stream;base64,${after.toString('base64')}`);
+    fs.rmSync(repository, { recursive: true, force: true });
+  });
+
+  it('finds a renamed file under its old name on the base side', async () => {
+    const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-range-rename-'));
+    const run = (...args) => execFileSync('git', args, { cwd: repository });
+    run('init', '-q', '-b', 'main');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    const before = Buffer.from([0x50, 0x4b, 0x00, 0xff, 0x01]);
+    fs.mkdirSync(path.join(repository, 'old'));
+    fs.mkdirSync(path.join(repository, 'new'));
+    fs.writeFileSync(path.join(repository, 'old', 'book.xlsx'), before);
+    fs.writeFileSync(path.join(repository, 'new', '.keep'), '');
+    run('add', '.');
+    run('commit', '-qm', 'base');
+    run('switch', '-qc', 'feature');
+    run('mv', 'old/book.xlsx', 'new/report.xlsx');
+    run('commit', '-qm', 'rename');
+    const dataUrl = `data:application/octet-stream;base64,${before.toString('base64')}`;
+    const range = await getRangeFileVersions(repository, { base: 'main', head: 'feature', path: 'new/report.xlsx', previousPath: 'old/book.xlsx' });
+    expect(range).toEqual({ original: dataUrl, modified: dataUrl });
+    const hash = run('rev-parse', 'HEAD').toString().trim();
+    const commit = await getCommitFileDiff(repository, hash, 'new/report.xlsx', true, 'old/book.xlsx');
+    expect(commit.original).toBe(dataUrl);
+    expect(commit.modified).toBe(dataUrl);
+    fs.rmSync(repository, { recursive: true, force: true });
+  });
+
+  it('reads a rename inside a subfolder, past a file of the old name at the root', async () => {
+    const repository = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-range-subfolder-')));
+    const run = (...args) => execFileSync('git', args, { cwd: repository });
+    run('init', '-q', '-b', 'main');
+    run('config', 'user.email', 't@t');
+    run('config', 'user.name', 't');
+    const unrelated = Buffer.from([0x50, 0x4b, 0x09]);
+    const before = Buffer.from([0x50, 0x4b, 0x01]);
+    fs.mkdirSync(path.join(repository, 'sub'));
+    fs.writeFileSync(path.join(repository, 'old.xlsx'), unrelated);
+    fs.writeFileSync(path.join(repository, 'sub', 'old.xlsx'), before);
+    run('add', '.');
+    run('commit', '-qm', 'base');
+    run('switch', '-qc', 'feature');
+    run('mv', 'sub/old.xlsx', 'sub/new.xlsx');
+    run('commit', '-qm', 'rename');
+    const dataUrl = `data:application/octet-stream;base64,${before.toString('base64')}`;
+    const directory = path.join(repository, 'sub');
+    const range = await getRangeFileVersions(directory, { base: 'main', head: 'feature', path: 'new.xlsx', previousPath: 'old.xlsx' });
+    expect(range).toEqual({ original: dataUrl, modified: dataUrl });
+    const hash = run('rev-parse', 'HEAD').toString().trim();
+    const commit = await getCommitFileDiff(directory, hash, 'new.xlsx', true, 'old.xlsx');
+    expect(commit.original).toBe(dataUrl);
+    fs.rmSync(repository, { recursive: true, force: true });
   });
 });

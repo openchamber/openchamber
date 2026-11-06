@@ -51,7 +51,7 @@ import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
-import { formatEffortLabel, getCycledPrimaryAgentName, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
+import { formatEffortLabel, getCycledPrimaryAgentName, getEffortTone, getEffortToneClass, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
 import { getCurrentIntlLocale, isRightToLeft, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
@@ -375,11 +375,18 @@ type ModelControlsProps = {
      */
     rememberVariantPicks?: boolean;
 } & (
-    | { selection?: never; sessionId?: never }
+    | { selection?: never; sessionId?: never; modelSelectorOpen?: never; onModelSelectorOpenChange?: never }
     | {
         selection: BtwSelection;
         /** The session an agent pick is saved for: a chat pinned in the side panel, or a BTW fork. */
         sessionId: string | null;
+        /**
+         * The model picker's open state, owned by a composer that answers the
+         * model and effort shortcuts for this selection (BTW). The tooltips
+         * then name those shortcuts.
+         */
+        modelSelectorOpen?: boolean;
+        onModelSelectorOpenChange?: (open: boolean) => void;
     }
 );
 
@@ -397,6 +404,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     selection,
     sessionId: controlledSessionId,
     rememberVariantPicks = true,
+    modelSelectorOpen: controlledModelSelectorOpen,
+    onModelSelectorOpenChange,
 }) => {
     const { t } = useI18n();
     const { focusInput: focusColumnInput } = useChatColumnActions();
@@ -420,9 +429,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const getAgentColor = useAgentColors();
     const favoriteAgents = useUIStore((state) => state.favoriteAgents);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-    const modelShortcut = selection ? undefined : formatShortcutForDisplay(getEffectiveShortcutCombo('open_model_selector', shortcutOverrides), '');
+    const answersModelShortcuts = !selection || onModelSelectorOpenChange !== undefined;
+    const modelShortcut = answersModelShortcuts ? formatShortcutForDisplay(getEffectiveShortcutCombo('open_model_selector', shortcutOverrides), '') : undefined;
     const agentShortcut = selection ? undefined : formatShortcutForDisplay(getEffectiveShortcutCombo('cycle_agent', shortcutOverrides), '');
-    const thinkingShortcut = selection ? undefined : formatShortcutForDisplay(getEffectiveShortcutCombo('cycle_thinking_variant', shortcutOverrides), '');
+    const thinkingShortcut = answersModelShortcuts ? formatShortcutForDisplay(getEffectiveShortcutCombo('cycle_thinking_variant', shortcutOverrides), '') : undefined;
     const toggleFavoriteAgent = useUIStore((state) => state.toggleFavoriteAgent);
     const currentProviderId = useConfigStore((state) => selection ? selection.model?.providerId ?? '' : state.currentProviderId);
     const currentModelId = useConfigStore((state) => selection ? selection.model?.modelId ?? '' : state.currentModelId);
@@ -534,7 +544,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const lastUsedEfforts = useUIStore((state) => state.lastUsedEfforts);
     const globalModelSelectorOpen = useUIStore((state) => !selection && state.isModelSelectorOpen);
     const [localModelSelectorOpen, setLocalModelSelectorOpen] = React.useState(false);
-    const isModelSelectorOpen = selection ? localModelSelectorOpen : globalModelSelectorOpen;
+    const isModelSelectorOpen = selection ? controlledModelSelectorOpen ?? localModelSelectorOpen : globalModelSelectorOpen;
     const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
     const setSettingsPage = useUIStore((state) => state.setSettingsPage);
@@ -594,7 +604,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     useWidthMorph(modelTriggerRef);
     useWidthMorph(agentTriggerRef);
     useWidthMorph(variantTriggerRef);
-    const setAgentMenuOpen = selection ? setLocalModelSelectorOpen : setModelSelectorOpen;
+    const setAgentMenuOpen = selection ? onModelSelectorOpenChange ?? setLocalModelSelectorOpen : setModelSelectorOpen;
     const openAddProviderSettings = React.useCallback(() => {
         requestProviderConnect(true);
         setSettingsPage('providers');
@@ -2697,9 +2707,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const displayVariant = currentVariant ? formatEffortLabel(currentVariant) : t('chat.modelControls.default');
         const isDefault = !currentVariant;
-        // The effort reads as a quiet suffix of the model name: "Opus 5.5 / medium".
-        // It brightens on its own hover, so the pointer shows it is a control of
-        // its own; where the row is too narrow for it, its icon stands in.
+        const isGreyEffort = getEffortTone(currentVariant) === 'default';
+        // The effort reads as a quiet suffix of the model name: "Opus 5.5 / medium",
+        // tinted by level. It brightens on its own hover, so the pointer shows it
+        // is a control of its own; where the row is too narrow for it, its icon
+        // stands in.
         const triggerLabel = (
             <>
                 <Icon name="brain-ai-3" className={cn('model-controls__variant-icon flex-shrink-0 text-muted-foreground group-hover:text-foreground', controlIconSize)} />
@@ -2708,7 +2720,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     className={cn(
                         'model-controls__variant-label',
                         controlTextSize,
-                        'font-medium min-w-0 truncate lowercase text-muted-foreground group-hover:text-foreground',
+                        'font-medium min-w-0 truncate lowercase',
+                        getEffortToneClass(currentVariant),
+                        isGreyEffort ? 'group-hover:text-foreground' : 'group-hover:opacity-100',
                         isMobile && 'max-w-[60px]',
                         isDesktop && 'max-w-[180px]',
                     )}

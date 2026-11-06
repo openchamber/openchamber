@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '@/lib/i18n';
 import { SessionNodeItem } from './SessionNodeItem';
 import type { SessionNodeItemProps } from './SessionNodeItem';
 import type { SessionNode } from '../types';
@@ -110,6 +111,7 @@ function SessionTreeItemComponent({
   renderChildren = true,
 }: SessionTreeItemProps): React.ReactNode {
   streamPerfCount('ui.sidebar_tree_item.render');
+  const { t } = useI18n();
   const effectiveRowKey = rowKey ?? `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${node.session.id}`;
   const createFolder = useSessionFoldersStore((state) => state.createFolder);
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
@@ -130,10 +132,10 @@ function SessionTreeItemComponent({
   const createFolderAndStartRename = React.useCallback((scopeKey: string, parentId?: string | null) => {
     if (!scopeKey) return null;
     if (parentId && useSessionFoldersStore.getState().collapsedFolderIds.has(parentId)) toggleFolderCollapse(parentId);
-    const folder = createFolder(scopeKey, 'New folder', parentId);
+    const folder = createFolder(scopeKey, t('sessions.sidebar.folders.newFolderTitle'), parentId);
     startFolderRename(scopeKey, folder);
     return folder;
-  }, [createFolder, startFolderRename, toggleFolderCollapse]);
+  }, [createFolder, startFolderRename, t, toggleFolderCollapse]);
   const sessionActions = useSessionActions({
     mobileVariant,
     allowReselect,

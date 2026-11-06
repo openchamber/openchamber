@@ -11,6 +11,12 @@ const readGuests = (json: string) => {
 };
 
 describe('parseGuestCatalogJson', () => {
+  test('a block keeps whether its frame answers', () => {
+    const block = { name: 'Card', description: 'Asks', args: ['title'], entry: 'card.html', answers: true };
+    const guest = { id: 'hello', name: 'Hello', icon: 'window', capabilities: { requested: [], granted: [] }, source: 'path', blocks: [block] };
+    expect(readGuests(JSON.stringify({ guests: [guest] }))?.[0]?.blocks?.[0]?.answers).toBe(true);
+  });
+
   test('one row it cannot read keeps the others and is listed by name', () => {
     const valid = {
       id: 'hello',
@@ -369,7 +375,7 @@ describe('session events on a catalog row', () => {
       sessionEvents,
     });
     const [guest, newer] = readGuests(JSON.stringify({
-      guests: [row(slice), { ...row({ events: ['turn-finished', 'turn-started'], content: false }), id: 'newer' }],
+      guests: [row(slice), { ...row({ events: ['turn-finished', 'turn-paused'], content: false }), id: 'newer' }],
     })) ?? [];
     expect(guest?.sessionEvents).toEqual(slice);
     expect(guest?.capabilities.requested).toEqual(['service', 'transcript']);

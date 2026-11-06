@@ -58,9 +58,11 @@ import {
   takeUsableGuestAuth,
   toPublicGuestAuth,
 } from './oauth.js';
+import { isMentionGuest, resolveGuestMention, searchGuestMentions } from './mentions.js';
 import { proxyGuestRequest } from './request.js';
 import {
   GuestServiceError,
+  getServiceFailure,
   getServiceStatus,
   proxyGuestServiceRequest,
   setServiceSocketOverride,
@@ -226,6 +228,9 @@ export const settleGuestDeactivationListeners = (listeners) => async (event) => 
   });
 };
 
+/** A stopped service starts again on the next request, so ten quiet minutes cost nothing but that. */
+const PANEL_SERVICE_IDLE_MS = 10 * 60_000;
+
 export const registerGuestRoutes = (app, {
   openchamberDataDir,
   openchamberVersion,
@@ -323,6 +328,36 @@ export const registerGuestRoutes = (app, {
     }
     return findInstalledGuest(id, persistPath);
   };
+
+  // Before the `:id` routes, because `mentions` is a valid panel id shape.
+  app.post('/api/guests/mentions/search', json16, async (req, res) => {
+    const query = typeof req.body?.query === 'string' ? req.body.query.slice(0, 200) : '';
+    const directory = typeof req.body?.directory === 'string' && req.body.directory ? req.body.directory : null;
+    try {
+      const guests = await listInstalledGuests({ persistPath });
+      // The next keystroke aborts this one: a slow service stops working on it too.
+      const abort = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+      const groups = await searchGuestMentions({ guests, query, directory, persistPath, signal: abort.signal });
+      if (!abort.signal.aborted) res.json({ groups });
+    } catch (error) {
+      console.error('Failed to search extension mentions:', error);
+      res.status(500).json({ error: 'Failed to search extension mentions' });
+    }
+  });
+
+  app.post('/api/guests/:id/mentions/resolve', json16, async (req, res) => {
+    const id = typeof req.body?.id === 'string' ? req.body.id : '';
+    if (!id) return res.status(400).json({ error: 'BAD_REQUEST' });
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.mentions || !isMentionGuest(guest)) return res.status(404).json({ error: 'NOT_FOUND' });
+      res.json({ text: await resolveGuestMention({ guest, id, persistPath }) });
+    } catch (error) {
+      console.warn(`[mentions] ${req.params.id}: reading a picked row failed (${error?.code ?? 'error'})`);
+      res.status(502).json({ error: 'MENTION_FAILED' });
+    }
+  });
 
   app.get('/api/guests', async (_req, res) => {
     try {
@@ -534,9 +569,19 @@ export const registerGuestRoutes = (app, {
         if (!allowed.has(key) || typeof value !== 'string') {
           continue;
         }
-        settings[key] = value.trim().slice(0, 2000);
+        const trimmed = value.trim().slice(0, 2000);
+        // The card never holds a stored secret, so an empty field leaves it as it is.
+        if (allowed.get(key).secret && !trimmed) continue;
+        settings[key] = trimmed;
       }
-      const stored = await patchGuestAuth(guest.id, { settings }, authPath);
+      // The card holds no secret, so what it saves never names one to keep:
+      // those stay as stored, read under the store lock.
+      const stored = await patchGuestAuth(guest.id, (current) => ({
+        settings: {
+          ...Object.fromEntries(Object.entries(current?.settings ?? {}).filter(([key]) => allowed.get(key)?.secret)),
+          ...settings,
+        },
+      }), authPath);
       res.json(await toGuestAuthResponse(guest.integration, stored, trackers));
     } catch (error) {
       console.error('Failed to save guest settings:', error);
@@ -677,6 +722,8 @@ export const registerGuestRoutes = (app, {
         service: guest.service,
         granted: guest.capabilityGrants,
         persistPath,
+        // One process per extension a panel ever touched otherwise stays for good.
+        idleStopMs: guest.service.keepRunning ? undefined : PANEL_SERVICE_IDLE_MS,
         method: parsed.data.method,
         path: parsed.data.path,
         query: parsed.data.query,
@@ -817,6 +864,19 @@ export const registerGuestRoutes = (app, {
     } catch (error) {
       console.error('Failed to read guest service status:', error);
       res.status(500).json({ error: 'Failed to read guest service status' });
+    }
+  });
+
+  app.get('/api/guests/:id/service/failure', async (req, res) => {
+    try {
+      const guest = await loadGuest(req.params.id);
+      if (!guest?.service) {
+        return res.status(404).json({ error: 'not-found' });
+      }
+      res.json({ failure: getServiceFailure(guest.id) });
+    } catch (error) {
+      console.error('Failed to read guest service failure:', error);
+      res.status(500).json({ error: 'Failed to read guest service failure' });
     }
   });
 

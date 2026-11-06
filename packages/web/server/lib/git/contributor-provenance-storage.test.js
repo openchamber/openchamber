@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createContributorProvenanceStore } from './contributor-provenance-storage.js';
+import { createContributorProvenanceStore, isContributorForkGitDirectory } from './contributor-provenance-storage.js';
 import { gitStorageProcess } from './storage-process.test-support.js';
 
 const roots = [];
@@ -42,6 +42,28 @@ describe('contributor provenance storage', () => {
     expect((await fs.stat(filePath)).mode & 0o777).toBe(0o600);
     await expect(store.compareAndSwap('/checkout', 0, provenance))
       .rejects.toMatchObject({ code: 'CONTRIBUTOR_PROVENANCE_CONFLICT', status: 409 });
+  });
+
+  it('finds a contributor fork by its git directory alone, and fails closed on a store it cannot read', async () => {
+    const { root, filePath, store } = await setup();
+    const gitDirectory = path.join(root, 'git');
+    const other = path.join(root, 'other-git');
+    await fs.mkdir(other);
+    await expect(isContributorForkGitDirectory({ filePath, gitDirectory })).resolves.toBe(false);
+
+    await store.compareAndSwap('/checkout', 0, provenance);
+    await expect(isContributorForkGitDirectory({ filePath, gitDirectory })).resolves.toBe(true);
+    await expect(isContributorForkGitDirectory({ filePath, gitDirectory: other })).resolves.toBe(false);
+
+    // A later checkout in the same folder is another git directory on disk. The old
+    // one stays on disk elsewhere: ext4 hands a removed directory's inode to the next one.
+    await fs.rename(gitDirectory, path.join(root, 'old-git'));
+    await fs.mkdir(gitDirectory);
+    await expect(isContributorForkGitDirectory({ filePath, gitDirectory })).resolves.toBe(false);
+
+    await fs.writeFile(filePath, '{', { mode: 0o600 });
+    await expect(isContributorForkGitDirectory({ filePath, gitDirectory }))
+      .rejects.toMatchObject({ code: 'CONTRIBUTOR_PROVENANCE_STORE_INVALID' });
   });
 
   it('records a worktree of an unbound repository at binding revision 0', async () => {

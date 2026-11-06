@@ -31,14 +31,16 @@ const baseProbe = (overrides = {}) => probeElectronHostWithDeadline({
 test('uses the Chromium transport as the authoritative ready-state transport', async () => {
   const calls = [];
   const result = await baseProbe({
-    chromiumFetch: async (url) => {
-      calls.push(url);
+    chromiumFetch: async (url, options) => {
+      calls.push({ url, cache: options.cache });
       return url.endsWith('/api/version') ? response(200, compatibleVersion) : response(200, {});
     },
   });
 
   assert.equal(result.status, 'ok');
-  assert.deepEqual(calls.map((url) => new URL(url).pathname), ['/api/version', '/auth/session']);
+  assert.deepEqual(calls.map(({ url }) => new URL(url).pathname), ['/api/version', '/auth/session']);
+  // Each answer comes from the server, never from Chromium's HTTP cache.
+  assert.deepEqual(calls.map(({ cache }) => cache), ['no-store', 'no-store']);
 });
 
 test('shares one absolute deadline across version and session requests', async () => {

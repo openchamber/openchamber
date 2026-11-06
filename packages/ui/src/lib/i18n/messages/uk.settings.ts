@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Період зберігання рахується від архівації. Сесії, строк яких минув, видаляються.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Період зберігання рахується від останньої активності сесії. Сесії, строк яких минув, архівуються.',
@@ -548,6 +549,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktree",
   "settings.projects.worktrees.removeForEveryone": "Видалити для всіх",
   "settings.projects.worktrees.skipped": "Пропущено для вас",
+  "settings.projects.worktrees.teardownCommandAria": "Команда очищення {position}",
   "settings.projects.shared.invalid": "Не вдалося прочитати конфіг проєкту в {path}: {reason}",
   "settings.projects.shared.plansDir": "Тека планів",
   "settings.projects.shared.plansDirPlaceholder": ".openchamber/plans",
@@ -1114,10 +1116,12 @@ export const settingsDict = {
   "settings.openchamber.sessionWork.title": "Сесії в роботі",
   "settings.openchamber.sessionWork.info": "Блок у сайдбарі під «Чатами» для сесій, у яких ви працюєте. Сесія з’являється там, щойно ви надсилаєте повідомлення. За замовчуванням вона відображається лише в цьому блоці. Увімкніть «Також показувати роботу в проєктах» у меню сайдбара, щоб вона відображалася і у своєму проєкті. У VS Code сесії завжди показуються у своїх проєктах. Позначте сесію як готову галочкою або в її меню. Коли хід схожий на завершення роботи, галочка сіріє як підказка.",
   "settings.openchamber.sessionWork.field.enabled": "Показувати сесії в роботі",
-  "settings.openchamber.sessionRetention.archivedTooltip": "Видаляє архівні сесії після завершення періоду зберігання. Зберігає 5 останніх архівованих сесій, відкриту сесію, сесії в роботі та сесії з публічним посиланням. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
-  "settings.openchamber.sessionRetention.tooltip": "Архівує або видаляє неархівовані сесії за часом останньої активності. Зберігає 5 найновіших сесій, відкриту сесію, сесії в роботі та сесії з публічним посиланням. Архівні сесії зберігаються. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
+  "settings.openchamber.sessionRetention.archivedTooltip": "Видаляє архівні сесії після завершення періоду зберігання. Зберігає 5 останніх архівованих сесій, відкриту сесію, сесії, що виконуються, і закріплені сесії. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
+  "settings.openchamber.sessionRetention.tooltip": "Архівує або видаляє неархівовані сесії за часом останньої активності. Зберігає 5 найновіших сесій, відкриту сесію, сесії, що виконуються, і закріплені сесії. Сесії в блоці «В роботі» теж зберігаються, якщо ви їх не включили. Архівні сесії зберігаються. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",
   "settings.openchamber.sessionRetention.field.enableAutoCleanupAria": "Увімкнути автоматичне очищення",
   "settings.openchamber.sessionRetention.field.enableAutoCleanup": "Увімкнути автоматичне очищення",
+  "settings.openchamber.sessionRetention.field.includeInWork": "Включати сесії «В роботі»",
+  "settings.openchamber.sessionRetention.field.includeInWorkInfo": "Сесії в блоці «В роботі» зберігаються, доки ви не позначите їх готовими. Увімкніть, щоб вони очищалися, як і будь-які інші сесії. Закріплені сесії зберігаються завжди.",
   "settings.openchamber.sessionRetention.field.retentionPeriod": "Період зберігання",
   "settings.openchamber.sessionRetention.field.retentionPeriodAria": "Термін зберігання в днях",
   "settings.openchamber.sessionRetention.field.days": "днів",
@@ -1643,6 +1647,11 @@ export const settingsDict = {
   "settings.openchamber.worktrees.setup.addCommand": "Додати команду",
   "settings.openchamber.worktrees.setup.waitForCommands": "Чекати завершення команд налаштування перед створенням або надсиланням сесії",
   "settings.openchamber.worktrees.setup.toast.saveFailed": "Не вдалося зберегти команди налаштування Worktree",
+  "settings.openchamber.worktrees.teardown.title": "Команди очищення",
+  "settings.openchamber.worktrees.teardown.tooltipPrefix": "Запускаються в каталозі worktree перед його видаленням або архівуванням. Якщо одна з них завершиться помилкою, worktree залишиться. Використовуйте",
+  "settings.openchamber.worktrees.teardown.tooltipSuffix": "для кореня проєкту.",
+  "settings.openchamber.worktrees.teardown.commandPlaceholder": "наприклад, docker compose down",
+  "settings.openchamber.worktrees.teardown.toast.saveFailed": "Не вдалося зберегти команди очищення worktree",
   "settings.openchamber.worktrees.list.title": "Наявні worktree",
   "settings.openchamber.worktrees.list.tooltip": "Видалення worktree також видаляє пов’язані з ним сесії.",
   "settings.openchamber.worktrees.list.loading": "Завантаження worktree...",
@@ -2660,6 +2669,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.uk,
   ...thirdPartyIntegrationI18n.uk,
   ...extensionCatalogI18n.uk,
+  ...extensionPowersI18n.uk,
   ...guestIntegrationsI18n.uk,
   ...extensionsSettingsI18n.uk,
   ...settingsLayoutI18n.uk,

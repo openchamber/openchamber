@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': '保留期限从归档时开始计算。过期会话会被删除。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保留期限从会话的最后活动时间开始计算。过期会话会被归档。',
@@ -548,6 +549,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "工作树",
   "settings.projects.worktrees.removeForEveryone": "为所有人移除",
   "settings.projects.worktrees.skipped": "已对你跳过",
+  "settings.projects.worktrees.teardownCommandAria": "清理命令 {position}",
   'settings.projects.shared.invalid': '无法读取 {path} 中的项目配置：{reason}',
   'settings.projects.shared.plansDir': '计划文件夹',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1114,10 +1116,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': '进行中的会话',
   'settings.openchamber.sessionWork.info': '侧边栏中位于聊天下方的区块，用于显示正在处理的会话。发送消息后，会话就会显示在这里。默认情况下，会话只显示在此区块中。若要同时在所属项目下显示，请在侧边栏菜单中开启“在项目下也显示进行中的工作”。VS Code 始终会在项目下显示会话。点击对勾或使用会话菜单可将会话标记为完成。当某一轮看起来像工作的结尾时，对勾会变灰作为提示。',
   'settings.openchamber.sessionWork.field.enabled': '显示进行中的会话',
-  'settings.openchamber.sessionRetention.archivedTooltip': '删除超过保留期限的已归档会话。保留最近归档的 5 个会话、当前打开的会话、运行中的会话和已分享的会话。如果删除父会话会同时删除受保护的子会话，则保留父会话。',
-  'settings.openchamber.sessionRetention.tooltip': '根据最后活动时间归档或删除未归档的会话。保留最近 5 个会话、当前打开的会话、运行中的会话和已分享的会话。已归档的会话会保留。如果删除父会话会同时删除受保护的子会话，则保留父会话。',
+  'settings.openchamber.sessionRetention.archivedTooltip': '删除超过保留期限的已归档会话。保留最近归档的 5 个会话、当前打开的会话、运行中的会话和已置顶的会话。如果删除父会话会同时删除受保护的子会话，则保留父会话。',
+  'settings.openchamber.sessionRetention.tooltip': '根据最后活动时间归档或删除未归档的会话。保留最近 5 个会话、当前打开的会话、运行中的会话和已置顶的会话。“进行中”区块里的会话也会保留，除非你选择包含它们。已归档的会话会保留。如果删除父会话会同时删除受保护的子会话，则保留父会话。',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '启用自动清理',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': '启用自动清理',
+  'settings.openchamber.sessionRetention.field.includeInWork': '包含“进行中”的会话',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '“进行中”区块里的会话会一直保留，直到将其标记为完成。开启后，它们会像其他会话一样过期。已置顶的会话始终保留。',
   'settings.openchamber.sessionRetention.field.retentionPeriod': '保留时长',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': '按天设置保留时长',
   'settings.openchamber.sessionRetention.field.days': '天',
@@ -1643,6 +1647,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': '添加命令',
   'settings.openchamber.worktrees.setup.waitForCommands': '创建或发送会话前等待初始化命令完成',
   'settings.openchamber.worktrees.setup.toast.saveFailed': '保存 Worktree 初始化命令失败',
+  'settings.openchamber.worktrees.teardown.title': '清理命令',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': '删除或归档工作树前，会在工作树目录内执行。任一命令失败时，工作树会保留。项目根目录可使用',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': '。',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': '例如：docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': '保存工作树清理命令失败',
   'settings.openchamber.worktrees.list.title': '现有工作树',
   'settings.openchamber.worktrees.list.tooltip': '删除工作树也会删除其关联会话。',
   'settings.openchamber.worktrees.list.loading': '正在加载工作树...',
@@ -2660,6 +2669,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n['zh-CN'],
   ...thirdPartyIntegrationI18n['zh-CN'],
   ...extensionCatalogI18n['zh-CN'],
+  ...extensionPowersI18n['zh-CN'],
   ...guestIntegrationsI18n['zh-CN'],
   ...extensionsSettingsI18n['zh-CN'],
   ...settingsLayoutI18n['zh-CN'],

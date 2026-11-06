@@ -9,6 +9,12 @@ export const MAX_OPEN_FILE_BYTES = 10 * 1024 * 1024;
 /** An office document is read whole to draw it, and a deck with photos passes the limit above. */
 export const MAX_OFFICE_PREVIEW_BYTES = 30 * 1024 * 1024;
 
+/**
+ * A data file is read whole into memory, away from the app's thread: a database
+ * or an export far past what an editor could hold. Phones keep the office limit.
+ */
+export const MAX_DATA_PREVIEW_BYTES = 256 * 1024 * 1024;
+
 export const countLinesWithLimit = (content: string, limit: number): number => {
   if (!content) {
     return 1;

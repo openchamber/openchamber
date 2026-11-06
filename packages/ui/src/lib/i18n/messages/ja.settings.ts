@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': '保持期間はアーカイブ時点から数えます。期間を過ぎたセッションは削除されます。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保持期間はセッションの最終アクティビティから数えます。期間を過ぎたセッションはアーカイブされます。',
@@ -581,6 +582,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "ワークツリー",
   "settings.projects.worktrees.removeForEveryone": "全員から削除",
   "settings.projects.worktrees.skipped": "あなたにはスキップ",
+  "settings.projects.worktrees.teardownCommandAria": "クリーンアップコマンド {position}",
   'settings.projects.shared.invalid': '{path} のプロジェクト設定を読み込めませんでした: {reason}',
   'settings.projects.shared.plansDir': 'プランフォルダー',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1147,10 +1149,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': '作業中のセッション',
   'settings.openchamber.sessionWork.info': '作業中のセッションを、サイドバーのチャットの下にまとめるブロックです。セッションでメッセージを送るとここに表示されます。既定ではこのブロックだけに表示されます。プロジェクトにも残すには、サイドバーのメニューで「作業中の項目もプロジェクトの下に表示」を有効にしてください。VS Code では常にプロジェクト内にも表示されます。チェックまたはセッションメニューから完了にできます。ターンが作業の終わりに見えると、ヒントとしてチェックが灰色になります。',
   'settings.openchamber.sessionWork.field.enabled': '作業中のセッションを表示',
-  'settings.openchamber.sessionRetention.archivedTooltip': '保持期間を過ぎたアーカイブ済みのセッションを削除します。最後にアーカイブされた5件、開いているセッション、実行中および共有中のセッションは保持されます。保護された子セッションまで削除される場合、親セッションは削除されません。',
-  'settings.openchamber.sessionRetention.tooltip': '最終アクティビティに基づいて未アーカイブのセッションをアーカイブまたは削除します。最新5件、開いているセッション、実行中および共有中のセッションは保持されます。アーカイブ済みのセッションも保持されます。保護された子セッションまで削除される場合、親セッションは削除されません。',
+  'settings.openchamber.sessionRetention.archivedTooltip': '保持期間を過ぎたアーカイブ済みのセッションを削除します。最後にアーカイブされた5件、開いているセッション、実行中のセッション、ピン留めしたセッションは保持されます。保護された子セッションまで削除される場合、親セッションは削除されません。',
+  'settings.openchamber.sessionRetention.tooltip': '最終アクティビティに基づいて未アーカイブのセッションをアーカイブまたは削除します。最新5件、開いているセッション、実行中のセッション、ピン留めしたセッションは保持されます。「作業中」ブロックのセッションも、含める設定にしない限り保持されます。アーカイブ済みのセッションも保持されます。保護された子セッションまで削除される場合、親セッションは削除されません。',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '自動クリーンアップを有効化',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': '自動クリーンアップを有効化',
+  'settings.openchamber.sessionRetention.field.includeInWork': '「作業中」のセッションも含める',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '「作業中」ブロックのセッションは、完了にするまで残ります。オンにすると、ほかのセッションと同じように期限切れになります。ピン留めしたセッションは常に残ります。',
   'settings.openchamber.sessionRetention.field.retentionPeriod': '保持期間',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': '保持期間（日数）',
   'settings.openchamber.sessionRetention.field.days': '日',
@@ -1676,6 +1680,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': 'コマンドを追加',
   'settings.openchamber.worktrees.setup.waitForCommands': 'セットアップコマンドの完了を待ってからセッションを作成または送信する',
   'settings.openchamber.worktrees.setup.toast.saveFailed': 'ワークツリー設定コマンドの保存に失敗しました',
+  'settings.openchamber.worktrees.teardown.title': 'クリーンアップコマンド',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': 'ワークツリーを削除またはアーカイブする前に、そのディレクトリ内で実行されます。失敗した場合、ワークツリーは残ります。以下を使用します:',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': 'をプロジェクトルートに。',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': '例: docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': 'ワークツリーのクリーンアップコマンドの保存に失敗しました',
   'settings.openchamber.worktrees.list.title': '既存の Worktree',
   'settings.openchamber.worktrees.list.tooltip': 'Worktree を削除すると、リンクされたセッションも削除されます。',
   'settings.openchamber.worktrees.list.loading': 'Worktree を読み込み中...',
@@ -2660,6 +2669,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.ja,
   ...thirdPartyIntegrationI18n.ja,
   ...extensionCatalogI18n.ja,
+  ...extensionPowersI18n.ja,
   ...guestIntegrationsI18n.ja,
   ...extensionsSettingsI18n.ja,
   ...settingsLayoutI18n.ja,

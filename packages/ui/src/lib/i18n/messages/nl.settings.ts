@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'Telt de bewaartermijn vanaf het archiveren. Verlopen sessies worden verwijderd.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'Telt de bewaartermijn vanaf de laatste activiteit van de sessie. Verlopen sessies worden gearchiveerd.',
@@ -581,6 +582,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktrees",
   "settings.projects.worktrees.removeForEveryone": "Voor iedereen verwijderen",
   "settings.projects.worktrees.skipped": "Overgeslagen voor jou",
+  "settings.projects.worktrees.teardownCommandAria": "Opruimopdracht {position}",
   'settings.projects.shared.invalid': 'De projectconfig in {path} kon niet worden gelezen: {reason}',
   'settings.projects.shared.plansDir': 'Plannenmap',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1147,10 +1149,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Sessies in uitvoering',
   'settings.openchamber.sessionWork.info': 'Een blok in de zijbalk, onder Chats, voor de sessies waaraan u werkt. Een sessie verschijnt daar zodra u een bericht stuurt. Standaard staat ze alleen in dit blok. Schakel "Werk in uitvoering ook onder projecten tonen" in via het zijbalkmenu om haar ook in haar project te tonen. In VS Code verschijnen sessies altijd in hun projecten. Markeer een sessie als afgerond met het vinkje of via het sessiemenu. Als een beurt op het einde van het werk lijkt, wordt het vinkje grijs als hint.',
   'settings.openchamber.sessionWork.field.enabled': 'Sessies in uitvoering tonen',
-  'settings.openchamber.sessionRetention.archivedTooltip': 'Verwijdert verlopen gearchiveerde sessies. Behoudt de 5 meest recent gearchiveerde sessies, de geopende sessie, lopende sessies en gedeelde sessies. Een bovenliggende sessie blijft behouden als verwijderen daarvan ook een beschermde subsessie zou verwijderen.',
-  'settings.openchamber.sessionRetention.tooltip': 'Archiveert of verwijdert niet-gearchiveerde sessies op basis van de laatste activiteit. Behoudt de 5 meest recente sessies, de geopende sessie, lopende sessies en gedeelde sessies. Gearchiveerde sessies blijven behouden. Een bovenliggende sessie blijft behouden als verwijderen daarvan ook een beschermde subsessie zou verwijderen.',
+  'settings.openchamber.sessionRetention.archivedTooltip': 'Verwijdert verlopen gearchiveerde sessies. Behoudt de 5 meest recent gearchiveerde sessies, de geopende sessie, lopende sessies en vastgezette sessies. Een bovenliggende sessie blijft behouden als verwijderen daarvan ook een beschermde subsessie zou verwijderen.',
+  'settings.openchamber.sessionRetention.tooltip': 'Archiveert of verwijdert niet-gearchiveerde sessies op basis van de laatste activiteit. Behoudt de 5 meest recente sessies, de geopende sessie, lopende sessies en vastgezette sessies. Sessies in het blok "In bewerking" blijven ook bewaard, tenzij u ze meeneemt. Gearchiveerde sessies blijven behouden. Een bovenliggende sessie blijft behouden als verwijderen daarvan ook een beschermde subsessie zou verwijderen.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Automatisch opschonen aanzetten',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Automatisch opschonen aanzetten',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Sessies in "In bewerking" meenemen',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Sessies in het blok "In bewerking" blijven bewaard tot u ze als afgerond markeert. Schakel dit in om ze te laten verlopen zoals elke andere sessie. Vastgezette sessies blijven altijd bewaard.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Bewaartermijn',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Bewaartermijn in dagen',
   'settings.openchamber.sessionRetention.field.days': 'dagen',
@@ -1676,6 +1680,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': 'Opdracht toevoegen',
   'settings.openchamber.worktrees.setup.waitForCommands': 'Wacht op setupopdrachten voordat u een sessie maakt of verstuurt',
   'settings.openchamber.worktrees.setup.toast.saveFailed': 'Kan de worktree-setupopdrachten niet opslaan',
+  'settings.openchamber.worktrees.teardown.title': 'Opruimopdrachten',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': 'Worden uitgevoerd in de worktreemap voordat een worktree wordt verwijderd of gearchiveerd. Mislukt er een, dan blijft de worktree bestaan. Gebruik',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': 'voor de projectroot.',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': 'bv. docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': 'Kan de worktree-opruimopdrachten niet opslaan',
   'settings.openchamber.worktrees.list.title': 'Bestaande worktrees',
   'settings.openchamber.worktrees.list.tooltip': 'Als u een worktree verwijdert, worden ook de gekoppelde sessies verwijderd.',
   'settings.openchamber.worktrees.list.loading': 'Worktrees laden...',
@@ -2650,6 +2659,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.nl,
   ...thirdPartyIntegrationI18n.nl,
   ...extensionCatalogI18n.nl,
+  ...extensionPowersI18n.nl,
   ...guestIntegrationsI18n.nl,
   ...extensionsSettingsI18n.nl,
   ...settingsLayoutI18n.nl,

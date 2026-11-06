@@ -22,6 +22,7 @@ import type {
   CreateGitWorktreePayload,
   GitWorktreeCreateResult,
   RemoveGitWorktreePayload,
+  TeardownGitWorktreePayload,
   GitWorktreeSnapshotPayload,
   GitWorktreeSnapshotResult,
   ArchiveGitWorktreePayload,
@@ -74,6 +75,7 @@ import { notifyGitPush } from './gitPushEvents';
 import { GitPathUnavailableError, gitPathUnavailableBodySchema, gitSubmoduleStateSchema } from './api/git-path-diff';
 
 const API_BASE = '/api/git';
+const gitFileVersionsSchema = z.object({ original: z.string(), modified: z.string() });
 const gitRangeDiffSchema = z.object({ diff: z.string() });
 const gitRangeFilesSchema = z.object({ files: z.array(z.object({ path: z.string(), status: z.string(), revision: z.string().optional() })) });
 const gitRangeErrorSchema = z.object({ error: z.string() });
@@ -369,6 +371,7 @@ const operationErrorCodeSchema = z.enum([
     'STALE_BINDING',
     'STALE_CONFIG',
     'REMOTE_CHANGED',
+    'REMOTE_URL_USERINFO',
     'AUTHENTICATION_REQUIRED',
     'DESTINATION_SELECTION_REQUIRED',
     'CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED',
@@ -1681,13 +1684,29 @@ export async function deleteGitWorktree(directory: string, payload: RemoveGitWor
     body: JSON.stringify(payload ?? {}),
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to delete worktree');
-  }
+  if (!response.ok) await throwWorktreeTeardownAwareError(response, 'Failed to delete worktree');
 
   return response.json();
 }
+
+/** Runs the worktree's teardown commands and keeps it. */
+export async function teardownGitWorktree(directory: string, payload: TeardownGitWorktreePayload): Promise<{ success: boolean }> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/teardown`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await throwWorktreeTeardownAwareError(response, 'Failed to tear down worktree');
+  return response.json();
+}
+
+// A failed teardown carries its code, so the delete can offer to go on without it.
+const throwWorktreeTeardownAwareError = async (response: Response, fallback: string): Promise<never> => {
+  const body = z.object({ error: z.string().optional(), code: z.string().optional() }).catch({})
+    .parse(await response.json().catch(() => null));
+  const message = body.error || response.statusText || fallback;
+  throw body.code ? new GitWorktreeRequestError(body.code, message, response.status) : new Error(message);
+};
 
 const worktreeTitleResultSchema = z.object({ title: z.string(), branch: z.string() });
 
@@ -2190,17 +2209,35 @@ export async function getCommitFiles(
   return gitCommitFilesSchema.parse(await response.json());
 }
 
+export async function getGitRangeFileVersions(
+  directory: string,
+  options: { base: string; head: string; path: string; previousPath?: string; includeWorkingTree?: boolean },
+): Promise<{ original: string; modified: string }> {
+  const { base, head, path, previousPath, includeWorkingTree } = options;
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/range-file-versions`, directory, {
+    base,
+    head,
+    path,
+    previousPath,
+    includeWorkingTree: includeWorkingTree ? 'true' : undefined,
+  }));
+  if (!response.ok) throw await rangeResponseError(response, 'Failed to read file versions');
+  return gitFileVersionsSchema.parse(await response.json());
+}
+
 export async function getCommitFileDiff(
   directory: string,
   hash: string,
   filePath: string,
-  isBinary: boolean
+  isBinary: boolean,
+  previousPath?: string,
 ): Promise<CommitFileDiffResponse> {
   const response = await runtimeFetch(
     buildUrl(`${API_BASE}/commit-file-diff`, directory, {
       hash,
       path: filePath,
       binary: isBinary ? 'true' : undefined,
+      previousPath,
     })
   );
   if (!response.ok) {

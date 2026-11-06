@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'La durée de conservation commence à l\'archivage. Les sessions expirées sont supprimées.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'La durée de conservation commence à la dernière activité de la session. Les sessions expirées sont archivées.',
@@ -458,6 +459,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktrees",
   "settings.projects.worktrees.removeForEveryone": "Retirer pour tout le monde",
   "settings.projects.worktrees.skipped": "Ignorée pour vous",
+  "settings.projects.worktrees.teardownCommandAria": "Commande de nettoyage {position}",
   'settings.projects.shared.invalid': 'La configuration du projet dans {path} n\'a pas pu être lue : {reason}',
   'settings.projects.shared.plansDir': 'Dossier des plans',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1017,10 +1019,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'Sessions en cours',
   'settings.openchamber.sessionWork.info': 'Un bloc dans la barre latérale, sous les discussions, pour les sessions sur lesquelles vous travaillez. Une session y apparaît dès que vous lui envoyez un message. Par défaut, elle apparaît uniquement dans ce bloc. Activez « Afficher aussi le travail en cours sous les projets » dans le menu de la barre latérale pour la garder aussi dans son projet. Dans VS Code, les sessions restent toujours dans leur projet. Marquez une session comme terminée avec la coche ou son menu. Quand un tour ressemble à la fin du travail, la coche devient grise en guise d’indice.',
   'settings.openchamber.sessionWork.field.enabled': 'Afficher les sessions en cours',
-  'settings.openchamber.sessionRetention.archivedTooltip': 'Supprime les sessions archivées dont la période de conservation a expiré. Conserve les 5 sessions archivées le plus récemment, la session ouverte, les sessions en cours et les sessions partagées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
-  'settings.openchamber.sessionRetention.tooltip': 'Archive ou supprime les sessions non archivées selon leur dernière activité. Conserve les 5 sessions les plus récentes, la session ouverte, les sessions en cours et les sessions partagées. Les sessions archivées sont conservées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
+  'settings.openchamber.sessionRetention.archivedTooltip': 'Supprime les sessions archivées dont la période de conservation a expiré. Conserve les 5 sessions archivées le plus récemment, la session ouverte, les sessions en cours d’exécution et les sessions épinglées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
+  'settings.openchamber.sessionRetention.tooltip': 'Archive ou supprime les sessions non archivées selon leur dernière activité. Conserve les 5 sessions les plus récentes, la session ouverte, les sessions en cours d’exécution et les sessions épinglées. Les sessions du bloc « En cours » sont aussi conservées, sauf si vous les incluez. Les sessions archivées sont conservées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'Activer le nettoyage automatique',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'Activer le nettoyage automatique',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'Inclure les sessions « En cours »',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'Les sessions du bloc « En cours » sont conservées jusqu’à ce que vous les marquiez comme terminées. Activez cette option pour qu’elles expirent comme toute autre session. Les sessions épinglées sont toujours conservées.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'Période de conservation',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'Durée de conservation en jours',
   'settings.openchamber.sessionRetention.field.days': 'jours',
@@ -1546,6 +1550,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': 'Ajouter une commande',
   'settings.openchamber.worktrees.setup.waitForCommands': 'Attendre la fin des commandes de configuration avant de créer ou d\'envoyer une session',
   'settings.openchamber.worktrees.setup.toast.saveFailed': 'Échec de l\'enregistrement des commandes de configuration Worktree',
+  'settings.openchamber.worktrees.teardown.title': 'Commandes de nettoyage',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': 'S\'exécutent dans le répertoire du worktree avant sa suppression ou son archivage. Si l\'une échoue, le worktree est conservé. Utiliser',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': 'pour la racine du projet.',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': 'p. ex. docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': 'Échec de l\'enregistrement des commandes de nettoyage du worktree',
   'settings.openchamber.worktrees.list.title': 'Worktrees existants',
   'settings.openchamber.worktrees.list.tooltip': 'La suppression d\'un worktree supprime également les sessions liées.',
   'settings.openchamber.worktrees.list.loading': 'Chargement des worktrees...',
@@ -2660,6 +2669,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.fr,
   ...thirdPartyIntegrationI18n.fr,
   ...extensionCatalogI18n.fr,
+  ...extensionPowersI18n.fr,
   ...guestIntegrationsI18n.fr,
   ...extensionsSettingsI18n.fr,
   ...settingsLayoutI18n.fr,

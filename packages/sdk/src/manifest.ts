@@ -2,6 +2,7 @@ import type { OpenChamberManifestApiVersion } from './api-version.ts';
 import type { FileEditorContribution } from './file-editor.ts';
 import { GUEST_STATUS_SOURCE_INTERVAL_DEFAULT, type StatusSectionSource } from './status-view.ts';
 import type { PublicSessionEvents, SessionEventsContribution } from './session-events.ts';
+import type { ServiceScheduleEntry } from './service-host.ts';
 
 export const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
@@ -87,7 +88,7 @@ export const GUEST_STATUS_SECTION_HEIGHT_MAX = 320;
 /** Frame height before the manifest or the guest says otherwise. */
 export const GUEST_STATUS_SECTION_HEIGHT_DEFAULT = 120;
 
-export type GuestActionWhere = 'message' | 'session';
+export type GuestActionWhere = 'message' | 'session' | 'selection' | 'file' | 'diff';
 export type GuestActionRole = 'user' | 'assistant';
 /** What a session action wants alongside the session id and title. */
 export type GuestActionPayload = 'messages';
@@ -104,11 +105,11 @@ export const GUEST_COMMAND_DESCRIPTION_MAX = 80;
 export const GUEST_COMMAND_NAME = /^[a-z][a-z0-9-]{0,23}$/;
 
 /**
- * A menu entry on a message or a session. By default it opens the guest with
- * the message or session as `ready.item`. `roles` narrows a message action
- * to user or assistant messages (default both); `payload: ["messages"]` on
- * a session action asks for the conversation and needs the `conversation`
- * capability.
+ * A menu entry on a message, a session, text selected in a message, a file in
+ * the Files view, or lines of a diff. By default it opens the guest with that
+ * target as `ready.item`. `roles` narrows a message action to user or
+ * assistant messages (default both); `payload: ["messages"]` on a session
+ * action asks for the conversation and needs the `conversation` capability.
  */
 export type GuestActionContribution = {
   id: string;
@@ -120,6 +121,8 @@ export type GuestActionContribution = {
   mode?: 'open' | 'background';
   roles?: GuestActionRole[];
   payload?: GuestActionPayload[];
+  /** How a `selection` action shows on the selection bar. Default: `label`. `icon` keeps the label as its tooltip. */
+  display?: 'label' | 'icon' | 'both';
 };
 
 /** A composer slash command the guest resolves into a chip through `host.onResolve`. */
@@ -179,6 +182,8 @@ export type GuestToolContribution = {
 export type IntegrationSettingField = {
   id: string;
   label: string;
+  /** A key or a password: the card masks it, no frame receives it, and the service reads it through `createServiceHost(...).readSettings()`. */
+  secret?: true;
 };
 
 export type IntegrationOAuthAccount = {
@@ -777,6 +782,10 @@ export type ServiceContribution = {
    * `PanelContribution.dock`); without it, the panel is the surface alone.
    */
   surface?: true;
+  /** Start the service with OpenChamber and bring it back when it stops. */
+  keepRunning?: true;
+  /** Runs OpenChamber posts to the service on a clock, whether or not anything else started it. */
+  schedule?: ServiceScheduleEntry[];
 };
 
 /** Catalog card for a local service. Drops nothing secret; grant is host state. */
@@ -786,6 +795,8 @@ export type PublicService = {
   socketBindings?: PublicSocketBinding[];
   provides?: GuestServiceProvides[];
   surface?: true;
+  keepRunning?: true;
+  schedule?: ServiceScheduleEntry[];
   granted: boolean;
 };
 
@@ -802,10 +813,15 @@ export const serviceProvides = (
  * `filesystem` and `origins` follow from `contributes.service`,
  * `contributes.integration`, `contributes.filesystem` and `contributes.origins`. `model` is one-off text generation with the
  * user's Small Model (`host.generate`), outside any session. `transcript`
- * follows from `contributes.sessionEvents.content`: the service receives what
- * the agent said or asked, not only that it did.
+ * follows from `contributes.sessionEvents.content` or
+ * `contributes.sessionControl.content`: the service receives what the agent
+ * said or asked, not only that it did. `sessionControl` follows from
+ * `contributes.sessionControl`: the service starts sessions and sends to them
+ * with no window open. `instructions` follows from `contributes.instructions`:
+ * the service adds to what agents read. `skills` follows from
+ * `contributes.skills`: the package's skills reach every agent.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'instructions', 'skills'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -839,6 +855,59 @@ export const isGuestFilesystemPattern = (value: string): boolean => {
   }
   const segments = value.split('/').slice(1);
   return !segments.some((segment) => segment === '' || segment === '..');
+};
+
+/**
+ * The service acts on sessions by itself (`service-host.ts`). `content: true`
+ * also lets it read the agent's answers, which asks for `transcript`.
+ */
+export type SessionControlContribution = {
+  content?: true;
+};
+
+/** `contributes.mentions`: the extension's rows in the composer's `@` menu, answered by its service. */
+export type MentionsContribution = {
+  /** The section's name in the menu, 1 to `GUEST_MENTIONS_LABEL_MAX` characters. */
+  label: string;
+};
+
+/** Characters of a mention section's label. */
+export const GUEST_MENTIONS_LABEL_MAX = 40;
+
+/** A component name an agent writes in a UI block. */
+export const GUEST_BLOCK_NAME = /^[A-Z][A-Za-z0-9]{1,31}$/;
+/** An argument name of a block component. */
+export const GUEST_BLOCK_ARG_NAME = /^[a-z][A-Za-z0-9]{0,31}$/;
+/** How many `contributes.blocks` a package may declare; each signature is text every session pays for. */
+export const GUEST_BLOCKS_MAX = 4;
+/** Arguments of one block component. */
+export const GUEST_BLOCK_ARGS_MAX = 8;
+/** Characters of a block component's description, which agents read. */
+export const GUEST_BLOCK_DESCRIPTION_MAX = 120;
+/** Serialized characters of one call's arguments. */
+export const GUEST_BLOCK_ARGS_TEXT_MAX = 16_000;
+/** Height a block's frame takes before it says otherwise. */
+export const GUEST_BLOCK_HEIGHT_DEFAULT = 120;
+/** The chat's own components; an extension's block cannot take these names. */
+export const GUEST_BLOCK_RESERVED_NAMES: readonly string[] = [
+  'Stack', 'Row', 'Card', 'Tabs', 'Tab', 'Text', 'Badge', 'Callout', 'KeyValue', 'Table', 'Steps', 'BarChart', 'LineChart',
+  'Series', 'Stat', 'Progress', 'Choice', 'Input', 'DateInput', 'Slider', 'Details', 'Button',
+];
+
+/** Most a block's frame may ask for. */
+export const GUEST_BLOCK_HEIGHT_MAX = 960;
+
+/** A component agents may write in a UI block, drawn by the extension's own sandboxed frame. */
+export type GuestBlockContribution = {
+  name: string;
+  description: string;
+  args: string[];
+  /** `.html` inside the package. */
+  entry: string;
+  /** Height in px until the frame says otherwise. */
+  height?: number;
+  /** Its frame answers the agent with `answerBlock`, so agents ask with it and a page adds no Send button. */
+  answers?: boolean;
 };
 
 export type OpenChamberContributes = {
@@ -876,6 +945,16 @@ export type OpenChamberContributes = {
   tracker?: TrackerContribution;
   /** The usage provider a `quota` service provides; present exactly when it does. */
   quota?: QuotaContribution;
+  /** The service acts on sessions by itself. Needs `service`. Grants `sessionControl`. */
+  sessionControl?: SessionControlContribution;
+  /** The service adds to what agents read. Needs `service`. Grants `instructions`. */
+  instructions?: true;
+  /** A folder of `<name>/SKILL.md` skills inside the package. Grants `skills`. */
+  skills?: string;
+  /** Rows in the composer's `@` menu. Needs `service`. */
+  mentions?: MentionsContribution;
+  /** Components agents write in UI blocks, each drawn by its own frame. */
+  blocks?: GuestBlockContribution[];
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -890,7 +969,7 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins' | 'sessionEvents' | 'sessionControl' | 'instructions' | 'skills'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
@@ -898,7 +977,10 @@ export const requestedGuestCapabilities = (
   if (contributes.integration) declared.add('network');
   if (contributes.filesystem && contributes.filesystem.length > 0) declared.add('filesystem');
   if (contributes.origins && contributes.origins.length > 0) declared.add('origins');
-  if (contributes.sessionEvents?.content) declared.add('transcript');
+  if (contributes.sessionEvents?.content || contributes.sessionControl?.content) declared.add('transcript');
+  if (contributes.sessionControl) declared.add('sessionControl');
+  if (contributes.instructions) declared.add('instructions');
+  if (contributes.skills) declared.add('skills');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
 
@@ -987,6 +1069,11 @@ export type OpenChamberEngines = {
   openchamber: string;
 };
 
+/**
+ * The parsed manifest. A package writes `id`, `name` and `icon` beside
+ * `contributes`; parsing moves them to `contributes.panel`, where older
+ * packages keep them, so there is one shape past this point.
+ */
 export type OpenChamberManifest = {
   apiVersion: OpenChamberManifestApiVersion;
   engines?: OpenChamberEngines;
@@ -1010,6 +1097,11 @@ export type ParseManifestErrorCode =
   | 'invalid-page'
   | 'invalid-status-section'
   | 'invalid-session-events'
+  | 'invalid-session-control'
+  | 'invalid-instructions'
+  | 'invalid-skills'
+  | 'invalid-mentions'
+  | 'invalid-blocks'
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'
@@ -1072,6 +1164,7 @@ export const toPublicIntegration = (integration: IntegrationContribution): Publi
     next.settings = integration.settings.map((field) => ({
       id: field.id,
       label: field.label,
+      ...(field.secret ? { secret: true as const } : {}),
     }));
   }
   return next;
@@ -1114,6 +1207,12 @@ export const toPublicService = (
   }
   if (service.surface) {
     next.surface = true;
+  }
+  if (service.keepRunning) {
+    next.keepRunning = true;
+  }
+  if (service.schedule) {
+    next.schedule = service.schedule.map((entry) => ({ ...entry }));
   }
   return next;
 };

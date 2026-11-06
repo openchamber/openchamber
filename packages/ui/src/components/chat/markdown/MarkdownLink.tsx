@@ -4,6 +4,9 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { getExternalFaviconUrl, isAppLinkUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { parseSessionLink } from '@/lib/sessionLinks';
+import { parseExtensionInstallLink } from '@/lib/guests/install-link';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { requestGuestInstall } from '@/lib/guests/install-request';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -138,6 +141,7 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
   // VS Code keeps session links inert: its sessions live on its own OpenCode,
   // so a link to a web session opens in the browser like any other.
   const session = isVSCodeRuntime() ? null : parseSessionLink(href, appOwnOrigins());
+  const extensionInstall = isVSCodeRuntime() ? null : parseExtensionInstallLink(href);
   // A session or message the user's message mentioned draws as its chip.
   const mentionChips = React.useContext(SessionMentionChipsContext);
   const mentionChip = session ? mentionChips.get(sessionLinkKey(session)) : undefined;
@@ -215,6 +219,24 @@ function ScreenMarkdownHref({ href, children: originalChildren, node, ...props }
       </span>
     );
   }
+  // A reply can offer the extension it built: a click is the go-ahead for a
+  // folder, and the approval dialog still decides what the package may do.
+  if (extensionInstall && isMobileSurfaceRuntime()) return <span>{children}</span>;
+  if (extensionInstall) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="my-1 align-middle"
+        onClick={() => requestGuestInstall({ source: extensionInstall.source, confirmed: extensionInstall.kind === 'path' })}
+      >
+        <Icon name="download" className="size-4" />
+        {children}
+      </Button>
+    );
+  }
+
   if (session && mentionChip) {
     return <SessionMentionChipButton chip={mentionChip} target={session} />;
   }

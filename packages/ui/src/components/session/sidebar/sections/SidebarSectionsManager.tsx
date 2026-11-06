@@ -42,8 +42,10 @@ import {
   type SidebarSectionTemplate,
 } from '@/lib/sidebarSections';
 import { cn, formatDirectoryName } from '@/lib/utils';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsInSidebarOrder } from '../list/useProjectsInSidebarOrder';
 import { keepRowInList, ROW_DRAG_AUTO_SCROLL, ROW_SORT_TRANSITION, useRowDragSensors } from '../rowDrag';
@@ -306,7 +308,7 @@ const SectionRow: React.FC<{ entry: SidebarSectionEntry }> = ({ entry }) => {
   );
 };
 
-type ConditionCategory = 'text' | 'states' | 'work' | 'pins' | 'kinds' | 'links' | 'projectIds' | 'activity';
+type ConditionCategory = 'text' | 'states' | 'work' | 'pins' | 'kinds' | 'links' | 'projectIds' | 'folders' | 'activity';
 type ConditionOption = { value: string; label: string };
 
 const CATEGORY_KEY = {
@@ -317,10 +319,11 @@ const CATEGORY_KEY = {
   kinds: 'sessions.sidebar.sections.category.kind',
   links: 'sessions.sidebar.sections.category.links',
   projectIds: 'sessions.sidebar.sections.category.projects',
+  folders: 'sessions.sidebar.sections.category.folders',
   activity: 'sessions.sidebar.sections.category.activity',
 } as const satisfies Record<ConditionCategory, I18nKey>;
 
-const TIME_CATEGORIES: readonly ConditionCategory[] = ['text', 'states', 'work', 'pins', 'kinds', 'links', 'projectIds', 'activity'];
+const TIME_CATEGORIES: readonly ConditionCategory[] = ['text', 'states', 'work', 'pins', 'kinds', 'links', 'projectIds', 'folders', 'activity'];
 
 /** The values a condition holds; activity is one choice, "any time" being no condition. */
 const conditionValues = (filter: SidebarSectionFilter, category: ConditionCategory): readonly string[] => {
@@ -366,6 +369,8 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
   const matchCount = useSidebarSectionsUiStore((state) => state.draftMatchCount);
   const pinLists = useSessionDisplayStore((state) => state.pinLists);
   const projects = useProjectsInSidebarOrder(useProjectsStore((state) => state.projects));
+  const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
+  const projectLabelOf = (project: (typeof projects)[number]): string => project.label?.trim() || formatDirectoryName(project.path, null) || project.path;
   // The phrase being typed into Title or branch, or null while no field is
   // open: Add condition and the row's Add open it empty.
   const [phraseDraft, setPhraseDraft] = React.useState<string | null>(null);
@@ -378,7 +383,10 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
       case 'pins': return [{ value: DEFAULT_PIN_LIST, label: t('sessions.sidebar.activity.pinnedTitle') }, ...pinLists.map((list) => ({ value: list.id, label: list.name }))];
       case 'kinds': return SIDEBAR_SECTION_KINDS.map((value) => ({ value, label: t(KIND_KEY[value]) }));
       case 'links': return SIDEBAR_SECTION_LINKS.map((value) => ({ value, label: t(LINK_KEY[value]) }));
-      case 'projectIds': return projects.map((project) => ({ value: project.id, label: project.label?.trim() || formatDirectoryName(project.path, null) || project.path }));
+      case 'projectIds': return projects.map((project) => ({ value: project.id, label: projectLabelOf(project) }));
+      case 'folders': return projects.flatMap((project) => (foldersMap[normalizePath(project.path) ?? ''] ?? [])
+        .filter((folder) => !folder.parentId)
+        .map((folder) => ({ value: folder.id, label: `${projectLabelOf(project)} / ${folder.name}` })));
       case 'activity': return SIDEBAR_SECTION_ACTIVITY.filter((value) => value !== 'any').map((value) => ({ value, label: t(ACTIVITY_KEY[value]) }));
       case 'text': return [];
     }
@@ -412,7 +420,7 @@ const SectionEditor: React.FC<{ draft: CustomSidebarSection }> = ({ draft }) => 
     ...order.filter(isShown),
     ...categories.filter((category) => isShown(category) && !order.includes(category)),
   ];
-  const addable = byProjects ? [] : categories.filter((category) => !isShown(category));
+  const addable = byProjects ? [] : categories.filter((category) => !isShown(category) && (category !== 'folders' || optionsOf(category).length > 0));
   const name = draft.name.trim();
   // A section with nothing to ask lists nothing, so it is not saved until it asks something.
   const hasConditions = byProjects ? draft.filter.projectIds.length > 0 : hasSidebarSectionConditions(draft.filter);

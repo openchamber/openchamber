@@ -1,3 +1,4 @@
+import { documentDataUrl } from '../source-control/document-versions.js';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { mapLimited } from '../shared/map-limited.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
@@ -512,13 +513,15 @@ export function createGiteaResourceService({
      * the head commit. Gitea keeps a fork pull request's head under the
      * target repository's `refs/pull/<n>/head`, so both reads go there.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, linked }) {
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, binary, linked }) {
       const { target, raw } = await findPull(directory, number, project, { remote, linked });
       const baseSha = raw?.merge_base;
       const headSha = raw?.head?.sha;
       if (!COMMIT_SHA.test(String(baseSha)) || !COMMIT_SHA.test(String(headSha))) throw malformed(`${providerLabel} returned invalid pull request refs`);
       const readFile = async (filePath, ref) => {
-        const content = await client.text(`${repoPath(target.project)}/raw/${filePath.split('/').map(seg).join('/')}`, { ref });
+        const rawPath = `${repoPath(target.project)}/raw/${filePath.split('/').map(seg).join('/')}`;
+        if (binary) return documentDataUrl(await client.bytes(rawPath, { ref }));
+        const content = await client.text(rawPath, { ref });
         if (!isString(content)) throw malformed(`${providerLabel} returned invalid file contents`);
         if (Buffer.byteLength(content) > MAX_FULL_FILE_BYTES) {
           throw Object.assign(new Error('This file is too large to show in full'), { status: 413, code: 'file-too-large' });

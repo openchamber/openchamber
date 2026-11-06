@@ -232,3 +232,45 @@ describe('quota scope', () => {
     expect(effectiveGrants(['service'], approved, guestGrantScope(guest))).toEqual([]);
   });
 });
+
+describe('what a service does with nobody asking', () => {
+  const base = { service: { entry: 'service/main.js', runtime: 'host' } };
+  const granted = ['service', 'transcript', 'sessionControl'];
+  const control = { ...base, sessionControl: { content: true } };
+
+  test('an approval from before these keys stays as it was', () => {
+    expect(guestGrantScope(base)).toEqual({ service: { exec: [], sockets: [] } });
+    const stored = guestGrantScope(base);
+    expect(effectiveGrants(['service'], stored, guestGrantScope(base))).toEqual(['service']);
+  });
+
+  test('a version that starts to run alone, on a clock, or to read what is typed asks again', () => {
+    const stored = guestGrantScope(base);
+    for (const next of [
+      { service: { ...base.service, keepRunning: true } },
+      { service: { ...base.service, schedule: [{ id: 'a', cron: '* * * * *' }] } },
+      { ...base, mentions: { label: 'Notes' } },
+      { ...base, sessionControl: {} },
+    ]) expect(effectiveGrants(['service'], stored, guestGrantScope(next))).toEqual([]);
+  });
+
+  test('a changed clock asks again, a dropped one too', () => {
+    const daily = { service: { ...base.service, schedule: [{ id: 'a', cron: '0 3 * * *' }] } };
+    const hourly = { service: { ...base.service, schedule: [{ id: 'a', cron: '0 * * * *' }] } };
+    expect(effectiveGrants(['service'], guestGrantScope(daily), guestGrantScope(hourly))).toEqual([]);
+    expect(effectiveGrants(['service'], guestGrantScope(daily), guestGrantScope(base))).toEqual([]);
+  });
+
+  test('session control and its content hold only while the package still asks for them', () => {
+    const stored = guestGrantScope(control);
+    expect(effectiveGrants(granted, stored, guestGrantScope(control))).toEqual(granted);
+    expect(effectiveGrants(granted, stored, guestGrantScope({ ...base, sessionControl: {} }))).toEqual([]);
+    expect(effectiveGrants(['sessionControl'], guestGrantScope(base), guestGrantScope(control))).toEqual([]);
+  });
+
+  test('transcript from session control does not cover a subscription that starts to ask', () => {
+    const stored = guestGrantScope(control);
+    const wider = guestGrantScope({ ...control, sessionEvents: { events: ['turn-finished'], content: true } });
+    expect(effectiveGrants(['transcript'], stored, wider)).toEqual([]);
+  });
+});

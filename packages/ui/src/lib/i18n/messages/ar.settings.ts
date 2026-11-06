@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': 'تُحسب مدة الاحتفاظ من وقت الأرشفة. تُحذف الجلسات التي انتهت مدتها.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': 'تُحسب مدة الاحتفاظ من آخر نشاط للجلسة. تُؤرشف الجلسات التي انتهت مدتها.',
@@ -580,6 +581,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "أشجار العمل",
   "settings.projects.worktrees.removeForEveryone": "إزالة للجميع",
   "settings.projects.worktrees.skipped": "متجاوز بالنسبة لك",
+  "settings.projects.worktrees.teardownCommandAria": "أمر التنظيف {position}",
   'settings.projects.shared.invalid': 'تعذّرت قراءة إعدادات المشروع في {path}: {reason}',
   'settings.projects.shared.plansDir': 'مجلد الخطط',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1146,10 +1148,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': 'الجلسات قيد العمل',
   'settings.openchamber.sessionWork.info': 'قسم في الشريط الجانبي أسفل المحادثات للجلسات التي تعمل عليها. تظهر الجلسة هنا عند إرسال رسالة فيها. افتراضيًا، تظهر في هذا القسم فقط. فعّل «إظهار العمل الجاري تحت المشاريع أيضًا» من قائمة الشريط الجانبي لعرضها في مشروعها كذلك. في VS Code تظهر الجلسات دائمًا ضمن مشاريعها. علّم الجلسة كمنتهية باستخدام علامة الصح أو قائمة الجلسة. عندما تبدو الجولة نهايةً للعمل، تتحول علامة الصح إلى الرمادي كتلميح.',
   'settings.openchamber.sessionWork.field.enabled': 'إظهار الجلسات قيد العمل',
-  'settings.openchamber.sessionRetention.archivedTooltip': 'يحذف الجلسات المؤرشفة المنتهية المدة. يحتفظ بآخر 5 جلسات مؤرشفة، والجلسة المفتوحة، والجلسات قيد التشغيل، والجلسات المشتركة. يُحتفظ بالجلسة الأم إذا كان حذفها سيحذف أيضًا جلسة فرعية محمية.',
-  'settings.openchamber.sessionRetention.tooltip': 'يؤرشف الجلسات غير المؤرشفة أو يحذفها بناءً على آخر نشاط. يحتفظ بآخر 5 جلسات، والجلسة المفتوحة، والجلسات قيد التشغيل، والجلسات المشتركة. تُحفظ الجلسات المؤرشفة. يُحتفظ بالجلسة الأم إذا كان حذفها سيحذف أيضًا جلسة فرعية محمية.',
+  'settings.openchamber.sessionRetention.archivedTooltip': 'يحذف الجلسات المؤرشفة المنتهية المدة. يحتفظ بآخر 5 جلسات مؤرشفة، والجلسة المفتوحة، والجلسات قيد التشغيل، والجلسات المثبّتة. يُحتفظ بالجلسة الأم إذا كان حذفها سيحذف أيضًا جلسة فرعية محمية.',
+  'settings.openchamber.sessionRetention.tooltip': 'يؤرشف الجلسات غير المؤرشفة أو يحذفها بناءً على آخر نشاط. يحتفظ بآخر 5 جلسات، والجلسة المفتوحة، والجلسات قيد التشغيل، والجلسات المثبّتة. تبقى أيضًا الجلسات في قسم «قيد العمل» ما لم تُضمّنها. تُحفظ الجلسات المؤرشفة. يُحتفظ بالجلسة الأم إذا كان حذفها سيحذف أيضًا جلسة فرعية محمية.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': 'تفعيل التنظيف التلقائي',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': 'تفعيل التنظيف التلقائي',
+  'settings.openchamber.sessionRetention.field.includeInWork': 'تضمين الجلسات «قيد العمل»',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': 'تبقى الجلسات في قسم «قيد العمل» حتى تعلّمها كمنجزة. فعّل هذا الخيار لتنتهي صلاحيتها مثل أي جلسة أخرى. تبقى الجلسات المثبّتة دائمًا.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': 'مدة الاحتفاظ',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': 'مدة الاحتفاظ بالأيام',
   'settings.openchamber.sessionRetention.field.days': 'أيام',
@@ -1673,6 +1677,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': 'إضافة أمر',
   'settings.openchamber.worktrees.setup.waitForCommands': 'انتظار أوامر الإعداد قبل إنشاء جلسة أو الإرسال فيها',
   'settings.openchamber.worktrees.setup.toast.saveFailed': 'تعذّر حفظ أوامر إعداد شجرة العمل',
+  'settings.openchamber.worktrees.teardown.title': 'أوامر التنظيف',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': 'تُشغَّل داخل مجلد شجرة العمل قبل حذفها أو أرشفتها. إذا فشل أحدها، تبقى شجرة العمل. استخدم',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': 'لجذر المشروع.',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': 'مثلًا، docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': 'تعذّر حفظ أوامر تنظيف شجرة العمل',
   'settings.openchamber.worktrees.list.title': 'أشجار العمل الحالية',
   'settings.openchamber.worktrees.list.tooltip': 'حذف شجرة عمل يزيل أيضًا الجلسات المرتبطة بها.',
   'settings.openchamber.worktrees.list.loading': 'جارٍ تحميل أشجار العمل…',
@@ -2693,6 +2702,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.ar,
   ...thirdPartyIntegrationI18n.ar,
   ...extensionCatalogI18n.ar,
+  ...extensionPowersI18n.ar,
   ...guestIntegrationsI18n.ar,
   ...extensionsSettingsI18n.ar,
   ...settingsLayoutI18n.ar,

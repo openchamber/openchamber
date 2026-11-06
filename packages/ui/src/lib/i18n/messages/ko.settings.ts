@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': '보존 기간은 보관 시점부터 계산합니다. 기간이 지난 세션은 삭제됩니다.',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '보존 기간은 세션의 마지막 활동부터 계산합니다. 기간이 지난 세션은 보관됩니다.',
@@ -548,6 +549,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktree",
   "settings.projects.worktrees.removeForEveryone": "모두에게서 제거",
   "settings.projects.worktrees.skipped": "나에게는 건너뜀",
+  "settings.projects.worktrees.teardownCommandAria": "정리 명령 {position}",
   'settings.projects.shared.invalid': '{path}의 프로젝트 설정을 읽을 수 없습니다: {reason}',
   'settings.projects.shared.plansDir': '플랜 폴더',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1114,10 +1116,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': '작업 중인 세션',
   'settings.openchamber.sessionWork.info': '작업 중인 세션을 사이드바의 채팅 아래에 모아 두는 영역입니다. 세션에서 메시지를 보내면 이곳에 표시됩니다. 기본적으로 이 영역에만 표시됩니다. 프로젝트에도 표시하려면 사이드바 메뉴에서 "진행 중인 작업을 프로젝트 아래에도 표시"를 켜세요. VS Code에서는 항상 프로젝트에도 표시됩니다. 체크 표시나 세션 메뉴에서 완료로 표시할 수 있습니다. 턴이 작업의 끝처럼 보이면 힌트로 체크가 회색으로 바뀝니다.',
   'settings.openchamber.sessionWork.field.enabled': '작업 중인 세션 표시',
-  'settings.openchamber.sessionRetention.archivedTooltip': '보존 기간이 지난 보관된 세션을 삭제합니다. 가장 최근에 보관된 세션 5개, 열려 있는 세션, 실행 중인 세션과 공유된 세션은 유지됩니다. 상위 세션을 삭제하면 보호된 하위 세션도 삭제되는 경우 상위 세션을 유지합니다.',
-  'settings.openchamber.sessionRetention.tooltip': '마지막 활동을 기준으로 보관되지 않은 세션을 보관하거나 삭제합니다. 최근 세션 5개, 열려 있는 세션, 실행 중인 세션과 공유된 세션은 유지됩니다. 보관된 세션도 유지됩니다. 상위 세션을 삭제하면 보호된 하위 세션도 삭제되는 경우 상위 세션을 유지합니다.',
+  'settings.openchamber.sessionRetention.archivedTooltip': '보존 기간이 지난 보관된 세션을 삭제합니다. 가장 최근에 보관된 세션 5개, 열려 있는 세션, 실행 중인 세션과 고정된 세션은 유지됩니다. 상위 세션을 삭제하면 보호된 하위 세션도 삭제되는 경우 상위 세션을 유지합니다.',
+  'settings.openchamber.sessionRetention.tooltip': '마지막 활동을 기준으로 보관되지 않은 세션을 보관하거나 삭제합니다. 최근 세션 5개, 열려 있는 세션, 실행 중인 세션과 고정된 세션은 유지됩니다. "작업 중" 영역의 세션도 포함하도록 설정하지 않으면 유지됩니다. 보관된 세션도 유지됩니다. 상위 세션을 삭제하면 보호된 하위 세션도 삭제되는 경우 상위 세션을 유지합니다.',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '자동 정리 활성화',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': '자동 정리 활성화',
+  'settings.openchamber.sessionRetention.field.includeInWork': '"작업 중" 세션 포함',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '"작업 중" 영역의 세션은 완료로 표시할 때까지 유지됩니다. 켜면 다른 세션처럼 만료됩니다. 고정된 세션은 항상 유지됩니다.',
   'settings.openchamber.sessionRetention.field.retentionPeriod': '보존 기간',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': '일 단위 보존 기간',
   'settings.openchamber.sessionRetention.field.days': '일',
@@ -1643,6 +1647,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': '명령어 추가',
   'settings.openchamber.worktrees.setup.waitForCommands': '세션을 만들거나 보내기 전에 설정 명령이 끝날 때까지 기다리기',
   'settings.openchamber.worktrees.setup.toast.saveFailed': 'Worktree 설정 명령 저장에 실패했습니다',
+  'settings.openchamber.worktrees.teardown.title': '정리 명령어',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': 'worktree를 삭제하거나 보관하기 전에 worktree 디렉터리 안에서 실행됩니다. 하나라도 실패하면 worktree가 유지됩니다. 프로젝트 root에는 다음을 사용하세요:',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': '.',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': '예: docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': 'Worktree 정리 명령 저장에 실패했습니다',
   'settings.openchamber.worktrees.list.title': '기존 worktree',
   'settings.openchamber.worktrees.list.tooltip': 'Worktree를 삭제하면 연결된 세션도 제거됩니다.',
   'settings.openchamber.worktrees.list.loading': 'worktree 로딩 중...',
@@ -2660,6 +2669,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n.ko,
   ...thirdPartyIntegrationI18n.ko,
   ...extensionCatalogI18n.ko,
+  ...extensionPowersI18n.ko,
   ...guestIntegrationsI18n.ko,
   ...extensionsSettingsI18n.ko,
   ...settingsLayoutI18n.ko,

@@ -1,3 +1,4 @@
+import { documentDataUrl } from '../source-control/document-versions.js';
 import { isPlainObject, isString } from '../shared/guards.js';
 import { mapLimited } from '../shared/map-limited.js';
 import { joinProjectPath } from '../source-control/project-path.js';
@@ -370,11 +371,12 @@ export function createGerritResourceService({
      * the patchset. `/COMMIT_MSG` is the commit message, which has no
      * earlier side.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, revision, linked }) {
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, revision, binary, linked }) {
       const { primary, raw } = await findChange(directory, number, project, remote, HEAD_OPTIONS, { linked });
       const sha = revisionOf(raw, revision);
       const readFile = async (filePath, parent) => {
         const content = await client.base64(`${changePath(primary.project, number)}/revisions/${sha}/files/${enc(filePath)}/content`, parent ? { parent: 1 } : undefined);
+        if (binary) return documentDataUrl(content);
         if (content.length > MAX_FULL_FILE_BYTES) {
           throw Object.assign(new Error('This file is too large to show in full'), { status: 413, code: 'file-too-large' });
         }

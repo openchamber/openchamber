@@ -2,6 +2,7 @@ import type {
   AttachContribution,
   FileEditorContribution,
   GuestActionContribution,
+  GuestBlockContribution,
   GuestCapability,
   GuestCommandContribution,
   GuestSurfaceDock,
@@ -68,6 +69,18 @@ export type InstalledGuest = {
   tracker?: PublicTracker;
   /** The usage provider from `contributes.quota`, when the service provides `quota`: the OpenCode providers whose credentials it receives. */
   quota?: PublicQuota;
+  /** The service acts on sessions by itself; `content` lets it read the agent's answers. */
+  sessionControl?: { content: boolean };
+  /** The service adds to what agents read. */
+  instructions?: true;
+  /** The package ships skills for every agent. */
+  skills?: true;
+  /** The section the extension adds to the composer's `@` menu. */
+  mentions?: { label: string };
+  /** What the running service says is missing; shown on its card. */
+  needsConfiguration?: string;
+  /** Declared `contributes.blocks`; agents write them only for an active guest. */
+  blocks?: GuestBlockContribution[];
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
   /** Declared `contributes.commands`; the composer routes them only for an active guest. */

@@ -20,8 +20,9 @@ import { canDeleteWorktreeBranch, canDeleteWorktreeWithoutConfirm, getWorktreeSt
 import { getWorktreeDisplayName, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
 import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { checkoutHoldsDirectory } from '@/lib/worktrees/worktreePaths';
-import { archiveSessionsThenRemoveWorktree } from '@/lib/worktrees/worktreeRemovalFlow';
+import { archiveSessionsThenRemoveWorktree, deleteWithoutTeardownToast, isWorktreeTeardownFailure } from '@/lib/worktrees/worktreeRemovalFlow';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
+import { withSessionsNowInWorktree } from '@/lib/worktrees/worktreeUse';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -67,7 +68,6 @@ export const SessionDialogs: React.FC = () => {
     const [dirtyWorktreePaths, setDirtyWorktreePaths] = React.useState<Set<string>>(new Set());
 
     const getWorktreeMetadata = useSessionUIStore((s) => s.getWorktreeMetadata);
-    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
     const setDraftBootstrapPendingDirectory = useSessionUIStore((s) => s.setDraftBootstrapPendingDirectory);
     const deleteSession = sessionActions.deleteSession;
@@ -345,7 +345,8 @@ export const SessionDialogs: React.FC = () => {
     const removeSelectedWorktree = React.useCallback(async (
         worktree: WorktreeMetadata,
         deleteLocalBranch: boolean,
-        toastId?: string | number,
+        toastId: string | number | undefined,
+        skipTeardown: boolean,
     ): Promise<boolean> => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
         const projectRef = getProjectRefForWorktree(worktree);
@@ -363,6 +364,7 @@ export const SessionDialogs: React.FC = () => {
                         git,
                         sourceControl,
                     },
+                    skipTeardown,
                 }
             );
 
@@ -372,6 +374,9 @@ export const SessionDialogs: React.FC = () => {
                 && directory
                 && checkoutHoldsDirectory(normalizedWorktreePath, directory)
             );
+            // Read now, not when the delete started: a teardown can run for
+            // minutes, and "Delete without teardown" can come much later.
+            const newSessionDraft = useSessionUIStore.getState().newSessionDraft;
             const draftDirectory = normalizeProjectDirectory(newSessionDraft?.directoryOverride);
             if (
                 newSessionDraft?.open
@@ -385,19 +390,21 @@ export const SessionDialogs: React.FC = () => {
                 }, { force: true });
             }
 
-            if (isInRemovedWorktree(normalizeProjectDirectory(currentDirectory)) && normalizedProjectPath) {
+            if (isInRemovedWorktree(normalizeProjectDirectory(useDirectoryStore.getState().currentDirectory)) && normalizedProjectPath) {
                 useDirectoryStore.getState().setDirectory(normalizedProjectPath, { showOverlay: false });
             }
 
             return true;
         } catch (error) {
+            // The caller's toast offers to delete without the teardown.
+            if (error instanceof Error && isWorktreeTeardownFailure(error)) throw error;
             toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
                 id: toastId,
                 description: renderToastDescription(error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
             });
             return false;
         }
-    }, [canRemoveRemoteBranches, currentDirectory, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, git, newSessionDraft?.directoryOverride, newSessionDraft?.open, setDraftBootstrapPendingDirectory, setNewSessionDraftTarget, sourceControl, t]);
+    }, [canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, git, setDraftBootstrapPendingDirectory, setNewSessionDraftTarget, sourceControl, t]);
 
     // Runs after the dialog closes so a slow removal cannot hold the UI. The
     // sessions are archived while their folder still exists, and come back if
@@ -408,14 +415,15 @@ export const SessionDialogs: React.FC = () => {
         deleteLocalBranch: boolean
     ): Promise<void> => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
-        const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name: getWorktreeDisplayName(worktree) }));
-        // The row shows it from here, through archiving the sessions too.
-        markWorktreeRemoving(worktree.path);
-        return (async () => {
+        // `skipTeardown` only from the failure toast; the same options otherwise.
+        const run = async (skipTeardown: boolean, attemptSessionIds: string[]): Promise<void> => {
+            const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name: getWorktreeDisplayName(worktree) }));
+            // The row shows it from here, through archiving the sessions too.
+            markWorktreeRemoving(worktree.path);
             try {
                 const result = await archiveSessionsThenRemoveWorktree({
-                    sessionIds,
-                    removeWorktree: () => removeSelectedWorktree(worktree, deleteLocalBranch, toastId),
+                    sessionIds: attemptSessionIds,
+                    removeWorktree: () => removeSelectedWorktree(worktree, deleteLocalBranch, toastId, skipTeardown),
                     restoreSessions: (ids) => unarchiveSessions(ids, { undo: true }),
                     archiveSessions: async (ids) => {
                         if (ids.length === 1) {
@@ -430,7 +438,7 @@ export const SessionDialogs: React.FC = () => {
                 if (!result.removed) return;
                 // The removed work leaves the working set: its sessions' tabs
                 // close and the app moves off them, as Done does.
-                leaveFinishedSessions(sessionIds, { projectId: getProjectRefForWorktree(worktree).id });
+                leaveFinishedSessions(attemptSessionIds, { projectId: getProjectRefForWorktree(worktree).id });
 
                 toast.success(shouldRemoveRemote
                     ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
@@ -451,11 +459,17 @@ export const SessionDialogs: React.FC = () => {
                 toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
                     id: toastId,
                     description: renderToastDescription(error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
+                    ...(error instanceof Error
+                        ? deleteWithoutTeardownToast(error, t('sessions.sidebar.sessionDialogs.worktree.deleteWithoutTeardown'), () => {
+                            void run(true, withSessionsNowInWorktree(attemptSessionIds, worktree.path));
+                        })
+                        : undefined),
                 });
             } finally {
                 clearWorktreeRemoval(worktree.path);
             }
-        })();
+        };
+        return run(false, sessionIds);
     }, [archiveSession, archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, removeSelectedWorktree, t, unarchiveSessions]);
 
     // Paths whose quick delete is being checked or removed, so a repeated

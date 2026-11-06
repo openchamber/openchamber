@@ -356,12 +356,144 @@ elements and every URL outside the file, so a link in a preview is not clickable
 and shows its target on hover. Macros never run. A workbook's cells go through
 React as text and need none of this.
 
-Shown spreadsheet values come from the file: formulas show the result saved in
-it and are not calculated. `xl/styles.xml` decides how a number reads for dates,
-times, elapsed hours, percents and decimals. Currency symbols and digit grouping
-stay out, and a format the reader does not apply, such as scientific notation,
-keeps the stored number instead of rounding it. Charts and merged cells in a
-workbook are not drawn.
+`xl/styles.xml` decides how a number reads for dates, times, elapsed hours,
+percents and decimals. Currency symbols and digit grouping stay out, and a
+format the reader does not apply, such as scientific notation, keeps the stored
+number instead of rounding it. Charts in a workbook are not drawn.
+
+### Tables: sorting, widths and editing
+
+`TableGrid` is one grid for CSV, TSV, XLSX and ODS. Sorting changes the view
+only and stays put while cells change, so a row never jumps out from under an
+edit. A sheet's first row stays on top of a sort when it is all text. Column
+widths and Markdown table widths live in `lib/columnWidthMemory.ts`, per browser
+profile: a sheet is named by its file and sheet, a Markdown table by its file and
+headings, so adding a table above it keeps the widths.
+
+An empty last column takes what is left of a wide pane. Without it the browser
+stretches every column past its width, and a drag starts from a width the column
+does not hold, so its edge jumps away from the pointer.
+
+A CSV edit replaces one field in the text (`setDelimitedField`) and goes through
+the editor's draft, so it saves and guards like typing. A workbook edit goes
+through `workbook/WorkbookSession`, and these must stay true:
+
+- A write changes only the cells it names. The archive keeps every other entry;
+  a cell keeps its style. `xlsxDocument` and `odsDocument` patch the XML and never
+  rebuild a part from the model.
+- Nothing reaches the disk unread: `prove` reopens the new bytes and compares
+  each changed cell. A mismatch returns the session to the last good bytes.
+- Before a write the file is read again. When it differs from what this view
+  loaded, the edit is dropped with a toast and the view reloads: the newer file
+  wins, because the agent is the usual other writer.
+- Cells the file's structure forbids stay read-only: parts of merged areas and
+  array formulas, table headings, protected sheets.
+- XLSX writes drop `calcChain.xml` and set `fullCalcOnLoad`: a chain naming a cell
+  that lost its formula makes Excel offer a repair.
+
+A selection is a rectangle of the sorted view, and its summary is the numbers
+in it. While there is one, the line above the grid says what is selected instead
+of the table's size, so the two are never read as one. A Comment bubble appears
+over it, as it does over text; the toolbar's comment stays for the whole file. A
+comment on a selection, or on text selected inside a document's frame, attaches
+to the composer through `QuoteCommentMenu` as a `file-quote` naming the place
+(sheet and range, slide or page) and never sends. A press anywhere else closes
+it, as it does the comment field over text. The frame reports its selection
+by message, because a selection cannot cross the frame's edge.
+
+Cells changed from outside stay marked until selected (`cellTraces.ts`). The
+marks live for the app's lifetime and outside the components, since a change on
+disk remounts the preview; the user's own edits move the baseline and mark nothing.
+
+Search and value filters narrow the view the same way sorting does, and the file
+stays as it is. A value filter keeps the values it hides, not the ones it shows,
+because a column can hold more values than the menu lists. Pinned rows stay
+outside the filter and render in the `thead`, so the virtualizer counts body rows
+only: `viewRows` indexes the whole view, `bodyRows` what scrolls. Frozen columns
+and filters live in the view and are not saved.
+
+Rows and columns as a whole change through `TableEditing.structure`, one undo
+step each:
+
+- CSV shifts by byte offset (`shiftDelimitedRow`, `shiftDelimitedColumn`), so
+  every field it does not touch keeps its quoting and line ending.
+- A workbook lets the engine rewrite references in every sheet, then
+  `WorkbookSession.restructure` patches the file and proves the whole of it.
+  Defined names shift through `shiftSheetReferences`, because the engine leaves
+  them. Undo restores the earlier bytes, not the inverse change: a deleted row's
+  cells exist nowhere else.
+- `canRestructure` refuses what would be left behind: a sheet with tables,
+  conditional formatting, data validation, drawings or `extLst`, a protected or
+  partly locked sheet, and any array formula in the workbook, since its block
+  cannot be rewritten cell by cell.
+  An ODS document is refused whole when it holds named ranges, database ranges,
+  validations, conditional formats, drawings, merged or matrix cells: those keep
+  addresses in their own notation or span the lines that would move.
+
+### Large tables
+
+`documentHost.ts` holds everything that parses a table or workbook, behind one
+typed call list (`documentProtocol.ts`). It runs in `document.worker.ts` and in
+the app's thread only where no worker starts (VS Code, tests). A workbook of
+100,000 rows takes seconds to read and each edit reads it back to prove the
+write, so the app never does that itself: it holds the sheet's text for the grid
+and small notes about its cells. These must stay true:
+
+- Rows cross in chunks (`CHUNK_ROWS`), so receiving them never blocks a frame.
+- An edit answers with the cells it changed (`CellPatch`), and a sheet is laid
+  out again only when one falls outside the grid or on its spare edge. What was
+  typed shows at once; the answer or a new layout replaces it.
+- One worker lives for the app, because `cellTraces` does: unseen marks outlast a
+  preview. A book past `MAX_TRACED_CELLS` keeps no marks, since they copy every cell.
+- The grid draws only the columns near the view from `COLUMN_WINDOW_MIN` columns
+  up. All `<col>`s stay and a spanning cell stands for what is not drawn, so widths
+  stay exact. A frozen column and the one being edited are always drawn.
+- Reading a column's values for the filter menu takes every row, so it happens
+  when the submenu mounts and never in render.
+
+A text table past `MAX_OPEN_FILE_BYTES` opens read-only from its bytes, because
+the editor could not hold it. `MAX_DATA_PREVIEW_BYTES` bounds data files; a phone
+keeps the office limit. Past `DEFAULT_TABLE_ROW_CAP` rows the grid holds the first
+ones, and a capped SQLite result sorts in the database (`onSort`) because the
+grid does not hold the rows that would come first. Filters and search see only
+the rows the grid holds.
+
+### Data files, archives, notebooks
+
+Each opens as a copy in memory, and nothing it does reaches the disk.
+
+- `DataFileArtifact` shows SQLite through sql.js and Parquet through hyparquet, in
+  the same grid. A query runs on the copy, so a write there changes nothing. A
+  WAL database opens with its flags patched, and the meta line says when a
+  non-empty `-wal` holds changes the copy lacks. It imports sql.js's browser
+  build: the default one pulls `node:fs` into the bundle, which fails only in
+  production.
+- `ArchiveArtifact` lists a zip without unpacking it and inflates one entry on
+  click, up to `MAX_ENTRY_BYTES`.
+- `NotebookArtifact` shows cells and saved outputs and runs nothing. HTML output
+  is the notebook's own content, so it stays in `officeFrameDocument`.
+
+### Export
+
+`documentExport.ts` turns Markdown into docx or a printable page, and a table into
+xlsx. A file lands next to its source under the next free name and never replaces
+one; the upload runs with `overwrite: false` so a stat that lied cannot change
+that. A runtime without `uploadFile` downloads it instead. PDF is the system print
+dialog on a hidden frame, so it is off on phones.
+
+### Why IronCalc for formulas
+
+HyperFormula covers more but is GPL, which an MIT app cannot ship. IronCalc is
+MIT or Apache, runs inside the app, and its `wasm` file loads on first need:
+a workbook with a formula missing its stored result (openpyxl writes them that
+way), or the first edit of a workbook with formulas. A viewed workbook with
+complete results never loads it. It reads only its own file format, so the
+session feeds it cells, and it gives only formatted text, so formula cells carry
+a scientific format that yields the 15 digits a spreadsheet stores.
+
+A function it lacks shows an error where the file holds a good result. That
+result stays, it is counted in the meta line, and the spreadsheet app recalculates
+on open. Results are never written over from a failed calculation.
 
 ### Why these renderers
 

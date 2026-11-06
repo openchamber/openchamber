@@ -58,8 +58,8 @@ remote or SSH default instance, local server not skipped) main navigates the
 splash to the application as soon as the login-shell probe has resolved,
 before the local server is imported, and the renderer parses, fetches and
 compiles the application while the server starts. The runtime values the
-application needs before any request (local origin, API base, client token)
-do not exist yet, so that document ends with a parser-blocking
+application needs before any request (local origin, API base, client token,
+request headers) do not exist yet, so that document ends with a parser-blocking
 `<script src="/__runtime-config.js">`; main answers it once `activateMainWindow`
 has the resolved runtime (`packaged-runtime-config.mjs`). Module scripts run only
 after parsing ends, so no application code runs before the values are set.
@@ -71,6 +71,13 @@ through the preload bridge, and main answers only the top frame of a window on
 the packaged origin. The scheme answers every frame in the session, including
 sandboxed ones, and a request to it carries nothing that says who is asking, so
 main decides by the IPC sender's frame.
+
+The main window is created before startup resolves, so its preload has no
+request headers and leaves the headers global unset: a global the preload
+exposes is read-only, and an exposed empty set would keep the document from
+receiving the headers of a remote startup host. Main answers with the asking
+window's own headers, so a window opened for another host never receives the
+main window's.
 
 A launch runs one startup. The tray, a second launch, a deep link, a shortcut or
 macOS `activate` can ask for a window while that startup still runs, and
@@ -532,9 +539,14 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;
-  the popup itself may open nothing further. Chromium reports `window.open(url)`
-  without window features as a new tab, the same as a target=_blank link, so the
-  session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
+  the popup itself may open nothing further. The popup runs in the panel's
+  session, with its sign-ins and permission rules. Electron gives such a window
+  the session's plain Chrome user agent only on navigations the app starts
+  (electron/electron#45897), so main cancels the popup's first navigation before
+  it is sent and starts it again itself; later navigations keep that agent. A
+  form posted into a new window is not repeated and keeps Electron's agent.
+  Chromium reports `window.open(url)` without window features as a new tab, the
+  same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
   `window.open` that keeps its opener as a popup. A link aimed at a new tab is
   noopener by default and becomes a panel tab
   (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
@@ -567,7 +579,7 @@ The desktop app updates from one of two channels, chosen under Settings → Abou
 - **Stable**: the latest full release on GitHub (the `github` provider of electron-updater).
 - **Canary**: the nightly build of `main`. `.github/workflows/canary.yml` builds it when `main` moved and replaces the files of one pre-release tagged `canary`; the app reads that pre-release's manifests directly (the `generic` provider on `releases/download/canary/`). Stable never sees them, because the GitHub provider reads only the latest full release.
 
-Picking Canary checks at once and offers the Canary build as an ordinary update; after it installs, the app is Canary and keeps updating from Canary. Picking Stable from a Canary build offers the latest release, which is older: `applyUpdaterChannel` (`main.mjs`) sets `allowDowngrade` for exactly that case, and `updater-check.mjs` takes electron-updater's verdict instead of comparing versions itself. A release build never downgrades. On a Linux .deb or .rpm install the downgrade tells the package manager the older package is wanted (`linux-package-install.mjs`), or it would keep the newer one. Every check re-reads the stored channel, so a switch needs no restart; a switch during a running check waits for that check first, because electron-updater answers a running check for the feed it started on.
+Picking Canary checks at once and offers the Canary build as an ordinary update; after it installs, the app is Canary and keeps updating from Canary. Picking Stable from a Canary build offers the latest release, which is older: `applyUpdaterChannel` (`main.mjs`) sets `allowDowngrade` for exactly that case, and `updater-check.mjs` takes electron-updater's verdict instead of comparing versions itself. A release build never downgrades. Without a stored pick the app follows its own build, so a Canary build downloaded from the canary pre-release stays on Canary and is not offered the older release on its first check. On a Linux .deb or .rpm install the downgrade tells the package manager the older package is wanted (`linux-package-install.mjs`), or it would keep the newer one. Every check re-reads the stored channel, so a switch needs no restart; a switch during a running check waits for that check first, because electron-updater answers a running check for the feed it started on.
 
 A Canary build is the release app with other icons: same name, bundle id, install location, profile and `openchamber://` registration, so an update replaces one with the other in place. `OPENCHAMBER_DESKTOP_CHANNEL=canary` while packaging makes `scripts/package.mjs` apply `scripts/canary-build-config.mjs`, which only swaps `resources/icons` for `resources/icons-canary` (Dock and taskbar icon, menu bar and tray glyphs). Its version is the release it leads to with a `canary` pre-release part, `2.5.4-canary.20261030.123` on a `main` at 2.5.3: above the latest release, so Stable installs update into it, and below the next one; the workflow sets it in every workspace. A remote host reached over SSH gets the same Canary version from npm, like a release build installs its own: the workflow publishes the GitHub pre-release only after `@openchamber/web` reached npm, so every Canary desktop build has its version there.
 

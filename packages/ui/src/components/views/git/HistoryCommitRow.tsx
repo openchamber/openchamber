@@ -13,7 +13,9 @@ import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { getCommitFileDiff, type CommitFileDiffResponse } from '@/lib/gitApi';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
-import { getLanguageFromExtension } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, isOfficePreviewFile } from '@/lib/toolHelpers';
+import { isDocumentVersions } from '@/components/views/files/documentVersions';
+import { OfficeDocumentDiff } from '@/components/views/files/OfficeDocumentDiff';
 import type { LanedCommit } from './gitGraph';
 import { GitGraphSegment } from './GitGraphSegment';
 import { ButtonTooltip } from '@/components/ui/action-toolbar';
@@ -304,7 +306,7 @@ export const HistoryCommitRow = React.memo(({
 
     setDiffCache(prev => trimHistoryDiffCache(new Map(prev).set(key, 'loading')));
     try {
-      const fetchPromise = getCommitFileDiff(directory, entry.hash, file.path, false);
+      const fetchPromise = getCommitFileDiff(directory, entry.hash, file.path, false, file.previousPath);
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(`Timed out after ${HISTORY_DIFF_REQUEST_TIMEOUT_MS}ms`)), HISTORY_DIFF_REQUEST_TIMEOUT_MS);
       });
@@ -318,7 +320,7 @@ export const HistoryCommitRow = React.memo(({
   const toggleFileDiff = React.useCallback(async (file: CommitFileEntry) => {
     const key = file.path;
 
-    if (file.changeType === 'R' || file.isBinary) {
+    if (file.changeType === 'R' || (file.isBinary && !isOfficePreviewFile(file.path))) {
       setOpenDiffPaths(prev => {
         const next = new Set(prev);
         if (next.has(key)) { next.delete(key); } else { next.add(key); }
@@ -628,7 +630,7 @@ export const HistoryCommitRow = React.memo(({
                     <ScrollableOverlay outerClassName="max-h-[400px] w-auto rounded border border-edge-muted mx-2 mb-1" data-diff-virtual-root data-diff-virtual-content>
                       {file.changeType === 'R' ? (
                         <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.renamedNoDiff')}</div>
-                      ) : file.isBinary ? (
+                      ) : file.isBinary && !isOfficePreviewFile(file.path) ? (
                         <div className="px-3 py-2 text-sm text-muted-foreground">{t('gitView.history.binaryNoDiff')}</div>
                       ) : (() => {
                         const changedLines = file.insertions + file.deletions;
@@ -672,10 +674,10 @@ export const HistoryCommitRow = React.memo(({
                             </button>
                           );
                         }
-                        return (
+                        const renderVersions = (versions: { original: string; modified: string }) => (
                             <PierreDiffViewer
-                             original={cached.original}
-                             modified={cached.modified}
+                             original={versions.original}
+                             modified={versions.modified}
                              language={getLanguageFromExtension(file.path) || ''}
                               fileName={file.path}
                               renderSideBySide={false}
@@ -683,6 +685,9 @@ export const HistoryCommitRow = React.memo(({
                               enableComments={false}
                             />
                         );
+                        return isOfficePreviewFile(file.path) && isDocumentVersions(cached.original, cached.modified)
+                          ? <OfficeDocumentDiff filePath={file.path} original={cached.original} modified={cached.modified} renderText={renderVersions} />
+                          : renderVersions(cached);
                       })()}
                     </ScrollableOverlay>
                   )}

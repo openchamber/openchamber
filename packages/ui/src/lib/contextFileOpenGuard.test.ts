@@ -62,6 +62,11 @@ describe('validateContextFileOpen', () => {
     });
   });
 
+  test('lets a table of any size through without reading it', async () => {
+    const files: FilesAPI = { ...filesApi(''), statFile: async () => ({ path: '/repo/big.csv', isFile: true, size: 1e9 }), readFile: async () => { throw new Error('read'); } };
+    expect(await validateContextFileOpen(files, '/repo/big.csv')).toEqual({ ok: true });
+  });
+
   test('refuses a file past the size limit without reading it', async () => {
     let reads = 0;
     const files: FilesAPI = {

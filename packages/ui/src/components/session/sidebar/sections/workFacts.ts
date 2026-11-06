@@ -6,7 +6,7 @@ import { getSessionPinList } from '@/lib/sessionPins';
 import { getSessionWork, isDoneSuggested } from '@/lib/sessionWorkMetadata';
 import { DEFAULT_PIN_LIST, type SidebarWorkFacts } from '@/lib/sidebarSections';
 import type { SessionNode } from '../types';
-import type { SidebarWorkRef } from '../works/sidebarWorks';
+import { findWorkFolderId, type SidebarFolderMembership, type SidebarWorkRef } from '../works/sidebarWorks';
 
 /**
  * What the user's sections ask of the live state, read only while a shown
@@ -75,6 +75,8 @@ type FactsContext = {
   runKeyBySessionId: ReadonlyMap<string, string>;
   live: SidebarLiveFacts;
   planSessionIds: SidebarPlanFacts;
+  /** The root folder holding each session and worktree, by folder member id. */
+  folderByMember: ReadonlyMap<string, SidebarFolderMembership>;
 };
 
 /** Every session of a work, the subagents included, and its top-level ones. */
@@ -120,6 +122,7 @@ export const buildSidebarWorkFacts = (ref: SidebarWorkRef, context: FactsContext
     kind,
     scheduled: topFacts.some((facts) => facts.scheduled),
     projectId: ref.projectId,
+    folderId: findWorkFolderId(ref, context.folderByMember),
     pin,
     inWork,
     done: !inWork && topFacts.some((facts) => facts.work === 'done'),

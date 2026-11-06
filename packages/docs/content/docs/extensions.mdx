@@ -48,6 +48,10 @@ Showing a panel and reading which project and session are open needs no permissi
 - **Read a session's conversation**: only when you run the extension's action on that session.
 - **Run a local service**: a separate program with your full user access. Allow it only if you trust the author. When the extension wants to be told what happens in your sessions, this line also lists the moments it hears about: a turn finishes, a turn fails, the agent asks permission, the agent asks a question. It hears about them in every project, with no window open, and gets only identifiers: the session, its project, and the items you linked to it.
 - **Read what the agent says in the background**: the final answer of each turn, the questions the agent asks and what it asks permission for, in every project, sent to the extension's local service. Allow it only if you trust where the extension sends it.
+- **Start sessions and send messages on its own**: its local service does this with no window open, which costs tokens and can run tools.
+- **Add to what agents read**: text in the instructions of your sessions, and skills offered to every agent while the extension is on.
+
+A local service can also keep running while OpenChamber runs, or wake on a schedule. The dialog says so under **Run a local service**, and it says when what you type after `@` goes to the service. An extension can add its own rows to the `@` menu and its own blocks to agent replies. Pausing the extension takes all of this away.
 
 An extension that delivers your notifications, to Slack, Matrix or a server of its own, says so under **Run a local service** too, with a line that starts with **Delivers your notifications**. Nothing goes out until you connect an account for it in [Settings → Integrations](/integrations/#extension-notification-channels); after that it gets what your phone would, and pausing the extension stops it.
 

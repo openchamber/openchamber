@@ -20,6 +20,8 @@ type Props = {
   onMoveToFolder: (folderId: string) => void;
   onCreateFolderAndMove: () => void;
   onRemoveFromFolder: () => void;
+  /** Something selected files in the project's folders: a worktree's sessions do not. */
+  canFileSelection: boolean;
   canRemoveFromFolder: boolean;
   onRestore: () => void;
   onArchive: () => void;
@@ -35,6 +37,7 @@ export const BulkActionBar: React.FC<Props> = ({
   onMoveToFolder,
   onCreateFolderAndMove,
   onRemoveFromFolder,
+  canFileSelection,
   canRemoveFromFolder,
   onRestore,
   onArchive,
@@ -43,7 +46,7 @@ export const BulkActionBar: React.FC<Props> = ({
 }) => {
   const { t } = useI18n();
   const hasSelection = selectedCount > 0;
-  const canMoveToFolder = hasSelection && Boolean(scopeKey) && !archivedBucket;
+  const canMoveToFolder = hasSelection && Boolean(scopeKey) && !archivedBucket && canFileSelection;
   const iconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40';
   const destructiveIconButtonClass = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50 disabled:pointer-events-none disabled:opacity-40';
 

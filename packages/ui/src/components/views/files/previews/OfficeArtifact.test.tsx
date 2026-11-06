@@ -4,6 +4,7 @@ import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
 import type { OfficePreview } from './officeDocument';
+import type { WorkbookDocument } from './workbook/model';
 
 const browser = new Window({ url: 'http://localhost/' });
 Object.assign(globalThis, {
@@ -17,6 +18,7 @@ Object.assign(globalThis, {
 const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { OfficeArtifact } = await import('./OfficeArtifact');
+const { WorkbookBook } = await import('./documentClient');
 
 const bytes = new Uint8Array([1, 2, 3]);
 let root: Root | null = null;
@@ -49,16 +51,32 @@ describe('OfficeArtifact', () => {
     expect(container.textContent).toContain('3 slides');
   });
 
-  test('a workbook shows column letters, the sheet\'s row numbers and its own column count', async () => {
-    const preview: OfficePreview = {
-      kind: 'workbook',
-      sheets: [{ name: 'Data', rowNumbers: [1, 4], rows: [['a', 'b'], ['c', 'd']], columnCount: 2, totalRows: 2 }],
+  test('a workbook shows column letters, row numbers and its own column count', async () => {
+    const document: WorkbookDocument = {
+      sheets: [{
+        name: 'Data',
+        locked: new Set(),
+        protected: false,
+        cells: new Map([
+          ['1:0', { row: 1, column: 0, kind: 'number', raw: '1', display: '1' }],
+          ['3:1', { row: 3, column: 1, kind: 'text', raw: 'b', display: 'b' }],
+        ]),
+      }],
+      definedNames: [],
+      date1904: false,
+      write: async () => bytes,
+      canRestructure: () => false,
+      restructure: async () => bytes,
     };
+    const { adoptWorkbook, handleDocumentCall } = await import('./documentHost');
+    const opened = await adoptWorkbook('test-book', '/book.xlsx', 'book.xlsx', bytes, document);
+    if (!opened) throw new Error('no book');
+    const preview: OfficePreview = { kind: 'workbook', book: new WorkbookBook((op, args, onChunk) => handleDocumentCall(op, args, (chunk) => onChunk?.(chunk)), 'test-book', opened), bytes };
     const container = await render(
       <OfficeArtifact name="book.xlsx" path="/book.xlsx" sizeBytes={null} loadBytes={async () => bytes} readPreview={async () => preview} />,
     );
-    expect(Array.from(container.querySelectorAll('th')).map((cell) => cell.textContent)).toEqual(['', 'A', 'B']);
-    expect(container.textContent).toContain('2 rows · 2 columns');
+    expect(Array.from(container.querySelectorAll('th:not(:last-child)')).map((cell) => cell.textContent)).toEqual(['', 'A', 'B']);
+    expect(container.textContent).toContain('3 rows · 2 columns');
   });
 
   test('a file that cannot be parsed says so and keeps its actions', async () => {

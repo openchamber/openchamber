@@ -105,12 +105,20 @@ export const deleteSidebarPinList = (id: string): void => {
   const store = useSessionDisplayStore.getState();
   store.setPinLists(store.pinLists.filter((list) => list.id !== id));
   void updateDesktopSettings({ sidebarPinLists: useSessionDisplayStore.getState().pinLists });
-  const sections = store.sections.flatMap((entry): SidebarSectionEntry[] => {
-    if (entry.kind !== 'custom' || !entry.filter.pins.includes(id)) return [entry];
-    const pins = entry.filter.pins.filter((pin) => pin !== id);
-    return pins.length === 0 ? [] : [{ ...entry, filter: { ...entry.filter, pins } }];
+  stopAskingFor('pins', id);
+};
+
+/** A deleted folder leaves the sections as a deleted pin list does. */
+export const removeFolderFromSections = (id: string): void => stopAskingFor('folders', id);
+
+const stopAskingFor = (category: 'pins' | 'folders', id: string): void => {
+  const current = useSessionDisplayStore.getState().sections;
+  const sections = current.flatMap((entry): SidebarSectionEntry[] => {
+    if (entry.kind !== 'custom' || !entry.filter[category].includes(id)) return [entry];
+    const values = entry.filter[category].filter((value) => value !== id);
+    return values.length === 0 ? [] : [{ ...entry, filter: { ...entry.filter, [category]: values } }];
   });
-  if (sections.length !== store.sections.length || sections.some((entry, index) => entry !== store.sections[index])) saveSidebarSections(sections);
+  if (sections.length !== current.length || sections.some((entry, index) => entry !== current[index])) saveSidebarSections(sections);
 };
 
 export const deleteSidebarSection = (id: string): void => {

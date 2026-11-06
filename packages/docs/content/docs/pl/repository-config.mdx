@@ -37,6 +37,9 @@ Elementy z repozytorium mają odznakę **In repo**. Akcje z repozytorium można 
     "bun install"
   ],
   "setupWorktreeWait": true,
+  "teardownWorktree": [
+    "docker compose down"
+  ],
   "projectActions": [
     {
       "id": "dev",
@@ -62,6 +65,8 @@ Elementy z repozytorium mają odznakę **In repo**. Akcje z repozytorium można 
 Wymagany jest tylko `version`. Wszystkie pozostałe klucze są opcjonalne, a OpenChamber zapisuje tylko te, które coś zawierają.
 
 `setupWorktree` to lista poleceń powłoki, które OpenChamber uruchamia w nowym worktree zaraz po jego utworzeniu, po kolei. Użyj `$ROOT_PROJECT_PATH` jako ścieżki do głównego checkoutu. `setupWorktreeWait: true` sprawia, że OpenChamber czeka na te polecenia, zanim uruchomi sesję w worktree.
+
+`teardownWorktree` to lista poleceń powłoki, które OpenChamber uruchamia w worktree tuż przed jego usunięciem lub zarchiwizowaniem, po kolei, na przykład `docker compose down` dla stosu uruchomionego przez worktree. Jeśli któreś się nie powiedzie, worktree zostaje, a OpenChamber pokazuje błąd polecenia. Najpierw uruchamiane są polecenia z repozytorium, potem Twoje, także gdy używasz tylko własnych poleceń konfiguracji. Obowiązuje je to samo pytanie o zaufanie co polecenia konfiguracji.
 
 `projectActions` to lista akcji projektu, tych, które uruchamiasz z Work Status, okna akcji projektu i palety poleceń. `id`, `name` i `command` są wymagane. `icon` jest opcjonalna i domyślnie jest to ikona play; OpenChamber zna nazwy `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` i `file`. `autoOpenUrl: true` otwiera adres wypisany przez polecenie, zobacz [Podgląd i serwery deweloperskie](/preview/). `platforms` ogranicza akcję do `macos`, `linux` lub `windows`. `runIn: "parent"` uruchamia akcję w głównym checkoucie zamiast w bieżącym worktree.
 

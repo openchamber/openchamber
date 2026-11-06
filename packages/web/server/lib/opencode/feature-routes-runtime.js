@@ -162,11 +162,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
           readContext,
           { allowEmpty, sourceRepo, revision, readChangeRequestPatch: walkthroughBindingService?.readChangeRequestPatch },
         ),
-        getPullRequestFileContents: (directory, number, readContext, { path, previousPath, status, sourceRepo, revision }) => pullRequest.getPullRequestFileContents(
+        getPullRequestFileContents: (directory, number, readContext, { path, previousPath, status, sourceRepo, revision, binary }) => pullRequest.getPullRequestFileContents(
           directory,
           number,
           readContext,
-          { path, previousPath, status, sourceRepo, revision, readChangeRequestFile: walkthroughBindingService?.readChangeRequestFile },
+          { path, previousPath, status, sourceRepo, revision, binary, readChangeRequestFile: walkthroughBindingService?.readChangeRequestFile },
         ),
       };
     }

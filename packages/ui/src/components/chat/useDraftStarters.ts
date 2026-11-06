@@ -10,6 +10,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getProjectDraftStarters, saveProjectDraftStarters, updateSharedProjectSetup, type ProjectDraftStarter } from '@/lib/openchamberConfig';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import type { IconName } from '@/components/icon/icons';
 import {
     BUILTIN_STARTERS,
@@ -126,8 +127,12 @@ export function useDraftStarters(): UseDraftStartersResult {
     const commandNames = React.useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
     const skillNames = React.useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
 
+    // Only a managed OpenCode has this command, and only where extensions load.
+    const offersNewExtension = !isVSCode && !isMobileSurfaceRuntime() && commandNames.has('new-extension');
+
     const resolve = React.useCallback((ref: DraftStarterRef, group: StarterGroup, shared = false): ResolvedStarter | null => {
         if (isVSCode && ref.type === 'command' && (ref.name === 'craft-goal' || ref.name === 'schedule-task')) return null;
+        if (ref.type === 'command' && ref.name === 'new-extension' && !offersNewExtension) return null;
         const plain: DraftStarterRef = { type: ref.type, name: ref.name };
         if (ref.type === 'command') {
             const builtin = getBuiltInStarter(ref.name);
@@ -139,7 +144,7 @@ export function useDraftStarters(): UseDraftStartersResult {
         }
         if (!skillNames.has(ref.name)) return null;
         return { id: chipId(group, plain), ref: plain, group, label: normalizeStarterLabel(ref.name), icon: SKILL_FALLBACK_ICON, submitText: `$${ref.name}`, shared };
-    }, [t, commandNames, skillNames, isVSCode]);
+    }, [t, commandNames, skillNames, isVSCode, offersNewExtension]);
 
     const globalRefs = React.useMemo<readonly DraftStarterRef[]>(
         () => globalRaw ?? DEFAULT_GLOBAL_STARTERS,
@@ -166,6 +171,7 @@ export function useDraftStarters(): UseDraftStartersResult {
         const items: PinnableItem[] = [];
         for (const b of BUILTIN_STARTERS) {
             if (isVSCode && (b.name === 'craft-goal' || b.name === 'schedule-task')) continue;
+            if (b.name === 'new-extension' && !offersNewExtension) continue;
             items.push({ type: 'command', name: b.name, label: t(b.labelKey), icon: b.icon, section: 'built-in', scope: 'user' });
         }
         for (const c of commands) {

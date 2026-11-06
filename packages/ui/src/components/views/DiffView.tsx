@@ -39,7 +39,9 @@ import { statusToGitCode } from './turnSnapshotDiff';
 import { toast } from '@/components/ui';
 
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
+import { isDocumentVersions } from './files/documentVersions';
+import { OfficeDocumentDiff } from './files/OfficeDocumentDiff';
+import { getLanguageFromExtension, hasFileVersionsDiff, isImageFile, isOfficePreviewFile } from '@/lib/toolHelpers';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { DiffViewToggle } from '@/components/chat/message/DiffViewToggle';
 import type { DiffViewMode } from '@/components/chat/message/types';
@@ -521,7 +523,7 @@ interface InlineDiffViewerProps {
   onFindWordRequest?: (request: DiffFindWordRequest) => void;
 }
 
-const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
+const InlineDiffViewer: React.FC<InlineDiffViewerProps> = React.memo<InlineDiffViewerProps>(({
   filePath,
   diff,
   commentOrigin,
@@ -547,6 +549,27 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
 
   if (diff.isBinary) {
     return <BinaryDiffPlaceholder />;
+  }
+
+  if (isOfficePreviewFile(filePath) && isDocumentVersions(diff.original, diff.modified)) {
+    return (
+      <OfficeDocumentDiff
+        filePath={filePath}
+        original={diff.original}
+        modified={diff.modified}
+        renderText={(text) => (
+          <InlineDiffViewer
+            filePath={filePath}
+            diff={{ ...diff, original: text.original, modified: text.modified }}
+            commentOrigin={commentOrigin}
+            staged={staged}
+            renderSideBySide={renderSideBySide}
+            wrapLines={wrapLines}
+            hideWhitespace={hideWhitespace}
+          />
+        )}
+      />
+    );
   }
 
   if (isImageFile(filePath)) {
@@ -653,7 +676,7 @@ const NestedRepositoryFileDiff = React.memo<NestedRepositoryFileDiffProps>(({
         const runtimeKey = getRuntimeKey();
         const request: Promise<DiffData> = !git.getGitFileDiff || !git.getGitDiff
             ? Promise.reject(new Error(t('diffView.unavailable.missingTitle')))
-            : isImageFile(file.path)
+            : hasFileVersionsDiff(file.path)
                 ? git.getGitFileDiff(directory, { path: file.path, staged }).then((response) => ({
                     original: response.original ?? '',
                     modified: response.modified ?? '',
@@ -1058,7 +1081,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const renderSideBySide = layout === 'side-by-side';
     const desiredContextMode: DiffContextMode = loadFullFiles ? 'full' : 'patch';
     const fileStatusKey = `${file.index}:${file.working_dir}:${file.insertions}:${file.deletions}`;
-    const hunkEligible = hunkActionsEnabled && !readOnlyActions && !initialDiffData && !comparisonDiff && !isImageFile(file.path);
+    const hunkEligible = hunkActionsEnabled && !readOnlyActions && !initialDiffData && !comparisonDiff && !hasFileVersionsDiff(file.path);
     const patchScope = JSON.stringify([getRuntimeKey(), directory, file.path, staged, fileStatusKey, diffRetryNonce, contentRevision]);
     const actionPatch = canonicalPatch?.scope === patchScope ? canonicalPatch.patch : null;
     const actionSubmodule = canonicalPatch?.scope === patchScope ? canonicalPatch.submodule : null;
@@ -1149,7 +1172,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         const contextLines = loadFullFiles ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES;
         const displayRequest = !git.getGitFileDiff || !git.getGitDiff
             ? Promise.reject(new Error(t('diffView.unavailable.missingTitle')))
-            : isImageFile(file.path)
+            : hasFileVersionsDiff(file.path)
                 ? git.getGitFileDiff(directory, { path: file.path, staged })
                 : !loadFullFiles && actionPatch !== null
                     ? Promise.resolve({ diff: actionPatch, submodule: actionSubmodule })
@@ -1864,7 +1887,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     );
     const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, effectiveDirectory, visible && activeDiffScope === 'pr' && !isVSCodeRuntime());
     const comparison = useGitComparison(effectiveDirectory ?? null, comparisonSource, visible && !isVSCodeRuntime(), activeDiffScope === 'branch' ? branchRevision : '', prComparison.readContext, prComparison.provider);
-    const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
+    const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile, fetchVersions: loadComparisonVersions } = comparison;
     const commitFiles = activeDiffScope === 'commit' ? comparison.files : null;
     const commitFilesError = activeDiffScope === 'commit' ? comparison.error : null;
     const branchFiles = activeDiffScope === 'branch' ? comparison.files : null;
@@ -1884,13 +1907,22 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const fetchComparisonDiffEntry = React.useCallback(
         async (filePath: string, fullContext = false): Promise<ComparisonDiffResult> => {
             try {
+                if (isOfficePreviewFile(filePath)) {
+                    const versions = await loadComparisonVersions(filePath);
+                    return {
+                        status: 'ready',
+                        data: isDocumentVersions(versions.original, versions.modified)
+                            ? { ...versions, contextMode: 'full' }
+                            : { original: '', modified: '', isBinary: true, contextMode: 'full' },
+                    };
+                }
                 const response = await loadComparisonDiff(filePath, fullContext ? FULL_CONTEXT_DIFF_LINES : DEFAULT_CONTEXT_DIFF_LINES);
                 return { status: 'ready', data: createTextDiffDataFromPatch(filePath, response.diff, fullContext ? 'full' : 'patch') };
             } catch (error) {
                 return { status: 'error', message: error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff') };
             }
         },
-        [loadComparisonDiff, t]
+        [loadComparisonDiff, loadComparisonVersions, t]
     );
     // Branch and commit diffs are re-read from git with the whole file as
     // context; a PR diff comes from GitHub at fixed context, so its full view
@@ -1898,6 +1930,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const fetchComparisonFullFileEntry = React.useCallback(
         async (filePath: string): Promise<ComparisonDiffResult> => {
             try {
+                if (isOfficePreviewFile(filePath)) return await fetchComparisonDiffEntry(filePath);
                 const { original, modified } = await loadComparisonFullFile(filePath);
                 // Complete-file metadata, like the git-backed full patches: the
                 // viewer keeps the highlighted partial diff on screen until this
@@ -1908,7 +1941,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 return { status: 'error', message: error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff') };
             }
         },
-        [loadComparisonFullFile, t]
+        [fetchComparisonDiffEntry, loadComparisonFullFile, t]
     );
     const loadFullComparisonDiff = React.useMemo(
         () => activeDiffScope === 'branch' || activeDiffScope === 'commit'
@@ -2646,7 +2679,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 layout,
                 revision,
                 load: async () => {
-                    if (isImageFile(nestedFile.path)) return null;
+                    if (hasFileVersionsDiff(nestedFile.path)) return null;
                     if (!git.getGitDiff) return null;
                     const staged = isStagedStatusFile(nestedFile) && !isWorkingStatusFile(nestedFile);
                     const response = await git.getGitDiff(nestedDirectory, { path: nestedFile.path, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES });
@@ -2671,7 +2704,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     ): Promise<GitPathDiffBatchEntry | null> => {
         if (!git.getGitDiffs) return Promise.resolve(null);
         const peers = diffFindSourcesRef.current
-            .filter((source) => !isImageFile(source.filePath)
+            .filter((source) => !hasFileVersionsDiff(source.filePath)
                 && getFileStaged(source.filePath) === staged
                 && findFullContextFiles.has(source.filePath) === fullContext)
             .map((source) => ({ filePath: source.filePath, revision: source.revision ?? '' }));
@@ -2709,7 +2742,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             if (result.status !== 'ready') throw new Error(result.status === 'error' ? result.message : 'Diff not loaded');
             return resolveFindDiff(diffDataToFileDiff(filePath, result.data), diffHideWhitespace);
         }
-        if (!effectiveDirectory || isImageFile(filePath)) return null;
+        if (!effectiveDirectory || hasFileVersionsDiff(filePath)) return null;
         if (!git.getGitDiff) return null;
         const getGitDiff = git.getGitDiff;
         // Search exactly the side the viewer renders. `getGitDiff` reads the
@@ -2827,9 +2860,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
         try {
             let targetLine: number | null = null;
 
-            if (cachedDiffData?.patch && !cachedDiffData.isBinary && !isImageFile(filePath)) {
+            if (cachedDiffData?.patch && !cachedDiffData.isBinary && !hasFileVersionsDiff(filePath)) {
                 targetLine = getFirstChangedModifiedLineFromPatch(cachedDiffData.patch);
-            } else if (cachedDiffData && cachedDiffData.contextMode === 'full' && !cachedDiffData.isBinary && !isImageFile(filePath)) {
+            } else if (cachedDiffData && cachedDiffData.contextMode === 'full' && !cachedDiffData.isBinary && !hasFileVersionsDiff(filePath)) {
                 targetLine = getFirstChangedModifiedLine(cachedDiffData.original, cachedDiffData.modified);
             }
 
@@ -2862,7 +2895,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             }
 
             const resolvedTargetLine = targetLine
-            ?? (diffForNavigation && !diffForNavigation.isBinary && !isImageFile(filePath)
+            ?? (diffForNavigation && !diffForNavigation.isBinary && !hasFileVersionsDiff(filePath)
               ? getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified)
               : 1);
 

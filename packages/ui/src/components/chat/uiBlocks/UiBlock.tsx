@@ -16,8 +16,11 @@ import { cn } from '@/lib/utils';
 import { MarkdownContent } from '../MarkdownRenderer';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { axisTicks } from './axisTicks';
+import { ExtensionBlockFrame } from './ExtensionBlockFrame';
+import { useExtensionBlocks } from './useExtensionBlocks';
 import {
-  blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
+  answeringFrame,
+  NO_EXTENSION_BLOCKS, type ExtensionBlocks, blockDecisions, blockFields, cardDecision, choiceOption, DEFAULT_TIME, decisionOf, decisionTitles, blockName, blockNode, blockPath, blockProps, noteSlot, parseUiBlock, sliderStart, type BlockName, type BlockPath, type BlockValue, tones,
 } from './catalog';
 import {
   describeUiBlockAnswer,
@@ -1382,8 +1385,25 @@ const drawn = blockName.extract([
   'LineChart', 'Choice', 'Input', 'DateInput', 'Slider', 'Button',
 ]);
 
+/** The active extensions' components, and whether the block is finished: only a finished one mounts their pages. */
+const ExtensionBlocksContext = React.createContext<{
+  blocks: ExtensionBlocks;
+  complete: boolean;
+  answered: (name: string) => string | null;
+  answer: (name: string, text: string) => Promise<void>;
+}>({ blocks: NO_EXTENSION_BLOCKS, complete: false, answered: () => null, answer: () => Promise.reject(new Error('This block cannot take an answer.')) });
+
+const extensionArgs = (props: Record<string, BlockValue>): Record<string, string> => Object.fromEntries(
+  Object.entries(props).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+);
+
 function Node({ value }: { value: BlockValue }) {
+  const extensions = React.useContext(ExtensionBlocksContext);
   const node = blockNode.safeParse(value);
+  const extension = node.data ? extensions.blocks.get(node.data.typeName) : undefined;
+  const nodeProps = node.data?.props;
+  const args = React.useMemo(() => (extension && nodeProps ? extensionArgs(nodeProps) : null), [extension, nodeProps]);
+  if (extension && args) return <ExtensionBlockFrame block={extension} args={args} complete={extensions.complete} answered={extensions.answered(extension.name)} answer={extensions.answer} />;
   const name = drawn.safeParse(node.data?.typeName);
   if (!node.success || !name.success) return null;
   const Renderer = renderers[name.data];
@@ -1398,10 +1418,12 @@ function NotDrawn({ source, errors, partial = false }: { source: string; errors:
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const panelId = React.useId();
+  // An agent's block outlives the extension that drew it; the parser's wording is for the agent.
+  const shown = errors.map((error) => (/Unknown component "[A-Z]/.test(error) ? t('chat.uiBlocks.extensionBlock.unavailable') : error));
   return (
     <div className="flex flex-col gap-1 typography-meta">
       <div className={partial ? 'text-muted-foreground' : 'text-[var(--status-error)]'}>{t(partial ? 'chat.uiBlock.partial' : 'chat.uiBlock.invalid')}</div>
-      {errors.map((error, index) => <div key={index} className="text-muted-foreground" dir="ltr">{error}</div>)}
+      {[...new Set(shown)].map((error) => <div key={error} className="text-muted-foreground">{error}</div>)}
       <button
         type="button"
         aria-expanded={open}
@@ -1466,7 +1488,8 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   // A broken page goes back to the agent, which draws it again, so only a
   // reply, which has no such second try, draws what it can.
   const salvage = host.kind === 'reply';
-  const parsed = React.useMemo(() => parseUiBlock(source, complete, salvage), [source, complete, salvage]);
+  const extensionBlocks = useExtensionBlocks();
+  const parsed = React.useMemo(() => parseUiBlock(source, complete, salvage, extensionBlocks), [source, complete, salvage, extensionBlocks]);
   // The kit's variables (series colours, tones) land on the block's root before paint, and follow a theme switch.
   const blockRef = React.useRef<HTMLDivElement>(null);
   React.useInsertionEffect(addKitStyles, []);
@@ -1503,6 +1526,8 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
     }
   }
   const root = parsed.kind === 'ready' ? parsed.root : null;
+  const frameName = React.useMemo(() => (root ? answeringFrame(root, extensionBlocks) : null), [extensionBlocks, root]);
+  const trimmedNote = note.trim();
   const fields = React.useMemo(() => (root && complete ? blockFields(root) : []), [root, complete]);
   const decisions = React.useMemo(() => (root ? blockDecisions(root) : []), [root]);
   const titles = React.useMemo(() => (root ? decisionTitles(root) : new Set<string>()), [root]);
@@ -1513,14 +1538,24 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   }), [fields, values]);
   const disabled = !host.submit || !complete || sending || sent;
 
+  // State arrives a render late, and a frame can answer twice within one.
+  // Taken until a send fails: an answered block stays answered.
+  const delivering = React.useRef(false);
   const deliver = React.useCallback((send: () => Promise<void>) => {
+    if (delivering.current) return Promise.resolve(false);
+    delivering.current = true;
     setSending(true);
     setFailed(false);
-    send().then(() => setSent(true), () => setFailed(true)).finally(() => setSending(false));
+    return send().then(() => {
+      setSent(true);
+      return true;
+    }, () => {
+      delivering.current = false;
+      setFailed(true);
+      return false;
+    }).finally(() => setSending(false));
   }, []);
-  const sendReply = React.useCallback((choices: Chosen) => {
-    if (host.kind !== 'reply' || !host.submit) return;
-    const { submit } = host;
+  const replyAnswer = React.useCallback((choices: Chosen) => {
     const answer: UiBlockReplyAnswerData = {
       picks: [],
       values: answerValues,
@@ -1537,8 +1572,42 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
       if (pick.button || pick.note) answer.picks.push(pick);
       else answer.skipped.push(decision);
     }
-    deliver(() => submit(answer, describeUiBlockReplyAnswer(fields, answer)));
-  }, [host, decisions, answerValues, notes, fields, deliver]);
+    // The note under a frame goes with whatever sends the block.
+    if (frameName && trimmedNote) answer.picks.unshift({ value: frameName, note: trimmedNote });
+    return answer;
+  }, [decisions, answerValues, notes, frameName, trimmedNote]);
+  const sendReply = React.useCallback((choices: Chosen) => {
+    if (host.kind !== 'reply' || !host.submit) return;
+    const { submit } = host;
+    const answer = replyAnswer(choices);
+    void deliver(() => submit(answer, describeUiBlockReplyAnswer(fields, answer)));
+  }, [host, replyAnswer, fields, deliver]);
+
+  // An extension's frame answers for the whole block, along with what the
+  // user already chose or wrote in it, as a button of the block does.
+  const answerFromFrame = React.useCallback(async (name: string, text: string) => {
+    if (disabled || delivering.current || !host.submit) throw new Error('This block cannot take an answer now.');
+    const send = async () => {
+      if (host.kind === 'reply') {
+        const answer = replyAnswer(chosen);
+        const others = answer.picks.filter((pick) => pick.value !== name);
+        answer.picks = [{ button: text, value: name, ...(trimmedNote ? { note: trimmedNote } : {}) }, ...others];
+        await host.submit?.(answer, describeUiBlockReplyAnswer(fields, answer));
+      } else {
+        const data: UiBlockAnswerData = { button: text, value: name, values: answerValues };
+        if (trimmedNote) data.note = trimmedNote;
+        await host.submit?.({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data });
+      }
+      setChosen((current) => new Map(current).set(name, text));
+    };
+    if (!await deliver(send)) throw new Error('The answer did not reach the agent.');
+  }, [answerValues, chosen, deliver, disabled, fields, host, replyAnswer, t, trimmedNote]);
+  const extensionContext = React.useMemo(() => ({
+    blocks: extensionBlocks,
+    complete,
+    answered: (name: string) => chosen.get(name) ?? notes.get(name) ?? (sent && trimmedNote ? trimmedNote : null),
+    answer: answerFromFrame,
+  }), [answerFromFrame, chosen, complete, extensionBlocks, notes, sent, trimmedNote]);
 
   const form = React.useMemo<FormState>(() => ({
     values: answerValues,
@@ -1572,7 +1641,7 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         if (value) data.value = value;
         if (trimmedNote) data.note = trimmedNote;
         setChosen(new Map([[decision, button]]));
-        deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
+        void deliver(() => submit({ summary: describeUiBlockAnswer(fields, data, t('chat.uiBlock.note.label')), data }));
         return;
       }
       // A press chooses; pressing the chosen button again clears the choice.
@@ -1587,12 +1656,14 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   // Every waiting form lets the user qualify their answer, whether or not the
   // agent thought to ask: "this option, and also ...". It sits before the
   // form's last buttons, so it is written before one of them is pressed.
-  const showNote = host.kind === 'page' && Boolean(host.submit || note);
+  const savedFrameNote = frameName ? notes.get(frameName) ?? '' : '';
+  const shownNote = note || savedFrameNote;
+  const showNote = (host.kind === 'page' || frameName !== null) && Boolean(host.submit || shownNote);
   const slotPlace = React.useMemo(() => (root && showNote ? noteSlot(root) : null), [root, showNote]);
   // The form's own fields are compact, so its note is too.
-  const noteElement = !showNote ? null : noteOpen ? (
+  const noteElement = !showNote ? null : noteOpen || savedFrameNote ? (
     <ShortTextarea
-      value={note}
+      value={shownNote}
       placeholder={t('chat.uiBlock.note.placeholder')}
       aria-label={t('chat.uiBlock.note.label')}
       disabled={disabled}
@@ -1605,8 +1676,9 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
   const slot = slotPlace && noteElement ? { ...slotPlace, element: noteElement } : null;
   const canSendChosen = host.kind === 'reply' && !sent && chosen.size > 0 && (chosen.size < decisions.length || failed);
   // Only a press answers a page, so a waiting form the agent gave no button
-  // gets one; without it the user could not answer at all.
-  const sendButton = host.kind === 'page' && complete && decisions.length === 0 && Boolean(host.submit || sent)
+  // gets one; without it the user could not answer at all. A frame that
+  // answers is that press already, unless the user wrote a note and no press.
+  const sendButton = host.kind === 'page' && complete && decisions.length === 0 && (!frameName || (trimmedNote !== '' && !chosen.has(frameName))) && Boolean(host.submit || sent)
     ? { label: host.answered?.button ?? t('chat.uiBlock.send'), variant: 'primary' }
     : null;
   // Fields in a reply answer through a press too, and a block without a Button
@@ -1622,7 +1694,9 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
       <BlockErrorBoundary source={source} fallback={fallback} onFailed={onNotDrawn}>
         <FormContext.Provider value={form}>
           <SlotContext.Provider value={slot}>
-            <Node value={parsed.root} />
+            <ExtensionBlocksContext.Provider value={extensionContext}>
+              <Node value={parsed.root} />
+            </ExtensionBlocksContext.Provider>
           </SlotContext.Provider>
         </FormContext.Provider>
       </BlockErrorBoundary>
@@ -1634,13 +1708,19 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
       ) : null}
       {replyForm ? (
         <div className="mt-2">
-          <UiButton type="button" className="w-fit" disabled={disabled || !hasValue} onClick={() => sendReply(chosen)}>
+          <UiButton type="button" className="w-fit" disabled={disabled || (!hasValue && !(frameName && trimmedNote))} onClick={() => sendReply(chosen)}>
             {t('chat.uiBlock.send')}
           </UiButton>
         </div>
       ) : null}
+      {/* A reply's frame takes a note too, and the note alone is an answer. */}
+      {host.kind === 'reply' && frameName && trimmedNote && !sent && !replyForm ? (
+        <div className="mt-2">
+          <UiButton type="button" className="w-fit" disabled={disabled} onClick={() => sendReply(chosen)}>{t('chat.uiBlock.send')}</UiButton>
+        </div>
+      ) : null}
       {/* A block that sends keeps one line for what happened, so the reply does not jump. */}
-      {replyForm || (decisions.length > 0 && host.kind === 'reply' && (host.submit || sent)) ? (
+      {replyForm || ((decisions.length > 0 || frameName) && host.kind === 'reply' && (host.submit || sent)) ? (
         <div className="mt-1 flex min-h-6 items-center gap-2 typography-meta text-muted-foreground" aria-live="polite" data-export-ignore>
           {failed ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
             : sent ? <span>{t('chat.uiBlock.sent')}</span>

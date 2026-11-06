@@ -28,7 +28,7 @@ Bu, yalnızca bir kez çalışan bir bağlama callback'i değildir. Arayüzü ve
 | `locale` | uygulamanın dil etiketi |
 | `directory` | geçerli proje dizini veya `null` |
 | `session` | `{ id, title, busy }` veya `null`. Başlık yoksa oturum id'sine düşer. `busy` canlı durumdur. Oturumda varsa `model` ve `agent` (OpenCode ajanı) de gelir. |
-| `surface` | şeritte `panel`, iliştirme penceresinde `dialog`, tam ekranda `page`, Work Status panelinde `status`, Files içinde dosya düzenleyici olarak `file` |
+| `surface` | şeritte `panel`, iliştirme penceresinde `dialog`, tam ekranda `page`, Work Status panelinde `status`, Files içinde dosya düzenleyici olarak `file`, sohbetteki UI bloğunda `block` |
 | `item` | bu yüzeyin ne için açıldığı veya `null`: kullanıcının tıkladığı iliştirilmiş öğe (`attach` çağrısına verdiğiniz alanların aynısı, `data` dahil), tanımladığınız eylemlerden birinden gelen bir mesaj (`kind: "message"`) veya oturum (`kind: "session"`). Bkz. [Eylemler](/sdk/#eylemler-komutlar-ve-rozet). |
 | `connection` | entegrasyonunuz için `{ connected, account }` |
 | `settings` | `integration.settings` içinde tanımladığınız alanların değerleri |
@@ -204,7 +204,7 @@ Sayfanız bir oturumu yalnızca açıkken bilir. Servisiniz daha fazlasını bil
 "sessionEvents": { "events": ["turn-finished", "question-asked"], "content": true }
 ```
 
-Dört olay şunlardır: `turn-finished` (ajan işini bitirdi ve hiçbir şey beklemiyor: çalışan alt ajan, açık izin ya da soru, hedef adımı yok), `turn-failed`, `permission-asked` ve `question-asked`. Kullanıcının durdurduğu bir tur hiçbir şey göndermez. Eklentiyi onaylamak aboneliğin kendisidir; iletişim kutusu olayları servis satırının altında listeler. `content` olmadan servis yalnızca tanımlayıcıları alır: oturum, proje dizini, kullanıcının oturuma iliştirdiği öğeler. `"content": true` ile manifest, kullanıcının ayrı bir satır olarak gördüğü bir yetenek de ister, **Ajanın arka planda söylediklerini okuma**, ve her olay ajanın son yanıtını, sorunun alanlarını ya da iznin ayrıntısını taşır.
+Olaylar şunlardır: `turn-started`, `session-created`, `session-archived`, `session-deleted`, `turn-finished` (ajan işini bitirdi ve hiçbir şey beklemiyor: çalışan alt ajan, açık izin ya da soru, hedef adımı yok), `turn-failed`, `permission-asked` ve `question-asked`. Kullanıcının durdurduğu bir tur hiçbir şey göndermez. Eklentiyi onaylamak aboneliğin kendisidir; iletişim kutusu olayları servis satırının altında listeler. `content` olmadan servis yalnızca tanımlayıcıları alır: oturum, proje dizini, kullanıcının oturuma iliştirdiği öğeler. `"content": true` ile manifest, kullanıcının ayrı bir satır olarak gördüğü bir yetenek de ister, **Ajanın arka planda söylediklerini okuma**, ve her olay ajanın son yanıtını, sorunun alanlarını ya da iznin ayrıntısını taşır.
 
 Her olay servis bearer token'ı ile tek bir `POST /session-events` olarak gelir. `readSessionEventRequest` ile okuyun ve `{ "ok": true }` yanıtlayın:
 
@@ -224,6 +224,71 @@ if (url.pathname === SESSION_EVENTS_PATH) {
 ```
 
 Her projenin olayları gönderilir; `event.project.directory` değerini kendi ayarlarınızla karşılaştırın ve geri kalanına `{ "ok": true }` yanıtlayın. Teslimat en fazla bir kez ve sıralıdır, aynı anda tek istek; başarısız bir yanıt olaylarınızı 30 saniye düşürür ve OpenChamber ya da servisiniz kapalıyken olanlar sonradan yeniden gönderilmez. Servisin bunun için panele ihtiyacı yoktur. `session-events-log` örneği her olayı bir dosyaya yazar.
+
+## OpenChamber'ı servisinizden çağırma
+
+Bir servis, hiçbir pencere açık değilken de işlem yapabilir. `createServiceHost`, servisin OpenChamber'a dönüş yoludur:
+
+```ts
+import { createServiceHost } from '@openchamber/sdk';
+
+const host = createServiceHost({ env: process.env });
+
+const { sessionId } = await host.sessions.start({ prompt: 'Summarize the failed deploy', directory });
+await host.sessions.send(sessionId, 'Now write the incident note');
+await host.setInstructions(directory, 'Deploys run through the release branch.');
+await host.emit('deploy-finished', { id: 42 });
+```
+
+`sessions.start`, `sessions.send`, `sessions.retry` ve `sessions.status` için `contributes.sessionControl` gerekir; kullanıcı bunu ayrı bir satır olarak onaylar. `sessions.lastReply` için `sessionControl: { content: true }` gerekir. `setInstructions` için `contributes.instructions` gerekir; bu çağrı ajanların okuduklarına tek bir klasörde ya da `null` ile her yerde ekleme yapar.
+
+`emit`, `host.onServiceEvent` üzerinden açık frame'lerinize ulaşır, böylece panelin yoklama yapması gerekmez. Hiçbir şey yeniden gönderilmez, bu yüzden sonradan açılan bir frame önce güncel durumu okur. `readSettings`, servise `secret` alanları dahil entegrasyonun ayarlarını verir; `needsConfiguration` ise eklentinin kartında bir mesaj gösterir.
+
+## Kimse istemeden çalışma
+
+Bir servis ilk istekle başlar ve bir role sahip servis boşta kalınca durur. `service.keepRunning: true`, servisi OpenChamber ile birlikte başlatır ve durduğunda geri getirir. `service.schedule` servisi zamanlamaya göre uyandırır:
+
+```json
+"service": {
+  "entry": "service/main.js",
+  "runtime": "host",
+  "keepRunning": true,
+  "schedule": [{ "id": "nightly", "cron": "0 3 * * *", "timezone": "Europe/Kyiv" }]
+}
+```
+
+Bir çalıştırma tek bir `POST /schedule` isteğidir. `readServiceScheduleRequest` ile okuyun ve 200 yanıtlayın. OpenChamber kapalıyken kaçırılan bir çalıştırma kaybolur. Dış olaylara ihtiyaç duyan bir servis kendi bağlantısını tutar ya da yoklama yapar.
+
+## @ menüsündeki satırlar
+
+`contributes.mentions: { label }`, sohbet kutusunun `@` menüsüne bir bölüm ekler. Servisiniz `POST /mentions/search` isteğini 2 saniye içinde `{ items: [{ id, title, subtitle?, url? }] }` ile, `POST /mentions/resolve` isteğini ise kullanıcının seçtiği satır için `{ text }` ile yanıtlar. Metin mesajla birlikte ajana gider ve kullanıcı bir etiket görür. Yavaş bir servis satır eklemez ve dosyaları hiçbir zaman bekletmez; okunamayan bir satır etiket bırakmaz ve bunu bildirir.
+
+## Sohbetteki bloklar
+
+`contributes.blocks`, ajanların bir UI bloğuna yazabileceği bileşenler ekler. Her birini panelinizle aynı korumalı alanda ve aynı izinlerle kendi sayfanız çizer.
+
+```json
+"blocks": [{ "name": "JiraIssue", "description": "A Jira ticket", "args": ["key"], "entry": "blocks/issue.html" }]
+```
+
+Ajan `JiraIssue("OPE-1")` yazar, sayfanız da çağrıyı okur:
+
+```ts
+host.onBlock(({ args }) => draw(args.key));
+```
+
+Kök öğenizdeki bir `ResizeObserver` içinden `host.setHeight(px)` çağırın. Frame kutusunu dolgu olmadan doldurur, bu yüzden kendi dolgunuzu ekleyin. Eklenti başına en fazla 4 bileşen olabilir, çünkü her imza her oturumun okuduğu metindir.
+
+Bir blok, bloktaki bir düğmenin yaptığı gibi ajana yanıt verebilir. Bir tıklamadan `host.answerBlock(text)` çağırın: ajan metni alır ve sonraki turuna başlar. Blok başına bir yanıt olur ve `block.answered` bunu yeniden yüklemeden sonra tutar, bu yüzden bloğu o zaman yanıtlanmış olarak çizin.
+
+```ts
+host.onBlock(({ args, answered }) => draw(args.key, answered));
+button.onclick = () => host.answerBlock('Close this ticket');
+```
+
+Bunu yapan bir bileşende `"answers": true` ayarlayın. Açıklaması uyduğunda ajanlara yerleşik seçim yerine onunla sormaları söylenir ve yanıt bekleyen bir sayfa kendi Gönder düğmesini göstermez. Böyle bir bloğun altında OpenChamber, kendi formlarındaki not alanının aynısını sunar: ajan notu yanıtınızla birlikte okur ve tek başına bir not da yanıt sayılır.
+
+Argümanları bir model yazar, bu yüzden bir web sayfasındaki ya da bir bilet metnindeki yazı onları yönlendirebilir. Argümanları güvenilmez sayın ve kullanıcı tıklayana kadar yan etkisi olan hiçbir şey yapmayın.
 
 ## Bildirim kanalları
 

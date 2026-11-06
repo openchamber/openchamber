@@ -30,7 +30,7 @@ import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
-import { cn } from '@/lib/utils';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
@@ -44,6 +44,7 @@ import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from '../ses
 import type { SessionGroup } from '../types';
 import { normalizePath, renderHighlightedText } from '../utils';
 import { useWorktreeWork } from './useWorktreeWork';
+import { requestNewFolder } from '../folders/newFolderRequest';
 import { worktreeFolderMemberId } from './sidebarWorks';
 import { SpaceMenuItems } from '@/components/session/spaces/SpaceActions';
 import { SpaceStatusLines, SpaceStatusMark } from '@/components/session/spaces/SpaceStatus';
@@ -156,6 +157,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const folderMemberId = worktreeFolderMemberId(directory);
   const projectFolders = useSessionFoldersStore((state) => (folderScopeKey ? state.foldersMap[folderScopeKey] ?? NO_FOLDERS : NO_FOLDERS));
   const currentFolderId = folderMemberId ? projectFolders.find((folder) => folder.sessionIds.includes(folderMemberId))?.id ?? null : null;
+  const canFile = Boolean(folderScopeKey && folderMemberId);
   const moveToFolder = (folderId: string | null): void => {
     if (!folderScopeKey || !folderMemberId) return;
     const folders = useSessionFoldersStore.getState();
@@ -351,7 +353,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           onUnpin={() => { void work.setPin(false); }}
         />
       ) : null}
-      {projectFolders.length > 0 ? (
+      {canFile ? (
         <Slots.Sub>
           <Slots.SubTrigger>
             <Icon name="folder" className="h-4 w-4" />
@@ -364,17 +366,24 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
                 {folder.id === currentFolderId ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
               </Slots.Item>
             ))}
-            {currentFolderId ? <>
-              <Slots.Separator />
+            {projectFolders.length > 0 ? <Slots.Separator /> : null}
+            <Slots.Item onClick={() => requestNewFolder({
+              projectLabel: project?.label?.trim() || (project ? formatDirectoryName(project.path, null) : null),
+              create: (name) => { if (folderScopeKey) moveToFolder(useSessionFoldersStore.getState().createFolder(folderScopeKey, name).id); },
+            })}>
+              <Icon name="add" className="h-4 w-4" />
+              <span>{t('sessions.sidebar.folders.newFolderEllipsis')}</span>
+            </Slots.Item>
+            {currentFolderId ? (
               <Slots.Item onClick={() => moveToFolder(null)}>
                 <span>{t('sessions.sidebar.folders.removeFromFolder')}</span>
               </Slots.Item>
-            </> : null}
+            ) : null}
           </Slots.SubContent>
         </Slots.Sub>
       ) : null}
       {space ? <>
-        {projectFolders.length > 0 ? <Slots.Separator /> : null}
+        {canFile ? <Slots.Separator /> : null}
         <SpaceMenuItems spaceId={space.id} slots={Slots} />
       </> : null}
       {worktree && !worktreeRemoving ? <>

@@ -30,6 +30,7 @@ const gitLibraries = {
   observeWorktreeTopology: vi.fn(),
   subscribeWorktreeTopologyChanges: vi.fn(),
   removeWorktree: vi.fn(),
+  teardownWorktree: vi.fn(),
   archiveWorktree: vi.fn(),
   listWorktreeArchives: vi.fn(),
   deleteWorktreeArchive: vi.fn(),
@@ -65,6 +66,7 @@ vi.mock('./index.js', () => ({
   observeWorktreeTopology: gitLibraries.observeWorktreeTopology,
   subscribeWorktreeTopologyChanges: gitLibraries.subscribeWorktreeTopologyChanges,
   removeWorktree: gitLibraries.removeWorktree,
+  teardownWorktree: gitLibraries.teardownWorktree,
   archiveWorktree: gitLibraries.archiveWorktree,
   listWorktreeArchives: gitLibraries.listWorktreeArchives,
   deleteWorktreeArchive: gitLibraries.deleteWorktreeArchive,
@@ -853,6 +855,63 @@ describe('git worktree archive routes', () => {
   });
 });
 
+describe('git worktree teardown routes', () => {
+  const worktreeBootstrapStore = { remove: vi.fn() };
+  const teardownFailure = () => Object.assign(new Error('Worktree teardown command failed, so the worktree was kept: no compose file'), { code: 'WORKTREE_TEARDOWN_FAILED' });
+
+  beforeEach(() => {
+    gitLibraries.removeWorktree.mockReset();
+    gitLibraries.archiveWorktree.mockReset();
+    gitLibraries.teardownWorktree.mockReset();
+  });
+
+  it('tells removal and teardown alone which checkouts are a contributor fork, and fails closed', async () => {
+    const read = vi.fn(async (directory) => {
+      if (directory === '/repo/broken') throw new Error('provenance store unreadable');
+      return { provenance: directory === '/repo/fork' ? { kind: 'contributor-fork' } : null };
+    });
+    gitLibraries.removeWorktree.mockResolvedValue(true);
+    gitLibraries.teardownWorktree.mockResolvedValue(true);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { worktreeBootstrapStore, contributorProvenance: { read } });
+
+    await getRoute('DELETE', '/api/git/worktrees')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
+    await getRoute('POST', '/api/git/worktrees/teardown')({ query: { directory: '/repo' }, body: { directory: '/repo/fork', teardownCommand: './scripts/stop.sh' } }, createMockResponse());
+
+    const hooks = [
+      gitLibraries.removeWorktree.mock.calls[0][1],
+      gitLibraries.teardownWorktree.mock.calls[0][1],
+    ];
+    for (const input of hooks) {
+      expect(input.teardownCommand).toBe('./scripts/stop.sh');
+      await expect(input.isContributorCheckout('/repo/fork')).resolves.toBe(true);
+      await expect(input.isContributorCheckout('/repo/own')).resolves.toBe(false);
+      await expect(input.isContributorCheckout('/repo/broken')).rejects.toThrow('provenance store unreadable');
+    }
+  });
+
+  it('answers a failed teardown with its code, on a delete and on a teardown alone', async () => {
+    gitLibraries.removeWorktree.mockRejectedValue(teardownFailure());
+    gitLibraries.teardownWorktree.mockRejectedValue(teardownFailure());
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { worktreeBootstrapStore });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const removal = createMockResponse();
+      await getRoute('DELETE', '/api/git/worktrees')({ query: { directory: '/repo' }, body: { directory: '/repo/wt', teardownCommand: 'docker compose down' } }, removal);
+      const teardown = createMockResponse();
+      await getRoute('POST', '/api/git/worktrees/teardown')({ query: { directory: '/repo' }, body: { directory: '/repo/wt', teardownCommand: 'docker compose down' } }, teardown);
+      for (const response of [removal, teardown]) {
+        expect(response.statusCode).toBe(500);
+        expect(response.body).toEqual({ error: 'Worktree teardown command failed, so the worktree was kept: no compose file', code: 'WORKTREE_TEARDOWN_FAILED' });
+      }
+      expect(gitLibraries.teardownWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({ directory: '/repo/wt', teardownCommand: 'docker compose down' }));
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
+
 describe('git worktree removal instance disposal', () => {
   let fetchMock;
   const worktreeBootstrapStore = { remove: vi.fn() };
@@ -1326,6 +1385,20 @@ describe('git network operation routes', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.body).toEqual({ error: 'Pull destination is not the checked out branch', code: 'INVALID_REQUEST' });
+    logged.mockRestore();
+  });
+
+  it('names the fix for a remote URL with a name before @', async () => {
+    const error = Object.assign(new Error('Git remote URL has a name before @'), { code: 'INVALID_GIT_REMOTE_USERINFO', status: 400 });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, { networkOperations: { plan: vi.fn(async () => { throw error; }) } });
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/network-operations')({ body: { operation: 'sync' } }, response);
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toEqual({ error: 'Remove the name before @ from remote URL', code: 'REMOTE_URL_USERINFO' });
     logged.mockRestore();
   });
 

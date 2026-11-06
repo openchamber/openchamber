@@ -52,6 +52,13 @@ with its named pin lists. How the rows are drawn stays with the row model
   clock that moves by the local hour while such a section is shown
   (`useSidebarSectionsNow`), so "Today" turns over at local midnight in any
   time zone.
+- The Folder condition asks for folders of a project's root by id, across
+  projects. A session is in a folder when it is filed there, a worktree or a
+  space likewise. Chats and folders inside a worktree are not offered, as
+  sections list neither. The list comes from `foldersMap`, so it needs no read
+  of its own. Deleting a folder takes it out of every section as deleting a pin
+  list does (`removeFolderFromSections`), and a section left asking for no
+  folder goes with it.
 - "Scheduled run" is a type of its own beside what the work is (a session or a
   worktree): a work whose top-level session a scheduled task started
   (`openchamber.kind = 'scheduled'`, cleared on a fork). With the text

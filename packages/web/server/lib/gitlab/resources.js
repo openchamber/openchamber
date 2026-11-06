@@ -1,3 +1,4 @@
+import { documentDataUrl } from '../source-control/document-versions.js';
 import { createHash } from 'node:crypto';
 import { pairedDiffLine } from '../source-control/review-position.js';
 import { changeRequestNetworkTarget } from '../source-control/repository-network.js';
@@ -1328,7 +1329,7 @@ export function createGitLabResourceService({ origin, client, download, resolveP
      * diff was taken against, never the target branch tip. A fork's head
      * commit is reachable from the target project, so every read goes there.
      */
-    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, linked }) {
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status, binary, linked }) {
       const { target, raw } = await findByNumber(directory, number, project, {
         constrainToPrimary: true, remote, requireNetwork: true, linked,
       });
@@ -1339,6 +1340,10 @@ export function createGitLabResourceService({ origin, client, download, resolveP
       }
       const readFile = async (filePath, ref) => {
         const content = await client.RepositoryFiles.showRaw(target.project.id, filePath, ref);
+        if (binary) {
+          if (!(content instanceof Blob)) throw new Error('GitLab returned invalid file contents');
+          return documentDataUrl(Buffer.from(await content.arrayBuffer()));
+        }
         const value = content instanceof Blob ? await content.text() : content;
         if (!isString(value)) throw new Error('GitLab returned invalid file contents');
         if (Buffer.byteLength(value) > MAX_FULL_FILE_BYTES) {

@@ -22,6 +22,7 @@ import { CommitSection } from '@/components/views/git/CommitSection';
 import { ConflictDialog } from '@/components/views/git/ConflictDialog';
 import { DirtyBranchSwitchDialog } from '@/components/views/git/DirtyBranchSwitchDialog';
 import { SyncActions } from '@/components/views/git/SyncActions';
+import { gitRequestErrorMessage } from '@/components/views/git/gitRequestErrorMessage';
 import { ContributorDestinationDialog } from '@/components/views/git/ContributorDestinationDialog';
 import { useContributorDestinationChooser } from '@/components/views/git/contributorDestination';
 import { RepositoryConfigurationDialog } from '@/components/sections/openchamber/SourceControlBindingSettings';
@@ -75,7 +76,9 @@ import { useChangeRequestTerm } from '@/lib/source-control/providers/registry';
 import { useI18n } from '@/lib/i18n';
 import { generateCommitMessage, stageGitFile, stageGitFiles, unstageGitFile, unstageGitFiles } from '@/lib/gitApi';
 import type { GitRemote } from '@/lib/gitApi';
-import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, isImageFile, isOfficePreviewFile } from '@/lib/toolHelpers';
+import { isDocumentVersions } from '@/components/views/files/documentVersions';
+import { OfficeDocumentDiff } from '@/components/views/files/OfficeDocumentDiff';
 import { diffCommentOriginFromSource, type DiffCommentOrigin } from '@/lib/diffCommentOrigin';
 import { useWholeFileComment } from '@/components/comments';
 import {
@@ -444,12 +447,16 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   );
   const { review: changeRequestReview, provider: reviewProvider } = useComparisonReview(prComparison, currentDirectory, visible && mode === 'pr');
   const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision, prComparison.readContext, prComparison.provider);
-  const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
+  const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile, fetchVersions: loadComparisonVersions } = comparison;
   const comparisonFiles = React.useMemo(() => comparison.files ? [...comparison.files].sort((a, b) => a.path.localeCompare(b.path)) : null, [comparison.files]);
   const activeComparisonPath = route.type === 'comparison' && route.sourceKey === comparison.key ? route.path : null;
   const [comparisonRetry, setComparisonRetry] = React.useState(0);
   const fetchComparisonDiff = React.useCallback(async (path: string): Promise<ComparisonDiff> => {
     try {
+      if (isOfficePreviewFile(path)) {
+        const versions = await loadComparisonVersions(path);
+        return { status: 'ready', diff: isDocumentVersions(versions.original, versions.modified) ? versions : { original: '', modified: '', isBinary: true } };
+      }
       const { diff: patch } = await loadComparisonDiff(path);
       const diff: MobileDiffData = { original: '', modified: '', isBinary: isBinaryPatch(patch) };
       if (!diff.isBinary) diff.fileDiff = fileDiffFromPatch(path, patch);
@@ -457,7 +464,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     } catch (error) {
       return { status: 'error', message: error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff') };
     }
-  }, [loadComparisonDiff, t]);
+  }, [loadComparisonDiff, loadComparisonVersions, t]);
   const branchDiffRevisions = React.useMemo(
     () => mode === 'branch' ? branchPathRevisions(comparison.files, comparisonRevision) : undefined,
     [comparison.files, comparisonRevision, mode],
@@ -872,7 +879,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           : error.code === 'contributor-publish-cancelled'
             ? t('gitView.toast.contributorPublishCancelled')
             : t('gitView.toast.syncActionFailed', { action: actionLabel })
-        : error instanceof Error ? error.message : t('gitView.toast.syncActionFailed', { action: actionLabel }));
+        : error instanceof Error ? gitRequestErrorMessage(error, t) : t('gitView.toast.syncActionFailed', { action: actionLabel }));
     } finally {
       recovery.finish();
       if (recovery.isCurrent()) setSyncAction(null);
@@ -1035,7 +1042,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           : error.code === 'contributor-publish-cancelled'
             ? t('gitView.toast.contributorPublishCancelled')
             : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') })
-        : error instanceof Error ? error.message : t('gitView.toast.createCommitFailed'));
+        : error instanceof Error ? gitRequestErrorMessage(error, t) : t('gitView.toast.createCommitFailed'));
     } finally {
       recovery?.finish();
       setCommitAction(null);
@@ -1711,6 +1718,27 @@ const MobileDiffDetail: React.FC<{
           <div className="p-3"><SubmoduleDiffSummary state={diff.submodule} staged={staged} /></div>
         ) : diff.isBinary ? (
           <MobileChangesState icon message={t('diffView.binary.unavailable')} />
+        ) : isOfficePreviewFile(path) && isDocumentVersions(diff.original, diff.modified) ? (
+          <ScrollableOverlay outerClassName="h-full" className="p-3" disableHorizontal data-diff-virtual-root data-diff-virtual-content>
+            <OfficeDocumentDiff
+              filePath={path}
+              original={diff.original}
+              modified={diff.modified}
+              renderText={(text) => (
+                <PierreDiffViewer
+                  original={text.original}
+                  modified={text.modified}
+                  language="text"
+                  fileName={path}
+                  commentOrigin={commentOrigin}
+                  renderSideBySide={false}
+                  wrapLines={true}
+                  hideWhitespace={hideWhitespace}
+                  layout="inline"
+                />
+              )}
+            />
+          </ScrollableOverlay>
         ) : isImageFile(path) && !diff.fileDiff ? (
           <MobileChangesState icon message={t('mobile.changes.diffDetail.imageUnavailable')} />
         ) : (

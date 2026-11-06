@@ -8,6 +8,8 @@ import type { SessionSidebarRow } from '@/components/session/sidebar/sessionSide
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { formatProjectLabel } from '@/components/session/sidebar/utils';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { MobileProjectIcon } from '../MobileProjectIcon';
 import { MobileSwipeActionsRow, ROW_ACTION_SLOT_WIDTH } from '../MobileSessionSwipe';
@@ -202,6 +204,7 @@ export const MobileFolderRow: React.FC<{
 }> = ({ row, geometry }) => {
   const { t } = useI18n();
   const expanded = row.forceExpanded || !row.collapsed;
+  const project = useProjectsStore((state) => (row.mixed ? state.projects.find((entry) => entry.id === row.projectId) : undefined));
   return (
     <button
       type="button"
@@ -220,6 +223,7 @@ export const MobileFolderRow: React.FC<{
       {row.empty ? <span aria-hidden className="size-3.5 shrink-0" /> : <FileTreeChevron expanded={expanded} />}
       <Icon name={expanded && !row.empty ? 'folder-open' : 'folder'} className="mx-px size-3 shrink-0 text-muted-foreground" />
       <span className="block min-w-0 flex-1 truncate typography-ui-label font-medium oc-group-label">{row.displayName}</span>
+      {project ? <span className="min-w-0 shrink-[2] truncate typography-micro text-muted-foreground">{formatProjectLabel(project.label?.trim() || project.path)}</span> : null}
     </button>
   );
 };

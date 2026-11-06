@@ -153,6 +153,14 @@ export function registerGitRoutes(app, {
     return worktrees;
   };
 
+  // A contributor-fork checkout runs no project command before its checkout
+  // trust passes, so its teardown is skipped. A provenance read that fails
+  // throws, and the removal keeps the worktree.
+  const isContributorCheckout = contributorProvenance?.read instanceof Function
+    ? async (worktreeDirectory) => (await contributorProvenance.read(worktreeDirectory)).provenance?.kind === 'contributor-fork'
+    : undefined;
+  const worktreeTeardownCodeOf = (error) => (error?.code === 'WORKTREE_TEARDOWN_FAILED' ? error.code : undefined);
+
   const sendNetworkOperationError = (req, res, error) => {
     const code = isString(error?.code) ? error.code : 'UNKNOWN';
     const storageFailure = code === 'GIT_NETWORK_OPERATION_STORAGE_INVALID';
@@ -177,6 +185,7 @@ export function registerGitRoutes(app, {
     else if (code === 'SOURCE_CONTROL_BINDING_STALE') publicCode = 'STALE_BINDING';
     else if (code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') publicCode = 'STALE_REPOSITORY';
     else if (code === 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED') publicCode = 'REMOTE_CHANGED';
+    else if (code === 'INVALID_GIT_REMOTE_USERINFO') publicCode = 'REMOTE_URL_USERINFO';
     if (!publicCode && !storageFailure && code.includes('INVALID')) publicCode = 'INVALID_REQUEST';
     if (!publicCode && preservedCodes.includes(code)) publicCode = code;
     publicCode ??= 'UNKNOWN';
@@ -189,6 +198,7 @@ export function registerGitRoutes(app, {
       STALE_BINDING: 'Source control binding changed',
       STALE_CONFIG: 'Git repository configuration changed',
       REMOTE_CHANGED: 'Git remote or transport binding changed',
+      REMOTE_URL_USERINFO: 'Remove the name before @ from remote URL',
       AUTHENTICATION_REQUIRED: 'Git authentication is required',
       DESTINATION_SELECTION_REQUIRED: 'Contributor push destination selection is required',
       CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED: 'Contributor transfers require managed credentials',
@@ -1026,6 +1036,25 @@ export function registerGitRoutes(app, {
     }
   });
 
+  app.get('/api/git/range-file-versions', async (req, res) => {
+    const { getRangeFileVersions } = await getGitLibraries();
+    try {
+      const directory = resolveDirectoryQuery(req.query.directory);
+      const [base, head, filePath] = [req.query.base, req.query.head, req.query.path].map((value) => String(value ?? ''));
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+      if (!base || !head || !filePath) {
+        return res.status(400).json({ error: 'base, head and path parameters are required' });
+      }
+      const previousPath = String(req.query.previousPath ?? '') || undefined;
+      res.json(await getRangeFileVersions(directory, { base, head, path: filePath, previousPath, includeWorkingTree: req.query.includeWorkingTree === 'true' }));
+    } catch (error) {
+      console.error('Failed to read file versions:', error);
+      res.status(500).json({ error: error.message || 'Failed to read file versions' });
+    }
+  });
+
   app.get('/api/git/branch-base', async (req, res) => {
     const { getBranchBase } = await getGitLibraries();
     try {
@@ -1816,7 +1845,8 @@ export function registerGitRoutes(app, {
     }
   });
 
-  app.delete('/api/git/worktrees', async (req, res) => {
+  // A user action, so the teardown command gets the project's current environment, as creation does.
+  app.delete('/api/git/worktrees', userAction(async (req, res) => {
     const { removeWorktree } = await getGitLibraries();
     if (typeof removeWorktree !== 'function') {
       return res.status(501).json({ error: 'Worktree removal is not available' });
@@ -1839,6 +1869,8 @@ export function registerGitRoutes(app, {
       const result = await removeWorktree(directory, {
         directory: worktreeDirectory,
         deleteLocalBranch: req.body?.deleteLocalBranch === true,
+        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        isContributorCheckout,
         disposeInstance: canDisposeWorktreeInstance
           ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
           : undefined,
@@ -1848,9 +1880,31 @@ export function registerGitRoutes(app, {
       res.json({ success: Boolean(result) });
     } catch (error) {
       console.error('Failed to remove worktree:', error);
-      res.status(500).json({ error: error.message || 'Failed to remove worktree' });
+      res.status(500).json({ error: error.message || 'Failed to remove worktree', code: worktreeTeardownCodeOf(error) });
     }
-  });
+  }));
+
+  // Runs a worktree's teardown commands without removing it: a delete that also
+  // removes the remote branch calls this first, so a failing teardown stops it
+  // before the remote branch goes.
+  app.post('/api/git/worktrees/teardown', userAction(async (req, res) => {
+    const { teardownWorktree } = await getGitLibraries();
+    const directory = resolveDirectoryQuery(req.query.directory);
+    if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+    const worktreeDirectory = z.string().min(1).safeParse(req.body?.directory).data;
+    if (!worktreeDirectory) return res.status(400).json({ error: 'worktree directory is required' });
+    try {
+      await teardownWorktree(directory, {
+        directory: worktreeDirectory,
+        teardownCommand: z.string().safeParse(req.body?.teardownCommand).data,
+        isContributorCheckout,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to tear down worktree:', error);
+      res.status(500).json({ error: error.message || 'Failed to tear down worktree', code: worktreeTeardownCodeOf(error) });
+    }
+  }));
 
   app.post('/api/git/worktrees/snapshot', async (req, res) => {
     const { snapshotWorktree } = await getGitLibraries();
@@ -2073,7 +2127,7 @@ export function registerGitRoutes(app, {
       }
 
       const isBinary = req.query.binary === 'true';
-      const result = await getCommitFileDiff(directory, hash, filePath, isBinary);
+      const result = await getCommitFileDiff(directory, hash, filePath, isBinary, String(req.query.previousPath ?? '') || undefined);
       res.json(result);
     } catch (error) {
       console.error('Failed to get commit file diff:', error);

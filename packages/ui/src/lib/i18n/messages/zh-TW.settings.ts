@@ -4,6 +4,7 @@ import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { firstPartyIntegrationsI18n } from './first-party-integrations.i18n';
 import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { extensionCatalogI18n } from './extension-catalog.i18n';
+import { extensionPowersI18n } from './extension-powers.i18n';
 export const settingsDict = {
   'settings.openchamber.sessionRetention.field.archivedDescription': '保留期限從封存時開始計算。過期的工作階段會被刪除。',
   'settings.openchamber.sessionRetention.field.unarchivedArchiveDescription': '保留期限從工作階段的最後活動時間開始計算。過期的工作階段會被封存。',
@@ -545,6 +546,7 @@ export const settingsDict = {
   "settings.projects.worktrees.manageTitle": "Worktree",
   "settings.projects.worktrees.removeForEveryone": "為所有人移除",
   "settings.projects.worktrees.skipped": "已對你略過",
+  "settings.projects.worktrees.teardownCommandAria": "清理命令 {position}",
   'settings.projects.shared.invalid': '無法讀取 {path} 中的專案設定：{reason}',
   'settings.projects.shared.plansDir': '計畫資料夾',
   'settings.projects.shared.plansDirPlaceholder': '.openchamber/plans',
@@ -1111,10 +1113,12 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.title': '進行中的工作階段',
   'settings.openchamber.sessionWork.info': '側邊欄中位於聊天下方的區塊，用來顯示正在處理的工作階段。傳送訊息後，工作階段就會顯示在這裡。預設只會顯示在此區塊。若要同時顯示在所屬專案下，請在側邊欄選單中開啟「在專案下也顯示進行中的工作」。VS Code 一律會在專案下顯示工作階段。點選勾號或使用工作階段選單即可將其標記為完成。當某一輪看起來像工作的結尾時，勾號會變灰作為提示。',
   'settings.openchamber.sessionWork.field.enabled': '顯示進行中的工作階段',
-  'settings.openchamber.sessionRetention.archivedTooltip': '刪除超過保留期限的已封存工作階段。保留最近封存的 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已分享的工作階段。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',
-  'settings.openchamber.sessionRetention.tooltip': '根據最後活動時間封存或刪除未封存的工作階段。保留最近 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已分享的工作階段。已封存的工作階段會保留。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',
+  'settings.openchamber.sessionRetention.archivedTooltip': '刪除超過保留期限的已封存工作階段。保留最近封存的 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已釘選的工作階段。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',
+  'settings.openchamber.sessionRetention.tooltip': '根據最後活動時間封存或刪除未封存的工作階段。保留最近 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已釘選的工作階段。「進行中」區塊裡的工作階段也會保留，除非你選擇包含它們。已封存的工作階段會保留。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',
   'settings.openchamber.sessionRetention.field.enableAutoCleanupAria': '啟用自動清理',
   'settings.openchamber.sessionRetention.field.enableAutoCleanup': '啟用自動清理',
+  'settings.openchamber.sessionRetention.field.includeInWork': '包含「進行中」的工作階段',
+  'settings.openchamber.sessionRetention.field.includeInWorkInfo': '「進行中」區塊裡的工作階段會一直保留，直到將其標記為完成。開啟後，它們會像其他工作階段一樣過期。已釘選的工作階段一律保留。',
   'settings.openchamber.sessionRetention.field.retentionPeriod': '保留時長',
   'settings.openchamber.sessionRetention.field.retentionPeriodAria': '按天設定保留時長',
   'settings.openchamber.sessionRetention.field.days': '天',
@@ -1528,6 +1532,11 @@ export const settingsDict = {
   'settings.openchamber.worktrees.setup.addCommand': '新增命令',
   'settings.openchamber.worktrees.setup.waitForCommands': '建立或傳送工作階段前等待設定命令完成',
   'settings.openchamber.worktrees.setup.toast.saveFailed': '儲存 Worktree 設定命令失敗',
+  'settings.openchamber.worktrees.teardown.title': '清理命令',
+  'settings.openchamber.worktrees.teardown.tooltipPrefix': '刪除或封存 worktree 前，會在 worktree 目錄內執行。任一命令失敗時，worktree 會保留。專案根目錄可使用',
+  'settings.openchamber.worktrees.teardown.tooltipSuffix': '。',
+  'settings.openchamber.worktrees.teardown.commandPlaceholder': '例如：docker compose down',
+  'settings.openchamber.worktrees.teardown.toast.saveFailed': '儲存 Worktree 清理命令失敗',
   'settings.openchamber.worktrees.list.title': '現有 worktree',
   'settings.openchamber.worktrees.list.tooltip': '刪除 worktree 也會刪除其關聯工作階段。',
   'settings.openchamber.worktrees.list.loading': '正在載入 worktree...',
@@ -2660,6 +2669,7 @@ export const settingsDict = {
   ...firstPartyIntegrationsI18n['zh-TW'],
   ...thirdPartyIntegrationI18n['zh-TW'],
   ...extensionCatalogI18n['zh-TW'],
+  ...extensionPowersI18n['zh-TW'],
   ...guestIntegrationsI18n['zh-TW'],
   ...extensionsSettingsI18n['zh-TW'],
   ...settingsLayoutI18n['zh-TW'],

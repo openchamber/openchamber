@@ -42,6 +42,8 @@ export type SidebarSectionFilter = {
   kinds: readonly SidebarSectionKind[];
   links: readonly SidebarSectionLink[];
   projectIds: readonly string[];
+  /** Folders of a project's root, by id; a filed worktree counts as a work in its folder. */
+  folders: readonly string[];
   activity: SidebarSectionActivity;
   /**
    * Phrases to find in the work's title or branch, any one of them: each
@@ -79,7 +81,7 @@ export const SIDEBAR_SECTION_TEXT_MAX = 100;
 export const SIDEBAR_SECTION_PHRASES_MAX = 12;
 
 export const EMPTY_SIDEBAR_SECTION_FILTER: SidebarSectionFilter = Object.freeze({
-  states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], activity: 'any', text: [],
+  states: [], work: [], pins: [], kinds: [], links: [], projectIds: [], folders: [], activity: 'any', text: [],
 });
 
 
@@ -112,6 +114,7 @@ const filterSchema = z.object({
   kinds: chips(SIDEBAR_SECTION_KINDS).catch([]),
   links: chips(SIDEBAR_SECTION_LINKS).catch([]),
   projectIds: projectIds.catch([]),
+  folders: ids.catch([]),
   activity: z.enum(SIDEBAR_SECTION_ACTIVITY).catch('any'),
   // A list of phrases; a build before lists kept one phrase as a string.
   text: z.union([z.string().transform((value) => [value]), z.array(z.unknown())]).transform((entries) => (
@@ -146,6 +149,7 @@ const toFilter = (filter: z.infer<typeof filterSchema>, grouping: 'time' | 'proj
       kinds: filter.kinds ?? [],
       links: filter.links ?? [],
       projectIds: filter.projectIds ?? [],
+      folders: filter.folders ?? [],
       activity: filter.activity ?? 'any',
       text: filter.text ?? [],
     }
@@ -221,6 +225,7 @@ export const hasSidebarSectionConditions = (filter: SidebarSectionFilter): boole
   || filter.kinds.length > 0
   || filter.links.length > 0
   || filter.projectIds.length > 0
+  || filter.folders.length > 0
   || filter.activity !== 'any'
   || filter.text.length > 0
 );
@@ -240,6 +245,8 @@ export type SidebarWorkFacts = {
   /** A scheduled task started one of its top-level sessions. */
   scheduled: boolean;
   projectId: string | null;
+  /** The folder of the project's root the work is filed in, or null. */
+  folderId: string | null;
   /** The pin list the work is filed in (`DEFAULT_PIN_LIST` for Pinned), or null. */
   pin: string | null;
   inWork: boolean;
@@ -311,6 +318,7 @@ export const matchesSidebarSectionFilter = (filter: SidebarSectionFilter, facts:
   if (filter.kinds.length > 0 && !filter.kinds.some((kind) => (kind === 'scheduled' ? facts.scheduled : kind === facts.kind))) return false;
   if (filter.links.length > 0 && !filter.links.some((link) => matchesLink(link, facts))) return false;
   if (filter.projectIds.length > 0 && (facts.projectId === null || !filter.projectIds.includes(facts.projectId))) return false;
+  if (filter.folders.length > 0 && (facts.folderId === null || !filter.folders.includes(facts.folderId))) return false;
   if (filter.text.length > 0 && !filter.text.some((phrase) => matchesRankQuery(facts.texts, phrase, SIDEBAR_SEARCH))) return false;
   return matchesActivity(filter.activity, facts.lastActivityAt, now);
 };
