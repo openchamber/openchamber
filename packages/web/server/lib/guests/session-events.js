@@ -663,7 +663,8 @@ export const createExtensionSessionEvents = ({
    */
   const onArchived = (payload, directory, admitted) => {
     const sessionId = sessionIdOf(payload);
-    if (!sessionId) return undefined;
+    // A report dropped under backlog leaves the other one free to announce the archive.
+    if (!sessionId || !admitted) return undefined;
     const at = now();
     const announcedAt = archivedSessions.get(sessionId);
     if (announcedAt !== undefined && at - announcedAt < SESSION_EVENT_ARCHIVE_DEDUPE_MS) return undefined;
