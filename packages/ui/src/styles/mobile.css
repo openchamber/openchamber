@@ -59,6 +59,12 @@
     min-width: 36px;
   }
 
+  /* List rows ask for a full finger's height; the minimum above must not cut it. */
+  :root.mobile-pointer:not(.desktop-runtime) button.min-h-11,
+  :root.mobile-pointer:not(.desktop-runtime) [role="button"].min-h-11 {
+    min-height: 44px !important;
+  }
+
   /* Toast titles and icons line up with their buttons, which the rule above
      makes at least 36px tall (sonner.tsx). */
   :root.mobile-pointer:not(.desktop-runtime) [data-sonner-toast] {
@@ -961,3 +967,37 @@
   border-radius: var(--radius-md, 0.375rem);
   font-size: var(--text-ui-label);
 }
+
+/* A phone finds in a file with one row, like the Markdown preview's bar:
+   query, count, previous, next, close. Replace and the match options are
+   keyboard-and-pointer work; the panel stays CodeMirror's, so its behaviour is
+   the same. FilesView sets the class. */
+.oc-compact-search .cm-panels .cm-panel.cm-search {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.oc-compact-search .cm-panels .cm-search {
+  flex-wrap: nowrap;
+  gap: 2px;
+}
+
+.oc-compact-search .cm-panels .cm-search label,
+.oc-compact-search .cm-panels .cm-search .cm-textfield[name="replace"],
+.oc-compact-search .cm-panels .cm-search button[name="select"],
+.oc-compact-search .cm-panels .cm-search button[name="replace"],
+.oc-compact-search .cm-panels .cm-search button[name="replaceAll"] {
+  display: none;
+}
+
+.oc-compact-search .cm-panels .cm-search .cm-textfield[name="search"] {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  height: 36px;
+}
+
+.oc-compact-search .cm-panels .cm-search button[name="prev"] { order: 10; }
+.oc-compact-search .cm-panels .cm-search button[name="next"] { order: 11; }
+.oc-compact-search .cm-panels .cm-search button[name="close"] { order: 12; position: static; }

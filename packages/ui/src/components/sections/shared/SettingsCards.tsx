@@ -148,7 +148,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
               aria-label={actionsLabel}
               title={actionsLabel}
             >
-              <Icon name="more-2" className="size-4" />
+              <Icon name="more" className="size-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-32">

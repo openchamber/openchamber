@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { computeContextUsage, DEFAULT_CONTEXT_LIMIT } from './contextUsage';
+import { computeContextUsage, computeLastReplyTokens, DEFAULT_CONTEXT_LIMIT } from './contextUsage';
 
 const assistant = (tokens: Record<string, unknown>, id = 'msg') => ({ id, role: 'assistant', tokens });
 
@@ -114,5 +114,21 @@ describe('computeContextUsage', () => {
       200_000,
     );
     expect(measured(usage).totalTokens).toBe(12_100);
+  });
+});
+
+describe('computeLastReplyTokens', () => {
+  const assistant = (tokens: { total: number; input: number; output: number; cache: { read: number; write: number } }) => ({ role: 'assistant', tokens, time: { created: 1, completed: 2 } });
+
+  test('reads the newest reply, never a sum', () => {
+    const result = computeLastReplyTokens([
+      assistant({ total: 10, input: 10, output: 0, cache: { read: 0, write: 0 } }),
+      assistant({ total: 100, input: 20, output: 5, cache: { read: 60, write: 20 } }),
+    ]);
+    expect(result).toEqual({ output: 5, cacheHitPercent: 60 });
+  });
+
+  test('has nothing to say without a reported turn', () => {
+    expect(computeLastReplyTokens([])).toBeNull();
   });
 });

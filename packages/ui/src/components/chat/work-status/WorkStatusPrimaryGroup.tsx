@@ -18,7 +18,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
-import { computeContextUsage } from './contextUsage';
+import { computeContextUsage, computeLastReplyTokens } from './contextUsage';
+import { formatTelemetryTokens } from './telemetry';
 import { formatCost } from './subagentCost';
 import { useSubagentCostRollup } from './useSubagentCostRollup';
 import {
@@ -198,6 +199,12 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
     [sessionMessages, contextLimit],
   );
 
+  // The phone has no context overview, so the figures it would open come here.
+  const lastReplyTokens = React.useMemo(
+    () => (mobile ? computeLastReplyTokens(sessionMessages) : null),
+    [mobile, sessionMessages],
+  );
+
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -328,6 +335,19 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                     subagents: formatCost(subagentCost),
                   })}
                 </WorkStatusNote>
+              ) : null}
+              {lastReplyTokens ? (
+                <>
+                  <p className="px-2.5 pb-0.5 pt-2 typography-meta text-muted-foreground">{t('contextSidebar.section.lastAssistantMessage')}</p>
+                  {lastReplyTokens.cacheHitPercent !== null ? (
+                    <WorkStatusRow
+                      muted
+                      label={t('contextSidebar.tokens.cacheHit')}
+                      value={<WorkStatusValue>{`${lastReplyTokens.cacheHitPercent.toFixed(1)}%`}</WorkStatusValue>}
+                    />
+                  ) : null}
+                  <WorkStatusRow muted label={t('contextSidebar.tokens.output')} value={<WorkStatusValue>{formatTelemetryTokens(lastReplyTokens.output)}</WorkStatusValue>} />
+                </>
               ) : null}
             </>
           ) : null}

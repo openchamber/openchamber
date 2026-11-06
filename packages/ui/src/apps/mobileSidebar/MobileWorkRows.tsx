@@ -223,7 +223,7 @@ export const MobileWorktreeRow: React.FC<{
         ) : null}
         {space ? (
           <MobileSwipeAction
-            icon="more-2"
+            icon="more"
             label={t('spaces.actions.menuAria', { label })}
             revealed={revealed}
             onClick={after(() => useSpacesStore.getState().openActionsSheet(space.id))}

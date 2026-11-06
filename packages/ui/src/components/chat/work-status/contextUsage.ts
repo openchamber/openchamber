@@ -13,7 +13,7 @@
  * global read to race with.
  */
 
-import { findLatestContextFill, type ContextFillMessage } from '@/stores/utils/tokenUtils';
+import { computeCacheHitRate, findLatestContextFill, type ContextFillMessage } from '@/stores/utils/tokenUtils';
 
 type WorkStatusContextUsage =
   | {
@@ -49,4 +49,23 @@ export const computeContextUsage = (
   if (fill.state === 'compacted') return { state: 'compacted', limit };
 
   return { state: 'measured', totalTokens: fill.totalTokens, limit, percent: (fill.totalTokens / limit) * 100 };
+};
+
+type LastReplyTokens = {
+  output: number;
+  /** Share of the prompt served from cache; null when the reply reported no prompt tokens. */
+  cacheHitPercent: number | null;
+};
+
+/**
+ * The figures of the reply the context reading comes from, for the phone's
+ * session rows. Never a sum over messages: a long session holds only its tail,
+ * so a sum falls as the chat grows, and every reply re-reads the whole context.
+ */
+export const computeLastReplyTokens = (messages: readonly ContextFillMessage[]): LastReplyTokens | null => {
+  const fill = findLatestContextFill(messages);
+  const tokens = fill ? messages[fill.index]?.tokens : undefined;
+  if (!tokens) return null;
+  const hitRate = computeCacheHitRate(tokens);
+  return { output: tokens.output ?? 0, cacheHitPercent: hitRate.hasInput ? hitRate.percent : null };
 };
