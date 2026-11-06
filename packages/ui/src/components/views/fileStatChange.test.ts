@@ -43,7 +43,9 @@ describe('openFilePollStep (issue 4477)', () => {
 
 describe('fileStatSnapshotForRequestedPath', () => {
   test('keeps the requested path when the server answers with a resolved symlink path', () => {
+    // A real answer always carries the resolved path; `docs` is a symlink to `oracle/docs`.
     expect(fileStatSnapshotForRequestedPath('/repo/docs/plan.md', {
+      path: '/repo/oracle/docs/plan.md',
       size: 120,
       mtimeMs: 1700000000000,
     })).toEqual({
