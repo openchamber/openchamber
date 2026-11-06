@@ -458,9 +458,10 @@ copy.
 
 - `mentions.ts` — `@` references. The `start..end` span is the reference
   itself and is what gets highlighted; in `see @a/b.ts,` the comma is sentence
-  punctuation, not part of the file being referenced. Mentions are plain
-  editable text: deleting a character edits the token and reopens the mention
-  picker, the same way `$skill` tokens behave — not an atomic delete.
+  punctuation, not part of the file being referenced. A `@` token with a dot
+  or a slash is only a candidate: it draws as a file once something confirms
+  it (*Why a file chip needs confirming*). A send treats a candidate as a file
+  either way and drops the ones that do not exist.
 - `prefixTokens.ts` — `/command`, `$skill`, `#snippet`. Scanning is deliberately
   generous; **membership in the command, skill or snippet registry is the
   authority**, not the pattern. An unknown `/token` or `$token` stays plain
@@ -510,6 +511,35 @@ to web, Electron, VS Code, hosted mobile and Capacitor; VS Code continues to omi
 session suggestions. Selection key routing and IME guards stay with their
 existing owners.
 
+### Why a file chip needs confirming
+
+The shape of a token cannot tell `@README.md` from `@john.doe`, or `@src/app`
+from `@types/node`. `NOT_A_PATH` drops what is plainly no path (calls, URLs,
+versions), and everything else with a dot or a slash stays a candidate. A file
+chip needs an entry in `confirmedMentions`: the picker, a drop and a restored
+draft write one at once, and `useFileMentionCheck` writes one when a candidate
+is found on disk. A typed or pasted mention therefore stays text for a moment.
+A check that cannot run confirms the name, because a send keeps it too.
+
+A send still resolves candidates, so pressing Enter before the check answers
+attaches the same files.
+
+`confirmedMentions` is read through a getter in the language context.
+`useComposerDraft` puts a new set in the ref on every draft switch, without a
+new context object.
+
+### Why a dismissal lives in the confirmed set
+
+A double click on a file or agent chip writes a dismissal for that name, so
+every occurrence in the draft stays text and a send neither attaches it nor
+routes to the agent. A name would chip again the moment its text was left
+alone, so the dismissal has to be remembered. It is an entry with a NUL prefix
+in `confirmedMentions` because that set is already saved, restored, cleared on
+send and carried across a failed send; a second set would repeat each of those
+paths. Choosing the name in the picker confirms it again. Dismissals stay out
+of a published draft (`useSessionDraftPublishing`), which keeps only names
+found in the text.
+
 ## The editor
 
 `editor/bidi.ts` gives each rendered logical line native `dir="auto"` and
@@ -537,7 +567,8 @@ sent message's chips (`composerLanguage.ts`). The document keeps the source
 text, so sending, copying and undo are unchanged; the caret steps over a chip
 and one Backspace removes it. File and agent mentions, skills and snippets
 chip the same way; a token whose last character was just typed stays text
-until typing moves on, so a name is never chipped halfway. Commands keep
+until typing moves on, so a name is never chipped halfway. A double click on a
+file or agent chip gives its text back with the caret at the end. Commands keep
 their color only.
 
 The `#` snippet picker (`chat/SnippetAutocomplete.tsx`) also creates
@@ -1122,9 +1153,10 @@ so they never mix with the main draft's files; the attach control offers
 only local files. Goals, expansion, shell, linked context (issues, PRs,
 guests) and file/agent mention autocomplete are unavailable. Auto-accept is
 applied before the first send.
-On mobile, the model, effort and agent controls sit in the input's upper-left
-row and open the same bottom sheets as the main composer's; the footer only
-contains auto-accept and send/stop controls.
+On mobile, the model, effort and agent controls take the main composer's
+bottom row below the footer, drawn the same way, and open the same bottom
+sheets; the footer holds the files-only attach, auto-accept and send/stop
+controls.
 
 Escape closes menus first. Otherwise it returns to normal: an unsent BTW is
 discarded with its text, references, selections and panel; a creating or real

@@ -1,4 +1,5 @@
 import { isCompleteIdentity } from '@/lib/api/git-identity';
+import { useDeviceInfo } from '@/lib/device';
 import { identityAccountConnected, identityDisplayName, unavailableAccountReason } from '@/lib/source-control/identity';
 import { useSourceControlDescriptorOf, useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
@@ -52,6 +53,7 @@ const COLOR_MAP: Record<string, string> = {
 
 export const GitPage: React.FC = () => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const { sourceControl } = useRuntimeAPIs();
   const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
   const {
@@ -134,7 +136,7 @@ export const GitPage: React.FC = () => {
           )}
           settingsItem="git.identities"
         >
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
+          <div className={cn('flex flex-col', !isMobile && 'overflow-hidden rounded-lg bg-[var(--surface-elevated)]/70')}>
             {/* Global identity */}
             {globalIdentity && (
               <IdentityRow
@@ -231,6 +233,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
   hasBorder,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const connectedAccountIds = useConnectedAccountIds();
   const authEntries = useSourceControlAuthStore((state) => state.entries);
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
@@ -289,8 +292,12 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
         render={
           <div
             className={cn(
-              'group flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-[var(--interactive-hover)]/30 cursor-pointer',
-              hasBorder && 'border-b border-[var(--surface-subtle)]'
+              'group flex cursor-pointer items-center justify-between gap-3',
+              // Flat on a phone, like the other lists there.
+              isMobile
+                ? 'min-h-11 rounded-md px-0 py-1.5 active:bg-interactive-hover'
+                : 'px-4 py-2.5 transition-colors hover:bg-[var(--interactive-hover)]/30',
+              !isMobile && hasBorder && 'border-b border-[var(--surface-subtle)]',
             )}
             onClick={onEdit}
             role="button"
@@ -333,10 +340,10 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
           <Button
             size="icon"
             variant="ghost"
-            className="h-6 w-6 shrink-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+            className={cn('shrink-0 opacity-100 transition-opacity', isMobile ? 'size-9' : 'h-6 w-6 md:opacity-0 md:group-hover:opacity-100')}
             onClick={(e) => e.stopPropagation()}
           >
-            <Icon name="more-2" className="h-3.5 w-3.5" />
+            <Icon name="more" className={isMobile ? 'size-4' : 'h-3.5 w-3.5'} />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-fit min-w-28">

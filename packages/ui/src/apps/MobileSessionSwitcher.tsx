@@ -46,13 +46,13 @@ const SwitcherRow: React.FC<{
       type="button"
       className={cn(
         'flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-        active && 'bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]',
+        active && 'bg-interactive-selection text-interactive-selection-foreground',
       )}
       onClick={onSelect}
       style={{ touchAction: 'manipulation' }}
     >
       <span className="flex min-w-0 flex-1 flex-col">
-        <span dir="auto" className={cn('block truncate oc-ui-start-align typography-ui-label', active ? 'text-primary' : 'text-foreground')}>
+        <span dir="auto" className={cn('block truncate oc-ui-start-align typography-ui-label', !active && 'text-foreground')}>
           {getSessionTitle(session, t('sessions.sidebar.session.untitled'))}
         </span>
         {meta ? (
@@ -131,7 +131,7 @@ export const MobileSessionSwitcher: React.FC<{
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
 
-  const items = useSwitcherItems(open || shouldRender, { maxParents: RECENT_SESSIONS_LIMIT });
+  const items = useSwitcherItems(open || shouldRender, { maxParents: RECENT_SESSIONS_LIMIT, ignorePins: true, currentSessionId });
 
   React.useEffect(() => {
     if (open) {

@@ -76,7 +76,7 @@ export const MobileWalkthroughScreen: React.FC<{
               <Icon name="arrow-right-s" className="size-5" />
             </button>
           </>
-        ) : (
+        ) : view || review.blocked || review.showStages ? (
           <button
             type="button"
             className={HEADER_BUTTON_CLASS}
@@ -86,7 +86,7 @@ export const MobileWalkthroughScreen: React.FC<{
           >
             <Icon name="more" className="size-5" />
           </button>
-        )}
+        ) : null}
       </header>
 
       <WalkthroughBanners review={review} view={view} />
@@ -128,9 +128,7 @@ export const MobileWalkthroughScreen: React.FC<{
       </div>
 
       <MobileOverlayPanel open={optionsOpen} onClose={() => setOptionsOpen(false)} title={t('walkthrough.options.title')}>
-        <div className="px-2 py-2">
-          <WalkthroughOptions review={review} hasView={view !== null} size="mobile" onActed={() => setOptionsOpen(false)} />
-        </div>
+        <WalkthroughOptions review={review} hasView={view !== null} size="mobile" onActed={() => setOptionsOpen(false)} />
       </MobileOverlayPanel>
     </div>
   );

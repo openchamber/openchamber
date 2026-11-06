@@ -384,7 +384,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
           title={t('mcpDropdown.title')}
           onClose={() => setOpen(false)}
           renderHeader={(closeButton) => (
-            <div className="flex items-center justify-between px-3 py-2 border-b border-edge-muted">
+            <div className="flex items-center justify-between ps-4 pe-3 py-2 border-b border-edge-muted">
               <h2 className="typography-ui-label font-semibold text-foreground">{t('mcpDropdown.title')}</h2>
               <div className="flex items-center gap-1">
                 <button

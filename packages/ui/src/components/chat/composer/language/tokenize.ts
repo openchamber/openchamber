@@ -36,8 +36,15 @@ export interface ComposerLanguageContext {
     inputMode: 'normal' | 'shell';
     /** Lowercased names of the agents that can be mentioned. */
     knownAgentNames: ReadonlySet<string>;
-    /** Mention paths confirmed by the picker, a drop, or a restored draft. */
+    /** See `MentionClassifier.confirmedMentions`. A live set, read on every pass. */
     confirmedMentions: ReadonlySet<string>;
+    /** Changes when `confirmedMentions` did without the text changing, to repaint. */
+    confirmedMentionsRevision?: number;
+    /**
+     * Lets a double click turn a file or agent chip back into text. `dismiss`
+     * records it in `confirmedMentions`; `hint` joins the chip's tooltip.
+     */
+    mentionDismissal?: { dismiss: (name: string) => void; hint: string };
     /** Lowercased command and built-in names invocable with `/`. */
     knownSlashNames: ReadonlySet<string>;
     /** Lowercased snippet names and aliases invocable with `#`. */

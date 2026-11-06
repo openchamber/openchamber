@@ -42,6 +42,7 @@ import { assistantTextSegments, flattenAssistantTextParts, suggestPlanTitleFromT
 import { MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT } from '@/lib/messages/executionMeta';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { useFactsFit } from './useFactsFit';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -651,30 +652,25 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
                             onClose={() => setUserActionSheetOpen(false)}
                             title={t('chat.messageBody.actions.moreActions')}
                         >
-                            <div className="flex flex-col">
-                                {timestamp ? (
-                                    <div className="mb-1 flex items-center gap-3 border-b border-edge px-3 pb-2 text-muted-foreground">
-                                        <Icon name="time" className="h-4 w-4" />
-                                        <span className="typography-ui-label">{timestamp}</span>
-                                    </div>
-                                ) : null}
-                                {userSheetActions.map((action) => (
-                                    <button
-                                        key={action.id}
-                                        type="button"
-                                        disabled={action.disabled}
-                                        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-start text-foreground transition-colors active:bg-interactive-active disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                                        onClick={() => {
-                                            setUserActionSheetOpen(false);
-                                            action.onSelect();
-                                        }}
-                                        style={{ touchAction: 'manipulation' }}
-                                    >
-                                        <span className="text-muted-foreground">{action.icon}</span>
-                                        <span className="typography-ui-label">{action.label}</span>
-                                    </button>
-                                ))}
-                            </div>
+                            {timestamp ? (
+                                <div className="mb-1 flex items-center gap-2.5 border-b border-edge-muted px-2 pb-2 typography-meta text-muted-foreground">
+                                    <Icon name="time" className="size-4" />
+                                    <span>{timestamp}</span>
+                                </div>
+                            ) : null}
+                            {userSheetActions.map((action) => (
+                                <MobileSheetRow
+                                    key={action.id}
+                                    disabled={action.disabled}
+                                    leading={<span className="flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-4">{action.icon}</span>}
+                                    onClick={() => {
+                                        setUserActionSheetOpen(false);
+                                        action.onSelect();
+                                    }}
+                                >
+                                    {action.label}
+                                </MobileSheetRow>
+                            ))}
                         </MobileOverlayPanel>
                     </>
                 ) : (
@@ -2413,32 +2409,27 @@ const AssistantMessageBody = React.memo(({
                             onClose={() => setActionSheetOpen(false)}
                             title={t('chat.messageBody.actions.moreActions')}
                         >
-                            <div className="flex flex-col">
-                                {/* The row drops the timestamp first on a narrow screen,
-                                    so the sheet is where it is always readable. */}
-                                {footerTimestamp ? (
-                                    <div className="mb-1 flex items-center gap-3 border-b border-edge px-3 pb-2 text-muted-foreground">
-                                        <Icon name="time" className="h-4 w-4" />
-                                        <span className="typography-ui-label">{footerTimestamp}</span>
-                                    </div>
-                                ) : null}
-                                {footerSheetActions.map((action) => (
-                                    <button
-                                        key={action.id}
-                                        type="button"
-                                        disabled={action.disabled}
-                                        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-start text-foreground transition-colors active:bg-interactive-active disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                                        onClick={() => {
-                                            setActionSheetOpen(false);
-                                            action.onSelect();
-                                        }}
-                                        style={{ touchAction: 'manipulation' }}
-                                    >
-                                        <span className="text-muted-foreground">{action.icon}</span>
-                                        <span className="typography-ui-label">{action.label}</span>
-                                    </button>
-                                ))}
-                            </div>
+                            {/* The row drops the timestamp first on a narrow screen,
+                                so the sheet is where it is always readable. */}
+                            {footerTimestamp ? (
+                                <div className="mb-1 flex items-center gap-2.5 border-b border-edge-muted px-2 pb-2 typography-meta text-muted-foreground">
+                                    <Icon name="time" className="size-4" />
+                                    <span>{footerTimestamp}</span>
+                                </div>
+                            ) : null}
+                            {footerSheetActions.map((action) => (
+                                <MobileSheetRow
+                                    key={action.id}
+                                    disabled={action.disabled}
+                                    leading={<span className="flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground [&>svg]:size-4">{action.icon}</span>}
+                                    onClick={() => {
+                                        setActionSheetOpen(false);
+                                        action.onSelect();
+                                    }}
+                                >
+                                    {action.label}
+                                </MobileSheetRow>
+                            ))}
                         </MobileOverlayPanel>
                     </div>
                 )}
