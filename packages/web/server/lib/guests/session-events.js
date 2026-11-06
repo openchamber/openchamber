@@ -52,6 +52,8 @@ export const SESSION_EVENT_FAILURE_BACKOFF_MS = 30_000;
 export const SESSION_EVENT_IDLE_DEDUPE_MS = 5_000;
 /** A permission request is announced only when it is still open this long after it was asked. */
 const SESSION_EVENT_PERMISSION_DEBOUNCE_MS = 500;
+/** A second archive of one session within this window, with no restore between, is the same archive. */
+export const SESSION_EVENT_ARCHIVE_DEDUPE_MS = 5_000;
 
 const SESSION_PARENT_CACHE_MS = 60_000;
 const TRACKED_SESSIONS_MAX = 2_000;
@@ -61,7 +63,7 @@ const RESULT_MAX = 4_096;
 const LOCATION_SCOPED_FORM_SESSION_ID = 'global';
 /** Proxy failures that mean "not a subscriber right now", never a broken service. */
 const INELIGIBLE_CODES = new Set(['NO_SERVICE', 'DISABLED', 'CANCELLED']);
-const ANNOUNCEMENT_EVENTS = new Set(['session.idle', 'session.error', 'permission.asked', 'form.created', 'openchamber:page-waiting', 'session.created', 'session.deleted', 'session.status', 'openchamber:session-archived']);
+const ANNOUNCEMENT_EVENTS = new Set(['session.idle', 'session.error', 'permission.asked', 'form.created', 'openchamber:page-waiting', 'session.created', 'session.deleted', 'session.status', 'session.archived', 'openchamber:session-archived']);
 
 const isText = (value) => typeof value === 'string' && value.length > 0;
 
@@ -190,6 +192,8 @@ export const createExtensionSessionEvents = ({
   const parentCache = new Map();
   /** Sessions whose running turn was announced, so the repeated status of one turn is one event. */
   const busySessions = new Map();
+  /** Per session: when its archive was announced, so OpenCode's event and OpenChamber's own for one archive are one. */
+  const archivedSessions = new Map();
   /** Per guest: its ordered queue and backoff. */
   const queues = new Map();
 
@@ -651,6 +655,24 @@ export const createExtensionSessionEvents = ({
     });
   };
 
+  /**
+   * OpenCode announces an archive that changed its record; OpenChamber
+   * announces one that dropped an entry of the old archive file. One archive
+   * can bring both, moments apart. A window, so a restore lost in a stream
+   * gap cannot silence the next archive for good.
+   */
+  const onArchived = (payload, directory, admitted) => {
+    const sessionId = sessionIdOf(payload);
+    // A report dropped under backlog leaves the other one free to announce the archive.
+    if (!sessionId || !admitted) return undefined;
+    const at = now();
+    const announcedAt = archivedSessions.get(sessionId);
+    if (announcedAt !== undefined && at - announcedAt < SESSION_EVENT_ARCHIVE_DEDUPE_MS) return undefined;
+    bound(archivedSessions);
+    archivedSessions.set(sessionId, at);
+    return onLifecycle('session-archived', payload, directory, admitted);
+  };
+
   const reportFailure = (error) => {
     warn('[session-events] an event could not be handled:', error?.message ?? error);
   };
@@ -690,11 +712,19 @@ export const createExtensionSessionEvents = ({
         if (isText(id)) {
           parentCache.delete(id);
           busySessions.delete(id);
+          archivedSessions.delete(id);
         }
         return prepared;
       }
+      case 'session.archived':
+        return onArchived(payload, directory, admitted);
       case 'openchamber:session-archived':
-        return Number.isFinite(props?.archivedAt) ? onLifecycle('session-archived', payload, directory, admitted) : undefined;
+        if (Number.isFinite(props?.archivedAt)) return onArchived(payload, directory, admitted);
+        archivedSessions.delete(sessionIdOf(payload));
+        return undefined;
+      case 'session.unarchived':
+        archivedSessions.delete(sessionIdOf(payload));
+        return undefined;
       case 'session.updated':
       case 'session.patched': {
         const id = props?.info?.id ?? props?.sessionID;
