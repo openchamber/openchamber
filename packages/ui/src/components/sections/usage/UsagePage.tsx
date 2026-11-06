@@ -173,6 +173,11 @@ export const UsagePage: React.FC = () => {
             plan: selectedResult.planLabel,
             time: formatTime(lastUpdated, timeFormatPreference),
           })
+        ) : selectedResult?.accountLabel ? (
+          t('settings.usage.page.header.lastUpdatedWithAccount', {
+            account: selectedResult.accountLabel,
+            time: formatTime(lastUpdated, timeFormatPreference),
+          })
         ) : (
           t('settings.usage.page.header.lastUpdated', { time: formatTime(lastUpdated, timeFormatPreference) })
         )

@@ -149,10 +149,6 @@ describe('OpenCode Go quota provider (VS Code parity)', () => {
       configureOpenCodeCredentials({ list: async () => [key('opencode')] });
     });
 
-    afterEach(() => {
-      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
-    });
-
     test('reads the usage with that key', async () => {
       let request: RequestInit | undefined;
       stubFetchReturning(async (_url, init) => {
@@ -484,10 +480,6 @@ describe('OpenCode Zen quota provider (VS Code parity)', () => {
       configureOpenCodeCredentials({ list: async () => [key('opencode')] });
     });
 
-    afterEach(() => {
-      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
-    });
-
     test('reports the request counters, the spend and the models', async () => {
       stubConsole();
 
@@ -630,10 +622,6 @@ describe('OpenCode Zen quota provider (VS Code parity)', () => {
   describe('with a Console sign-in', () => {
     beforeEach(() => {
       configureOpenCodeCredentials({ list: async () => [consoleOAuth()] });
-    });
-
-    afterEach(() => {
-      configureOpenCodeCredentials({ list: async () => baseCredentialList() });
     });
 
     test('uses the Console token and organization', async () => {
@@ -1066,6 +1054,20 @@ describe('ClinePass quota provider (VS Code parity)', () => {
 });
 
 describe('Codex quota provider (VS Code parity)', () => {
+  // The refused path reads the Codex CLI's sign-in; point it at an empty folder so
+  // no test hands the developer's real `~/.codex/auth.json` token to a stub.
+  let codexHome: string;
+
+  beforeEach(() => {
+    codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+    process.env.CODEX_HOME = codexHome;
+  });
+
+  afterEach(() => {
+    delete process.env.CODEX_HOME;
+    fs.rmSync(codexHome, { recursive: true, force: true });
+  });
+
   for (const { balance, unlimited, expected } of [
     { balance: 62500, unlimited: false, expected: '62500' },
     { balance: '62500.00', unlimited: false, expected: '62500' },
@@ -1101,6 +1103,51 @@ describe('Codex quota provider (VS Code parity)', () => {
     globalThis.fetch = async () => new Response('unauthorized', { status: 401 });
     const expired = await fetchQuotaForProvider('codex');
     assert.equal(expired.error, 'Session expired \u2014 please re-authenticate with OpenAI');
+  });
+
+  describe('through the Codex CLI sign-in', () => {
+    const REFUSED = { error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule' } };
+    const CLI_USAGE = { email: 'cli@example.com', rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18000 } } };
+
+    const signInCli = () => fs.writeFileSync(
+      path.join(codexHome, 'auth.json'),
+      JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'cli-token', refresh_token: 'cli-refresh', account_id: 'acct_cli' } }),
+    );
+
+    // The usage endpoint refuses OpenCode's token and accepts the CLI's.
+    const stubUsageEndpoint = () => {
+      const authorizations: string[] = [];
+      stubFetchReturning(async (_url, init) => {
+        const headers = new Headers(init?.headers);
+        authorizations.push(headers.get('authorization') ?? '');
+        if (headers.get('authorization') !== 'Bearer cli-token') return Response.json(REFUSED, { status: 401 });
+        assert.equal(headers.get('chatgpt-account-id'), 'acct_cli');
+        return Response.json(CLI_USAGE);
+      });
+      return authorizations;
+    };
+
+    test('reads the numbers with the CLI sign-in and names its account', async () => {
+      signInCli();
+      const authorizations = stubUsageEndpoint();
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, true);
+      assert.equal(result.usage?.windows['5h'].usedPercent, 42);
+      assert.equal(result.accountLabel, 'cli@example.com');
+      assert.deepEqual(authorizations, ['Bearer test-token', 'Bearer cli-token']);
+    });
+
+    test('keeps the usage-page message without a CLI sign-in', async () => {
+      const authorizations = stubUsageEndpoint();
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'OpenAI shows usage for Sign in with ChatGPT only at chatgpt.com/settings/usage. The legacy Codex sign-ins show it here.');
+      assert.deepEqual(authorizations, ['Bearer test-token']);
+    });
   });
 
   test('omits the balance window when credits are absent', async () => {

@@ -1456,6 +1456,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': 'Aktualisiere Nutzung...',
   'settings.usage.page.header.lastUpdated': 'Zuletzt aktualisiert: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'Tarif: {plan} · Zuletzt aktualisiert: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': 'Konto: {account} · Zuletzt aktualisiert: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'Im Arbeitsstatusbereich anzeigen',
   'settings.usage.page.options.showInWorkStatus': 'Im Arbeitsstatusbereich anzeigen',
   'settings.usage.page.options.showInWorkStatusTooltip': 'Wenn aktiviert, ist die Nutzung dieses Anbieters im Arbeitsstatusbereich sichtbar.',

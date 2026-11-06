@@ -722,6 +722,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     const groups: Array<{
       providerId: string;
       providerName: string;
+      accountLabel?: string | null;
       entries: Array<[string, UsageWindow]>;
       error?: string;
     }> = [];
@@ -735,7 +736,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       const entries = Object.entries(windows);
       const error = (result && !result.ok && result.configured) ? result.error : undefined;
       if (entries.length > 0 || error) {
-        groups.push({ providerId: provider.id, providerName: provider.name, entries, error });
+        groups.push({ providerId: provider.id, providerName: provider.name, accountLabel: result?.accountLabel, entries, error });
       }
     }
 
@@ -884,6 +885,11 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                 <DropdownMenuLabel className="flex items-center gap-2 bg-[var(--surface-elevated)] typography-ui-label text-foreground">
                   <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
                   {group.providerName}
+                  {group.accountLabel ? (
+                    <span className="min-w-0 truncate typography-micro font-normal text-muted-foreground" title={group.accountLabel}>
+                      {group.accountLabel}
+                    </span>
+                  ) : null}
                 </DropdownMenuLabel>
                 {group.entries.length === 0 ? (
                   <DropdownMenuItem

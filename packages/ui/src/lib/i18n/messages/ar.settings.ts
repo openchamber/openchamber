@@ -1514,6 +1514,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': 'جارٍ تحديث الاستخدام…',
   'settings.usage.page.header.lastUpdated': 'آخر تحديث: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'الخطة: {plan} · آخر تحديث: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': 'الحساب: {account} · آخر تحديث: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'إظهار في لوحة حالة العمل',
   'settings.usage.page.options.showInWorkStatus': 'إظهار في لوحة حالة العمل',
   'settings.usage.page.options.showInWorkStatusTooltip': 'عند التفعيل، سيظهر استخدام هذا الموفر في لوحة حالة العمل.',
