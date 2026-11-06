@@ -1352,6 +1352,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.enterCommitMessage': 'コミットメッセージを入力してください',
   'gitView.toast.fetchedFromRemote': '{name}からフェッチしました',
   'gitView.toast.pulledFromRemote': '{name}からプルしました',
+  'gitView.toast.remoteUrlUserinfo': 'リモートURLから@の前の名前を削除してください',
   'gitView.toast.generateCommitMessageFailed': 'コミットメッセージの生成に失敗しました',
   'gitView.toast.mergeAborted': 'マージを中止しました',
   'gitView.toast.mergeCompleted': 'マージが完了しました',

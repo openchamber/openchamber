@@ -185,6 +185,7 @@ export function registerGitRoutes(app, {
     else if (code === 'SOURCE_CONTROL_BINDING_STALE') publicCode = 'STALE_BINDING';
     else if (code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') publicCode = 'STALE_REPOSITORY';
     else if (code === 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED') publicCode = 'REMOTE_CHANGED';
+    else if (code === 'INVALID_GIT_REMOTE_USERINFO') publicCode = 'REMOTE_URL_USERINFO';
     if (!publicCode && !storageFailure && code.includes('INVALID')) publicCode = 'INVALID_REQUEST';
     if (!publicCode && preservedCodes.includes(code)) publicCode = code;
     publicCode ??= 'UNKNOWN';
@@ -197,6 +198,7 @@ export function registerGitRoutes(app, {
       STALE_BINDING: 'Source control binding changed',
       STALE_CONFIG: 'Git repository configuration changed',
       REMOTE_CHANGED: 'Git remote or transport binding changed',
+      REMOTE_URL_USERINFO: 'Remove the name before @ from remote URL',
       AUTHENTICATION_REQUIRED: 'Git authentication is required',
       DESTINATION_SELECTION_REQUIRED: 'Contributor push destination selection is required',
       CONTRIBUTOR_MANAGED_TRANSPORT_REQUIRED: 'Contributor transfers require managed credentials',

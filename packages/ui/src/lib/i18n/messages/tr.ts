@@ -1247,6 +1247,7 @@ export const dict = {
   'gitView.toast.enterCommitMessage': 'Bir commit mesajı gir',
   'gitView.toast.fetchedFromRemote': '{name} uzak deposundan fetch edildi',
   'gitView.toast.pulledFromRemote': '{name} uzak deposundan pull edildi',
+  'gitView.toast.remoteUrlUserinfo': 'Uzak depo URL’sinden @ öncesindeki adı kaldırın',
   'gitView.toast.generateCommitMessageFailed': 'Commit mesajı oluşturulamadı',
   'gitView.toast.mergeAborted': 'Merge iptal edildi',
   'gitView.toast.mergeCompleted': 'Merge tamamlandı',

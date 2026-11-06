@@ -1246,6 +1246,7 @@ export const dict = {
   'gitView.toast.enterCommitMessage': 'Geben Sie eine Commit-Nachricht ein',
   'gitView.toast.fetchedFromRemote': 'Von {name} abgerufen',
   'gitView.toast.pulledFromRemote': 'Von {name} gepullt',
+  'gitView.toast.remoteUrlUserinfo': 'Namen vor @ aus der Remote-URL entfernen',
   'gitView.toast.generateCommitMessageFailed': 'Fehler beim Generieren der Commit-Nachricht',
   'gitView.toast.mergeAborted': 'Merge abgebrochen',
   'gitView.toast.mergeCompleted': 'Merge abgeschlossen',

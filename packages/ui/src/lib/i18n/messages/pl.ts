@@ -2786,6 +2786,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.enterCommitMessage': 'Wpisz wiadomość commita',
   'gitView.toast.fetchedFromRemote': 'Pobrano z {name}',
   'gitView.toast.pulledFromRemote': 'Pobrano i scalono z {name}',
+  'gitView.toast.remoteUrlUserinfo': 'Usuń nazwę przed @ z adresu remote',
   'gitView.toast.generateCommitMessageFailed': 'Nie udało się wygenerować wiadomości commita',
   'gitView.toast.mergeAborted': 'Scalanie przerwane',
   'gitView.toast.mergeCompleted': 'Scalanie zakończone',

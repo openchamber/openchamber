@@ -1289,6 +1289,7 @@ export const dict = {
   'gitView.toast.enterCommitMessage': 'أدخل رسالة الإيداع',
   'gitView.toast.fetchedFromRemote': 'تم الجلب من {name}',
   'gitView.toast.pulledFromRemote': 'تم السحب من {name}',
+  'gitView.toast.remoteUrlUserinfo': 'احذف الاسم قبل @ من عنوان URL البعيد',
   'gitView.toast.generateCommitMessageFailed': 'تعذّر إنشاء رسالة الإيداع',
   'gitView.toast.mergeAborted': 'أُلغي الدمج',
   'gitView.toast.mergeCompleted': 'اكتمل الدمج',
