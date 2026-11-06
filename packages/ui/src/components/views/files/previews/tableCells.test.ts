@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { cellParts, fromTsv, selectionSummary, sortedRowOrder, toTsv } from './tableCells';
+import { cellParts, columnSlots, fromTsv, selectionSummary, sortedRowOrder, toTsv } from './tableCells';
 
 describe('sorting', () => {
   const rows = [['10'], ['9'], [''], ['apple'], ['12.5%'], ['Banana'], ['1,000']];
@@ -63,5 +63,36 @@ describe('a chart of a selection', () => {
     const { chartProgram } = await import('./tableChart');
     expect(chartProgram([['2024-01', '1'], ['2024-02', '2']], [])).toContain('LineChart');
     expect(chartProgram([['a'], ['b']], ['x'])).toBeNull();
+  });
+});
+
+describe('virtual column gaps', () => {
+  test('every gap fits the HTML colspan limit without moving the drawn columns', () => {
+    const cases = [
+      { count: 0, drawn: [] },
+      { count: 1_000, drawn: [] },
+      { count: 1_001, drawn: [] },
+      { count: 1_001, drawn: [1_000] },
+      { count: 1_002, drawn: [1_001] },
+      { count: 5_000, drawn: [0, 2_500, 4_999] },
+      { count: 5_000, drawn: [4_998, 4_999] },
+    ];
+    for (const { count, drawn } of cases) {
+      let position = 0;
+      const columns: number[] = [];
+      for (const slot of columnSlots(count, drawn)) {
+        expect(slot.column).toBe(position);
+        if (slot.span === undefined) {
+          columns.push(slot.column);
+          position += 1;
+        } else {
+          // Browsers clamp a larger colspan, shifting every subsequent cell.
+          expect(slot.span > 0 && slot.span <= 1_000).toBe(true);
+          position += slot.span;
+        }
+      }
+      expect(columns).toEqual(drawn);
+      expect(position).toBe(count);
+    }
   });
 });
