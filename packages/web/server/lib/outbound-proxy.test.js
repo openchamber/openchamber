@@ -38,8 +38,7 @@ describe('applyOutboundProxyFromEnv', () => {
       import http from 'node:http';
       import assert from 'node:assert/strict';
       const seen = [];
-      const proxy = http.createServer((req, res) => res.end());
-      proxy.on('connect', (req, socket) => { seen.push('proxy ' + req.url); socket.end('HTTP/1.1 502 Bad Gateway\\r\\n\\r\\n'); });
+      const proxy = http.createServer((req, res) => { seen.push('proxy ' + req.method + ' ' + req.url); res.end(); });
       const local = http.createServer((req, res) => { seen.push('direct'); res.end('ok'); });
       await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
       await new Promise((resolve) => local.listen(0, '127.0.0.1', resolve));
@@ -47,7 +46,7 @@ describe('applyOutboundProxyFromEnv', () => {
       assert.equal(applyOutboundProxyFromEnv({ env: { HTTPS_PROXY: 'http://127.0.0.1:' + proxy.address().port, HTTP_PROXY: 'http://127.0.0.1:' + proxy.address().port } }), true);
       await fetch('http://upstream.invalid/usage').catch(() => {});
       assert.equal(await (await fetch('http://127.0.0.1:' + local.address().port + '/')).text(), 'ok');
-      assert.deepEqual(seen, ['proxy upstream.invalid:80', 'direct']);
+      assert.deepEqual(seen, ['proxy GET http://upstream.invalid/usage', 'direct']);
       process.exit(0);
     `], { encoding: 'utf8', timeout: 15_000, windowsHide: true });
     expect(result.status, result.stderr).toBe(0);
