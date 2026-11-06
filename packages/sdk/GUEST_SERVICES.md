@@ -143,6 +143,7 @@ Env the host sets:
 
 - `OPENCHAMBER_SERVICE_PORT` — port to bind on `127.0.0.1`
 - `OPENCHAMBER_SERVICE_TOKEN` — shared secret
+- `OPENCHAMBER_SERVICE_DATA_DIR` — this extension's own folder (`OPENCHAMBER_SERVICE_DATA_DIR` in `@openchamber/sdk` names the variable). The host creates it before the start. It survives restarts and updates and is deleted when the extension is removed. Keep the service's files here, never next to OpenChamber's own: the location of OpenChamber's data is not part of this contract
 - `OPENCHAMBER_SERVICE_SOCKETS` — JSON map `{ [socketId]: absolutePath }` for every binding that resolved (override or first existing candidate)
 - `OPENCHAMBER_HOST_CALLBACK_URL` — OpenChamber's callback listener: what a service calls on its own (*Calling OpenChamber*, below) and the requests the `source-control`, `notifications` and `tracker` roles send out
 
@@ -205,7 +206,7 @@ A service sends at most 60 prompts an hour, counting starts, sends and retries, 
 
 ## Running with nobody asking
 
-A service starts on the first request and stops after ten idle minutes; the next request starts it again, so keep state in a file or set `keepRunning`. Two manifest keys change that, and either one frees the service from needing a panel or background entry.
+A service starts on the first request and stops after ten idle minutes; the next request starts it again, so keep state in `OPENCHAMBER_SERVICE_DATA_DIR` or set `keepRunning`. Two manifest keys change that, and either one frees the service from needing a panel or background entry.
 
 `service.keepRunning: true` starts the service when OpenChamber starts or the extension is approved, and holds it through every idle stop. A check every 15 s brings a stopped one back, and a process that keeps dying waits longer each time, up to five minutes. A service that needs outside events holds its own connection or polls; arbitrary inbound routes do not exist.
 
@@ -487,7 +488,7 @@ A service with this role is a work item tracker next to Linear: YouTrack, Jira, 
 | `identifier` | The shape of an item's key: `key-number` (`PROJ-42`), `number` (`123`), `short-code` (letters and digits). OpenChamber compares identifiers case-insensitively everywhere and sends them upper-cased |
 | `urls.item` | 1 to 8 link templates: `/`, segments that are each a literal (`[A-Za-z0-9._~-]`) or a placeholder of `TRACKER_URL_TOKENS` (`{id}` the identifier, `{segment}` any one segment, `{segments+}` one or more, at most once), and optionally `?name={id}` when the identifier travels in the query. `{id}` once per template, in the path or the query. OpenChamber compiles them against the instance into the pattern that recognises a pasted link, on the server and in every client; an extension never supplies a regular expression |
 
-What the user sees: the card under Extension accounts asks for the server address first when `instances.kind` is `user`, then offers the ways in you declared: a token field (and a username for `basic`) with a link to `createPath`, and, for `oauth`, the client id and secret fields with the redirect URL to register, then a browser sign-in. Connected accounts, switching between them (`multipleAccounts`), project mapping (`projectMapping`) and the session comments switch (`sessionComments`) follow the capabilities. Pausing the extension takes the tracker out of every surface and keeps the accounts; removing it forgets them. In enterprise mode the role installs only from an allowed repository like every service; its reads carry no conversation content and its comments carry a fixed label and a session link, so nothing else is stripped.
+What the user sees: the card under Extension accounts asks for the server address first when `instances.kind` is `user`, then offers the ways in you declared: a token field (and a username for `basic`) with a link to `createPath`, and, for `oauth`, the client id and secret fields with the redirect URL to register, then a browser sign-in. Connected accounts, switching between them (`multipleAccounts`), project mapping (`projectMapping`) and the session comments switch (`sessionComments`) follow the capabilities. An extension without `contributes.integration` gets the tracker's account through `host.onConnection` in its frames: `connected`, and the account's name in `account`. It reads as not connected until OpenChamber has read the status. Pausing the extension takes the tracker out of every surface and keeps the accounts; removing it forgets them. In enterprise mode the role installs only from an allowed repository like every service; its reads carry no conversation content and its comments carry a fixed label and a session link, so nothing else is stripped.
 
 ### Calls
 

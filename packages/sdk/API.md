@@ -97,7 +97,7 @@ Each returns an unsubscribe function. State subscriptions replay the last known 
 | `session`      | snapshot or `null`       | Title falls back to `id`. `busy` is live status. `model` is `providerID/id` when present |
 | `surface` | `'panel' \| 'dialog' \| 'page' \| 'background' \| 'status' \| 'file' \| 'popover' \| 'block'` | Where the host mounted this frame |
 | `popover` | optional `{ id, data }` | Present in a host-created popover frame. `data` is bounded JSON from the owning frame |
-| `connection`   | `{ connected, account }` | Integration link state                                                                   |
+| `connection`   | `{ connected, account }` | Integration link state; a tracker extension without an integration gets its tracker account |
 | `settings`     | `Record<string, string>` | Declared keys only, without `secret` fields                                                                       |
 | `item`         | `GuestItem               | null`                                                                                    | Set when the user clicked this guest's chip on the composer, or ran one of this guest's `contributes.actions`. Narrow with `isGuestMessageItem` / `isGuestSessionItem` / `isGuestAttachItem` |
 
