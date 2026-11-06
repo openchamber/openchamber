@@ -1565,6 +1565,25 @@ describe('ModelControls in a pinned column', () => {
     }
   });
 
+  // BTW's model shortcut opens its own picker, never the main chat's (#6403).
+  test('opens the picker its composer opens, and only that one', async () => {
+    useUIStore.setState({ isModelSelectorOpen: true });
+    const isOpen = (dom: { container: Element }) => dom.container.querySelector('.model-controls__model-trigger')?.closest('[data-menu-open]')?.getAttribute('data-menu-open');
+    const closed = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_btw', modelSelectorOpen: false, onModelSelectorOpenChange: () => undefined }, column);
+    try {
+      expect(isOpen(closed.dom)).toBe('false');
+    } finally {
+      await closed.cleanup();
+    }
+    useUIStore.setState({ isModelSelectorOpen: false });
+    const open = await renderModelControls({ selection: pinnedSelection, sessionId: 'ses_btw', modelSelectorOpen: true, onModelSelectorOpenChange: () => undefined }, column);
+    try {
+      expect(isOpen(open.dom)).toBe('true');
+    } finally {
+      await open.cleanup();
+    }
+  });
+
   test('the main chat keeps the active folder catalog', async () => {
     const { dom, cleanup } = await renderModelControls();
     try {

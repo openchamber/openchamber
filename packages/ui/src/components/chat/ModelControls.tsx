@@ -375,12 +375,19 @@ type ModelControlsProps = {
      */
     rememberVariantPicks?: boolean;
 } & (
-    | { selection?: never; sessionId?: never; agentSelectable?: never }
+    | { selection?: never; sessionId?: never; agentSelectable?: never; modelSelectorOpen?: never; onModelSelectorOpenChange?: never }
     | {
         selection: BtwSelection;
         sessionId: string | null;
         /** Offers the agent picker and saves the pick for `sessionId` (a chat pinned in the side panel). */
         agentSelectable?: boolean;
+        /**
+         * The model picker's open state, owned by a composer that answers the
+         * model and effort shortcuts for this selection (BTW). The tooltips
+         * then name those shortcuts.
+         */
+        modelSelectorOpen?: boolean;
+        onModelSelectorOpenChange?: (open: boolean) => void;
     }
 );
 
@@ -399,6 +406,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     sessionId: controlledSessionId,
     agentSelectable = false,
     rememberVariantPicks = true,
+    modelSelectorOpen: controlledModelSelectorOpen,
+    onModelSelectorOpenChange,
 }) => {
     const { t } = useI18n();
     const { focusInput: focusColumnInput } = useChatColumnActions();
@@ -422,9 +431,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const getAgentColor = useAgentColors();
     const favoriteAgents = useUIStore((state) => state.favoriteAgents);
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-    const modelShortcut = selection ? undefined : formatShortcutForDisplay(getEffectiveShortcutCombo('open_model_selector', shortcutOverrides), '');
+    const answersModelShortcuts = !selection || onModelSelectorOpenChange !== undefined;
+    const modelShortcut = answersModelShortcuts ? formatShortcutForDisplay(getEffectiveShortcutCombo('open_model_selector', shortcutOverrides), '') : undefined;
     const agentShortcut = selection ? undefined : formatShortcutForDisplay(getEffectiveShortcutCombo('cycle_agent', shortcutOverrides), '');
-    const thinkingShortcut = selection ? undefined : formatShortcutForDisplay(getEffectiveShortcutCombo('cycle_thinking_variant', shortcutOverrides), '');
+    const thinkingShortcut = answersModelShortcuts ? formatShortcutForDisplay(getEffectiveShortcutCombo('cycle_thinking_variant', shortcutOverrides), '') : undefined;
     const toggleFavoriteAgent = useUIStore((state) => state.toggleFavoriteAgent);
     const currentProviderId = useConfigStore((state) => selection ? selection.model?.providerId ?? '' : state.currentProviderId);
     const currentModelId = useConfigStore((state) => selection ? selection.model?.modelId ?? '' : state.currentModelId);
@@ -536,7 +546,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const lastUsedEfforts = useUIStore((state) => state.lastUsedEfforts);
     const globalModelSelectorOpen = useUIStore((state) => !selection && state.isModelSelectorOpen);
     const [localModelSelectorOpen, setLocalModelSelectorOpen] = React.useState(false);
-    const isModelSelectorOpen = selection ? localModelSelectorOpen : globalModelSelectorOpen;
+    const isModelSelectorOpen = selection ? controlledModelSelectorOpen ?? localModelSelectorOpen : globalModelSelectorOpen;
     const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
     const setSettingsPage = useUIStore((state) => state.setSettingsPage);
@@ -596,7 +606,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     useWidthMorph(modelTriggerRef);
     useWidthMorph(agentTriggerRef);
     useWidthMorph(variantTriggerRef);
-    const setAgentMenuOpen = selection ? setLocalModelSelectorOpen : setModelSelectorOpen;
+    const setAgentMenuOpen = selection ? onModelSelectorOpenChange ?? setLocalModelSelectorOpen : setModelSelectorOpen;
     const openAddProviderSettings = React.useCallback(() => {
         requestProviderConnect(true);
         setSettingsPage('providers');

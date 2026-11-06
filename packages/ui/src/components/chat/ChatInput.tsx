@@ -121,7 +121,7 @@ import { PastedSessionIds, sessionLinkOverPastedId, type PastedSessionIdRange } 
 import { bareSessionId, findSessionLinks, sessionLinkKey, type SessionLinkTarget } from '@/lib/sessionLinks';
 import { sessionMentionChip } from '@/lib/messages/sessionMentionChip';
 import { appOwnOrigins } from '@/lib/router/appOrigins';
-import type { Session } from '@/lib/opencode/model';
+import { findCatalogModel, type Session } from '@/lib/opencode/model';
 import { usePendingComposerReferences, resolveComposerReferenceHandoffTarget, type ComposerReferenceHandoff } from './composer/pendingComposerReferences';
 import { readLinkedReferences, useDraftLinkedReferences, useLinkedReferenceDrafts } from './composer/linkedReferenceDrafts';
 import { postTrackerSessionStarted } from '@/lib/trackers/sessionStatus';
@@ -158,6 +158,7 @@ import { displayedPermissionMode, nextPermissionMode } from '@/stores/utils/perm
 import { selectAutoReady, selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
 import { getNextFavoriteModel } from '@/lib/modelRefs';
+import { modelVariantNames, nextThinkingVariant } from '@/lib/modelVariants';
 import { hasOpenDropdown } from '@/hooks/keyboard-shortcut-dom';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
 import { useI18n } from '@/lib/i18n';
@@ -768,21 +769,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         selections.saveAgentModelForSession(btwComposerSessionId, agent, model.providerId, model.modelId);
         selections.saveAgentModelVariantForSession(btwComposerSessionId, agent, model.providerId, model.modelId, variant);
     }, [btwComposerSessionId, effectiveBtwSelection, isBtwActive]);
-    // While BTW is open the app-wide favorite-model handlers decline, so the
-    // parent's model never moves; these step the BTW model from the one its
-    // chip shows and save it the way the BTW model picker does (#5914). As
-    // with permission keys, a key pressed in a chat pinned in the side panel
-    // is that chat's and a key pressed anywhere else is the main chat's.
-    const cycleBtwFavoriteModel = (event: KeyboardEvent, delta: number): boolean | void => {
+    // While BTW is open the app-wide model, effort and favorite-model handlers
+    // decline, so the parent's selection never moves; these act on the BTW
+    // selection its chips show and save it the way the BTW picker does
+    // (#5914, #6403). As with permission keys, a key pressed in a chat pinned
+    // in the side panel is that chat's and a key pressed anywhere else is the
+    // main chat's.
+    const [btwModelSelectorOpen, setBtwModelSelectorOpen] = React.useState(false);
+    if (!isBtwActive && btwModelSelectorOpen) setBtwModelSelectorOpen(false);
+    const isBtwKey = (event: KeyboardEvent): boolean => {
         const keyColumn = event.target instanceof Element ? event.target.closest('[data-chat-column="pinned"]') : null;
         if (columnPinned ? !keyColumn?.contains(composerFormRef.current) : keyColumn) return false;
         const ui = useUIStore.getState();
-        const hasOverlay = ui.isSettingsDialogOpen
+        return !(ui.isSettingsDialogOpen
             || ui.isCommandPaletteOpen
             || ui.isHelpDialogOpen
             || ui.isSessionSwitcherOpen
-            || ui.isAboutDialogOpen;
-        if (hasOverlay || !btwComposerSessionId) return false;
+            || ui.isAboutDialogOpen);
+    };
+    const cycleBtwFavoriteModel = (event: KeyboardEvent, delta: number): boolean | void => {
+        if (!isBtwKey(event) || !btwComposerSessionId) return false;
+        const ui = useUIStore.getState();
         const { model, agent } = effectiveBtwSelection;
         const next = getNextFavoriteModel(
             ui.favoriteModels,
@@ -796,7 +803,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         selections.saveSessionModelSelection(btwComposerSessionId, next.providerID, next.modelID);
         if (agent) selections.saveAgentModelForSession(btwComposerSessionId, agent, next.providerID, next.modelID);
     };
+    const cycleBtwThinkingVariant = (event: KeyboardEvent): boolean | void => {
+        if (!isBtwKey(event) || !btwComposerSessionId) return false;
+        const { model, agent, variant } = effectiveBtwSelection;
+        if (!model || !agent) return false;
+        const variants = modelVariantNames(findCatalogModel(providerCatalog.find((provider) => provider.id === model.providerId)?.models, model.modelId));
+        if (variants.length === 0) return false;
+        useSelectionStore.getState().saveAgentModelVariantForSession(
+            btwComposerSessionId,
+            agent,
+            model.providerId,
+            model.modelId,
+            nextThinkingVariant(variants, variant),
+        );
+    };
     useKeybinds(isBtwActive ? {
+        open_model_selector: (event) => {
+            if (!isBtwKey(event) || !btwComposerSessionId) return false;
+            setBtwModelSelectorOpen((open) => !open);
+        },
+        cycle_thinking_variant: cycleBtwThinkingVariant,
         cycle_favorite_model_forward: (event) => cycleBtwFavoriteModel(event, 1),
         cycle_favorite_model_backward: (event) => cycleBtwFavoriteModel(event, -1),
     } : {});
@@ -5238,6 +5264,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         isBtw={isBtwActive}
                         modelSessionId={btwComposerSessionId}
                         btwSelection={effectiveBtwSelection}
+                        btwModelSelectorOpen={btwModelSelectorOpen}
+                        onBtwModelSelectorOpenChange={setBtwModelSelectorOpen}
                         pinnedSelection={pinnedComposerSelection}
                         onRunInParallel={!isMobile && !isBtwActive && !columnPinned ? handleRunInParallel : undefined}
                         parallelRun={parallelRun}
