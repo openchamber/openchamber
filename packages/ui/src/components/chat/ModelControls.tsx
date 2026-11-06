@@ -51,7 +51,7 @@ import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
-import { formatEffortLabel, getCycledPrimaryAgentName, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
+import { formatEffortLabel, getCycledPrimaryAgentName, getEffortTone, getEffortToneClass, isPrimaryMode, type MobileControlsPanel } from './mobileControlsUtils';
 import { getCurrentIntlLocale, isRightToLeft, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, formatShortcutForDisplay, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
@@ -2682,9 +2682,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const displayVariant = currentVariant ? formatEffortLabel(currentVariant) : t('chat.modelControls.default');
         const isDefault = !currentVariant;
-        // The effort reads as a quiet suffix of the model name: "Opus 5.5 / medium".
-        // It brightens on its own hover, so the pointer shows it is a control of
-        // its own; where the row is too narrow for it, its icon stands in.
+        const isGreyEffort = getEffortTone(currentVariant) === 'default';
+        // The effort reads as a quiet suffix of the model name: "Opus 5.5 / medium",
+        // tinted by level. It brightens on its own hover, so the pointer shows it
+        // is a control of its own; where the row is too narrow for it, its icon
+        // stands in.
         const triggerLabel = (
             <>
                 <Icon name="brain-ai-3" className={cn('model-controls__variant-icon flex-shrink-0 text-muted-foreground group-hover:text-foreground', controlIconSize)} />
@@ -2693,7 +2695,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     className={cn(
                         'model-controls__variant-label',
                         controlTextSize,
-                        'font-medium min-w-0 truncate lowercase text-muted-foreground group-hover:text-foreground',
+                        'font-medium min-w-0 truncate lowercase',
+                        getEffortToneClass(currentVariant),
+                        isGreyEffort ? 'group-hover:text-foreground' : 'group-hover:opacity-100',
                         isMobile && 'max-w-[60px]',
                         isDesktop && 'max-w-[180px]',
                     )}
