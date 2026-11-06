@@ -2279,7 +2279,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return <MobileModelButton
                 model={selection.model}
                 onOpenModel={() => setActiveMobilePanel('model')}
-                className="model-controls__model-trigger flex-shrink-0"
+                className="model-controls__model-trigger min-w-0"
             />;
         }
         const handleThinkingVariantKey = (e: React.KeyboardEvent, selectedItem: ModelPickerEntry) => {
@@ -2761,7 +2761,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     }}
                     aria-label={tooltipText}
                     className={cn(
-                        'model-controls__variant-trigger group flex items-center gap-1 min-w-0 focus:outline-none',
+                        // Drawn as the main composer's phone row: 36px to tap in a 26px row.
+                        'model-controls__variant-trigger group -my-[5px] flex flex-shrink-0 items-center gap-1 px-1.5 focus:outline-none',
                         buttonHeight,
                         'cursor-pointer hover:bg-transparent',
                     )}
@@ -3001,7 +3002,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 disabled={!canSelectAgent}
                 aria-label={agentUnavailableText}
                 className={cn(
-                    'model-controls__agent-trigger flex items-center gap-1.5 transition-colors min-w-0 focus:outline-none',
+                    'model-controls__agent-trigger -my-[5px] flex flex-shrink-0 items-center gap-1.5 transition-colors min-w-0 focus:outline-none',
                     buttonHeight,
                     canSelectAgent ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
                 )}
@@ -3026,14 +3027,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     </>
                 ) : (
                     <>
-                        {renderAgentMark()}
+                        {/* As the main composer's agent button: the name in the
+                            agent's colour, a mark only when it is missing. */}
+                        {agentUnavailable ? renderAgentMark() : null}
                         <span
                             className={cn(
                                 'model-controls__agent-label',
                                 controlTextSize,
-                                'font-medium truncate min-w-0 text-foreground',
-                                isMobile && 'max-w-[60px]'
+                                'font-medium truncate min-w-0',
+                                (agentUnavailable || !uiAgentName) && 'text-foreground',
                             )}
+                            style={!agentUnavailable && uiAgentName ? { color: getAgentColor(uiAgentName).color } : undefined}
                         >
                             {getAgentDisplayName()}
                         </span>
@@ -3045,7 +3049,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const inlineMobileSelection = isMobile && Boolean(selection);
     const inlineClassName = cn(
-        '@container/model-controls flex items-center min-w-0',
+        'flex items-center min-w-0',
+        // The labels collapse to icons as a desktop row narrows (index.css). A
+        // phone keeps them, as the main composer's row does, and truncates.
+        !isMobile && '@container/model-controls',
         // Only force full-width + truncation behaviors on true mobile layouts.
         // VS Code also uses "compact" mode, but should keep its right-aligned inline sizing.
         isMobile && 'w-full',
@@ -3062,13 +3069,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 <div
                     className={cn(
                         'flex items-center min-w-0 flex-1',
-                        inlineMobileSelection ? 'justify-start' : 'justify-end',
+                        // A phone lays the row out as the main composer's: model left, agent right.
+                        inlineMobileSelection ? 'justify-between' : 'justify-end',
+                        // No overflow-hidden: mobile.css makes it a vertical scroller,
+                        // and the 36px triggers in this 26px row would draw its thumb.
                         inlineGapClass,
-                        isMobile && 'overflow-hidden'
                     )}
                 >
                     {/* The effort follows the model as its suffix, so the two sit closer than the other controls. */}
-                    <div className="flex items-center gap-x-1 min-w-0">
+                    <div className={cn('flex items-center min-w-0', isMobile ? 'gap-x-0.5' : 'gap-x-1')}>
                         {renderModelSelector()}
                         {renderVariantSelector()}
                     </div>

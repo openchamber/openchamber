@@ -1122,9 +1122,10 @@ so they never mix with the main draft's files; the attach control offers
 only local files. Goals, expansion, shell, linked context (issues, PRs,
 guests) and file/agent mention autocomplete are unavailable. Auto-accept is
 applied before the first send.
-On mobile, the model, effort and agent controls sit in the input's upper-left
-row and open the same bottom sheets as the main composer's; the footer only
-contains auto-accept and send/stop controls.
+On mobile, the model, effort and agent controls take the main composer's
+bottom row below the footer, drawn the same way, and open the same bottom
+sheets; the footer holds the files-only attach, auto-accept and send/stop
+controls.
 
 Escape closes menus first. Otherwise it returns to normal: an unsent BTW is
 discarded with its text, references, selections and panel; a creating or real
