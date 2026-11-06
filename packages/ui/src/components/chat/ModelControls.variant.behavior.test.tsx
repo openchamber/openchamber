@@ -1575,6 +1575,7 @@ describe('ModelControls in a pinned column', () => {
     catalogLoads.length = 0;
     knownElsewhere = nothingKnownElsewhere();
     setSessionRecord(undefined);
+    useSelectionStore.setState({ savedVariant: undefined, sessionAgentSelections: new Map() });
     useUIStore.setState({ isMobile: false, isModelSelectorOpen: false, lastUsedEfforts: {} });
     useConfigStore.setState({ providers: [provider], agents: [agent], providersLoaded: true, agentsLoaded: true });
     folderCatalogs = new Map([[PINNED_FOLDER, { providers: [pinnedProvider], agents: [agent, stockAgent], loaded: true }]]);
@@ -1646,7 +1647,11 @@ describe('ModelControls in a pinned column', () => {
   // A pinned chat's agent pick carries the level its composer is on, as a
   // BTW pick does, instead of the new agent falling back to another level.
   test('an agent pick carries the effort the pinned composer is on', async () => {
+    // The store copies a spy into every later state, so restore the function
+    // on the live state: `mockRestore` reaches only the object spied on.
+    const saveOriginal = useSelectionStore.getState().saveAgentModelVariantForSession;
     const saveVariant = spyOn(useSelectionStore.getState(), 'saveAgentModelVariantForSession');
+    saveVariant.mockClear();
     const { dom, cleanup } = await renderModelControls({ selection: { ...pinnedSelection, variant: 'high' }, sessionId: 'ses_pinned' }, column);
     try {
       const stockRow = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button'))
@@ -1657,7 +1662,7 @@ describe('ModelControls in a pinned column', () => {
       // The main chat's agent stays its own.
       expect(useConfigStore.getState().currentAgentName).toBe(AGENT);
     } finally {
-      saveVariant.mockRestore();
+      useSelectionStore.setState({ saveAgentModelVariantForSession: saveOriginal });
       await cleanup();
     }
   });
