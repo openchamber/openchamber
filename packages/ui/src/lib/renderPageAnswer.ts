@@ -11,11 +11,12 @@ const errorSchema = z.object({ error: z.string().min(1) }).catch({ error: '' });
  * that no longer waits, because it was answered elsewhere or its turn ended,
  * is refused with the server's message. A ui page this client cannot draw
  * answers with `notDrawn`, the parser's errors, so the agent can fix it.
+ * `declined` ends the wait without an answer.
  */
 export async function answerRenderedPage(input: {
     sessionId: string;
     callId: string;
-} & ({ summary: string; data: JsonValue } | { notDrawn: string[] })): Promise<void> {
+} & ({ summary: string; data: JsonValue } | { notDrawn: string[] } | { declined: true })): Promise<void> {
     const response = await runtimeFetch('/api/openchamber/render/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

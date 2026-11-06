@@ -107,13 +107,17 @@ describe('answer state', () => {
         const document = buildHtmlRenderDocument('<p>a</p>', theme, { answerState: { waiting: false, answer: { note: '</script><script>alert(1)</script>' } } });
         const start = document.indexOf('<script type="application/json" id="oc-html-render-answer">');
         const json = document.slice(document.indexOf('>', start) + 1, document.indexOf('</script>', start));
-        expect(JSON.parse(json)).toEqual({ waiting: false, answer: { note: '</script><script>alert(1)</script>' } });
+        expect(JSON.parse(json)).toEqual({ waiting: false, answer: { note: '</script><script>alert(1)</script>' }, declineLabel: 'Decline' });
         // The bootstrap, the answer state and the answer script, nothing more.
         expect(document.match(/<\/script>/g)?.length).toBe(3);
     });
 
     test('starts a page as not waiting unless told', () => {
-        expect(buildHtmlRenderDocument('<p>a</p>', theme)).toContain('{"waiting":false,"answer":null}');
+        expect(buildHtmlRenderDocument('<p>a</p>', theme)).toContain('{"waiting":false,"answer":null,');
+    });
+
+    test('names the page\'s Decline in the chat\'s language', () => {
+        expect(buildHtmlRenderDocument('<p>a</p>', theme, { declineLabel: 'Відхилити' })).toContain('"declineLabel":"Відхилити"');
     });
 });
 

@@ -5,6 +5,7 @@ import { locateChatQuote } from '@/lib/chatQuoteAnchor';
 
 import {
     buildHtmlRenderDocument,
+    htmlRenderAnswerStateMessage,
     htmlRenderClearSelectionMessage,
     htmlRenderMarksMessage,
     htmlRenderPointerMessage,
@@ -545,5 +546,33 @@ describe('a page that waits for an answer', () => {
         page.send(htmlRenderSubmitReply(1));
         await settle();
         expect(page.sent).toContain(JSON.stringify({ type: 'test:sent', answer: { layout: 'b' } }));
+    });
+
+    test('puts Decline beside its last button, sends it on a click, and drops it once the page stops waiting', () => {
+        const page = mountPage({ waiting: true, answer: null }, '<p>Pick one</p><div><button class="oc-button">A</button><button class="oc-button">B</button></div><p>Why</p>');
+        const decline = page.win.document.querySelector('[data-oc-decline]');
+
+        expect(decline?.textContent).toBe('Decline');
+        expect(decline?.previousElementSibling?.textContent).toBe('B');
+        expect(page.reports.some((report) => report?.kind === 'decline-placed' && report.placed)).toBe(true);
+
+        decline?.dispatchEvent(new page.win.MouseEvent('click'));
+        expect(page.reports.at(-1)).toEqual({ kind: 'decline' });
+        expect(decline?.hasAttribute('disabled')).toBe(true);
+
+        page.send(htmlRenderAnswerStateMessage({ waiting: false, answer: null }));
+        expect(page.win.document.querySelector('[data-oc-decline]')).toBeNull();
+    });
+
+    test('turns Decline off while its answer is on its way', () => {
+        const page = mountPage({ waiting: true, answer: null }, '<button class="oc-button">Send</button>');
+        page.run('window.openchamber.submit({},"Send");');
+        expect(page.win.document.querySelector('[data-oc-decline]')?.hasAttribute('disabled')).toBe(true);
+    });
+
+    test('tells the host it found no button, so the host draws Decline under the page', () => {
+        const page = mountPage({ waiting: true, answer: null });
+        expect(page.win.document.querySelector('[data-oc-decline]')).toBeNull();
+        expect(page.reports.some((report) => report?.kind === 'decline-placed' && !report.placed)).toBe(true);
     });
 });

@@ -1476,10 +1476,12 @@ function addKitStyles() {
   document.head.append(style);
 }
 
-export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
+export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }: {
   source: string;
   complete: boolean;
   host?: UiBlockHost;
+  /** The host's own controls, after the form's Send in the same row. */
+  actions?: React.ReactNode;
   /** Hears why a finished block could not be drawn: the parser's errors, or a drawing failure. */
   onNotDrawn?: (errors: string[]) => void;
 }) {
@@ -1701,10 +1703,16 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn }: {
         </FormContext.Provider>
       </BlockErrorBoundary>
       {showNote && !slot && noteElement ? <div className="mt-2">{noteElement}</div> : null}
-      {sendButton ? (
-        <FormContext.Provider value={form}>
-          <div className="mt-2"><Button props={sendButton} /></div>
-        </FormContext.Provider>
+      {sendButton || actions ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {sendButton ? (
+            <FormContext.Provider value={form}>
+              <Button props={sendButton} />
+            </FormContext.Provider>
+          ) : null}
+          {/* Nothing else is sent while the form's answer is on its way. */}
+          {actions ? <fieldset disabled={disabled} className="contents">{actions}</fieldset> : null}
+        </div>
       ) : null}
       {replyForm ? (
         <div className="mt-2">

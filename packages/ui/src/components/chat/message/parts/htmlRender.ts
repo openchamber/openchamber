@@ -41,6 +41,10 @@ const SIZE_MESSAGE = `${MESSAGE_PREFIX}size`;
 const OPEN_LINK_MESSAGE = `${MESSAGE_PREFIX}open-link`;
 const KEY_MESSAGE = `${MESSAGE_PREFIX}key`;
 const ANSWER_STATE_MESSAGE = `${MESSAGE_PREFIX}answer-state`;
+// The page's Decline was clicked, and where the answer script put it: beside
+// the page's last button, or nowhere when the page has none.
+const DECLINE_MESSAGE = `${MESSAGE_PREFIX}decline`;
+const DECLINE_PLACED_MESSAGE = `${MESSAGE_PREFIX}decline-placed`;
 const SELECTION_MESSAGE = `${MESSAGE_PREFIX}selection`;
 // Escape pressed in the page while it has a reported selection: the host
 // closes the selection menu, as Escape does for a selection in the chat.
@@ -201,6 +205,10 @@ const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repe
     + '.oc-button[data-variant=outline]:hover,.oc-button[data-variant=outline]:focus-visible{background-image:linear-gradient(var(--oc-hover),var(--oc-hover))}'
     + '.oc-button[data-variant=outline]:active{background-image:linear-gradient(var(--oc-active),var(--oc-active));box-shadow:inset 0 0 0 0.5px var(--oc-edge)}'
     + '.oc-button[data-variant=destructive]{--oc-button-bg:var(--oc-destructive-bg);--oc-button-hover:var(--oc-destructive-hover);--oc-button-active:var(--oc-destructive-active);--oc-button-border:var(--oc-destructive-border);--oc-button-text:var(--oc-destructive-text)}'
+    // The chat's own Decline, which the answer script puts beside the page's
+    // last button while it waits: the app's secondary Button, a flat muted fill.
+    + '.oc-button[data-oc-decline]{margin-inline-start:calc(var(--oc-rem) * .5);--oc-button-bg:var(--muted);--oc-button-hover:var(--muted);--oc-button-active:var(--muted);--oc-button-border:transparent;--oc-button-text:var(--foreground);--oc-button-shadow:none;--oc-button-sheen:none}'
+    + '.oc-button[data-oc-decline]:hover,.oc-button[data-oc-decline]:focus-visible{background-image:linear-gradient(var(--oc-hover),var(--oc-hover))}'
     // Focus draws no ring in the app: a focused control takes its hover fill.
     + '.oc-option:focus-visible,.oc-button:focus-visible{outline:none}';
 
@@ -496,21 +504,34 @@ export interface HtmlRenderAnswerState {
 // The host's reply settles the promise; a state message from the host ends
 // the wait when it ended elsewhere (another device answered, or the user
 // wrote in the chat).
-const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={};`
+//
+// While the page waits, the script also puts the chat's Decline beside the
+// page's last `.oc-button`, the class the tool description gives agents for
+// their send button, so it sits with the page's own actions however long the
+// page is. It reports whether it found one; without one the host draws its
+// Decline under the page. Decline is off while an answer is on its way.
+const ANSWER_SCRIPT = `(function(){if(window.parent===window)return;var S=JSON.parse(document.getElementById("oc-html-render-answer").textContent),I=0,R={},DL=S.declineLabel||"Decline",D=null;`
+    + `var DP=function(){var a,b;if(!S.waiting){if(D&&D.parentNode)D.parentNode.removeChild(D);return;}`
+    + `a=document.querySelectorAll(".oc-button:not([data-oc-decline])");b=a[a.length-1];`
+    + `if(!b){if(D&&D.parentNode)D.parentNode.removeChild(D);window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:false},"*");return;}`
+    + `if(!D){D=document.createElement("button");D.type="button";D.className="oc-button";D.setAttribute("data-oc-decline","");D.textContent=DL;`
+    + `D.addEventListener("click",function(){if(!S.waiting||D.disabled)return;D.disabled=true;window.parent.postMessage({type:${JSON.stringify(DECLINE_MESSAGE)}},"*");});}`
+    + `D.disabled=Object.keys(R).length>0;if(b.nextElementSibling!==D)b.insertAdjacentElement("afterend",D);window.parent.postMessage({type:${JSON.stringify(DECLINE_PLACED_MESSAGE)},placed:true},"*");};`
     + `var o=window.openchamber={answer:S.answer===null?undefined:S.answer,submit:function(data,summary){return new Promise(function(res,rej){`
     + `if(!S.waiting)return rej(new Error("This page is not waiting for an answer"));`
     + `if(navigator.userActivation&&!navigator.userActivation.isActive)return rej(new Error("openchamber.submit works only from a click"));`
     + `if(typeof summary!=="string"||!summary.trim())return rej(new Error("summary is required: the choice in a few words"));`
-    + `var id=++I,v=data===undefined?null:data;R[id]={res:res,rej:rej,data:v};`
-    + `try{window.parent.postMessage({jsonrpc:"2.0",id:id,method:"ui/message",params:{role:"user",content:[{type:"text",text:summary}],_meta:{"openchamber/data":v}}},"*");}catch(x){delete R[id];rej(x);}});}};`
+    + `var id=++I,v=data===undefined?null:data;R[id]={res:res,rej:rej,data:v};if(D)D.disabled=true;`
+    + `try{window.parent.postMessage({jsonrpc:"2.0",id:id,method:"ui/message",params:{role:"user",content:[{type:"text",text:summary}],_meta:{"openchamber/data":v}}},"*");}catch(x){delete R[id];DP();rej(x);}});}};`
     + `window.addEventListener("message",function(e){var d=e.data,r;if(e.source!==window.parent||!d)return;`
-    + `if(d.type===${JSON.stringify(ANSWER_STATE_MESSAGE)}){S={waiting:d.waiting===true,answer:d.answer===undefined?null:d.answer};o.answer=S.answer===null?undefined:S.answer;return;}`
+    + `if(d.type===${JSON.stringify(ANSWER_STATE_MESSAGE)}){S={waiting:d.waiting===true,answer:d.answer===undefined?null:d.answer};o.answer=S.answer===null?undefined:S.answer;DP();return;}`
     + `if(d.jsonrpc!=="2.0"||!R[d.id])return;r=R[d.id];delete R[d.id];`
-    + `if(d.error)r.rej(new Error(String(d.error.message||"The answer was not sent")));else{S={waiting:false,answer:r.data};o.answer=r.data;r.res();}});})();`;
+    + `if(d.error)r.rej(new Error(String(d.error.message||"The answer was not sent")));else{S={waiting:false,answer:r.data};o.answer=r.data;r.res();}DP();});`
+    + `if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",DP);else DP();window.addEventListener("load",DP);})();`;
 
 // JSON inside a script element: "<" is escaped so no "</script>" in the data
 // can close it.
-const scriptJson = (value: HtmlRenderAnswerState): string => JSON.stringify(value).replace(/</g, '\\u003c');
+const scriptJson = (value: HtmlRenderAnswerState & { declineLabel: string }): string => JSON.stringify(value).replace(/</g, '\\u003c');
 
 // Comments and raw-text elements are blanked to the same length before the
 // head is located, so a "<head>" written inside a script or comment is never
@@ -525,12 +546,17 @@ const blankNonMarkup = (html: string): string => html.replace(
  * its head. `contained` is for a frame with nothing around it to scroll (the
  * full-screen view): the page's own scrolling stops at its edges without the
  * elastic bounce. `answerState` is where the page stands on its answer when
- * it loads; later changes reach it as messages.
+ * it loads; later changes reach it as messages. `declineLabel` is the chat's
+ * word for the Decline the page shows while it waits.
  */
 export function buildHtmlRenderDocument(
     html: string,
     theme: HtmlRenderTheme,
-    { contained = false, answerState = { waiting: false, answer: null } }: { contained?: boolean; answerState?: HtmlRenderAnswerState } = {},
+    { contained = false, answerState = { waiting: false, answer: null }, declineLabel = 'Decline' }: {
+        contained?: boolean;
+        answerState?: HtmlRenderAnswerState;
+        declineLabel?: string;
+    } = {},
 ): string {
     const scan = blankNonMarkup(html);
     const bootstrap = [
@@ -540,7 +566,7 @@ export function buildHtmlRenderDocument(
         // Its own element: a theme switch rewrites the theme style whole.
         contained ? '<style>html{overscroll-behavior:none}</style>' : '',
         `<script>${BOOTSTRAP_SCRIPT}</script>`,
-        `<script type="application/json" id="oc-html-render-answer">${scriptJson(answerState)}</script>`,
+        `<script type="application/json" id="oc-html-render-answer">${scriptJson({ ...answerState, declineLabel })}</script>`,
         `<script>${ANSWER_SCRIPT}</script>`,
     ].join('');
     const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
@@ -632,7 +658,9 @@ type HtmlRenderFrameMessage =
     // An empty id is a click on no mark; the rect is then the click's point.
     | { kind: 'selection-escape' }
     | { kind: 'mark-click'; id: string; rect: z.infer<typeof selectionRectSchema> }
-    | { kind: 'scroll'; direction: FrameScrollDirection };
+    | { kind: 'scroll'; direction: FrameScrollDirection }
+    | { kind: 'decline' }
+    | { kind: 'decline-placed'; placed: boolean };
 
 /** A quote mark the host asks a page to paint. */
 export interface HtmlRenderMark {
@@ -656,6 +684,8 @@ const frameMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal(SELECTION_ESCAPE_MESSAGE) }),
     z.object({ type: z.literal(MARK_CLICK_MESSAGE), id: z.string().max(200), rect: selectionRectSchema }),
     z.object({ type: z.literal(SCROLL_MESSAGE), direction: z.enum(['up', 'down']) }),
+    z.object({ type: z.literal(DECLINE_MESSAGE) }),
+    z.object({ type: z.literal(DECLINE_PLACED_MESSAGE), placed: z.boolean() }),
 ]);
 
 // MCP Apps `ui/message`. Only text content is read; the summary is its text.
@@ -699,6 +729,8 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     if (message.type === SELECTION_ESCAPE_MESSAGE) return { kind: 'selection-escape' };
     if (message.type === MARK_CLICK_MESSAGE) return { kind: 'mark-click', id: message.id, rect: message.rect };
     if (message.type === SCROLL_MESSAGE) return { kind: 'scroll', direction: message.direction };
+    if (message.type === DECLINE_MESSAGE) return { kind: 'decline' };
+    if (message.type === DECLINE_PLACED_MESSAGE) return { kind: 'decline-placed', placed: message.placed };
     // Only a chord with Cmd or Ctrl: the page never passes plain typing on,
     // and a page that tried to must not reach the app's single-key handling.
     if (!message.metaKey && !message.ctrlKey) return null;
