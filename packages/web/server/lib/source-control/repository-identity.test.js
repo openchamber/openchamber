@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPrivateRepositoryIdentityResolver, resolvePrivateRepositoryIdentity, resolveRepositoryIdentity } from './repository-identity.js';
+import { createPrivateRepositoryIdentityResolver, createRepositoryIdResolver, resolvePrivateRepositoryIdentity, resolveRepositoryIdentity } from './repository-identity.js';
 import { createBindingService } from './binding-service.js';
 import { parseBindingStore } from './binding-contract.js';
 import { fingerprintRemoteUrl, isDiskPathRemoteUrl, redactRemoteUrl, redactSensitiveText } from './url-redaction.js';
@@ -399,6 +399,25 @@ describe('source-control repository identity', () => {
     const publicContext = await resolveRepositoryIdentity(repository);
     expect(publicContext.configRevision).toBe(second.configRevision);
     expect(publicContext).not.toHaveProperty('transportRevision');
+  });
+
+  it('resolves the record ID the full identity uses from the git paths alone', async () => {
+    const repository = makeDirectory();
+    git(repository, ['init', '-b', 'main']);
+    git(repository, ['remote', 'add', 'origin', 'https://example.com/team/repository.git']);
+
+    const full = await resolveRepositoryIdentity(repository);
+    const id = await createRepositoryIdResolver()(repository);
+
+    expect(id).toEqual({
+      supported: true,
+      bare: false,
+      repositoryId: full.repositoryId,
+      gitDirectory: fs.realpathSync(path.join(repository, '.git')),
+    });
+    await expect(createRepositoryIdResolver({
+      resolveGitPaths: async () => ({ supported: false, reason: 'not-a-git-repository' }),
+    })(repository)).resolves.toEqual({ supported: false, reason: 'not-a-git-repository' });
   });
 
   it('fails closed when private transport configuration cannot be read', async () => {

@@ -102,7 +102,7 @@ import { createContributorProvenanceStore } from '../git/contributor-provenance-
 import { createGitNetworkOperationStore } from '../git/network-operation-storage.js';
 import { readEffectiveGitTransportRevision } from '../git/transport-config.js';
 import { completeWorktreeCheckoutHydration, configureRepositoryTransport, deleteBranch as deleteBranchService, isGitRepository as isGitRepositoryService, removeWorktree as removeWorktreeService, resolvePrimaryWorktreeRoot, resolveWorktreeTopLevel } from '../git/service.js';
-import { createPrivateRepositoryIdentityResolver } from '../source-control/repository-identity.js';
+import { createPrivateRepositoryIdentityResolver, resolveRepositoryId } from '../source-control/repository-identity.js';
 import { createSourceControlAuditStore } from '../source-control/audit-storage.js';
 
 export const createFeatureRoutesRuntime = (dependencies) => {
@@ -504,9 +504,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     const resolveTransportRepository = createPrivateRepositoryIdentityResolver({
       getTransportRevision: (directory) => readEffectiveGitTransportRevision(directory, { gitBinary }),
     });
+    // A provenance record is keyed by the repository ID alone, so its reads
+    // take the ID-only resolver: the remote and transport Git processes a
+    // binding read needs answer nothing here (#6084).
     const contributorProvenance = createContributorProvenanceStore({
       filePath: path.join(openchamberDataDir, 'git-contributor-provenance.json'),
-      resolveRepositoryIdentity: resolveTransportRepository,
+      resolveRepositoryIdentity: resolveRepositoryId,
       resolveGitPaths: resolveRepositoryGitPaths,
       fsImpl: fsPromises,
     });
