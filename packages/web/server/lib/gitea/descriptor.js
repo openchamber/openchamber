@@ -9,7 +9,8 @@ const TEACUP_PATH = 'M2 6h15v5.5a6.5 6.5 0 0 1-6.5 6.5h-2A6.5 6.5 0 0 1 2 11.5z'
 /**
  * Gitea's static description: synchronous and dependency-free. Gitea is
  * always self-hosted here, so there is no default instance; every instance
- * comes from an account the user connected with a personal access token.
+ * comes from an account the user connected with a personal access token, or
+ * from a login of Gitea's `gt` CLI.
  */
 export const giteaDescriptor = Object.freeze({
   id: 'gitea',
@@ -48,7 +49,7 @@ export const giteaDescriptor = Object.freeze({
     referencePicker: false,
     multipleAccounts: true,
   }),
-  authMethods: Object.freeze({ device: false, pat: true, cli: false }),
+  authMethods: Object.freeze({ device: false, pat: true, cli: Object.freeze({ tool: 'gt' }) }),
   transport: Object.freeze({
     // Gitea takes the token as the password of the account's own login.
     httpsUsername: Object.freeze({ kind: 'login' }),
@@ -91,6 +92,7 @@ export const giteaDescriptor = Object.freeze({
       multiple: true, allowLoopbackHttp: true, allowPort: true,
       reserved: Object.freeze([]), placeholder: 'https://gitea.example.com',
     }),
+    // A gt login serves API reads only; Git transport needs a stored account.
     cliTransport: false,
     token: Object.freeze({
       scopes: Object.freeze(['write:repository', 'write:issue', 'read:user']),

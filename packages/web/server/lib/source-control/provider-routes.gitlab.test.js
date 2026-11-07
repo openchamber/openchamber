@@ -1280,6 +1280,10 @@ describe('GitLab routes', () => {
     expect(store.setCliActive).toHaveBeenCalledWith(origin, true);
     expect(response.body).toMatchObject({ connected: true, user: { id: 9 }, cli: { active: true } });
     expect(store.setAccount).not.toHaveBeenCalled();
+
+    const removed = await request(app).delete('/api/source-control/gitlab/auth').query({ instance: origin, accountId: `${origin}#cli:9` }).expect(200);
+    expect(removed.body).toEqual({ removed: true });
+    expect(store.setCliActive).toHaveBeenLastCalledWith(origin, false);
   });
 
   it('rejects and reconciles a changed exact glab identity', async () => {

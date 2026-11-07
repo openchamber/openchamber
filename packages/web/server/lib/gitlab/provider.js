@@ -655,7 +655,9 @@ export function createProvider({
           const cli = await getUsableGlab(origin);
           if (!cli || `${origin}#cli:${cli.user.id}` !== accountId) return { removed: false };
           await events.removed(identityFor(origin, accountId));
-          return { removed: await store.setCliActive(origin, false) };
+          // `setCliActive` answers the switch's new state, which is off here.
+          await store.setCliActive(origin, false);
+          return { removed: true };
         }
         if (!instance.accounts.some((account) => account.id === accountId)) return { removed: false };
         await events.removed(identityFor(origin, accountId));
