@@ -114,4 +114,62 @@ final class ShareStagingTests: XCTestCase {
         let records = await ShareStaging.records(from: [], in: inbox)
         XCTAssertEqual(records.count, 0)
     }
+
+    // MARK: - Text and links
+
+    private func textProvider(_ text: String) -> NSItemProvider {
+        NSItemProvider(item: NSString(string: text), typeIdentifier: UTType.plainText.identifier)
+    }
+
+    private func linkProvider(_ link: String) -> NSItemProvider {
+        NSItemProvider(item: NSURL(string: link)!, typeIdentifier: UTType.url.identifier)
+    }
+
+    func testATextShareBecomesComposerTextNotARejectedFile() async throws {
+        let providers = [textProvider("Summarise this thread")]
+
+        let records = await ShareStaging.records(from: providers, in: inbox)
+        let text = await ShareStaging.text(from: providers)
+
+        XCTAssertEqual(records.count, 0, "text is not an attachment, so it must not be reported as unsupported")
+        XCTAssertEqual(text, "Summarise this thread")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: inbox.path), [])
+    }
+
+    func testASharedLinkArrivesAsItsURL() async throws {
+        let providers = [linkProvider("https://openchamber.dev/session/abc?")]
+
+        let text = await ShareStaging.text(from: providers)
+        let records = await ShareStaging.records(from: providers, in: inbox)
+
+        XCTAssertEqual(text, "https://openchamber.dev/session/abc?")
+        XCTAssertEqual(records.count, 0)
+    }
+
+    func testTheLinkWinsOverTheCopySafariAlsoSends() async throws {
+        // Safari offers the URL and its plain-text form; the composer should get one line.
+        let providers = [textProvider("https://example.com/article"), linkProvider("https://example.com/article")]
+
+        let text = await ShareStaging.text(from: providers)
+
+        XCTAssertEqual(text, "https://example.com/article")
+    }
+
+    func testTextAndAFileBothSurvive() async throws {
+        let source = try sourceFile(named: "shot.png", bytes: pngBytes)
+        let fileProvider = try XCTUnwrap(providers([source]).first)
+        let providers = [textProvider("Screenshot of the failing test"), fileProvider]
+
+        let records = await ShareStaging.records(from: providers, in: inbox)
+        let text = await ShareStaging.text(from: providers)
+
+        XCTAssertEqual(records.count, 1)
+        XCTAssertNil(records.first?.rejected)
+        XCTAssertEqual(text, "Screenshot of the failing test")
+    }
+
+    func testBlankTextIsNotDelivered() async throws {
+        let text = await ShareStaging.text(from: [textProvider("   \n")])
+        XCTAssertNil(text)
+    }
 }

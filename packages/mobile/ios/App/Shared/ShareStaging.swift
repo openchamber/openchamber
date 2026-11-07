@@ -7,23 +7,86 @@ import UniformTypeIdentifiers
 enum ShareStaging {
     static let maxFiles = 8
 
-    static func records(from context: NSExtensionContext?, in directory: URL) async -> [ShareInbox.Record] {
-        await records(from: providers(in: context), in: directory)
-    }
-
     /// The share sheet sends one item per app, and each item carries its own attachments.
     static func providers(in context: NSExtensionContext?) -> [NSItemProvider] {
         (context?.inputItems as? [NSExtensionItem] ?? []).flatMap { $0.attachments ?? [] }
     }
 
+    /// True when the provider carries text or a link and nothing that can be attached. A share
+    /// of a link from Safari offers both `public.url` and `public.plain-text`, and a share of a
+    /// plain `.txt` file looks like text too — both become composer text, which is what the
+    /// user meant by selecting them.
+    static func isTextOnly(_ provider: NSItemProvider) -> Bool {
+        let types = provider.registeredTypeIdentifiers.compactMap { UTType($0) }
+        guard types.contains(where: { $0.conforms(to: .text) || $0.conforms(to: .url) }) else {
+            return false
+        }
+        return !types.contains { type in
+            type.conforms(to: .image) || type.conforms(to: .movie) || type.conforms(to: .audio)
+                || (type.conforms(to: .data) && !type.conforms(to: .text) && !type.conforms(to: .url))
+        }
+    }
+
+    /// The link or paragraph a share carried, if any. A provider that offers both is read as
+    /// its link, so a shared article arrives as one URL instead of URL plus its title.
+    static func text(from providers: [NSItemProvider]) async -> String? {
+        let candidates = providers.filter(isTextOnly)
+        guard !candidates.isEmpty else { return nil }
+
+        var paragraph: String?
+        for provider in candidates {
+            if let url = await link(from: provider), !url.isEmpty {
+                return url
+            }
+            if paragraph == nil, let value = await plainText(from: provider),
+               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                paragraph = value
+            }
+        }
+        return paragraph
+    }
+
+    private static func link(from provider: NSItemProvider) async -> String? {
+        guard provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) else { return nil }
+        return await withCheckedContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, _ in
+                let value: String?
+                switch item {
+                case let url as URL: value = url.absoluteString
+                case let text as String: value = text
+                default: value = nil
+                }
+                continuation.resume(returning: value)
+            }
+        }
+    }
+
+    private static func plainText(from provider: NSItemProvider) async -> String? {
+        guard provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) else { return nil }
+        return await withCheckedContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { item, _ in
+                let value: String?
+                switch item {
+                case let text as String: value = text
+                case let attributed as NSAttributedString: value = attributed.string
+                case let data as Data: value = String(data: data, encoding: .utf8)
+                default: value = nil
+                }
+                continuation.resume(returning: value)
+            }
+        }
+    }
+
     static func records(from providers: [NSItemProvider], in directory: URL) async -> [ShareInbox.Record] {
-        guard !providers.isEmpty else { return [] }
+        // Text and links are the page's business, not attachments.
+        let fileProviders = providers.filter { !isTextOnly($0) }
+        guard !fileProviders.isEmpty else { return [] }
 
         var records: [ShareInbox.Record] = []
-        for provider in providers.prefix(maxFiles) {
+        for provider in fileProviders.prefix(maxFiles) {
             records.append(await record(from: provider, in: directory))
         }
-        for provider in providers.dropFirst(maxFiles) {
+        for provider in fileProviders.dropFirst(maxFiles) {
             records.append(ShareInbox.Record(
                 id: "",
                 name: provider.suggestedName ?? "file",

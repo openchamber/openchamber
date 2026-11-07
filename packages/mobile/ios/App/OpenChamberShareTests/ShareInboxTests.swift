@@ -35,8 +35,8 @@ final class ShareInboxTests: XCTestCase {
         return id
     }
 
-    private func writeManifest(_ records: [ShareInbox.Record]) throws {
-        try ShareInbox.write(records, in: ShareInbox.inbox(in: container))
+    private func writeManifest(_ records: [ShareInbox.Record], text: String? = nil) throws {
+        try ShareInbox.write(records, text: text, in: ShareInbox.inbox(in: container))
     }
 
     func testResetReplacesThePreviousShare() throws {
@@ -143,6 +143,36 @@ final class ShareInboxTests: XCTestCase {
 
         XCTAssertEqual(taken.files.count, 0)
         XCTAssertEqual(taken.rejected.count, 0)
+        XCTAssertNil(taken.text)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: inbox.path))
+    }
+
+    func testTakeReturnsSharedTextTogetherWithTheFiles() throws {
+        _ = try ShareInbox.resetDirectory(in: container)
+        let id = try stageFile(named: "photo.png", bytes: pngBytes)
+        try writeManifest(
+            [ShareInbox.Record(id: id, name: "photo.png", mimeType: "image/png", size: pngBytes.count, rejected: nil)],
+            text: "Screenshot of the failing test"
+        )
+
+        let taken = ShareInbox.take(in: container)
+
+        XCTAssertEqual(taken.files.count, 1)
+        XCTAssertEqual(taken.text, "Screenshot of the failing test")
+        XCTAssertNil(ShareInbox.take(in: container).text, "text is delivered once, like the files")
+    }
+
+    func testTextOnlyShareIsDelivered() throws {
+        let inbox = try ShareInbox.resetDirectory(in: container)
+        XCTAssertFalse(ShareInbox.hasPending(), "a reset inbox holds nothing until a share is written")
+        try writeManifest([], text: "https://openchamber.dev/session/abc")
+        XCTAssertTrue(ShareInbox.hasPending())
+
+        let taken = ShareInbox.take(in: container)
+
+        XCTAssertEqual(taken.files.count, 0)
+        XCTAssertEqual(taken.rejected.count, 0)
+        XCTAssertEqual(taken.text, "https://openchamber.dev/session/abc")
         XCTAssertFalse(FileManager.default.fileExists(atPath: inbox.path))
     }
 }

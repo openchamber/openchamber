@@ -18,6 +18,13 @@ enum ShareInbox {
         let rejected: String?
     }
 
+    /// What a share contains: files to attach and, for a shared link or paragraph, the text to
+    /// type into the composer. One file describes both, so a share is read in one place.
+    struct Manifest: Codable {
+        let files: [Record]
+        let text: String?
+    }
+
     static let appGroup = "group.com.openchamber.app"
     static let directoryName = "SharedInbox"
     static let manifestName = "manifest.json"
@@ -54,8 +61,8 @@ enum ShareInbox {
         return directory
     }
 
-    static func write(_ records: [Record], in directory: URL) throws {
-        let data = try JSONEncoder().encode(records)
+    static func write(_ records: [Record], text: String? = nil, in directory: URL) throws {
+        let data = try JSONEncoder().encode(Manifest(files: records, text: text))
         try data.write(to: directory.appendingPathComponent(manifestName), options: .atomic)
     }
 
@@ -64,28 +71,29 @@ enum ShareInbox {
         return FileManager.default.fileExists(atPath: inbox(in: container).appendingPathComponent(manifestName).path)
     }
 
-    /// Files the page can attach, plus the ones that were refused when they were shared.
-    /// The inbox is emptied either way: a share is delivered once.
-    static func take() -> (files: [[String: Any]], rejected: [[String: String]]) {
-        guard let container else { return ([], []) }
+    /// Files the page can attach, the ones that were refused when they were shared, and the
+    /// text or link the user shared. The inbox is emptied either way: a share is delivered once.
+    static func take() -> (files: [[String: Any]], rejected: [[String: String]], text: String?) {
+        guard let container else { return ([], [], nil) }
         return take(in: container)
     }
 
-    static func take(in container: URL) -> (files: [[String: Any]], rejected: [[String: String]]) {
+    static func take(in container: URL) -> (files: [[String: Any]], rejected: [[String: String]], text: String?) {
         let source = inbox(in: container)
         // Claim the share by renaming the directory. The subscribe-time take and the
         // foreground announcement can race; the loser then finds no inbox instead of
         // delivering the same files twice.
         let claimed = container.appendingPathComponent("\(directoryName)-\(UUID().uuidString)", isDirectory: true)
         guard (try? FileManager.default.moveItem(at: source, to: claimed)) != nil else {
-            return ([], [])
+            return ([], [], nil)
         }
         defer { try? FileManager.default.removeItem(at: claimed) }
 
         guard let manifest = try? Data(contentsOf: claimed.appendingPathComponent(manifestName)),
-              let records = try? JSONDecoder().decode([Record].self, from: manifest) else {
-            return ([], [])
+              let share = try? JSONDecoder().decode(Manifest.self, from: manifest) else {
+            return ([], [], nil)
         }
+        let records = share.files
 
         var files: [[String: Any]] = []
         var rejected: [[String: String]] = []
@@ -115,16 +123,17 @@ enum ShareInbox {
             ])
         }
         NSLog(
-            "[ShareInbox] took files=%d rejected=%d names=%@",
+            "[ShareInbox] took files=%d rejected=%d text=%d names=%@",
             files.count,
             rejected.count,
+            share.text?.count ?? 0,
             records.map { "\($0.name) (\($0.mimeType), \($0.size))" }.joined(separator: ", ")
         )
-        return (files, rejected)
+        return (files, rejected, share.text)
     }
 }
 
 enum ShareInboxError: Error {
     case noAppGroup
-    case noFiles
+    case noContent
 }

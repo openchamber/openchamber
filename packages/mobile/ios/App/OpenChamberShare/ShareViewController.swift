@@ -1,8 +1,8 @@
 import UIKit
 
-/// Receives a file from the system share sheet, stages it in the App Group inbox and
-/// brings the app forward. The page then attaches it to a new session draft; the app
-/// itself never opens a draft from here.
+/// Receives what the system share sheet handed over — files, a link or a paragraph — stages it
+/// in the App Group inbox and brings the app forward. The page then attaches the files to a new
+/// session draft and types in the text; the app itself never opens a draft from here.
 final class ShareViewController: UIViewController {
     private var started = false
 
@@ -38,13 +38,16 @@ final class ShareViewController: UIViewController {
     private func receive() async {
         do {
             let directory = try ShareInbox.resetDirectory()
-            let records = await ShareStaging.records(from: extensionContext, in: directory)
-            guard !records.isEmpty else { throw ShareInboxError.noFiles }
-            try ShareInbox.write(records, in: directory)
+            let providers = ShareStaging.providers(in: extensionContext)
+            let text = await ShareStaging.text(from: providers)
+            let records = await ShareStaging.records(from: providers, in: directory)
+            guard !records.isEmpty || text != nil else { throw ShareInboxError.noContent }
+            try ShareInbox.write(records, text: text, in: directory)
             NSLog(
-                "[ShareInbox] staged %@",
+                "[ShareInbox] staged files=[%@] text=%d",
                 records.map { "\($0.rejected ?? "ok") \($0.name) (\($0.mimeType), \($0.size))" }
-                    .joined(separator: ", ")
+                    .joined(separator: ", "),
+                text?.count ?? 0
             )
             openApp()
             extensionContext?.completeRequest(returningItems: nil)
@@ -74,10 +77,10 @@ final class ShareViewController: UIViewController {
     private func presentFailure(_ error: Error) {
         let message: String
         switch error as? ShareInboxError {
-        case .noFiles:
-            message = "No file could be shared with OpenChamber."
+        case .noContent:
+            message = "Nothing could be shared with OpenChamber."
         default:
-            message = "OpenChamber couldn't receive this file."
+            message = "OpenChamber couldn't receive what you shared."
         }
         NSLog("[ShareInbox] failed %@", String(describing: error))
         let alert = UIAlertController(title: "OpenChamber", message: message, preferredStyle: .alert)

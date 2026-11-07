@@ -1,9 +1,10 @@
 import Capacitor
 import UIKit
 
-/// Hands files the share extension staged in the App Group inbox to the page. Same
-/// take-once contract as ShortcutRequests: the inbox waits for the page, so a cold launch,
-/// where the share opens the app before the page exists, does not lose it.
+/// Hands what the share sheet staged in the App Group inbox to the page: files to attach and
+/// the link or paragraph to type in. Same take-once contract as ShortcutRequests: the inbox
+/// waits for the page, so a cold launch, where the share opens the app before the page exists,
+/// does not lose it.
 @objc(SharedFilesPlugin)
 public class SharedFilesPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "SharedFilesPlugin"
@@ -31,7 +32,9 @@ public class SharedFilesPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.global(qos: .userInitiated).async {
             let result = ShareInbox.take()
             DispatchQueue.main.async {
-                call.resolve(["files": result.files, "rejected": result.rejected])
+                var payload: [String: Any] = ["files": result.files, "rejected": result.rejected]
+                if let text = result.text { payload["text"] = text }
+                call.resolve(payload)
             }
         }
     }
