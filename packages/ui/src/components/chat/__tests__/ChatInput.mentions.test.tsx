@@ -422,6 +422,32 @@ test('a selected path containing spaces stays one reference after continuing pro
   await fileScenario('design notes/overview.md', false, false);
 });
 
+test('file chips use the latest confirmed paths after draft persistence', async () => {
+  await withComposer(async ({ container, view, type, choose }) => {
+    useFileSearchStore.setState({ searchFiles: async (_directory, _query, _limit, options) => (
+      options?.type === 'directory' ? [] : [
+        { name: 'file name.png', path: `${DIRECTORY}/docs/file name.png`, relativePath: 'docs/file name.png' },
+        { name: 'other file.png', path: `${DIRECTORY}/other file.png`, relativePath: 'other file.png' },
+      ]
+    ) });
+    await type('Please ');
+    // Advance the controlled clock past the draft's 500ms persistence debounce.
+    await settle();
+    await type('@file');
+    await choose('docs/file name.png');
+    await type('inspect');
+    expect(container.querySelector('[title^="@docs/file name.png"]')?.textContent).toBe('file name.png');
+    expect(container.querySelector('[title^="@docs/file\n"]')).toBeNull();
+
+    await settle();
+    await type(' and @other');
+    await choose('other file.png');
+    await type('too');
+    expect(container.querySelector('[title^="@other file.png"]')?.textContent).toBe('other file.png');
+    expect(view.state.doc.toString()).toBe('Please @docs/file name.png inspect and @other file.png too');
+  });
+});
+
 test('completion follows text inserted before it and is removed with the reference', async () => {
   await withComposer(async ({ view, type, key, rows }) => {
     await type('@cod');
