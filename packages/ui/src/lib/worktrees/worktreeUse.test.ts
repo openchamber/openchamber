@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { withSessionsNowInWorktree } from './worktreeUse';
+import { activeSessionsInWorktreeNow, withSessionsNowInWorktree } from './worktreeUse';
 
 const session = (id: string, directory: string): Session => ({
   id,
@@ -24,5 +24,23 @@ describe('withSessionsNowInWorktree', () => {
     });
 
     expect(withSessionsNowInWorktree(['ses_first', 'ses_gone'], '/repo-feature')).toEqual(['ses_first', 'ses_gone', 'ses_later']);
+  });
+});
+
+describe('activeSessionsInWorktreeNow', () => {
+  test('adds the live sessions the global list has not loaded yet, never an archived one or one elsewhere', () => {
+    useGlobalSessionsStore.setState({
+      activeSessions: [session('ses_listed', '/repo-feature'), session('ses_elsewhere', '/repo')],
+    });
+    const archived = { ...session('ses_archived', '/repo-feature'), time: { created: 1, updated: 1, archived: 2 } };
+
+    const ids = activeSessionsInWorktreeNow('/repo-feature', [
+      session('ses_listed', '/repo-feature'),
+      session('ses_live_only', '/repo-feature/sub'),
+      archived,
+      session('ses_live_elsewhere', '/repo-feature-two'),
+    ]).map((entry) => entry.id);
+
+    expect(ids).toEqual(['ses_listed', 'ses_live_only']);
   });
 });

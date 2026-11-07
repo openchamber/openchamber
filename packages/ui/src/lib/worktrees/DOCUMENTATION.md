@@ -17,3 +17,10 @@ This module resolves project roots and lists worktree topology through the runti
 ### Why topology revisions and instance ownership are separate
 
 A topology change requires another read of the same project. An instance change makes that project's path obsolete. Retrying both through one generation check sent the old path to the new instance, so reads now retain an instance predicate separately from the topology revision.
+
+### Keeping a worktree's sessions on delete
+
+Deleting a worktree with "Keep sessions in the project" moves its sessions to their projects, then removes it (`moveSessionsThenRemoveWorktree`, wired in `moveWorktreeSessionsThenRemove`).
+
+- OpenCode answers `session.move` once the move is queued in the session's inbox. A runner of the source folder applies it afterwards, and removing the folder first stopped that runner: the session stayed in the deleted folder, seen live on mobile. The removal waits until a session read places every moved session in its project, and keeps the worktree when that does not happen within ten seconds.
+- A failed removal leaves the moved sessions in the project, a teardown that stopped it included. Moving them back adds another "moved" note to each transcript, and git may already have removed the folder before failing on the branch.
