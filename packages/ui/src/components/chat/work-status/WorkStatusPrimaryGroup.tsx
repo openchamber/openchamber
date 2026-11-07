@@ -41,6 +41,8 @@ import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { useLeaveWorkStatus } from './leaveWorkStatus';
 import { prChecksTooltip } from './prChecks';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { openExternalUrl } from '@/lib/url';
 
 type Props = {
   sessionId: string | null;
@@ -68,6 +70,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   const { t } = useI18n();
   // On the phone the rows lead to the phone's own pages.
   const mobile = useMobileAppActions();
+  // VS Code has no context panel, so its rows are readouts; a PR still opens
+  // in the browser, the only place VS Code can show one.
+  const isVSCode = isVSCodeRuntime();
   const leaveWorkStatus = useLeaveWorkStatus();
   const openTrackerItem = useOpenTrackerItem();
   const { git } = useRuntimeAPIs();
@@ -211,6 +216,10 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   const openSurface = React.useCallback(
     (mode: 'git' | 'pr') => {
       if (!directory) return;
+      if (isVSCode) {
+        if (mode === 'pr' && prUrl) void openExternalUrl(prUrl);
+        return;
+      }
       if (mobile) {
         // The phone's Changes tab holds the branch; the board shows the PR.
         if (mode === 'git') mobile.openChanges();
@@ -224,10 +233,13 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
       if (mode === 'pr') openContextPanelTab(directory, { mode: 'pr' });
       else openContextSurface(directory, mode);
     },
-    [directory, leaveWorkStatus, mobile, openContextPanelTab, openContextSurface, openTrackerItem, prUrl],
+    [directory, isVSCode, leaveWorkStatus, mobile, openContextPanelTab, openContextSurface, openTrackerItem, prUrl],
   );
-  // The phone opens the PR by its link on the board; without one there is nowhere to go.
-  const openPr = directory && (!mobile || prUrl) ? () => openSurface('pr') : undefined;
+  // The phone and VS Code open the PR by its link; without one there is
+  // nowhere to go, so the row stays a readout.
+  const openPr = directory && ((mobile || isVSCode) ? Boolean(prUrl) : true)
+    ? () => openSurface('pr')
+    : undefined;
   // Working-tree diff without a target path: the panel opens on the whole
   // change set rather than picking a file on the user's behalf.
   // Same destination as the header's context readout.
@@ -306,8 +318,8 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
             <>
               <WorkStatusRow
                 icon="donut-chart"
-                // The context overview is a desktop panel; the phone has none.
-                onClick={directory && !mobile ? openContext : undefined}
+                // The context overview is a desktop panel; the phone and VS Code have none.
+                onClick={directory && !mobile && !isVSCode ? openContext : undefined}
                 ariaLabel={t('chat.workStatus.action.openContext')}
                 label={t('chat.workStatus.context.label')}
                 value={(
@@ -369,7 +381,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
           {branch ? (
             <WorkStatusRow
               icon="git-branch"
-              onClick={directory ? () => openSurface('git') : undefined}
+              onClick={directory && !isVSCode ? () => openSurface('git') : undefined}
               ariaLabel={t('chat.workStatus.action.openGit')}
               label={branch}
               value={(gitStatus?.ahead ?? 0) > 0 || (gitStatus?.behind ?? 0) > 0 ? (
@@ -386,7 +398,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
           {nestedRepoLabel ? (
             <WorkStatusRow
               icon="folder"
-              onClick={directory ? () => openSurface('git') : undefined}
+              onClick={directory && !isVSCode ? () => openSurface('git') : undefined}
               ariaLabel={t('chat.workStatus.action.openGit')}
               label={nestedRepoLabel}
               muted
@@ -396,7 +408,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
           {changed ? (
             <WorkStatusRow
               icon="file-edit"
-              onClick={directory ? openChanges : undefined}
+              onClick={directory && !isVSCode ? openChanges : undefined}
               ariaLabel={t('chat.workStatus.action.openChanges')}
               // The count names the row, matching the composer's changed-files
               // bar; the diffstat stays the trailing value.

@@ -290,15 +290,16 @@ every surface reached only through those is unreachable.
 |---|---|---|
 | Chat timeline | MOUNTED | `VSCodeLayout` → `ChatView` → `ChatContainer` → `MessageList` |
 | Composer | MOUNTED | `ChatContainer` → `ChatInput` (model/agent controls, autocomplete, attachments, dictation, issue/PR pickers, `ReviewFlowDialog`, `PendingChangesBar`) |
-| Work status panel | NOT MOUNTED | `ChatContainer` skips `WorkStatusPanel` when `isVSCodeRuntime()` (`workStatusPanelMountable`) |
+| Work status panel | MOUNTED | `VSCodeHeader` opens the overlay form; `ChatContainer` keeps only the inline card out of VS Code (`workStatusInlineMountable`) |
 | Permission / form cards | MOUNTED | `ChatContainer` → `PermissionCard`, `FormCard` |
 | Timeline dialog | MOUNTED | `ChatContainer` → `TimelineDialog` |
 | Tool output / inline diff preview | MOUNTED | `MessageList` → `ToolPart`, `ToolOutputDialog` (`DiffViewToggle`, not `DiffView`) |
 | Sessions sidebar | MOUNTED | `VSCodeLayout` → `SessionSidebar` with `mobileVariant hideDirectoryControls` |
 | Session dialogs | MOUNTED | `VSCodeLayout` → `SessionDialogs` |
 | Session switcher | MOUNTED | `VSCodeHeader` → `SessionSwitcherDropdown` |
-| MCP dropdown | MOUNTED | `VSCodeHeader` `showMcp` → `McpDropdown` |
-| Context usage / rate limits | MOUNTED | `VSCodeHeader` `showContextUsage` / `showRateLimits` → `ContextUsageDisplay`, `UsageProgressBar` |
+| MCP servers | MOUNTED | Work status panel's MCP section; the separate header dropdown is gone |
+| Context usage | MOUNTED | `VSCodeHeader` `showContextUsage` → `ContextUsageDisplay` |
+| Rate limits | MOUNTED | Work status panel's Usage section; the separate header dropdown is gone |
 | Multi-run | MOUNTED | `SessionSidebar` run rows; `RunOverview` over the chat in every layout (sidebar, expanded, editor tab); composer parallel mode from the model picker and the `openchamber.openAgentManager` tab |
 | Settings | PARTIAL | Settings editor tab → `VSCodeApp` → on-demand `SettingsView`. Page availability remains defined by `metadata.ts`; moving the host does not enable unsupported pages. |
 | Usage / quota page | MOUNTED | `SettingsView` → `UsagePage` (slug `usage`, no VS Code gate) |
