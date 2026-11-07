@@ -1,6 +1,8 @@
 /** Settings → Extensions. Not OpenCode Plugins. */
 export const extensionsSettingsI18n = {
   en: {
+    'settings.extensions.capability.opencode': 'Read OpenCode sessions',
+    'settings.extensions.capability.opencode.detail': 'Reads sessions, messages, projects and live events from the OpenCode this app uses. It can only read.',
     'settings.extensions.actions.openSource': 'Open source',
     'settings.extensions.builtIn.info': 'Included with OpenChamber and updated with the app. Its declared permissions are granted automatically. Disabling keeps its data and connected accounts.',
     'settings.extensions.toast.reservedId': 'That extension ID is reserved for a built-in extension.',
@@ -166,6 +168,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Location',
   },
   nl: {
+    'settings.extensions.capability.opencode': 'OpenCode-sessies lezen',
+    'settings.extensions.capability.opencode.detail': 'Leest sessies, berichten, projecten en live gebeurtenissen van de OpenCode die deze app gebruikt. Het kan alleen lezen.',
     'settings.extensions.capability.origins': 'Rechtstreeks gegevens versturen en ontvangen',
     'settings.extensions.capability.origins.detail': 'De pagina\'s kunnen gegevens, inclusief wat ze tonen, met deze adressen uitwisselen:',
     'settings.extensions.actions.openSource': 'Broncode openen',
@@ -331,6 +335,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Locatie',
   },
   de: {
+    'settings.extensions.capability.opencode': 'OpenCode-Sitzungen lesen',
+    'settings.extensions.capability.opencode.detail': 'Liest Sitzungen, Nachrichten, Projekte und Live-Ereignisse aus dem OpenCode, das diese App verwendet. Nur Lesen ist möglich.',
     'settings.extensions.actions.openSource': 'Quellcode öffnen',
     'settings.extensions.builtIn.info': 'Mit OpenChamber geliefert und zusammen mit der App aktualisiert. Die deklarierten Berechtigungen werden automatisch gewährt. Beim Deaktivieren bleiben Daten und verbundene Konten erhalten.',
     'settings.extensions.toast.reservedId': 'Diese Erweiterungs-ID ist für eine integrierte Erweiterung reserviert.',
@@ -496,6 +502,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Speicherort',
   },
   fr: {
+    'settings.extensions.capability.opencode': 'Lire les sessions OpenCode',
+    'settings.extensions.capability.opencode.detail': 'Lit les sessions, les messages, les projets et les événements en direct de l\'OpenCode utilisé par cette application. Lecture seule.',
     'settings.extensions.actions.openSource': 'Voir le code source',
     'settings.extensions.builtIn.info': "Fournie avec OpenChamber et mise à jour avec l'application. Ses autorisations déclarées sont accordées automatiquement. La désactivation conserve ses données et comptes connectés.",
     'settings.extensions.toast.reservedId': "Cet identifiant est réservé à une extension intégrée.",
@@ -661,6 +669,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Emplacement',
   },
   es: {
+    'settings.extensions.capability.opencode': 'Leer sesiones de OpenCode',
+    'settings.extensions.capability.opencode.detail': 'Lee sesiones, mensajes, proyectos y eventos en directo del OpenCode que usa esta app. Solo puede leer.',
     'settings.extensions.actions.openSource': 'Abrir código fuente',
     'settings.extensions.builtIn.info': 'Incluida en OpenChamber y actualizada con la app. Sus permisos declarados se conceden automáticamente. Desactivarla conserva sus datos y cuentas conectadas.',
     'settings.extensions.toast.reservedId': 'Ese identificador está reservado para una extensión integrada.',
@@ -826,6 +836,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Ubicación',
   },
   ja: {
+    'settings.extensions.capability.opencode': 'OpenCode のセッションを読み取る',
+    'settings.extensions.capability.opencode.detail': 'このアプリが使用している OpenCode からセッション、メッセージ、プロジェクト、ライブイベントを読み取ります。読み取りのみ可能です。',
     'settings.extensions.actions.openSource': 'ソースコードを開く',
     'settings.extensions.builtIn.info': 'OpenChamber に同梱され、アプリと一緒に更新されます。宣言された権限は自動的に付与されます。無効にしてもデータと接続済みアカウントは保持されます。',
     'settings.extensions.toast.reservedId': 'その ID は組み込み拡張機能用に予約されています。',
@@ -991,6 +1003,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': '場所',
   },
   ko: {
+    'settings.extensions.capability.opencode': 'OpenCode 세션 읽기',
+    'settings.extensions.capability.opencode.detail': '이 앱이 사용하는 OpenCode에서 세션, 메시지, 프로젝트, 실시간 이벤트를 읽습니다. 읽기만 가능합니다.',
     'settings.extensions.actions.openSource': '소스 코드 열기',
     'settings.extensions.builtIn.info': 'OpenChamber에 포함되며 앱과 함께 업데이트됩니다. 선언한 권한은 자동으로 부여됩니다. 비활성화해도 데이터와 연결된 계정은 유지됩니다.',
     'settings.extensions.toast.reservedId': '이 ID는 기본 제공 확장용으로 예약되어 있습니다.',
@@ -1156,6 +1170,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': '위치',
   },
   pl: {
+    'settings.extensions.capability.opencode': 'Odczyt sesji OpenCode',
+    'settings.extensions.capability.opencode.detail': 'Odczytuje sesje, wiadomości, projekty i zdarzenia na żywo z OpenCode, którego używa ta aplikacja. Może tylko odczytywać.',
     'settings.extensions.actions.openSource': 'Otwórz kod źródłowy',
     'settings.extensions.builtIn.info': 'Dostarczane z OpenChamber i aktualizowane razem z aplikacją. Zadeklarowane uprawnienia są nadawane automatycznie. Wyłączenie zachowuje dane i połączone konta.',
     'settings.extensions.toast.reservedId': 'Ten identyfikator jest zarezerwowany dla wbudowanego rozszerzenia.',
@@ -1321,6 +1337,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Lokalizacja',
   },
   'pt-BR': {
+    'settings.extensions.capability.opencode': 'Ler sessões do OpenCode',
+    'settings.extensions.capability.opencode.detail': 'Lê sessões, mensagens, projetos e eventos ao vivo do OpenCode que este app usa. Pode apenas ler.',
     'settings.extensions.actions.openSource': 'Abrir código-fonte',
     'settings.extensions.builtIn.info': 'Incluída no OpenChamber e atualizada com o app. As permissões declaradas são concedidas automaticamente. Desativar mantém os dados e as contas conectadas.',
     'settings.extensions.toast.reservedId': 'Esse identificador é reservado para uma extensão integrada.',
@@ -1486,6 +1504,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Local',
   },
   uk: {
+    'settings.extensions.capability.opencode': 'Читання сесій OpenCode',
+    'settings.extensions.capability.opencode.detail': 'Читає сесії, повідомлення, проєкти й події наживо з OpenCode, який використовує цей застосунок. Може лише читати.',
     'settings.extensions.actions.openSource': 'Відкрити код',
     'settings.extensions.builtIn.info': 'Постачається з OpenChamber й оновлюється разом із застосунком. Задекларовані дозволи надаються автоматично. Вимкнення зберігає дані та підключені облікові записи.',
     'settings.extensions.toast.reservedId': 'Цей ідентифікатор зарезервовано для вбудованого розширення.',
@@ -1651,6 +1671,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Розташування',
   },
   'zh-CN': {
+    'settings.extensions.capability.opencode': '读取 OpenCode 会话',
+    'settings.extensions.capability.opencode.detail': '读取此应用所用 OpenCode 中的会话、消息、项目和实时事件。仅可读取。',
     'settings.extensions.actions.openSource': '查看源码',
     'settings.extensions.builtIn.info': '随 OpenChamber 提供并与应用一起更新。声明的权限会自动授予。停用后会保留数据和已连接的账户。',
     'settings.extensions.toast.reservedId': '该标识符已保留给内置扩展。',
@@ -1816,6 +1838,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': '位置',
   },
   'zh-TW': {
+    'settings.extensions.capability.opencode': '讀取 OpenCode 工作階段',
+    'settings.extensions.capability.opencode.detail': '讀取此應用程式所用 OpenCode 中的工作階段、訊息、專案和即時事件。僅可讀取。',
     'settings.extensions.actions.openSource': '查看原始碼',
     'settings.extensions.builtIn.info': '隨 OpenChamber 提供並與應用程式一起更新。宣告的權限會自動授予。停用後會保留資料和已連接的帳戶。',
     'settings.extensions.toast.reservedId': '此識別碼已保留給內建擴充功能。',
@@ -1981,6 +2005,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': '位置',
   },
   tr: {
+    'settings.extensions.capability.opencode': 'OpenCode oturumlarını okuma',
+    'settings.extensions.capability.opencode.detail': 'Bu uygulamanın kullandığı OpenCode üzerinden oturumları, mesajları, projeleri ve canlı olayları okur. Yalnızca okuyabilir.',
     'settings.extensions.actions.openSource': 'Kaynak kodunu aç',
     'settings.extensions.builtIn.info': 'OpenChamber ile gelir ve uygulamayla birlikte güncellenir. Bildirilen izinler otomatik verilir. Devre dışı bırakmak verileri ve bağlı hesapları korur.',
     'settings.extensions.toast.reservedId': 'Bu kimlik yerleşik bir eklenti için ayrılmıştır.',
@@ -2146,6 +2172,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'Konum',
   },
   ar: {
+    'settings.extensions.capability.opencode': 'قراءة جلسات OpenCode',
+    'settings.extensions.capability.opencode.detail': 'يقرأ الجلسات والرسائل والمشاريع والأحداث المباشرة من OpenCode الذي يستخدمه هذا التطبيق. يمكنه القراءة فقط.',
     'settings.extensions.actions.openSource': 'فتح المصدر',
     'settings.extensions.builtIn.info': 'مضمّنة مع OpenChamber وتُحدَّث مع التطبيق. تُمنح أذوناتها المعلنة تلقائيًا. التعطيل يحتفظ ببياناتها وحساباتها المرتبطة.',
     'settings.extensions.toast.reservedId': 'معرّف الإضافة هذا محجوز لإضافة مضمّنة.',
@@ -2311,6 +2339,8 @@ export const extensionsSettingsI18n = {
     'settings.extensions.detail.field.location': 'الموقع',
   },
   he: {
+    'settings.extensions.capability.opencode': 'קריאת סשנים של OpenCode',
+    'settings.extensions.capability.opencode.detail': 'קורא סשנים, הודעות, פרויקטים ואירועים חיים מ-OpenCode שבו האפליקציה משתמשת. יכול לקרוא בלבד.',
     'settings.extensions.actions.openSource': 'פתח את המקור',
     'settings.extensions.builtIn.info': 'כלולה ב-OpenChamber ומתעדכנת יחד עם האפליקציה. ההרשאות שהיא מצהירה עליהן ניתנות אוטומטית. השבתה שומרת את הנתונים שלה ואת החשבונות המחוברים.',
     'settings.extensions.toast.reservedId': 'מזהה ההרחבה הזה שמור להרחבה מובנית.',

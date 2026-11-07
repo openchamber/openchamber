@@ -416,3 +416,16 @@ describe('notification channels on a catalog row', () => {
     expect(malformed?.notifications).toBeUndefined();
   });
 });
+
+test('reads an OpenCode service role and its approval capability from the catalog', () => {
+  const row = {
+    id: 'api-provider', name: 'API provider', icon: 'plug',
+    service: { runtime: 'host', provides: ['opencode'], granted: false },
+    capabilities: { requested: ['service', 'opencode'], granted: ['service'] },
+  };
+  expect(parseGuestCatalogJson(JSON.stringify({ guests: [row] }))).toEqual({
+    guests: [row],
+    opencodePlugins: null,
+    unreadable: [],
+  });
+});

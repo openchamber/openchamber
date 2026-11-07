@@ -147,6 +147,16 @@ The SDK adds `HostActionMessage`, `GuestActionResultMessage`, `GuestActionItem`,
 
 The runner cancels on runtime/catalog invalidation and marks the operation inactive synchronously, so queued messages cannot mutate host state during React teardown. Timeout, completion, frame-load failure, or host unmount clears the invocation and subscriptions. Unmount cleanup yields one microtask for Strict Mode's effect reattachment. Already accepted remote effects are not rolled back; no automatic retry. Web/desktop use the existing direct or relay frame loader; VS Code and mobile remain unsupported. `examples/hello-kit` demonstrates a background message-length toast.
 
+## OpenCode role
+
+The SDK owns `service.provides: ["opencode"]` and the implicit `opencode` capability in `manifest.ts`. The role needs no extra contribution. `requestedGuestCapabilities` requests both `service` and `opencode`; an existing service grant alone cannot approve the new access. `opencode` cannot be listed in `contributes.capabilities` and needs no scoped persisted schema.
+
+Services use `@opencode/client` directly under the [OpenCode access contract](./GUEST_SERVICES.md#opencode-access). The [host provider module](../web/server/lib/guests/opencode-provider/DOCUMENTATION.md) owns transport, the list of allowed reads, upstream selection and process-lifetime authorization; the SDK adds no transport helper or response envelope.
+
+### Why reading has its own capability
+
+Sessions and messages hold everything said in them, so a service that can read them is a different thing to approve from one that only runs. A distinct approval names that access and prevents an earlier service approval from silently granting it. The grant covers reads only: the host refuses everything else, so `opencode` will never mean more than that, and wider access would be a new capability the user approves.
+
 ## Source-control role
 
 `provides: ["source-control"]` plus `contributes.sourceControl` (`SourceControlContribution`, `manifest.ts`) make an extension a Git host. The SDK owns the manifest parse, the wire (`service-providers.ts`: `SOURCE_CONTROL_PROVIDER_PATH`, `SOURCE_CONTROL_PROVIDER_METHODS`, deadlines and caps, `readSourceControlProviderRequest`, the outbound types, `createSourceControlForge`) and the host's answer schemas (`sourceControlProviderSchemasV1` in `service-provider-schemas.ts`, from `@openchamber/sdk/schemas`). The host adapter that turns the contribution into a provider descriptor, the callback listener and the outbound proxy live in `packages/web/server/lib/source-control` and `lib/guests`. The service-side contract is in `GUEST_SERVICES.md`; `examples/source-control-provider` and its fake forge are the reference, run by `scripts/source-control-example.test.ts`.
@@ -224,7 +234,7 @@ Tracker links differ widely: a key in the path, a key in a query parameter (Jira
 
 ### Why the service receives the credential and does not go through a proxy
 
-The other roles keep the token in OpenChamber and hand the service a per-call handle, because a forge or a tracker is one origin OpenChamber can pin. A usage API is the extension's own knowledge, a different one per provider, and the credential is not OpenChamber's: it is OpenCode's, held for the model calls already. The ticket decided the hand-over: the manifest names the providers, the dialog shows them, the user approves exactly that list, and the server hands only those entries, read through `opencode/auth.js`, never the whole store. A changed list asks again, as a new capability does.
+The source-control, notifications and tracker roles keep the token in OpenChamber and hand the service a per-call handle, because each account uses one origin OpenChamber can pin. A usage API is the extension's own knowledge, a different one per provider, and the credential is not OpenChamber's: it is OpenCode's, held for the model calls already. The ticket decided the hand-over: the manifest names the providers, the dialog shows them, the user approves exactly that list, and the server hands only those entries, read through `opencode/auth.js`, never the whole store. A changed list asks again, as a new capability does.
 
 ## Services that act on their own
 
