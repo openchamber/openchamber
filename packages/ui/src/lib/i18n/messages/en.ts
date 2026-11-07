@@ -1888,6 +1888,7 @@ export const dict = {
   'diffView.change.new': 'New file',
   'diffView.change.deleted': 'Deleted file',
   'diffView.change.renamed': 'Renamed file',
+  'diffView.change.renamedFrom': 'Renamed from {from} — content unchanged',
   'diffView.change.copied': 'Copied file',
   'diffView.change.modified': 'Modified file',
   'diffView.change.conflicted': 'Conflicted file',

@@ -160,7 +160,7 @@ interface GitAPI {
   getGitBranches: (directory: string, options?: GitBranchListOptions) => Promise<GitBranch>;
   getGitLog?: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
   getCurrentGitIdentity?: (directory: string) => Promise<GitIdentitySummary | null>;
-  getGitFileDiff?: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
+  getGitFileDiff?: (directory: string, options: { path: string; staged?: boolean; previousPath?: string }) => Promise<GitFileDiffResponse>;
 }
 
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
@@ -1271,6 +1271,7 @@ export const useGitStore = create<GitStore>()(
 
         const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
         const availablePaths = new Set(dirState.status.files.map((file) => file.path));
+        const previousPaths = new Map(dirState.status.files.flatMap((file) => (file.previousPath ? [[file.path, file.previousPath] as const] : [])));
         const diffStats = dirState.status.diffStats;
         const inFlight = getInFlightDiffs(directory);
 
@@ -1326,7 +1327,7 @@ export const useGitStore = create<GitStore>()(
           inFlight.add(filePath);
           const fetchPromise = (async () => {
             try {
-              return await git.getGitFileDiff!(directory, { path: filePath });
+              return await git.getGitFileDiff!(directory, { path: filePath, previousPath: previousPaths.get(filePath) });
             } finally {
               // A UI deadline only stops waiting. Keep the path and capacity
               // reserved until the transport actually settles.

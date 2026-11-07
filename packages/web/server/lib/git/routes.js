@@ -914,10 +914,12 @@ export function registerGitRoutes(app, {
 
       const staged = req.query.staged === 'true';
       const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
+      const previousPath = typeof req.query.previousPath === 'string' && req.query.previousPath ? req.query.previousPath : undefined;
 
       const { diff, submodule } = await getPathDiff(directory, {
         path,
         staged,
+        previousPath,
         contextLines: Number.isFinite(context) ? context : 3,
       });
 
@@ -981,10 +983,12 @@ export function registerGitRoutes(app, {
       }
 
       const staged = req.query.staged === 'true';
+      const previousPath = typeof req.query.previousPath === 'string' && req.query.previousPath ? req.query.previousPath : undefined;
 
       const result = await getFileDiff(directory, {
         path: pathParam,
         staged,
+        previousPath,
       });
 
       res.json({
@@ -1020,12 +1024,14 @@ export function registerGitRoutes(app, {
 
       const pathParam = typeof req.query.path === 'string' && req.query.path ? req.query.path : undefined;
       const context = req.query.context ? parseInt(String(req.query.context), 10) : undefined;
+      const previousPath = typeof req.query.previousPath === 'string' && req.query.previousPath ? req.query.previousPath : undefined;
 
       const diff = await getRangeDiff(directory, {
         base,
         head,
         includeWorkingTree: req.query.includeWorkingTree === 'true',
         path: pathParam,
+        previousPath,
         contextLines: Number.isFinite(context) ? context : 3,
       });
 

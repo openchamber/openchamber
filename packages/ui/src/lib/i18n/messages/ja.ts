@@ -1884,6 +1884,7 @@ export const dict: Record<I18nKey, string> = {
   'diffView.change.new': '新しいファイル',
   'diffView.change.deleted': '削除されたファイル',
   'diffView.change.renamed': '名前変更されたファイル',
+  'diffView.change.renamedFrom': '{from} から名前変更 — 内容は変更なし',
   'diffView.change.copied': 'コピーされたファイル',
   'diffView.change.modified': '変更されたファイル',
   'diffView.change.conflicted': '競合しているファイル',

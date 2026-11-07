@@ -1844,6 +1844,7 @@ export const dict: Record<I18nKey, string> = {
   "diffView.change.new": "Archivo nuevo",
   "diffView.change.deleted": "Archivo eliminado",
   "diffView.change.renamed": "Archivo renombrado",
+  "diffView.change.renamedFrom": "Renombrado desde {from} — contenido sin cambios",
   "diffView.change.copied": "Archivo copiado",
   "diffView.change.modified": "Archivo modificado",
   "diffView.change.conflicted": "Archivo en conflicto",
