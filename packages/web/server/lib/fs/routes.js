@@ -1600,7 +1600,11 @@ export const registerFsRoutes = (app, dependencies) => {
     const declaredSize = Number(req.headers?.['content-length']);
     if (Number.isFinite(declaredSize) && declaredSize > maxUploadBytes) {
       req.resume?.();
-      return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+      return res.status(413).json({
+        error: `File exceeds maximum size of ${maxUploadBytes} bytes`,
+        reason: 'too-large',
+        maxBytes: maxUploadBytes,
+      });
     }
 
     try {
@@ -1623,7 +1627,7 @@ export const registerFsRoutes = (app, dependencies) => {
       const requestedParent = path.dirname(resolved.resolved);
       const canonicalParent = await fsPromises.realpath(requestedParent);
       if (!isPathWithinRoot(canonicalParent, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied', reason: 'outside-workspace' });
       }
 
       const existingPath = await fsPromises.realpath(resolved.resolved).catch((error) => {
@@ -1634,7 +1638,7 @@ export const registerFsRoutes = (app, dependencies) => {
       });
       const writePath = existingPath || path.join(canonicalParent, path.basename(resolved.resolved));
       if (!isPathWithinRoot(writePath, canonicalBase, path, os)) {
-        return res.status(403).json({ error: 'Access denied' });
+        return res.status(403).json({ error: 'Access denied', reason: 'outside-workspace' });
       }
 
       if (existingPath) {
@@ -1693,7 +1697,11 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(404).json({ error: 'Destination directory not found', reason: 'not-found' });
       }
       if (err && typeof err === 'object' && err.uploadTooLarge) {
-        return res.status(413).json({ error: `File exceeds maximum size of ${maxUploadBytes} bytes` });
+        return res.status(413).json({
+          error: `File exceeds maximum size of ${maxUploadBytes} bytes`,
+          reason: 'too-large',
+          maxBytes: maxUploadBytes,
+        });
       }
       if (err && typeof err === 'object' && (err.code === 'EISDIR' || err.code === 'ENOTDIR')) {
         return res.status(400).json({ error: 'Specified path is a directory' });
