@@ -71,6 +71,37 @@ const sendChunkedPost = (port, route, body, contentType) => new Promise((resolve
   });
 });
 
+const isTrustedOpenCodeOrigin = (origin, host) => {
+  try {
+    if (new URL(origin).host === host) return true;
+  } catch {
+    return false;
+  }
+  return origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
+};
+
+// OpenCode 2.2.6 refuses `/api` requests that carry a browser Origin and
+// Sec-Fetch-Site: cross-site or same-site, before authentication. This mirrors
+// the origin branch the proxy hits, so a regression test fails the same way the
+// real server does.
+const rejectCrossSiteApiRequests = (req, res, next) => {
+  const site = req.headers['sec-fetch-site'];
+  if (site !== 'cross-site' && site !== 'same-site') {
+    next();
+    return;
+  }
+  if (!req.path.startsWith('/api')) {
+    next();
+    return;
+  }
+  const origin = req.headers.origin;
+  if (origin && !isTrustedOpenCodeOrigin(origin, req.headers.host)) {
+    res.status(403).json({ _tag: 'ForbiddenError', message: 'Cross-site requests to the API are not allowed' });
+    return;
+  }
+  next();
+};
+
 describe('OpenCode proxy SSE forwarding', () => {
   let upstreamServer;
   let proxyServer;
@@ -385,6 +416,105 @@ describe('OpenCode proxy SSE forwarding', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, source: 'external-host' });
+  });
+
+  it('strips cross-site browser headers from generic API proxy requests', async () => {
+    let seenOrigin;
+    let seenSite;
+
+    const upstream = express();
+    upstream.use(rejectCrossSiteApiRequests);
+    upstream.get('/api/config/providers', (req, res) => {
+      seenOrigin = req.headers.origin;
+      seenSite = req.headers['sec-fetch-site'];
+      res.json({ ok: true });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: 3902,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/config/providers`, {
+      headers: {
+        Origin: 'openchamber-ui://app',
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-Mode': 'cors',
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(seenOrigin).toBeUndefined();
+    expect(seenSite).toBeUndefined();
+  });
+
+  it('strips cross-site browser headers from forwarded event streams', async () => {
+    let seenOrigin;
+    let seenSite;
+
+    const upstream = express();
+    upstream.use(rejectCrossSiteApiRequests);
+    upstream.get('/api/event', (req, res) => {
+      seenOrigin = req.headers.origin;
+      seenSite = req.headers['sec-fetch-site'];
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.write('data: {"ok":true}\n\n');
+      res.end();
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/event`, {
+      headers: {
+        Accept: 'text/event-stream',
+        Origin: 'openchamber-ui://app',
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-Mode': 'cors',
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('data: {"ok":true}\n\n');
+    expect(seenOrigin).toBeUndefined();
+    expect(seenSite).toBeUndefined();
   });
 
   it('replays parsed urlencoded bodies to generic API proxy requests', async () => {

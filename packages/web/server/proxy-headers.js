@@ -1,4 +1,20 @@
+// Browser request metadata carries the page origin and the browser's fetch
+// classification. OpenCode 2.2.6 rejects `/api` requests that pair a
+// cross-site `Sec-Fetch-Site` with an untrusted `Origin`, and packaged clients
+// (`openchamber-ui://app`, `capacitor://localhost`) are not on its trust list.
+// This proxy is the server-to-server hop, so none of these headers belong
+// upstream.
+const browserRequestMetadataHeaders = new Set([
+  'origin',
+  'referer',
+  'sec-fetch-site',
+  'sec-fetch-mode',
+  'sec-fetch-dest',
+  'sec-fetch-user',
+]);
+
 const filteredRequestHeaders = new Set([
+  ...browserRequestMetadataHeaders,
   // Client credentials for the OpenChamber server (UI client tokens) must
   // never reach the managed OpenCode upstream — it only accepts its own auth,
   // so a forwarded client bearer turns every upstream response into a 401.
@@ -41,6 +57,19 @@ export const collectForwardProxyHeaders = (requestHeaders, authHeaders = {}) => 
   }
 
   return headers;
+};
+
+/**
+ * Removes browser request metadata from an outgoing proxy request.
+ *
+ * `http-proxy` copies the incoming request headers wholesale, so the catch-all
+ * `/api` proxy needs this in its `proxyReq` hook. The fetch-based paths use
+ * `collectForwardProxyHeaders`, which drops the same names.
+ */
+export const stripBrowserRequestMetadataHeaders = (request) => {
+  for (const name of browserRequestMetadataHeaders) {
+    request.removeHeader(name);
+  }
 };
 
 export const shouldForwardProxyResponseHeader = (key) => {

@@ -8,6 +8,7 @@ import {
   applyForwardProxyResponseHeaders,
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
+  stripBrowserRequestMetadataHeaders,
 } from '../../proxy-headers.js';
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
@@ -1329,6 +1330,10 @@ export const registerOpenCodeProxy = (app, deps) => {
         res.once('close', onClientClose);
         proxyReq.once('close', () => res.off('close', onClientClose));
         if (res.destroyed) onClientClose();
+
+        // The proxy is the server hop, so the browser's origin and fetch
+        // metadata must not reach OpenCode's cross-site guard.
+        stripBrowserRequestMetadataHeaders(proxyReq);
 
         // Inject OpenCode auth headers
         const authHeaders = getOpenCodeAuthHeaders();
