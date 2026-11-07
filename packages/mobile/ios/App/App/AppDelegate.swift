@@ -213,6 +213,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if let urlContext = connectionOptions.urlContexts.first {
             _ = ApplicationDelegateProxy.shared.application(UIApplication.shared, open: urlContext.url, options: [:])
         }
+        // A quick action that launched the app arrives here rather than in performActionFor.
+        if let shortcutItem = connectionOptions.shortcutItem {
+            _ = openShortcut(shortcutItem)
+        }
         if let userActivity = connectionOptions.userActivities.first {
             _ = ApplicationDelegateProxy.shared.application(UIApplication.shared, continue: userActivity) { _ in }
         }
@@ -301,5 +305,25 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         _ = ApplicationDelegateProxy.shared.application(UIApplication.shared, continue: userActivity) { _ in }
+    }
+
+    func windowScene(
+        _ windowScene: UIWindowScene,
+        performActionFor shortcutItem: UIApplicationShortcutItem,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        completionHandler(openShortcut(shortcutItem))
+    }
+
+    /// The quick actions are declared in Info.plist and each one carries the deep link it opens
+    /// in its user info, so the routes stay in the web layer's vocabulary (`deepLinks.ts`) and a
+    /// new action is a plist entry rather than a second list of destinations here.
+    @discardableResult
+    private func openShortcut(_ item: UIApplicationShortcutItem) -> Bool {
+        guard let text = item.userInfo?["url"] as? String, let url = URL(string: text) else {
+            return false
+        }
+        _ = ApplicationDelegateProxy.shared.application(UIApplication.shared, open: url, options: [:])
+        return true
     }
 }
