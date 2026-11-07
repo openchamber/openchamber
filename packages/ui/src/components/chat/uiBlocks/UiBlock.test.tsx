@@ -10,10 +10,11 @@ browser.document.write('<!doctype html><html><head></head><body></body></html>')
 Object.assign(globalThis, { window: browser, document: browser.document, navigator: browser.navigator,
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   Element: browser.Element, Node: browser.Node, Text: browser.Text, SVGElement: browser.SVGElement,
-  customElements: browser.customElements, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser,
+  customElements: browser.customElements, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser, CustomEvent: browser.CustomEvent,
   ResizeObserver: browser.ResizeObserver, IntersectionObserver: browser.IntersectionObserver });
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 const { UiBlock } = await import('./UiBlock');
+const { onTabStep } = await import('../lib/scroll/timelineScrollIntent');
 const { I18nProvider } = await import('@/lib/i18n');
 const { ThemeSystemContext } = await import('@/contexts/theme-system-context');
 const { getDefaultTheme } = await import('@/lib/theme/themes');
@@ -27,14 +28,21 @@ afterAll(async () => { await act(() => root.unmount()); browser.happyDOM.abort()
 
 // SAFETY: UiBlock reads only `currentTheme` from the theme system.
 const themeSystem = { currentTheme: getDefaultTheme(false) } as React.ContextType<typeof ThemeSystemContext>;
-const draw = (source: string, submit: (answer: Answer) => Promise<void>) => act(() => root.render(
+// Each draw mounts a fresh block, so no answer carries over. Without submit it draws as in a reply.
+let draws = 0;
+const draw = (source: string, submit?: (answer: Answer) => Promise<void>) => act(() => root.render(
   <I18nProvider>
     <ThemeSystemContext.Provider value={themeSystem}>
-      <UiBlock source={source} complete host={{ kind: 'page', submit, answered: null }} />
+      <UiBlock key={draws++} source={source} complete host={submit ? { kind: 'page', submit, answered: null } : undefined} />
     </ThemeSystemContext.Provider>
   </I18nProvider>,
 ));
 const buttons = () => [...host.querySelectorAll('button')].map((button) => button.textContent);
+const press = async (label: string) => {
+  const button = [...host.querySelectorAll('button')].find((candidate) => candidate.textContent === label);
+  if (!button) throw new Error(`Expected a ${label} button, got ${buttons().join(', ')}`);
+  await act(async () => button.click());
+};
 
 test('a waiting form without buttons gets one that sends its fields', async () => {
   const answers: Answer[] = [];
@@ -107,4 +115,72 @@ test('a block that cannot be drawn says why and folds its source', async () => {
   const toggle = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Source');
   await act(async () => toggle?.click());
   expect(source?.hidden).toBe(false);
+});
+
+const tabbedForm = 'root = Stack([tabs])\ntabs = Tabs([Tab("Editor", [Choice("editor", ["Zed"])]), Tab("Why", [Input("why", "Why?")])])';
+
+test('a waiting form that ends with tabs steps through them with Next and sends from the last tab', async () => {
+  const answers: Answer[] = [];
+  await draw(tabbedForm, async (answer) => { answers.push(answer); });
+  expect(buttons()).toContain('Next');
+  expect(buttons()).not.toContain('Send');
+  await press('Next');
+  expect(host.textContent).toContain('Why?');
+  expect(buttons()).not.toContain('Next');
+  // Next went away, so focus moved to the tab it opened.
+  expect(document.activeElement?.classList.contains('oc-box')).toBe(true);
+  await press('Send');
+  expect(answers).toHaveLength(1);
+});
+
+test('Next keeps the fields of earlier tabs and asks for the new tab to come into view, and the first draw does not', async () => {
+  const answers: Answer[] = [];
+  const steps: HTMLElement[] = [];
+  const stop = onTabStep(host, (tabs) => { steps.push(tabs); });
+  await draw(tabbedForm, async (answer) => { answers.push(answer); });
+  expect(steps).toHaveLength(0);
+  await act(async () => host.querySelector<HTMLElement>('[role="radio"]')?.click());
+  await press('Next');
+  stop();
+  expect(steps).toHaveLength(1);
+  expect(steps[0].contains(document.activeElement)).toBe(true);
+  await press('Send');
+  expect(answers[0].data.values).toEqual({ editor: 'Zed' });
+});
+
+test('the host\'s controls stay under the block on every tab', async () => {
+  await act(() => root.render(
+    <I18nProvider>
+      <ThemeSystemContext.Provider value={themeSystem}>
+        <UiBlock key={draws++} source={tabbedForm} complete host={{ kind: 'page', submit: async () => {}, answered: null }} actions={<button type="button">Decline</button>} />
+      </ThemeSystemContext.Provider>
+    </I18nProvider>,
+  ));
+  const decline = () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Decline');
+  const tile = () => host.querySelector('.oc-box');
+  expect(decline()).toBeDefined();
+  expect(tile()?.contains(decline() ?? null)).toBe(false);
+  await press('Next');
+  expect(tile()?.contains(decline() ?? null)).toBe(false);
+  expect(buttons()).toContain('Send');
+  expect(tile()?.textContent).toContain('Send');
+});
+
+test('a tab with buttons of its own takes Next on their line', async () => {
+  await draw('root = Stack([tabs])\ntabs = Tabs([Tab("A", [Choice("a", ["x"]), Button("Send A", "primary", "a")]), Tab("B", [Input("b")])])', async () => {});
+  const row = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Next')?.parentElement;
+  expect([...row?.querySelectorAll('button') ?? []].map((button) => button.textContent)).toEqual(['Send A', 'Next']);
+});
+
+test('tabs in a reply, or on a page nobody answers, step only through their strip', async () => {
+  await draw(tabbedForm);
+  expect(buttons()).not.toContain('Next');
+  await act(() => root.render(
+    <I18nProvider>
+      <ThemeSystemContext.Provider value={themeSystem}>
+        <UiBlock key={draws++} source={tabbedForm} complete host={{ kind: 'page', submit: null, answered: null }} />
+      </ThemeSystemContext.Provider>
+    </I18nProvider>,
+  ));
+  expect(buttons()).not.toContain('Next');
 });

@@ -139,6 +139,14 @@ describe('a note on a frame that answers', () => {
     expect(sent[0].data.note).toBe('none of these');
   }));
 
+  test('stays under the block while it is written on a form that ends with Tabs', () => answering(async () => {
+    const source = 'root = Stack([tabs])\ntabs = Tabs([Tab("Chart", [chart]), Tab("Why", [Input("why", "Why?")])])\nchart = DeskChart("Sales")';
+    await draw({ kind: 'page', answered: null, submit: async () => {} }, source);
+    await writeNote('none of these');
+    expect(container.querySelector('.oc-box textarea')).toBeNull();
+    expect(container.querySelector('textarea')?.value).toBe('none of these');
+  }));
+
   test('a reloaded reply shows the note it sent', () => answering(async () => {
     await draw({ kind: 'reply', answered: { picks: [{ value: 'DeskChart', note: 'kept' }], values: {}, skipped: [] }, submit: async () => {} });
     expect(container.querySelector('textarea')?.value).toBe('kept');
