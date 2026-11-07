@@ -1024,12 +1024,18 @@ always whole, and so are calls arriving by the event stream, except `read` and
 reducer drops it the moment the call finishes (`withoutUnshownResult`), with
 the same marker.
 
-Tool completion checks existing transcript membership and a result shell before
-requesting `getToolContentMessage`. This dedicated adapter operation may read
+Tool completion checks the store the row renders from: membership and a result
+shell there gate the request, and the merge fills that same store. The read
+routes through the session's directory (`getToolContentMessage`, which may walk
 ancestors as described in `lib/opencode/DOCUMENTATION.md`; ordinary message
-reads remain session-strict. Completion writes only into the original store
-while the runtime and message are still current, so an evicted store or a
-removed message is never recreated by the response.
+reads remain session-strict). A chat can show a session in another directory's
+store than the session's own (a deep link without a directory, or a worktree
+beside the main checkout), so the row's store is the one that must hold the
+message and receive the result. A row finds that store through
+`useChatTranscriptDirectory`: its column's directory, or the fork's directory
+in a `/btw` transcript, which renders inside the parent's column. Both checks
+keep an evicted store or a removed message from being recreated, and a message
+outside the displayed transcript is never requested.
 
 A successful local session creation publishes its session record and calls `SessionMessageLoader.initializeCreatedSession` before selection starts navigation loading. The create response establishes an empty transcript only if no transcript has arrived yet. Initialization supersedes an earlier unresolved history load, preserves any messages or metadata received before the create response, and uses the server-returned directory. Opening that new session needs no history read; forced recovery and later eviction still use normal fetching. Creation responses from a previous runtime cannot select or initialize a session in the current runtime.
 
