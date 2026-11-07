@@ -1805,6 +1805,7 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.empty.openSession": "Відкрийте сесію, щоб перевірити контекст.",
   "contextSidebar.section.context": "Контекст",
   "contextSidebar.section.lastAssistantMessage": "Останнє повідомлення асистента",
+  "contextSidebar.section.sessionTotals": "Підсумки сесії",
   "contextSidebar.section.rawMessages": "Необроблені повідомлення",
   "contextSidebar.context.percentUsed": "{percent}% використано",
   "contextSidebar.breakdown.user": "Користувач",

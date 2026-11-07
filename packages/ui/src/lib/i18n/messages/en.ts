@@ -1849,6 +1849,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'Open a session to inspect context.',
   'contextSidebar.section.context': 'Context',
   'contextSidebar.section.lastAssistantMessage': 'Last Assistant Message',
+  'contextSidebar.section.sessionTotals': 'Session Totals',
   'contextSidebar.section.rawMessages': 'Raw Messages',
   'contextSidebar.context.percentUsed': '{percent}% used',
   'contextSidebar.breakdown.user': 'User',

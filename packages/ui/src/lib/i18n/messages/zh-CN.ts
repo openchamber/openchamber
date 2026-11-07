@@ -1815,6 +1815,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.empty.openSession': '请先打开会话以查看上下文。',
   'contextSidebar.section.context': '上下文',
   'contextSidebar.section.lastAssistantMessage': '最近一条助手消息',
+  'contextSidebar.section.sessionTotals': '会话总计',
   'contextSidebar.section.rawMessages': '原始消息',
   'contextSidebar.context.percentUsed': '已使用 {percent}%',
   'contextSidebar.breakdown.user': '用户',

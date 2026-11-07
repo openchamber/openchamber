@@ -1845,6 +1845,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.empty.openSession': 'セッションを開いてコンテキストを確認します。',
   'contextSidebar.section.context': 'コンテキスト',
   'contextSidebar.section.lastAssistantMessage': '最後のアシスタントメッセージ',
+  'contextSidebar.section.sessionTotals': 'セッション合計',
   'contextSidebar.section.rawMessages': '生メッセージ',
   'contextSidebar.context.percentUsed': '{percent}%使用',
   'contextSidebar.breakdown.user': 'ユーザー',

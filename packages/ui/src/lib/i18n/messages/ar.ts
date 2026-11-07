@@ -1768,6 +1768,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'افتح جلسة لفحص السياق.',
   'contextSidebar.section.context': 'السياق',
   'contextSidebar.section.lastAssistantMessage': 'آخر رسالة من المساعد',
+  'contextSidebar.section.sessionTotals': 'إجماليات الجلسة',
   'contextSidebar.section.rawMessages': 'الرسائل الخام',
   'contextSidebar.context.percentUsed': '{percent}% مستخدم',
   'contextSidebar.breakdown.user': 'المستخدم',

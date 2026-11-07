@@ -1585,6 +1585,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'Öffnen Sie eine Sitzung, um den Kontext zu prüfen.',
   'contextSidebar.section.context': 'Kontext',
   'contextSidebar.section.lastAssistantMessage': 'Letzte Assistentennachricht',
+  'contextSidebar.section.sessionTotals': 'Sitzung insgesamt',
   'contextSidebar.section.rawMessages': 'Rohmeldungen',
   'contextSidebar.context.percentUsed': '{percent}% verwendet',
   'contextSidebar.breakdown.user': 'Benutzer',

@@ -26,6 +26,7 @@ import { ContextPanelHeaderToolbar } from './contextPanelHeaderSlot';
 import { useInContextPanelHeader } from './contextPanelHeaderSlotContext';
 import { toolContentShellChars } from '@/lib/opencode/toolContentShells';
 import { composeContextBreakdown, type ContextBuckets } from './contextBreakdown';
+import { computeSessionTokenTotals } from '@/components/chat/work-status/contextUsage';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -262,6 +263,49 @@ const resolveProviderAndModel = (
   };
 };
 
+type TokenFigures = {
+  /** Every prompt token, cached or not; the cache cells beside it split it up. */
+  prompt: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheHitPercent: number | null;
+};
+
+/** Six token figures under a title; `null` figures, not yet known, read as dashes. */
+const TokenFiguresCard: React.FC<{ title: string; figures: TokenFigures | null }> = ({ title, figures }) => {
+  const { t } = useI18n();
+  const items = [
+    { label: t('contextSidebar.tokens.input'), value: figures?.prompt ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.output'), value: figures?.output ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.reasoning'), value: figures?.reasoning ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheRead'), value: figures?.cacheRead ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheWrite'), value: figures?.cacheWrite ?? null, format: 'count' },
+    { label: t('contextSidebar.tokens.cacheHit'), value: figures?.cacheHitPercent ?? null, format: 'percent' },
+  ] as const;
+
+  return (
+    <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
+      <div className="typography-micro text-muted-foreground mb-2.5">{title}</div>
+      <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
+        {items.map((item) => (
+          <div key={item.label}>
+            <div className="typography-micro text-muted-foreground">{item.label}</div>
+            <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
+              {item.value === null
+                ? '—'
+                : item.format === 'percent'
+                  ? `${item.value.toFixed(1)}%`
+                  : formatNumber(item.value)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
   const inPanelHeader = useInContextPanelHeader();
@@ -385,6 +429,7 @@ export const ContextPanelContent: React.FC = () => {
 
     return {
       sessionTitle: currentSession?.title || t('contextSidebar.session.untitled'),
+      sessionTotals: computeSessionTokenTotals(currentSession),
       messagesCount: sessionMessages.length,
       userMessagesCount: userMessages.length,
       assistantMessagesCount: assistantMessages.length,
@@ -487,35 +532,19 @@ export const ContextPanelContent: React.FC = () => {
           ))}
         </div>
 
-        {/* ── Last turn tokens ── */}
-        <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="typography-micro text-muted-foreground mb-2.5">{t('contextSidebar.section.lastAssistantMessage')}</div>
-          <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
-            {([
-              { label: t('contextSidebar.tokens.input'), value: viewModel.tokenBreakdown.input, format: 'count' },
-              { label: t('contextSidebar.tokens.output'), value: viewModel.tokenBreakdown.output, format: 'count' },
-              { label: t('contextSidebar.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead, format: 'count' },
-              { label: t('contextSidebar.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite, format: 'count' },
-              {
-                label: t('contextSidebar.tokens.cacheHit'),
-                value: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
-                format: 'percent',
-              },
-            ] as const).map((item) => (
-              <div key={item.label}>
-                <div className="typography-micro text-muted-foreground">{item.label}</div>
-                <div className="mt-0.5 typography-ui-label tabular-nums text-foreground">
-                  {item.value !== null && item.value !== undefined
-                    ? item.format === 'percent'
-                      ? `${item.value.toFixed(1)}%`
-                      : formatNumber(item.value)
-                    : '—'}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* ── Whole-session tokens, then the last turn's, in the same columns ── */}
+        <TokenFiguresCard
+          title={t('contextSidebar.section.sessionTotals')}
+          figures={viewModel.sessionTotals}
+        />
+        <TokenFiguresCard
+          title={t('contextSidebar.section.lastAssistantMessage')}
+          figures={{
+            ...viewModel.tokenBreakdown,
+            prompt: viewModel.tokenBreakdown.input + viewModel.tokenBreakdown.cacheRead + viewModel.tokenBreakdown.cacheWrite,
+            cacheHitPercent: viewModel.cacheHitRate.hasInput ? viewModel.cacheHitRate.percent : null,
+          }}
+        />
 
         {/* ── Context breakdown ── */}
         <div className="mb-6">

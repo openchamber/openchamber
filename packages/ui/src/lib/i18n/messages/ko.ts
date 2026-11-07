@@ -1849,6 +1849,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.empty.openSession': '컨텍스트를 볼 세션을 여세요.',
   'contextSidebar.section.context': '컨텍스트',
   'contextSidebar.section.lastAssistantMessage': '마지막 어시스턴트 메시지',
+  'contextSidebar.section.sessionTotals': '세션 합계',
   'contextSidebar.section.rawMessages': '원본 메시지',
   'contextSidebar.context.percentUsed': '{percent}% 사용됨',
   'contextSidebar.breakdown.user': '사용자',

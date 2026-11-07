@@ -1832,6 +1832,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.empty.openSession': '請先開啟會話以查看上下文。',
   'contextSidebar.section.context': '上下文',
   'contextSidebar.section.lastAssistantMessage': '最近一條助理訊息',
+  'contextSidebar.section.sessionTotals': '會話總計',
   'contextSidebar.section.rawMessages': '原始訊息',
   'contextSidebar.context.percentUsed': '已使用 {percent}%',
   'contextSidebar.breakdown.user': '使用者',

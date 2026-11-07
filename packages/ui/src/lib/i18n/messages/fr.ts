@@ -1603,6 +1603,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'Ouvrez une session pour inspecter le contexte.',
   'contextSidebar.section.context': 'Contexte',
   'contextSidebar.section.lastAssistantMessage': 'Dernier message de l\'assistant',
+  'contextSidebar.section.sessionTotals': 'Totaux de la session',
   'contextSidebar.section.rawMessages': 'Messages bruts',
   'contextSidebar.context.percentUsed': '{percent}% utilisé',
   'contextSidebar.breakdown.user': 'Utilisateur',

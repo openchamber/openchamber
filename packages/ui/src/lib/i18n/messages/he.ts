@@ -1768,6 +1768,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'יש לפתוח הפעלה כדי לבדוק את ההקשר.',
   'contextSidebar.section.context': 'הקשר',
   'contextSidebar.section.lastAssistantMessage': 'ההודעה האחרונה של העוזר',
+  'contextSidebar.section.sessionTotals': 'סיכום ההפעלה',
   'contextSidebar.section.rawMessages': 'הודעות גולמיות',
   'contextSidebar.context.percentUsed': '{percent}% בשימוש',
   'contextSidebar.breakdown.user': 'משתמש',

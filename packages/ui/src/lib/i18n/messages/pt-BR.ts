@@ -1805,6 +1805,7 @@ export const dict: Record<I18nKey, string> = {
   "contextSidebar.empty.openSession": "Abrir uma sessão para inspecionar o contexto.",
   "contextSidebar.section.context": "Contexto",
   "contextSidebar.section.lastAssistantMessage": "Última mensagem do assistente",
+  "contextSidebar.section.sessionTotals": "Totais da sessão",
   "contextSidebar.section.rawMessages": "Mensagens brutas",
   "contextSidebar.context.percentUsed": "{percent}% usado",
   "contextSidebar.breakdown.user": "Usuário",

@@ -1724,6 +1724,7 @@ export const dict = {
   'contextSidebar.empty.openSession': 'Bağlamı incelemek için bir session açın.',
   'contextSidebar.section.context': 'Bağlam',
   'contextSidebar.section.lastAssistantMessage': 'Son Asistan Mesajı',
+  'contextSidebar.section.sessionTotals': 'Session Toplamları',
   'contextSidebar.section.rawMessages': 'Ham Mesajlar',
   'contextSidebar.context.percentUsed': '%{percent} kullanıldı',
   'contextSidebar.breakdown.user': 'Kullanıcı',
