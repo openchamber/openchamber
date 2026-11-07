@@ -16,7 +16,7 @@ const windowSchema = z.object({
     z.object({ kind: z.literal('spend'), spent: z.number().finite().nonnegative(), limit: z.number().finite().positive().nullable() }),
   ]).optional(),
   creditsUsed: z.number().finite().nonnegative().optional(),
-  giftReset: z.object({ recordId: z.number(), expireAt: z.number() }).nullable().optional(),
+  giftReset: z.object({ recordId: z.number(), expireAt: z.number(), grantType: z.string().optional() }).nullable().optional(),
 });
 const windowsSchema = z.record(z.string(), windowSchema);
 const consoleBudgetsSchema = z.object({
@@ -122,6 +122,7 @@ export const activateGiftReset = async (
   providerId: QuotaProviderId,
   recordId: number,
   resetType: QuotaGiftResetType,
+  grantType?: string,
   { signal, timeoutMs = 30_000 }: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<void> => {
   const controller = new AbortController();
@@ -140,7 +141,9 @@ export const activateGiftReset = async (
     const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}/gift-reset/use`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recordId, resetType }),
+      // grantType is omitted from the JSON when undefined (the record carried
+      // none); the server then falls back to 'GLOBAL'.
+      body: JSON.stringify({ recordId, resetType, grantType }),
       signal: controller.signal,
     });
     const payload = await response.json();

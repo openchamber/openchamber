@@ -1,7 +1,8 @@
 import express from 'express';
 import request from 'supertest';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { configureOpenCodeCredentials } from '../opencode/auth.js';
 import { attachExtensionQuotaProvider, detachExtensionQuotaProvider } from './extension-registry.js';
 import { QuotaRouteError } from './route-error.js';
 import { registerQuotaRoutes } from './routes.js';
@@ -41,5 +42,52 @@ describe('quota routes with extension providers', () => {
     })).get('/api/quota/codex');
     expect(plain.status).toBe(500);
     expect(plain.body).toEqual({ error: 'upstream said no' });
+  });
+});
+
+describe('z.ai gift reset activation route', () => {
+  beforeEach(() => {
+    configureOpenCodeCredentials({ list: async () => [{
+      id: 'test-zai', integrationID: 'zai-coding-plan', label: 'default', active: true,
+      value: { type: 'key', key: 'test-token' },
+    }] });
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+    vi.unstubAllGlobals();
+  });
+
+  const activate = async (body) => {
+    const upstream = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ code: 200, msg: 'success', data: 1, success: true }),
+    });
+    vi.stubGlobal('fetch', upstream);
+    const response = await request(app({})).post('/api/quota/zai-coding-plan/gift-reset/use').send(body);
+    return { response, upstream };
+  };
+
+  it('sends GLOBAL upstream when the record carried no grantType', async () => {
+    const { response, upstream } = await activate({ recordId: 462029, resetType: 'FIVE_HOUR' });
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(upstream.mock.calls[0][1].body).grantType).toBe('GLOBAL');
+  });
+
+  it('sends the record grantType upstream unchanged', async () => {
+    const { response, upstream } = await activate({ recordId: 462029, resetType: 'WEEK', grantType: 'ACTIVITY' });
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(upstream.mock.calls[0][1].body).grantType).toBe('ACTIVITY');
+  });
+
+  it.each([[''], ['   '], [null], [7]])('answers 400 without calling upstream for grantType %j', async (grantType) => {
+    const { response, upstream } = await activate({ recordId: 462029, resetType: 'WEEK', grantType });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('INVALID_REQUEST');
+    expect(upstream).not.toHaveBeenCalled();
   });
 });
