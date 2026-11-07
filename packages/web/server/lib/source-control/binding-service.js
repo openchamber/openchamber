@@ -202,6 +202,17 @@ const parseAuxiliary = (value) => {
 };
 
 /**
+ * A managed credential can serve only the protocol it was issued for.
+ */
+const credentialServesEndpoint = (credentialId, rawEndpoint) => {
+  try {
+    return parseGitCredentialReference(credentialId).transport === normalizeGitRemoteEndpoint(rawEndpoint).protocol;
+  } catch {
+    return false;
+  }
+};
+
+/**
  * The grant a submodule or LFS endpoint inherits when none names it.
  *
  * A checkout's submodules and LFS objects are fetched the way the checkout
@@ -225,9 +236,15 @@ const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
     return null;
   }
   if (!endpointHost || endpointHost !== parentHost) return null;
-  return parent.mode === 'managed'
-    ? { mode: 'managed', readiness: 'ready', credentialId: parent.credentialId }
-    : { mode: parent.mode, readiness: 'ready' };
+  if (parent.mode === 'managed') {
+    // An SSH key cannot authenticate an HTTPS LFS or submodule endpoint, and
+    // an HTTPS credential cannot authenticate an SSH one. The endpoint needs
+    // its own grant when the parent's transport cannot serve it.
+    return parent.credentialId && credentialServesEndpoint(parent.credentialId, rawEndpoint)
+      ? { mode: 'managed', readiness: 'ready', credentialId: parent.credentialId }
+      : null;
+  }
+  return { mode: parent.mode, readiness: 'ready' };
 };
 
 /**
