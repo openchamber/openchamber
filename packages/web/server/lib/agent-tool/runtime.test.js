@@ -677,6 +677,32 @@ describe('managed agent tool runtime', () => {
     expect(tool.openchamber_image.description.length).toBeLessThanOrEqual(2048);
   });
 
+  it('exposes usage as its own tool behind Code Mode, only when switched on', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeUsage: true });
+    const namespaces = [];
+    const tool = await loadTools(dataDir, 'usage', {}, [], namespaces);
+
+    expect(Object.keys(tool)).toEqual(['openchamber_usage']);
+    expect(Object.keys(tool.openchamber_usage.input.properties.parameters.properties)).toEqual(['providerId']);
+    expect(tool.openchamber_usage.options).toEqual({ codemode: true });
+    // Its catalog line names when to read it, so agents do not check limits before every task.
+    expect(namespaces).toEqual([expect.objectContaining({ name: 'openchamber_usage', description: expect.stringContaining('when the user asks about limits') })]);
+    expect(tool.openchamber_usage.description.length).toBeLessThanOrEqual(2048);
+
+    await runtime.materializePlugin({ includeControl: true, includeWeb: false, includeMemory: false });
+    expect(await loadTools(dataDir, 'usage-off')).not.toHaveProperty('openchamber_usage');
+  });
+
+  it('runs usage.read from the usage tool, bare read included', async () => {
+    const { runtime, executeAction } = await createRuntime();
+    const result = await runtime.execute({ tool: 'openchamber_usage', input: { action: 'read', providerId: 'claude' }, sessionID: 'ses_a' });
+
+    expect(result).toMatchObject({ ok: true, action: 'usage.read' });
+    expect(executeAction).toHaveBeenCalledWith('usage.read', expect.objectContaining({ providerId: 'claude' }), undefined, expect.anything());
+    expect((await runtime.execute({ tool: 'openchamber', input: { action: 'usage.read' }, sessionID: 'ses_a' })).ok).toBe(false);
+  });
+
   it('exposes render as its own tool carrying only the page (html or ui) and its title', async () => {
     const { runtime, dataDir } = await createRuntime();
     await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeRender: true });
@@ -766,6 +792,7 @@ describe('managed agent tool runtime', () => {
       includeRender: true,
       includeWorkflow: true,
       includeImage: true,
+      includeUsage: true,
     });
     const tools = await loadTools(dataDir, 'description-length');
 
@@ -777,6 +804,7 @@ describe('managed agent tool runtime', () => {
       'openchamber_notify',
       'openchamber_render',
       'openchamber_schedule',
+      'openchamber_usage',
       'openchamber_web',
       'openchamber_workflow',
       'openchamber_workflow_answer',

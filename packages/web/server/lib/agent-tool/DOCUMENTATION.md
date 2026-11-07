@@ -89,6 +89,17 @@ the user can want independently:
   Mode, because the chat draws the card from the call. On by default:
   enabled while `agentSecretToolEnabled` is not `false`, and the control
   service refuses the action when it is, so a stale plugin cannot keep asking.
+- `openchamber_usage` — `usage.read`, the provider quotas Settings → Usage
+  shows (`../openchamber-control/usage-read.js`): every configured provider's
+  result as the page gets it, without `accountLabel`, or one with
+  `providerId`. Off by default:
+  enabled only while `agentUsageToolEnabled` is `true`, and the action reads
+  the setting on every call and refuses while it is not. Each call runs the
+  page's readers again, so the description tells agents to read once per
+  decision and that a rate-limited provider answers with its last sample. It
+  sits behind Code Mode like notify, since the chat draws nothing from its
+  call, and its catalog line says to read it when the user asks about limits
+  or a model choice depends on them, never before every task.
 - `openchamber_workflow` — `workflow.*`, scripts that fan a large task out to
   many agents, run by OpenChamber (`../workflows/DOCUMENTATION.md`). Off by
   default: enabled only while `agentWorkflowToolEnabled` is `true`, and the

@@ -1042,6 +1042,36 @@ describe('notify.send', () => {
   });
 });
 
+describe('usage.read', () => {
+  const quota = {
+    listUsagePageProviders: () => [{ providerId: 'claude', providerName: 'Claude' }],
+    listConfiguredQuotaProviders: async () => ['claude'],
+    fetchQuotaForProvider: async (providerId) => ({ providerId, providerName: 'Claude', ok: true, configured: true, usage: { windows: {} }, fetchedAt: 1 }),
+  };
+
+  it('reads the configured providers while the setting is on', async () => {
+    const { service } = createService({
+      readSettingsFromDiskMigrated: vi.fn(async () => ({ agentUsageToolEnabled: true })),
+      loadQuota: async () => quota,
+    });
+
+    await expect(service.execute('usage.read', {}, '/repo')).resolves.toEqual({
+      providers: [{ providerId: 'claude', providerName: 'Claude', ok: true, configured: true, usage: { windows: {} }, fetchedAt: 1 }],
+      notConfigured: [],
+    });
+  });
+
+  it('refuses while the setting is off', async () => {
+    const { service } = createService({ loadQuota: async () => quota });
+    await expect(service.execute('usage.read', {}, '/repo')).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('answers 503 when this server cannot load the quota module', async () => {
+    const { service } = createService({ readSettingsFromDiskMigrated: vi.fn(async () => ({ agentUsageToolEnabled: true })) });
+    await expect(service.execute('usage.read', {}, '/repo')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});
+
 describe('render.page', () => {
   const page = '<!doctype html><p>Hi</p>';
 
