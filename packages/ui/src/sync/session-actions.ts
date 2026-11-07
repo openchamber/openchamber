@@ -2146,9 +2146,10 @@ export async function optimisticSend(input: {
   markBusy?: boolean
   /**
    * The actual API call. Receives the optimistic message id and the context
-   * with its optimistic ids, so the server's records reconcile in place.
+   * with its optimistic ids, so the server's records reconcile in place, and,
+   * while a revert is staged, the commit to run before any context is admitted.
    */
-  send: (messageID: string, context: SyntheticContextInput[]) => Promise<void>
+  send: (messageID: string, context: SyntheticContextInput[], commitRevert?: () => Promise<void>) => Promise<void>
 }): Promise<void> {
   if (!_optimisticAdd || !_optimisticRemove) {
     throw new Error("Optimistic refs not set — is useSync() mounted?")
@@ -2269,6 +2270,19 @@ export async function optimisticSend(input: {
 
   if (input.markBusy !== false) markSessionStatus(input.sessionId, targetDirectory, "busy")
 
+  // Whether the commit of the staged revert left, and whether the server
+  // answered it. A failed send puts the revert back only while the server
+  // still has it staged.
+  let revertCommitSent = false
+  let revertCommitted = false
+  const commitRevert = revertMessageID
+    ? async () => {
+        revertCommitSent = true
+        await opencodeClient.commitRevert(input.sessionId, targetDirectory)
+        revertCommitted = true
+      }
+    : undefined
+
   const releasePrompt = trackPromptInFlight(input.sessionId)
   // Only a request that left can have been accepted; a failure before it is certain.
   let requestSent = false
@@ -2276,7 +2290,7 @@ export async function optimisticSend(input: {
     await input.ready
     assertRuntimeUnchanged()
     requestSent = true
-    await input.send(messageID, context)
+    await input.send(messageID, context, commitRevert)
   } catch (error) {
     const status = getErrorStatus(error)
     const ambiguousFailure = requestSent && isAmbiguousSendFailure(error)
@@ -2314,6 +2328,13 @@ export async function optimisticSend(input: {
     recordSendFailure(failureRecord)
     console.warn("[session-actions] prompt send rejected; rolling back optimistic message", failureRecord)
 
+    let revertStaged = !revertCommitted
+    // A commit whose response was lost may have landed all the same; the
+    // session record, read once the connection is back, says which.
+    if (revertCommitSent && !revertCommitted && ambiguousFailure) {
+      revertStaged = await opencodeClient.getSession(input.sessionId, targetDirectory).then((record) => !!record.revert, () => true)
+    }
+
     // Rollback via optimistic infrastructure. Context the server admitted
     // before the failure comes back with the next history read. The records
     // are where the session lives now: a session created from a draft can
@@ -2332,7 +2353,7 @@ export async function optimisticSend(input: {
     let message = rollbackState.message
     let part = rollbackState.part
 
-    if (revertMessageID) {
+    if (revertMessageID && revertStaged) {
       session = rollbackState.session.map((candidate) => (
         candidate.id === input.sessionId ? { ...candidate, revert: sessionBeforeSend?.revert } as Session : candidate
       ))

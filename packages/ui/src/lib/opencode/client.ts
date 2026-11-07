@@ -1525,6 +1525,12 @@ class OpencodeService {
      * this one.
      */
     beforeSend?: () => void
+    /**
+     * Commits the session's staged revert. Runs once, before the first
+     * synthetic message: one admitted while the revert is staged lies past its
+     * boundary, and the commit the prompt makes deletes it.
+     */
+    commitRevert?: () => Promise<void>
   }): Promise<string> {
     this.assertRuntimeUnchanged(params.runtimeKey)
 
@@ -1548,8 +1554,14 @@ class OpencodeService {
 
     assertProviderCircuitClosed(params.providerID)
 
+    let commitRevert = params.commitRevert
     const admitSynthetic = async (item: SyntheticContextInput) => {
       this.assertRuntimeUnchanged(params.runtimeKey)
+      if (commitRevert) {
+        await commitRevert()
+        commitRevert = undefined
+        this.assertRuntimeUnchanged(params.runtimeKey)
+      }
       await call("session.synthetic", () =>
         this.clientFor(params.directory).session.synthetic({
           sessionID: params.id,
@@ -1632,12 +1644,18 @@ class OpencodeService {
     directory?: string | null
     /** As `sendMessage`'s: runs right before the command request leaves. */
     beforeSend?: () => void
+    /** As `sendMessage`'s: commits the staged revert before the context is admitted. */
+    commitRevert?: () => Promise<void>
   }): Promise<void> {
     this.assertRuntimeUnchanged(params.runtimeKey)
     const files = await Promise.all((params.files ?? []).map((file) => this.toPromptFile(file)))
     await this.applySendSelection(params.id, { model: params.model, agent: params.agent }, params.directory, params.runtimeKey)
-    for (const item of params.context ?? []) {
-      if (!item.text.trim()) continue
+    const context = (params.context ?? []).filter((item) => item.text.trim())
+    if (context.length > 0 && params.commitRevert) {
+      this.assertRuntimeUnchanged(params.runtimeKey)
+      await params.commitRevert()
+    }
+    for (const item of context) {
       this.assertRuntimeUnchanged(params.runtimeKey)
       await call("session.synthetic", () =>
         this.clientFor(params.directory).session.synthetic({

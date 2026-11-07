@@ -18,6 +18,7 @@ const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part
 let cursorMessagePages: Array<{ items: Array<{ info: Message; parts: Part[] }>; cursor: { next?: string } }> | null = null
 const sessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
+let commitRevertError: Error | null = null
 let sessionDeleteError: unknown | null = null
 let sessionForkResult: Session | null = null
 let sessionForkError: Error | null = null
@@ -129,6 +130,7 @@ mock.module("@/lib/opencode/client", () => ({
       sessionRecords.set(sessionId, { ...(record ?? sessionFixture(sessionId)), revert: { messageID: messageId } })
       return { messageID: messageId }
     }),
+    commitRevert: mock(async () => { if (commitRevertError) throw commitRevertError }),
     forkSession: mock(async (
       sessionId: string,
       options?: { before?: string; directory?: string | null },
@@ -1625,6 +1627,7 @@ describe("updateSessionTitle live state", () => {
 describe("optimisticSend target directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
+    commitRevertError = null
   })
 
   test("passes the prompt directory to optimistic state during session switch races", async () => {
@@ -1740,7 +1743,13 @@ describe("optimisticSend target directory", () => {
     expect(optimisticShadow.has((optimisticMessage as unknown as Message).id)).toBe(true)
   })
 
-  test("restores the reverted branch when sending fails", async () => {
+  // A failed send puts the revert back only while the server still has it staged.
+  for (const { outcome, commit, serverStaged, restored } of [
+    { outcome: "before the commit", commit: "none", serverStaged: true, restored: true },
+    { outcome: "after the server committed the revert", commit: "answered", serverStaged: false, restored: false },
+    { outcome: "after a lost commit response the server applied", commit: "lost", serverStaged: false, restored: false },
+    { outcome: "after a lost commit response the server did not apply", commit: "lost", serverStaged: true, restored: true },
+  ] as const) test(`${restored ? "restores" : "keeps dropped"} the reverted branch when sending fails ${outcome}`, async () => {
     const retainedMessage = { id: "msg_ffffffffffffRetained", role: "user", sessionID: "session-reverted", time: { created: 1 } } as Message
     const revertedMessage = { id: "msg_000000000000Reverted", role: "user", sessionID: "session-reverted", time: { created: 2 } } as Message
     const revertedPart = { id: "part_2", type: "text", text: "old branch" } as Part
@@ -1750,6 +1759,8 @@ describe("optimisticSend target directory", () => {
       part: { [revertedMessage.id]: [revertedPart] },
     })
     const childStores = createChildStores([["/target/project", targetStore]])
+    sessionRecords.set("session-reverted", serverStaged ? { ...sessionFixture("session-reverted"), revert: { messageID: revertedMessage.id } } : sessionFixture("session-reverted"))
+    if (commit === "lost") commitRevertError = Object.assign(new Error("gateway timeout"), { status: 504 })
 
     const { optimisticSend, setActionRefs, setOptimisticRefs } = await import("./session-actions")
     setActionRefs(childStores, () => "/target/project")
@@ -1768,12 +1779,15 @@ describe("optimisticSend target directory", () => {
       sessionId: "session-reverted",
       directory: "/target/project",
       content: "new branch",
-      send: async () => { throw new Error("rejected") },
-    })).rejects.toThrow("rejected")
+      send: async (_messageID, _context, commitRevert) => {
+        if (commit !== "none") await commitRevert?.()
+        throw new Error("rejected")
+      },
+    })).rejects.toThrow()
 
-    expect(targetStore.getState().session[0].revert?.messageID).toBe(revertedMessage.id)
-    expect(targetStore.getState().message["session-reverted"]).toEqual([retainedMessage, revertedMessage])
-    expect(targetStore.getState().part[revertedMessage.id]).toEqual([revertedPart])
+    expect(targetStore.getState().session[0].revert).toEqual(restored ? { messageID: revertedMessage.id } : undefined)
+    expect(targetStore.getState().message["session-reverted"]).toEqual(restored ? [retainedMessage, revertedMessage] : [retainedMessage])
+    expect(targetStore.getState().part[revertedMessage.id]).toEqual(restored ? [revertedPart] : undefined)
   })
 
   test("runs appendSubmissions before revert cleanup and optimistic insertion", async () => {
