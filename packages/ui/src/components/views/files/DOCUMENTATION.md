@@ -682,7 +682,10 @@ server; `FilesView` assembles them. What the syntax tree or git can answer
 is shown, nothing that needs type information.
 
 - **Git changes.** `gitChangeGutter` diffs the document against the file's git
-  baseline after typing pauses. A click on a bar opens that change in place:
+  baseline after typing pauses. For a file inside the repository selected in
+  Changes, the baseline and status come from that repository, even when the
+  project root is not a repository. The file tab remains keyed to the project.
+  A click on a bar opens that change in place:
   the changed lines are tinted, the baseline lines show under them, and
   Revert puts them back as an ordinary edit, so undo, autosave and the
   external-change guard treat it like typing. Escape or the close button
