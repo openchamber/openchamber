@@ -94,6 +94,8 @@ describe("tool row description", () => {
     expect(toolDescription("openchamber_notify", { title: "Review ready" }, undefined))
       .toEqual({ kind: "text", value: "Review ready" })
     expect(toolDescription("openchamber_usage", { action: "usage.read", parameters: { providerId: "claude" } }, undefined))
+      .toEqual({ kind: "text", value: "usage.read · claude" })
+    expect(toolDescription("openchamber_usage", { action: "usage.read", parameters: {} }, undefined))
       .toEqual({ kind: "text", value: "usage.read" })
   })
 

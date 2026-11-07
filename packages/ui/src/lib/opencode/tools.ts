@@ -168,6 +168,7 @@ const inputSchema = z
         text: optionalText,
         selector: optionalText,
         taskId: optionalText,
+        providerId: optionalText,
         link: z.object({ identifier: optionalText, title: optionalText }).optional().catch(undefined),
       })
       .optional()
@@ -656,7 +657,7 @@ export function openChamberToolCall(toolName: ToolName, input: JsonValue | undef
 
 /**
  * The action an OpenChamber tool call ran and the one detail that tells calls
- * apart: what was linked, created, saved, opened or asked. Notifications have
+ * apart: what was linked, created, saved, opened, asked or read. Notifications have
  * no action, so their title stands alone.
  */
 function describeOpenChamberTool(parsed: ParsedInput): ToolDescription | null {
@@ -673,6 +674,7 @@ function describeOpenChamberTool(parsed: ParsedInput): ToolDescription | null {
     || parameters?.selector
     || parameters?.prompt?.split("\n")[0]
     || parameters?.taskId
+    || parameters?.providerId
     || parsed.title
   const label = [parsed.action, detail].filter(Boolean).join(" · ")
   return label ? { kind: "text", value: label.slice(0, MAX_COMMAND_LENGTH) } : null
