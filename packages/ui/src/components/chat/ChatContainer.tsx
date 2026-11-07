@@ -1424,6 +1424,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const chatRootRef = React.useRef<HTMLDivElement>(null);
     const lastPressedInsideRef = React.useRef(false);
     const [chatSearch, setChatSearch] = React.useState({ open: false, focusRequest: 0 });
+    const [chatSearchSessionId, setChatSearchSessionId] = React.useState(currentSessionId);
+    // The search belongs to the conversation it was opened in. Close it
+    // synchronously on session switch: a passive effect would leave one
+    // commit rendering the old hits under the new session id, and the bar
+    // would re-issue message focus for the new session with the old hit's
+    // id, ending in a "linked message not found" toast.
+    if (chatSearchSessionId !== currentSessionId) {
+        setChatSearchSessionId(currentSessionId);
+        if (chatSearch.open) setChatSearch((current) => ({ ...current, open: false }));
+    }
     const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const messageSearchEnabled = useUIStore((state) => state.messageSearchEnabled);
     React.useEffect(() => {
@@ -1449,10 +1459,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
             document.removeEventListener('keydown', onKeyDown);
         };
     }, [active, currentSessionId, messageSearchEnabled, shortcutOverrides]);
-    // The search belongs to the conversation it was opened in.
-    React.useEffect(() => {
-        setChatSearch((current) => (current.open ? { ...current, open: false } : current));
-    }, [currentSessionId]);
     const closeChatSearch = React.useCallback(() => {
         setChatSearch((current) => ({ ...current, open: false }));
     }, []);
@@ -2011,6 +2017,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
 			{chatSearch.open && currentSessionId && messageSearchEnabled ? (
 				<div className="pointer-events-none absolute inset-e-3 top-2 z-20">
 					<ChatSearchBar
+						// Keyed by session so the old hits never meet a new
+						// session id in one commit: the same instance would
+						// re-issue message focus for the new session with the
+						// old hit's id, ending in a "not found" toast.
+						key={currentSessionId}
 						sessionId={currentSessionId}
 						scrollNode={scrollNode}
 						focusRequest={chatSearch.focusRequest}
