@@ -102,11 +102,7 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
 - **Secure storage** — `@aparajita/capacitor-secure-storage` for connection tokens.
 - **Deep links** — `openchamber://` URL scheme; a reusable intent vocabulary (`apps/deepLinks.ts`)
   used by notification taps, widgets, and Control Center. Cold-launch intents are stashed.
-- **Share-sheet file intake** — the `OpenChamberShare` extension accepts files, images and movies
-  from the iOS share sheet, stages them in the App Group inbox and opens the app. The app's
-  `SharedFiles` plugin hands them to the page, which opens a new session draft with them
-  attached and unsent. More than eight files, a file over 24 MB, a batch over 32 MB, or a file
-  the provider cannot open is reported by name instead of attached.
+- **Share intake (text, links, files)** — iOS: the `OpenChamberShare` extension accepts text, links, files, images and movies from the share sheet, stages them in the App Group inbox and opens the app. Android: `ACTION_SEND`/`ACTION_SEND_MULTIPLE` start `MainActivity`, which reads the intent off the UI thread (`SharedIntentReader`) into `SharedPayloadStore`; a share that arrives while the app runs goes through `onNewIntent`. The app's `SharedFiles` plugin hands the payload to the page, which opens a new session draft with the files attached and unsent and the text typed into the composer. More than eight files, a file over 24 MB, a batch over 32 MB, or a file the provider cannot open is reported by name instead of attached. Text or a link shared on its own is not an attachment: a provider that carries only text or a URL becomes composer text, and a provider that offers both is read as its link so a shared article arrives as one line.
 - **Native tests** — `OpenChamberShareTests` (a unit-test target with no host app) runs the real
   `FileManager`/`NSItemProvider` paths of `Shared/ShareInbox.swift` and `Shared/ShareStaging.swift`
   in the simulator: the copy inside the load callback, the manifest round-trip, the three
@@ -171,7 +167,9 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   brings `firebase-messaging`.
 - Manifest: permissions `INTERNET`, `CAMERA` (+ optional camera feature), `POST_NOTIFICATIONS`
   (Android 13+; older versions allow notifications by default). `windowSoftInputMode=adjustResize`.
-  FCM `default_notification_icon=@drawable/ic_stat_notify`.
+  `MainActivity` also declares `ACTION_SEND` and `ACTION_SEND_MULTIPLE` with `mimeType="*/*"`, so
+  the app appears in the system share sheet for any type; the page's attachment rules decide what
+  can actually be attached. FCM `default_notification_icon=@drawable/ic_stat_notify`.
 - Adaptive and themed launcher icon: full-bleed color background + `ic_launcher_foreground`, plus the
   `<monochrome>` layer (`ic_launcher_monochrome.png`). All of them, and `assets/icon-*.png`, are written
   by `bun run brand:generate` (`scripts/brand`); `@capacitor/assets` would rewrite `ic_launcher.xml`
