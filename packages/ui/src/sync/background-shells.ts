@@ -167,10 +167,48 @@ const sameShell = (left: TrackedShell | undefined, right: TrackedShell): boolean
   && left.background === right.background
 );
 
+// Stops of a command the turn waits for, waiting until the call moves to the
+// background (see `waitForShellSettle`). Keyed by command, at most one each.
+type SettleOutcome = 'background' | 'ended';
+type SettleWaiter = { resolve: (outcome: SettleOutcome) => void; reject: (error: Error) => void };
+type ShellSettleWait = { settled: Promise<SettleOutcome>; cancel: () => void };
+const settleWaiters = new Map<string, SettleWaiter>();
+
+
+/**
+ * Waits for a command's call to settle in the background (`'background'`), or
+ * for the command to end first (`'ended'`). Only the call's own settle event
+ * counts, never the `background` flag: a command first seen in a list reads
+ * as background while its call may still wait for it. Rejects after
+ * `timeoutMs` and on a runtime switch. Register it before asking OpenCode to
+ * background the work, since the event can arrive before that call answers.
+ */
+export const waitForShellSettle = (shellID: string, timeoutMs: number): ShellSettleWait => {
+  settleWaiters.get(shellID)?.reject(new Error('Replaced by a newer wait for the same command.'));
+  let cancel = (): void => {};
+  const settled = new Promise<SettleOutcome>((resolve, reject) => {
+    // Every way out, a timeout and a cancel included, drops the waiter.
+    const finish = (settle: () => void) => {
+      clearTimeout(timer);
+      if (settleWaiters.get(shellID) === waiter) settleWaiters.delete(shellID);
+      settle();
+    };
+    const waiter: SettleWaiter = {
+      resolve: (outcome) => finish(() => resolve(outcome)),
+      reject: (error) => finish(() => reject(error)),
+    };
+    const timer = setTimeout(() => waiter.reject(new Error('The command did not move to the background in time.')), timeoutMs);
+    settleWaiters.set(shellID, waiter);
+    cancel = () => waiter.reject(new Error('Cancelled.'));
+  });
+  return { settled, cancel };
+};
+
 /** Applies shell lifecycle events for one directory. Other event types are ignored cheaply. */
 export const applyBackgroundShellEvents = (rawDirectory: string, payloads: readonly SyncEvent[]): void => {
   let draft: Map<string, TrackedShell> | null = null;
   const ended: EndedShell[] = [];
+  const settled: Array<[string, SettleOutcome]> = [];
   const current = (): ReadonlyMap<string, TrackedShell> => draft ?? useBackgroundShellsStore.getState().byId;
   for (const payload of payloads) {
     if (payload.type === 'shell.started') {
@@ -189,6 +227,7 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
       const { shellID, end, endedAt } = payload.properties;
       touch(shellID);
       settledInBackground.delete(shellID);
+      if (settleWaiters.has(shellID)) settled.push([shellID, 'ended']);
       const tracked = current().get(shellID);
       if (!tracked) continue;
       draft ??= new Map(current());
@@ -204,6 +243,7 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
     }
     const backgroundedID = backgroundedShellID(payload);
     if (backgroundedID === undefined) continue;
+    if (settleWaiters.has(backgroundedID)) settled.push([backgroundedID, 'background']);
     const tracked = current().get(backgroundedID);
     if (!tracked) {
       rememberSettledInBackground(backgroundedID);
@@ -214,6 +254,8 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
     draft.set(backgroundedID, { ...tracked, background: true });
   }
   if (draft) publish(draft, ended.length > 0 ? withEnded(useBackgroundShellsStore.getState().ended, ended) : null);
+  // After publishing, so a waiter reads the index this batch left.
+  for (const [shellID, outcome] of settled) settleWaiters.get(shellID)?.resolve(outcome);
 };
 
 /**
@@ -277,6 +319,7 @@ export const resetBackgroundShells = (): void => {
   touchedAt.clear();
   settledInBackground.clear();
   stopNoted.clear();
+  for (const waiter of [...settleWaiters.values()]) waiter.reject(new Error('The runtime changed.'));
   useBackgroundShellsStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS, ended: new Map() });
 };
 
