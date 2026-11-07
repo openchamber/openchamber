@@ -1,9 +1,20 @@
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildSystemdUserService, enableStartupService, stablePnpmEntrypoint } from './cli-startup.js';
+import {
+  buildSystemdUserService,
+  enableStartupService,
+  findStartupServiceInstance,
+  parseLaunchdJobPid,
+  parseSystemdMainPid,
+  parseWindowsTaskProcesses,
+  restartWindowsStartupTask,
+  stablePnpmEntrypoint,
+  startWindowsTaskAfterExit,
+} from './cli-startup.js';
 import { INJECTED_ENV_KEY, assignInjectedEnv } from '../../server/lib/injected-env.js';
 
 const join = (...parts) => path.join(...parts);
@@ -54,6 +65,236 @@ describe('buildSystemdUserService', () => {
       process.argv[1] = previousEntry;
       fs.rmSync(pnpmHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe('parseSystemdMainPid', () => {
+  it('reads the pid systemd reports', () => {
+    expect(parseSystemdMainPid('4242\n')).toBe(4242);
+  });
+
+  it('reports no pid for a stopped unit', () => {
+    // A stopped unit answers with 0, which is not a process.
+    expect(parseSystemdMainPid('0\n')).toBeNull();
+    expect(parseSystemdMainPid('')).toBeNull();
+  });
+});
+
+describe('parseLaunchdJobPid', () => {
+  it('reads the pid of a running job', () => {
+    const output = [
+      '{',
+      '\t"LimitLoadToSessionType" = "Aqua";',
+      '\t"Label" = "dev.openchamber.web";',
+      '\t"PID" = 4242;',
+      '}',
+    ].join('\n');
+    expect(parseLaunchdJobPid(output)).toBe(4242);
+  });
+
+  it('reports no pid while launchd is not running the job', () => {
+    const output = [
+      '{',
+      '\t"Label" = "dev.openchamber.web";',
+      '\t"LastExitStatus" = 0;',
+      '}',
+    ].join('\n');
+    expect(parseLaunchdJobPid(output)).toBeNull();
+  });
+});
+
+describe('parseWindowsTaskProcesses', () => {
+  it('reports no processes for a task that is not running', () => {
+    expect(parseWindowsTaskProcesses('stopped\r\n')).toBeNull();
+  });
+
+  it('reads the processes of a running task', () => {
+    expect(parseWindowsTaskProcesses('running 4242 4243\r\n')).toEqual([4242, 4243]);
+  });
+
+  it('reads a running task whose process could not be told apart', () => {
+    expect(parseWindowsTaskProcesses('running\r\n')).toEqual([]);
+  });
+
+  it('rejects output it does not know', () => {
+    expect(() => parseWindowsTaskProcesses('')).toThrow(/unexpected task state/);
+  });
+});
+
+describe('findStartupServiceInstance', () => {
+  const daemon = { pid: 11, port: 3000, launchMode: 'daemon' };
+  const foreground = { pid: 22, port: 3001, launchMode: 'foreground' };
+  const second = { pid: 33, port: 3002, launchMode: 'foreground' };
+
+  it('picks the instance whose pid the service manager reports', () => {
+    expect(findStartupServiceInstance([daemon, foreground], {
+      getPid: () => 22,
+      platform: 'linux',
+    })).toBe(foreground);
+  });
+
+  it('reports no service instance when the pid lookup finds nothing running', () => {
+    // A stopped unit must not hand the foreground instance to the service
+    // restart, which would stop it and start nothing.
+    expect(findStartupServiceInstance([foreground], {
+      getPid: () => null,
+      platform: 'linux',
+    })).toBeNull();
+  });
+
+  describe('on Windows', () => {
+    const find = (instances, getTaskProcesses) => findStartupServiceInstance(instances, {
+      getTaskProcesses,
+      platform: 'win32',
+    });
+
+    it('leaves a manual foreground server alone when the task is stopped, disabled or missing', () => {
+      expect(find([foreground], () => null)).toBeNull();
+    });
+
+    it('finds the running task beside another foreground server', () => {
+      expect(find([foreground, second], () => [9000, 33])).toBe(second);
+    });
+
+    it('fails when the running task matches no instance', () => {
+      expect(() => find([foreground], () => [9000])).toThrow(/Nothing was stopped or installed/);
+    });
+
+    it('fails when the task cannot be read', () => {
+      expect(() => find([foreground], () => {
+        throw new Error('Access is denied');
+      })).toThrow(/Access is denied.*openchamber startup disable/);
+    });
+
+    it('finds no instance when discovery is empty and the task is stopped', () => {
+      expect(find([], () => null)).toBeNull();
+    });
+
+    it('fails when discovery is empty and the task is running', () => {
+      expect(() => find([], () => [9000])).toThrow(/Nothing was stopped or installed/);
+    });
+  });
+});
+
+describe('restartWindowsStartupTask', () => {
+  const instance = { pid: 4242, port: 3000 };
+
+  function setup({ endStatus = 0, requested = false, running = true, exited = true } = {}) {
+    const calls = [];
+    const options = {
+      run: vi.fn((_command, args) => {
+        calls.push(args[0]);
+        return { status: args[0] === '/End' ? endStatus : 0, stderr: 'ERROR: access denied' };
+      }),
+      requestShutdown: vi.fn(async () => {
+        calls.push('shutdown');
+        return requested;
+      }),
+      isRunning: vi.fn(() => running),
+      stopProcess: vi.fn(async () => {
+        calls.push('exit');
+        return exited;
+      }),
+      startTaskAfterExit: vi.fn(async () => {
+        calls.push('helper');
+      }),
+    };
+    return { calls, options };
+  }
+
+  it('hands the start to the helper, then ends the task and stops the server', async () => {
+    const { calls, options } = setup();
+
+    await restartWindowsStartupTask(instance, options);
+
+    expect(calls).toEqual(['helper', '/End', 'shutdown', 'exit']);
+    expect(options.startTaskAfterExit).toHaveBeenCalledWith(4242);
+    expect(options.stopProcess.mock.calls[0][0]).toBe(4242);
+  });
+
+  it('leaves the start to the helper when the shutdown takes down the updater', async () => {
+    // Run from a terminal of this server, the update dies with the shutdown
+    // request. Everything the restart needs has to be in place by then.
+    const { calls, options } = setup();
+    options.requestShutdown = vi.fn(() => {
+      calls.push('shutdown');
+      return new Promise(() => {});
+    });
+
+    void restartWindowsStartupTask(instance, options);
+    await vi.waitFor(() => expect(calls).toContain('shutdown'));
+
+    expect(calls).toEqual(['helper', '/End', 'shutdown']);
+  });
+
+  it('touches nothing when the helper cannot start', async () => {
+    const { calls, options } = setup();
+    options.startTaskAfterExit = vi.fn(async () => {
+      throw new Error('spawn ENOENT');
+    });
+
+    await expect(restartWindowsStartupTask(instance, options)).rejects.toThrow(/spawn ENOENT.*schtasks \/Run/);
+
+    expect(calls).toEqual([]);
+  });
+
+  it('reports a server that does not exit', async () => {
+    const { options } = setup({ exited: false });
+
+    await expect(restartWindowsStartupTask(instance, options)).rejects.toThrow(/did not exit.*taskkill \/PID 4242/);
+  });
+
+  it('stops when /End fails and the server is still up', async () => {
+    const { calls, options } = setup({ endStatus: 1 });
+
+    await expect(restartWindowsStartupTask(instance, options)).rejects.toThrow(/access denied/);
+
+    expect(calls).toEqual(['helper', '/End', 'shutdown']);
+  });
+
+  it('goes on when /End fails because the server is already gone', async () => {
+    const { calls, options } = setup({ endStatus: 1, running: false });
+
+    await restartWindowsStartupTask(instance, options);
+
+    expect(calls).toEqual(['helper', '/End', 'shutdown', 'exit']);
+  });
+
+  it('waits for a server that accepted the shutdown request when /End finds no task to end', async () => {
+    const { calls, options } = setup({ endStatus: 1, requested: true });
+
+    await restartWindowsStartupTask(instance, options);
+
+    expect(calls).toEqual(['helper', '/End', 'shutdown', 'exit']);
+  });
+});
+
+describe('startWindowsTaskAfterExit', () => {
+  const start = () => {
+    const helper = Object.assign(new EventEmitter(), { unref: vi.fn() });
+    const spawnProcess = vi.fn(() => helper);
+    return { helper, spawnProcess, started: startWindowsTaskAfterExit(4242, spawnProcess) };
+  };
+
+  it('starts a detached process that waits for the server and the task before /Run', async () => {
+    const { helper, spawnProcess, started } = start();
+    helper.emit('spawn');
+    await started;
+
+    const [, args, options] = spawnProcess.mock.calls[0];
+    expect(options).toMatchObject({ detached: true, stdio: 'ignore', windowsHide: true });
+    expect(helper.unref).toHaveBeenCalled();
+
+    const script = Buffer.from(args.at(-1), 'base64').toString('utf16le');
+    expect(script).toContain('Get-Process -Id 4242');
+    expect(script.indexOf('$serverGone -and $task.State -ne "Running"')).toBeLessThan(script.indexOf('/Run'));
+  });
+
+  it('rejects when the helper does not start', async () => {
+    const { helper, started } = start();
+    helper.emit('error', new Error('spawn ENOENT'));
+
+    await expect(started).rejects.toThrow('spawn ENOENT');
   });
 });
 
