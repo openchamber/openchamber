@@ -111,7 +111,7 @@
     "concurrently": "^10.0.0",
     "cors": "^2.8.5",
     "cross-env": "^10.0.0",
-    "happy-dom": "18.0.1",
+    "happy-dom": "21.0.4",
     "mdast-util-from-markdown": "2.1.0",
     "mdast-util-math": "3.0.0",
     "micromark-util-types": "2.0.3",
