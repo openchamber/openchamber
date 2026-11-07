@@ -6,7 +6,7 @@ Object.assign(globalThis, {
   window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage,
   Node: browser.Node, Element: browser.Element, HTMLElement: browser.HTMLElement,
   HTMLInputElement: browser.HTMLInputElement, HTMLTextAreaElement: browser.HTMLTextAreaElement,
-  Event: browser.Event, FocusEvent: browser.FocusEvent, CustomEvent: browser.CustomEvent, MouseEvent: browser.MouseEvent,
+  Event: browser.Event, KeyboardEvent: browser.KeyboardEvent, FocusEvent: browser.FocusEvent, CustomEvent: browser.CustomEvent, MouseEvent: browser.MouseEvent,
   MutationObserver: browser.MutationObserver, ResizeObserver: browser.ResizeObserver,
   getComputedStyle: browser.getComputedStyle.bind(browser),
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
@@ -123,17 +123,19 @@ describe('MessageFilesDisplay pasted text files', () => {
     expect(popups[0].content).toBe(content);
   });
 
-  test('a compact image thumbnail keeps the image popup payload', async () => {
+  test('a compact image is drawn inline and opens the image viewer instead of the message popup', async () => {
     await renderFiles([file({ mime: 'image/png', filename: 'shot.png', url: 'data:image/png;base64,aGVsbG8=' })], true);
 
     const chip = [...container.querySelectorAll('button')].find((entry) => entry.getAttribute('aria-label') === 'shot.png');
-    expect(chip).toBeDefined();
+    expect(chip?.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,aGVsbG8=');
     await clickChip(chip!);
 
-    expect(popups).toHaveLength(1);
-    expect(popups[0].content).toBe('');
-    expect(popups[0].image?.url).toBe('data:image/png;base64,aGVsbG8=');
-    expect(popups[0].image?.mimeType).toBe('image/png');
+    expect(popups).toHaveLength(0);
+    expect(document.body.querySelector('[data-image-lightbox] img')?.getAttribute('src')).toBe('data:image/png;base64,aGVsbG8=');
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(document.body.querySelector('[data-image-lightbox]')).toBeNull();
   });
 
   test('a pdf chip keeps today\'s behavior', async () => {

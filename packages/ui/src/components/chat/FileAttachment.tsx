@@ -15,6 +15,9 @@ import { ProviderIcon } from '@/components/sourceControl/ProviderIcon';
 import { useSourceControlProvider } from '@/lib/source-control/providers/registry';
 import { useOpenAttachment } from './message/useOpenAttachment';
 import { INLINE_SERVER_ATTACHMENT_ID_PREFIX } from './composer/attachments/inlineMentionAttachments';
+import { normalizeDroppedPath } from './composer/attachments/filePaths';
+import { InlineImage, WorkspaceImage } from './message/parts/InlineImage';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { StatusImage } from '@/components/ui/status-image';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -23,7 +26,6 @@ import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 
 import type { ToolPopupContent } from './message/types';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 const FileAttachmentButton = memo(() => {
   const { t } = useI18n();
@@ -597,6 +599,13 @@ const IssueLinkIcon: React.FC<{ file: { mime?: string }; kind: IssueLinkKind; cl
   return <Icon name={issueLinkIcon(kind)} className={className} />;
 };
 
+/** An image attachment drawn inline; one attached by path is read from the server's disk. */
+const AttachedImage = ({ url, name }: { url: string; name: string }) => {
+  const directory = useEffectiveDirectory() ?? '';
+  if (!/^file:\/\//i.test(url)) return <InlineImage src={url} alt={name} />;
+  return <WorkspaceImage path={normalizeDroppedPath(url)} directory={directory} alt={name} />;
+};
+
 interface MessageFilesDisplayProps {
   files: FilePart[];
   onShowPopup?: (content: ToolPopupContent) => void;
@@ -729,48 +738,11 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
         )}
 
         {imageFiles.length > 0 && (
-          <ScrollableOverlay outerClassName="overlay-scrollbar-wrapper--no-gutter -mx-1 w-auto" className="px-1 py-0.5" fillContainer={false}>
-            <div className="flex snap-x snap-mandatory gap-2">
-              {imageFiles.map((file, index) => {
-                const filename = resolveDisplayName(file) || 'Image';
-                const openTarget = resolveOpenTarget(file);
-
-                return (
-                  <Tooltip key={`img-${file.url || file.filename || index}`}>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (openTarget) openAttachment(openTarget);
-                        }}
-                        className="relative flex-none border border-edge-muted bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
-                        aria-label={filename}
-                      >
-                        {file.url ? (
-                          <StatusImage
-                            src={file.url}
-                            alt={filename}
-                            variant="thumbnail"
-                            className="h-full w-full"
-                            imgClassName="h-full w-full object-cover"
-                            lazy
-                          />
-                        ) : (
-                          <div className="h-full w-full flex items-center justify-center bg-muted/30 text-muted-foreground">
-                            <Icon name="file-image" className="h-6 w-6" />
-                          </div>
-                        )}
-                        <span className="sr-only">{filename}</span>
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" sideOffset={6} className="typography-meta px-2 py-1">
-                      {filename}
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })}
-            </div>
-          </ScrollableOverlay>
+          <div className="flex flex-wrap gap-x-2">
+            {imageFiles.map((file, index) => (
+              <AttachedImage key={`img-${file.url || file.filename || index}`} url={file.url ?? ''} name={resolveDisplayName(file) || 'Image'} />
+            ))}
+          </div>
         )}
       </div>
     );
@@ -788,26 +760,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, 
         const issueLinkKind = getIssueLinkKind(file);
 
         if (isImage && file.url) {
-          return (
-            <div
-              key={file.url || `${fileName}-${index}`}
-              className="relative aspect-video rounded-lg border border-edge-muted bg-muted/10 overflow-hidden group"
-            >
-              <StatusImage
-                src={file.url}
-                alt={fileName}
-                variant="thumbnail"
-                className="h-full w-full"
-                imgClassName="h-full w-full object-cover"
-                lazy
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="absolute bottom-0 inset-s-0 inset-e-0 p-2 text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                <p className="text-xs font-medium truncate">{fileName}</p>
-                {sizeText && <p className="text-xs opacity-80">{sizeText}</p>}
-              </div>
-            </div>
-          );
+          return <AttachedImage key={file.url || `${fileName}-${index}`} url={file.url} name={fileName} />;
         }
 
         if (issueLinkKind && file.url) {

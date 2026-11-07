@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
 import type { Metadata, ToolInput, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { MinDurationShineText } from './MinDurationShineText';
+import { WorkspaceImage } from './InlineImage';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Text } from '@/components/ui/text';
 import { getToolIcon } from './toolPresentation';
@@ -377,7 +378,14 @@ const StaticToolRowInner: React.FC<{
     const isFetchGroup = normalizedToolName === 'webfetch' || normalizedToolName === 'fetch' || normalizedToolName === 'curl' || normalizedToolName === 'wget';
     const isSkillGroup = isSkillTool(normalizedToolName);
 
+    // The image a read returned is drawn under its row. VS Code reads the file
+    // through the editor and has no raw-file route to draw it from.
+    const readImages = isReadGroup && !runtime?.editor
+        ? readFileEntries.filter((entry) => isImageFile(entry.path))
+        : [];
+
     return (
+        <>
         <div
             // oc-static-tool-row: on touch devices mobile.css raises this to the
             // same 36px floor the [role="button"] expandable/reasoning rows get,
@@ -497,6 +505,15 @@ const StaticToolRowInner: React.FC<{
                 </Text>
             ) : null}
         </div>
+        {readImages.map((entry) => (
+            <WorkspaceImage
+                key={entry.path}
+                path={toAbsoluteFilePath(currentDirectory, entry.path)}
+                directory={currentDirectory}
+                alt={entry.displayPath}
+            />
+        ))}
+        </>
     );
 };
 
