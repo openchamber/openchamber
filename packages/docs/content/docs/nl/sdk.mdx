@@ -114,7 +114,7 @@ Bij installatie ziet de gebruiker de volledige lijst en kan die goedkeuren of de
 
 ## Een OpenCode-plugin in uw pakket
 
-Een extensie kan een OpenCode-plugin meeleveren, zodat mensen één ding installeren in plaats van twee. Declareer `"opencodePlugin": "plugin"`, een map in het pakket met een `package.json` waarvan `main` het entry-bestand van de plugin noemt. De entry exporteert standaard `{ id, setup }`, de vorm die OpenCode laadt; hij importeert niets, want OpenCode laadt hem met een kale `import()` uit uw map, waar niets geïnstalleerd is. De `input` van een tool is gewoon JSON Schema, en zijn `execute` antwoordt `{ content }`.
+Een extensie kan een OpenCode-plugin meeleveren, zodat mensen één ding installeren in plaats van twee. Declareer `"opencodePlugin": "plugin"`, een map in het pakket met `index.js` of `server.js` in de hoofdmap. OpenCode leest `main` niet, dus voor een entry op een andere plek zet je `name` en `exports` in de `package.json` van de map. De entry exporteert standaard `{ id, setup }`, de vorm die OpenCode laadt; hij importeert niets, want OpenCode laadt hem met een kale `import()` uit uw map, waar niets geïnstalleerd is. De `input` van een tool is gewoon JSON Schema, en zijn `execute` antwoordt `{ content }`.
 
 ```json
 {

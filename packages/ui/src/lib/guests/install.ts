@@ -40,7 +40,7 @@ export type InstallGuestErrorCode =
   | 'id-taken'
   | 'already-installed'
   | 'missing-build'
-  /** `contributes.opencodePlugin` names a folder that is missing or whose package.json names no entry file. */
+  /** `contributes.opencodePlugin` names a folder that is missing or holds no entry file OpenCode finds. */
   | 'invalid-opencode-plugin'
   | 'host-too-old'
   | 'bundled'

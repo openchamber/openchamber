@@ -1,8 +1,8 @@
 # Teapot Tools
 
 An extension that ships an OpenCode plugin. It declares
-`contributes.opencodePlugin: "plugin"`, a folder inside the package with a
-`package.json` whose `main` is the plugin's entry file. The plugin adds one
+`contributes.opencodePlugin: "plugin"`, a folder inside the package with
+`index.js` at its root, which is where OpenCode looks for the plugin. The plugin adds one
 tool, `teapot_status`, which answers a fixed line. There is no panel and no
 service: the extension exists to show how a plugin travels with an extension
 and leaves with it.

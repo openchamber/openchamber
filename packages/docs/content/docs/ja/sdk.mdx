@@ -114,7 +114,7 @@ OpenChamber がマニフェストを読み、拡張機能が求めているも�
 
 ## パッケージに OpenCode プラグインを同梱する
 
-拡張機能は OpenCode プラグインを同梱できます。利用者は 2 つではなく 1 つをインストールするだけで済みます。`"opencodePlugin": "plugin"` を宣言してください。これはパッケージ内のフォルダーで、その `package.json` の `main` がプラグインのエントリーファイルを指します。エントリーは OpenCode が読み込む形 `{ id, setup }` をデフォルトエクスポートします。OpenCode は何もインストールされていないあなたのフォルダーから素の `import()` で読み込むため、エントリーは何もインポートしません。ツールの `input` は素の JSON Schema で、`execute` は `{ content }` を返します。
+拡張機能は OpenCode プラグインを同梱できます。利用者は 2 つではなく 1 つをインストールするだけで済みます。`"opencodePlugin": "plugin"` を宣言してください。これはパッケージ内のフォルダーで、そのルートに `index.js` または `server.js` を置きます。OpenCode は `main` を読まないため、エントリーを別の場所に置く場合はフォルダーの `package.json` に `name` と `exports` を指定してください。エントリーは OpenCode が読み込む形 `{ id, setup }` をデフォルトエクスポートします。OpenCode は何もインストールされていないあなたのフォルダーから素の `import()` で読み込むため、エントリーは何もインポートしません。ツールの `input` は素の JSON Schema で、`execute` は `{ content }` を返します。
 
 ```json
 {

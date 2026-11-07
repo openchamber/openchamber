@@ -96,7 +96,7 @@ Limits the package fails on:
 | `setInstructions` text | 4,096 characters |
 | `@` rows | 20, title and subtitle up to 120 |
 
-Everything a page touches goes through `capabilities` (`prompt`, `sessions`, `files`, `model`, `shells`) or `origins` (https origins it may fetch). `sessionControl`, `instructions`, `skills`, `sessionEvents` and `service` need nothing there: declaring them is the request. The user approves all of it once, and an update that asks for more asks again.
+Everything a page touches goes through `capabilities` (`prompt`, `sessions`, `files`, `model`, `shells`) or `origins` (https origins it may fetch). `sessionControl`, `instructions`, `skills`, `opencodePlugin`, `sessionEvents` and `service` need nothing there: declaring them is the request. The user approves all of it once, and an update that asks for more asks again.
 
 ## Recipes
 
@@ -184,6 +184,10 @@ A click posts `{ id, value? }` to the same path. A line's `content` can be `{ ki
 `"instructions": true` with a service, then `await host.setInstructions(null, text)` when it starts and when the facts change. `null` means every project, a directory means that one. Keep it to facts an agent acts on: each word costs tokens in every session.
 
 `"skills": "skills"` points to a folder of `skills/<name>/SKILL.md`, offered to every agent while the extension is on. The `description` decides when an agent picks it, so name the work.
+
+### OpenCode plugin
+
+For agent tools the extension should carry with it. `"opencodePlugin": "plugin"` points to a folder with `index.js` or `server.js` at its root, or a `package.json` whose `name` and `exports` lead to the entry; `main` is ignored. The entry default-exports `{ id, setup }` and imports nothing. It runs inside OpenCode with the user's full access, while the extension is on.
 
 ### `@` rows
 
@@ -274,7 +278,7 @@ The SDK ships its full reference. Read these before guessing a method or a manif
 
 - `node_modules/@openchamber/sdk/API.md`: every manifest key and host method.
 - `node_modules/@openchamber/sdk/GUEST_SERVICES.md`: services, schedules, session events, the roles under `service.provides`.
-- https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples: whole extensions. `agent-desk` uses nearly every point, `session-events-log` hears events, `notification-webhook` is a notification channel, `tracker-provider` a tracker, `github-token` an integration, `checklist-editor` a file editor.
+- https://github.com/openchamber/openchamber/tree/main/packages/sdk/examples: whole extensions. `agent-desk` uses nearly every point, `session-events-log` hears events, `notification-webhook` is a notification channel, `tracker-provider` a tracker, `github-token` an integration, `checklist-editor` a file editor, `opencode-plugin` an OpenCode plugin.
 
 Service roles (`browser`, `source-control`, `notifications`, `tracker`, `quota`) each have their own manifest block and wire: read that role in `GUEST_SERVICES.md` first.
 

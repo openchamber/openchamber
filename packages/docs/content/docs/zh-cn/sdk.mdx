@@ -114,7 +114,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 
 ## 在你的包里带上一个 OpenCode 插件
 
-扩展可以自带一个 OpenCode 插件，这样用户只装一样东西而不是两样。声明 `"opencodePlugin": "plugin"`：包内的一个文件夹，其中的 `package.json` 用 `main` 指向插件的入口文件。入口文件默认导出 `{ id, setup }`，也就是 OpenCode 加载的形状；它不导入任何东西，因为 OpenCode 用一个简单的 `import()` 从你的文件夹加载它，而那里什么都没有安装。工具的 `input` 是普通的 JSON Schema，它的 `execute` 返回 `{ content }`。
+扩展可以自带一个 OpenCode 插件，这样用户只装一样东西而不是两样。声明 `"opencodePlugin": "plugin"`：包内的一个文件夹，其根目录下有 `index.js` 或 `server.js`。OpenCode 不读取 `main`，所以如果入口文件在别处，请在该文件夹的 `package.json` 中设置 `name` 和 `exports`。入口文件默认导出 `{ id, setup }`，也就是 OpenCode 加载的形状；它不导入任何东西，因为 OpenCode 用一个简单的 `import()` 从你的文件夹加载它，而那里什么都没有安装。工具的 `input` 是普通的 JSON Schema，它的 `execute` 返回 `{ content }`。
 
 ```json
 {

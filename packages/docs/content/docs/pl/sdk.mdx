@@ -114,7 +114,7 @@ Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją z
 
 ## Plugin OpenCode w Twoim pakiecie
 
-Rozszerzenie może dostarczać plugin OpenCode, więc ludzie instalują jedną rzecz zamiast dwóch. Zadeklaruj `"opencodePlugin": "plugin"`, folder w pakiecie z `package.json`, którego `main` wskazuje plik wejściowy pluginu. Plik wejściowy eksportuje domyślnie `{ id, setup }`, kształt, który ładuje OpenCode; niczego nie importuje, bo OpenCode ładuje go zwykłym `import()` z Twojego folderu, gdzie nic nie jest zainstalowane. `input` narzędzia to zwykły JSON Schema, a jego `execute` odpowiada `{ content }`.
+Rozszerzenie może dostarczać plugin OpenCode, więc ludzie instalują jedną rzecz zamiast dwóch. Zadeklaruj `"opencodePlugin": "plugin"`, folder w pakiecie z `index.js` lub `server.js` w katalogu głównym. OpenCode nie czyta `main`, więc dla pliku wejściowego w innym miejscu dodaj do `package.json` tego folderu `name` i `exports`. Plik wejściowy eksportuje domyślnie `{ id, setup }`, kształt, który ładuje OpenCode; niczego nie importuje, bo OpenCode ładuje go zwykłym `import()` z Twojego folderu, gdzie nic nie jest zainstalowane. `input` narzędzia to zwykły JSON Schema, a jego `execute` odpowiada `{ content }`.
 
 ```json
 {

@@ -114,7 +114,7 @@ OpenChamber가 매니페스트를 읽고, 확장이 요구하는 항목을 나�
 
 ## 패키지에 OpenCode 플러그인 포함하기
 
-확장은 OpenCode 플러그인을 함께 제공할 수 있어서 사용자가 두 가지 대신 하나만 설치하면 됩니다. `"opencodePlugin": "plugin"`을 선언하세요. 패키지 안의 폴더이며, 그 `package.json`의 `main`이 플러그인 진입 파일을 가리킵니다. 진입 파일은 OpenCode가 불러오는 형태인 `{ id, setup }`을 기본 내보내기 합니다. OpenCode는 아무것도 설치되지 않은 당신의 폴더에서 단순한 `import()`로 불러오므로 진입 파일은 아무것도 가져오지 않습니다. 도구의 `input`은 순수 JSON Schema이고, `execute`는 `{ content }`를 답합니다.
+확장은 OpenCode 플러그인을 함께 제공할 수 있어서 사용자가 두 가지 대신 하나만 설치하면 됩니다. `"opencodePlugin": "plugin"`을 선언하세요. 패키지 안의 폴더이며, 그 루트에 `index.js` 또는 `server.js`가 있어야 합니다. OpenCode는 `main`을 읽지 않으므로 진입 파일을 다른 곳에 두려면 폴더의 `package.json`에 `name`과 `exports`를 지정하세요. 진입 파일은 OpenCode가 불러오는 형태인 `{ id, setup }`을 기본 내보내기 합니다. OpenCode는 아무것도 설치되지 않은 당신의 폴더에서 단순한 `import()`로 불러오므로 진입 파일은 아무것도 가져오지 않습니다. 도구의 `input`은 순수 JSON Schema이고, `execute`는 `{ content }`를 답합니다.
 
 ```json
 {

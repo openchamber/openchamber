@@ -117,7 +117,7 @@ describe('an extension that ships an OpenCode plugin', () => {
     plugins = { ...plugins, delivery: 'restart' };
     buttonAnswer = () => Response.json({ error: 'config-invalid', message: 'opencode.json contains invalid JSONC' }, { status: 409 });
     await openDetail();
-    expect(container.textContent).toContain('Your environment sets OPENCODE_CONFIG, so the plugin loads the next time OpenCode starts.');
+    expect(container.textContent).toContain('Your environment sets OPENCODE_CONFIG, so changes to this plugin apply the next time OpenCode starts.');
     const button = addButton();
     if (!button) throw new Error('Missing button');
     await act(async () => { button.click(); });

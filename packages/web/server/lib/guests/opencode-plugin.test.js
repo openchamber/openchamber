@@ -34,30 +34,36 @@ describe('resolveOpenCodePluginFolder', () => {
     if (entryFile) await fs.writeFile(path.join(root, 'plugin', entryFile), 'export default { id: "p", setup: async () => {} }');
   };
 
-  test('answers the real folder when its package.json names an entry that exists', async () => {
+  test('takes the folders OpenCode loads and refuses the ones it would skip without a word', async () => {
     const root = await temporary();
-    await writePlugin(root, { name: 'p', type: 'module', main: 'index.js' });
-    expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBe(path.join(root, 'plugin'));
-    await writePlugin(root, { name: 'p', type: 'module', exports: './index.js' });
-    expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBe(path.join(root, 'plugin'));
-    await writePlugin(root, { name: 'p', type: 'module', exports: { '.': './index.js' } });
-    expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBe(path.join(root, 'plugin'));
-    await writePlugin(root, { name: 'p', type: 'module', exports: { '.': { import: './index.js' } } });
-    expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBe(path.join(root, 'plugin'));
+    const accepts = async (manifest, entryFile) => {
+      await fs.rm(path.join(root, 'plugin'), { recursive: true, force: true });
+      await writePlugin(root, manifest, entryFile);
+      return (await resolveOpenCodePluginFolder(fs, root, 'plugin')) === path.join(root, 'plugin');
+    };
+    expect(await accepts({ type: 'module' }, 'index.js')).toBe(true);
+    expect(await accepts({ type: 'module' }, 'server.ts')).toBe(true);
+    expect(await accepts({ name: 'p', exports: './index.js' }, 'index.js')).toBe(true);
+    expect(await accepts({ name: 'p', exports: { './server': './server.js' } }, 'server.js')).toBe(true);
+    expect(await accepts({ name: 'p', exports: { '.': { import: './entry.js' } } }, 'entry.js')).toBe(true);
+    expect(await accepts({ name: 'p', exports: { '.': { node: { import: './entry.js' } } } }, 'entry.js')).toBe(true);
+    expect(await accepts({ name: 'p', exports: { '.': { require: './entry.js' } } }, 'entry.js')).toBe(false);
+    // A build in a subfolder named by `main`: OpenCode never reads `main`.
+    expect(await accepts({ name: 'p', main: 'entry.js' }, 'entry.js')).toBe(false);
+    // `exports` counts only beside a `name`.
+    expect(await accepts({ exports: './entry.js' }, 'entry.js')).toBe(false);
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  test('refuses a missing folder, a package.json without an entry, an entry that is not there, and a folder outside the package', async () => {
+  test('refuses a missing folder, a folder without an entry, an export that is not there, and a folder outside the package', async () => {
     const root = await temporary();
     expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBeNull();
-    await writePlugin(root, { name: 'p', type: 'module' });
+    await writePlugin(root, { name: 'p', type: 'module' }, null);
     expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBeNull();
-    await writePlugin(root, { name: 'p', type: 'module', main: 'missing.js' });
+    await writePlugin(root, { name: 'p', type: 'module', exports: './missing.js' });
     expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBeNull();
-    await writePlugin(root, { name: 'p', type: 'module', main: '../../outside.js' });
+    await writePlugin(root, { name: 'p', type: 'module', exports: '../outside.js' });
     await fs.writeFile(path.join(root, 'outside.js'), '');
-    expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBeNull();
-    await fs.writeFile(path.join(root, 'plugin', 'package.json'), '{not json');
     expect(await resolveOpenCodePluginFolder(fs, root, 'plugin')).toBeNull();
     // A link that leaves the package: the manifest parse admits the name, the real path does not.
     const elsewhere = await temporary();

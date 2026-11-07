@@ -114,7 +114,7 @@ L'utilisateur voit la liste complète une seule fois, à l'installation de l'ext
 
 ## Un plugin OpenCode dans votre paquet
 
-Une extension peut embarquer un plugin OpenCode, pour que les gens installent une seule chose au lieu de deux. Déclarez `"opencodePlugin": "plugin"`, un dossier du paquet avec un `package.json` dont le `main` nomme le fichier d'entrée du plugin. L'entrée exporte par défaut `{ id, setup }`, la forme qu'OpenCode charge ; elle n'importe rien, car OpenCode la charge avec un simple `import()` depuis votre dossier, où rien n'est installé. L'`input` d'un outil est du JSON Schema brut, et son `execute` répond `{ content }`.
+Une extension peut embarquer un plugin OpenCode, pour que les gens installent une seule chose au lieu de deux. Déclarez `"opencodePlugin": "plugin"`, un dossier du paquet avec `index.js` ou `server.js` à sa racine. OpenCode ne lit pas `main` : pour une entrée ailleurs, indiquez `name` et `exports` dans le `package.json` du dossier. L'entrée exporte par défaut `{ id, setup }`, la forme qu'OpenCode charge ; elle n'importe rien, car OpenCode la charge avec un simple `import()` depuis votre dossier, où rien n'est installé. L'`input` d'un outil est du JSON Schema brut, et son `execute` répond `{ content }`.
 
 ```json
 {

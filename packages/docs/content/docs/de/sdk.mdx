@@ -114,7 +114,7 @@ Der Nutzer sieht die vollständige Liste einmal, bei der Installation der Erweit
 
 ## Ein OpenCode-Plugin in deinem Paket
 
-Eine Erweiterung kann ein OpenCode-Plugin mitliefern, sodass die Leute eine Sache installieren statt zwei. Deklariere `"opencodePlugin": "plugin"`, einen Ordner im Paket mit einer `package.json`, deren `main` die Einstiegsdatei des Plugins nennt. Der Einstieg exportiert per Default `{ id, setup }`, die Form, die OpenCode lädt; er importiert nichts, weil OpenCode ihn mit einem bloßen `import()` aus deinem Ordner lädt, wo nichts installiert ist. Das `input` eines Tools ist reines JSON Schema, und sein `execute` antwortet mit `{ content }`.
+Eine Erweiterung kann ein OpenCode-Plugin mitliefern, sodass die Leute eine Sache installieren statt zwei. Deklariere `"opencodePlugin": "plugin"`, einen Ordner im Paket mit `index.js` oder `server.js` auf oberster Ebene. OpenCode liest `main` nicht, für einen Einstieg an anderer Stelle setze also `name` und `exports` in der `package.json` des Ordners. Der Einstieg exportiert per Default `{ id, setup }`, die Form, die OpenCode lädt; er importiert nichts, weil OpenCode ihn mit einem bloßen `import()` aus deinem Ordner lädt, wo nichts installiert ist. Das `input` eines Tools ist reines JSON Schema, und sein `execute` antwortet mit `{ content }`.
 
 ```json
 {

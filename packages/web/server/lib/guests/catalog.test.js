@@ -440,14 +440,12 @@ describe('an OpenCode plugin in the package', () => {
     }
   };
 
-  test('the install refuses a missing folder or a package.json with no entry, and lists a good one on the row', async () => {
+  test('the install refuses a missing folder and lists a good one on the row', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-plugin-'));
     const root = path.join(dir, 'teapot');
     await writePluginGuest(root, null);
     expect(await inspectGuestPackage(root)).toEqual({ ok: false, code: 'invalid-opencode-plugin' });
     await writePluginGuest(root, { name: 'teapot-plugin', version: '1.0.0', type: 'module' });
-    expect(await inspectGuestPackage(root)).toEqual({ ok: false, code: 'invalid-opencode-plugin' });
-    await writePluginGuest(root, { name: 'teapot-plugin', version: '1.0.0', type: 'module', main: 'index.js' });
     const inspected = await inspectGuestPackage(root);
     expect(inspected.ok).toBe(true);
     if (inspected.ok) {

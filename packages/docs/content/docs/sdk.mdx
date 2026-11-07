@@ -115,7 +115,7 @@ The user sees the full list once, when they install the extension, and approves 
 
 ## An OpenCode plugin in your package
 
-An extension can ship an OpenCode plugin, so people install one thing instead of two. Declare `"opencodePlugin": "plugin"`, a folder inside the package with a `package.json` whose `main` names the plugin's entry file. The entry default-exports `{ id, setup }`, the shape OpenCode loads; it imports nothing, because OpenCode loads it with a bare `import()` from your folder, where nothing is installed. A tool's `input` is plain JSON Schema, and its `execute` answers `{ content }`.
+An extension can ship an OpenCode plugin, so people install one thing instead of two. Declare `"opencodePlugin": "plugin"`, a folder inside the package with `index.js` or `server.js` at its root. OpenCode does not read `main`, so for an entry anywhere else give the folder's `package.json` a `name` and `exports`. The entry default-exports `{ id, setup }`, the shape OpenCode loads; it imports nothing, because OpenCode loads it with a bare `import()` from your folder, where nothing is installed. A tool's `input` is plain JSON Schema, and its `execute` answers `{ content }`.
 
 ```json
 {
