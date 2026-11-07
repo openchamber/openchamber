@@ -1627,6 +1627,7 @@ onCommand('addLineComment', (payload) => {
       return;
     }
 
+    // VS Code has already emptied the comment field, so a refusal would lose the text.
     useInlineCommentDraftStore.getState().addDraft(target, {
       id: draftId,
       source,
@@ -1637,7 +1638,7 @@ onCommand('addLineComment', (payload) => {
       code,
       language,
       text: comment,
-    });
+    }, { written: true });
   });
 });
 

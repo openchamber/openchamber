@@ -23,6 +23,7 @@ import { CommentTextEditor } from '@/components/comments/CommentTextEditor';
 import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
+import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
@@ -105,7 +106,7 @@ const DraftPreviewEntry: React.FC<{
     onStartEdit: () => void;
     onEndEdit: () => void;
     onRemove: () => void;
-    onSaveComment: ((text: string) => void) | null;
+    onSaveComment: ((text: string) => boolean) | null;
     /** Chat quotes: point at the quoted fragment in the transcript. */
     onFocusQuote: ((focused: boolean) => void) | null;
     onRevealQuote: (() => void) | null;
@@ -126,8 +127,9 @@ const DraftPreviewEntry: React.FC<{
     }, [editing]);
 
     const commitEdit = () => {
-        if (onSaveComment && editText !== draft.text) {
-            onSaveComment(editText);
+        if (onSaveComment && editText !== draft.text && !onSaveComment(editText)) {
+            toast.error(t('inlineComment.toast.noRoom'));
+            return;
         }
         void imagePaste.attachCitedImages(editText);
         onEndEdit();

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Icon } from '@/components/icon/Icon';
 import { useCommentEnterSubmit } from '@/components/comments/useCommentEnterSubmit';
+import { toast } from '@/components/ui';
 import { HoverTooltip } from '@/components/ui/row-tooltip';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -28,7 +29,7 @@ export interface ChatQuoteMarkPopoverProps {
     comment: string;
     editing: boolean;
     onEditingChange: (editing: boolean) => void;
-    onSave: (text: string) => void;
+    onSave: (text: string) => boolean;
     onRemove: () => void;
     /** Where to render: the open modal dialog for a quote in a full-screen page; the body otherwise. */
     portalTarget?: HTMLElement | null;
@@ -72,7 +73,10 @@ export function ChatQuoteMarkPopover({
     }, [editing]);
 
     const save = () => {
-        onSave(draft.trim());
+        if (!onSave(draft.trim())) {
+            toast.error(t('inlineComment.toast.noRoom'));
+            return;
+        }
         onEditingChange(false);
     };
 

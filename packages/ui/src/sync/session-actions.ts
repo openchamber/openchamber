@@ -833,7 +833,7 @@ function restoreContextPartsToInput(
     const payload = readContextPart(part)
     if (!payload) continue
     const draft = draftFromContextPayload(payload)
-    if (draft) store.addDraft(target, draft)
+    if (draft) store.addDraft(target, draft, { written: true })
   }
 }
 

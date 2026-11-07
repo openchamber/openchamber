@@ -1,6 +1,8 @@
 import React from 'react';
 
+import { toast } from '@/components/ui';
 import { useDeviceInfo } from '@/lib/device';
+import { useI18n } from '@/lib/i18n';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useComposerDraftTarget } from '@/hooks/useComposerAddress';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -25,6 +27,7 @@ interface FilePreviewCommentMenuProps {
  * source line range) plus the user's comment.
  */
 export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: FilePreviewCommentMenuProps) {
+  const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const effectiveDirectory = useEffectiveDirectory();
   const target = useComposerDraftTarget(effectiveDirectory);
@@ -186,10 +189,10 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
   const saveComment = React.useCallback((text: string) => {
     if (!selectedText || !target) {
       hide();
-      return;
+      return true;
     }
     const lineRange = resolveLineRange(selectedText);
-    addDraft(target, {
+    const draftId = addDraft(target, {
       source: 'file-quote',
       fileLabel: filePath,
       startLine: lineRange?.start ?? 0,
@@ -198,11 +201,16 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
       language: '',
       text: text.trim(),
     });
+    if (!draftId) {
+      toast.error(t('inlineComment.toast.noRoom'));
+      return false;
+    }
     hide();
     queueMicrotask(() => {
       focusChatInput();
     });
-  }, [addDraft, filePath, hide, resolveLineRange, selectedText, target]);
+    return true;
+  }, [addDraft, filePath, hide, resolveLineRange, selectedText, t, target]);
 
   if (!anchor) return null;
 

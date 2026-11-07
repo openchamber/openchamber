@@ -1290,7 +1290,7 @@ const PierreDiffViewerBody: React.FC<
   }, [hunkAnchors]);
 
   const handleSaveComment = useCallback((textToSave: string, rangeOverride?: SelectedLineRange) => {
-    saveComment(textToSave, rangeOverride ?? selection ?? undefined);
+    return saveComment(textToSave, rangeOverride ?? selection ?? undefined);
   }, [saveComment, selection]);
 
 

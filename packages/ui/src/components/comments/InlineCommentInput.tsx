@@ -22,7 +22,8 @@ import { runGuestAction } from '@/lib/guests/run-action';
 export interface InlineCommentInputProps {
   initialText?: string;
   onTextChange?: (text: string) => void;
-  onSave: (text: string, range?: { start: number; end: number; side?: 'additions' | 'deletions' }) => void;
+  /** False keeps the field open with its text: the save did not land. */
+  onSave: (text: string, range?: { start: number; end: number; side?: 'additions' | 'deletions' }) => boolean | void;
   onCancel: () => void;
   fileLabel?: string;
   lineRange?: { start: number; end: number; side?: 'additions' | 'deletions' };
@@ -196,7 +197,7 @@ export function InlineCommentInput({
 
   const save = () => {
     if (text.trim() && !saving) {
-      onSave(text, normalizeRange(stableRangeRef.current));
+      if (onSave(text, normalizeRange(stableRangeRef.current)) === false) return;
       void imagePaste.attachCitedImages(text);
     }
   };
