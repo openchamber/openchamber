@@ -19,13 +19,14 @@ type SessionSearchInputProps = {
   leadingHint?: React.ReactNode;
   /** Right-aligned hint on the same row as the Enter hint. */
   trailingHint?: React.ReactNode;
+  mode?: 'submit' | 'live';
+  debounceMs?: number;
 };
 
-// Draft text stays here: typing must not invalidate the session tree or run its
-// search projection. Parents receive only submitted queries and explicit clears.
+// Keep draft edits local until a submission or live debounce commits them.
 export function SessionSearchInput({
   value, onSearch, placeholder, clearLabel, inputRef, onClose, active = true, mobile = false,
-  leadingHint, trailingHint,
+  leadingHint, trailingHint, mode = 'submit', debounceMs = 100,
 }: SessionSearchInputProps) {
   const { t } = useI18n();
   const [draft, setDraft] = React.useState(value);
@@ -33,20 +34,43 @@ export function SessionSearchInput({
   const ownRef = React.useRef<HTMLInputElement | null>(null);
   const ref = inputRef ?? ownRef;
   const hintId = React.useId();
+  const timer = React.useRef<number | null>(null);
+  const cancelPendingSearch = () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+  };
 
   React.useLayoutEffect(() => {
     setDraft(value);
     composing.current = false;
+    cancelPendingSearch();
   }, [value, active]);
+
+  React.useEffect(() => () => cancelPendingSearch(), []);
 
   const clear = () => {
     if (!active) return;
     setDraft('');
+    cancelPendingSearch();
     if (value !== '') onSearch('');
   };
 
+  const scheduleSearch = (next: string) => {
+    cancelPendingSearch();
+    if (!active || composing.current) return;
+    const query = next.trim();
+    if (query.length === 0) {
+      if (value !== '') onSearch('');
+    } else if (mode === 'live') {
+      timer.current = window.setTimeout(() => {
+        timer.current = null;
+        onSearch(query);
+      }, debounceMs);
+    }
+  };
+
   return (
-    <div>
+    <div data-session-search-input>
       <div className={cn('relative', mobile && 'border-b border-edge-muted py-1')}>
         <Icon name="search" className={cn('pointer-events-none absolute top-1/2 -translate-y-1/2 text-muted-foreground', mobile ? 'inset-s-2.5 size-3.5' : 'inset-s-2 size-4')} />
         <Input
@@ -60,12 +84,13 @@ export function SessionSearchInput({
           onChange={(event) => {
             const next = event.target.value;
             setDraft(next);
-            if (active && !composing.current && next.trim().length === 0 && value !== '') onSearch('');
+            scheduleSearch(next);
           }}
-          onCompositionStart={() => { composing.current = true; }}
+          onCompositionStart={() => { composing.current = true; cancelPendingSearch(); }}
           onCompositionEnd={(event) => {
             composing.current = false;
-            if (active && event.currentTarget.value.trim().length === 0 && value !== '') onSearch('');
+            setDraft(event.currentTarget.value);
+            scheduleSearch(event.currentTarget.value);
           }}
           onKeyDown={(event) => {
             if (!active || composing.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -73,6 +98,7 @@ export function SessionSearchInput({
               event.preventDefault();
               event.stopPropagation();
               const query = event.currentTarget.value.trim();
+              cancelPendingSearch();
               if (!event.repeat && query !== value) onSearch(query);
             } else if (event.key === 'Escape' && (draft.length > 0 || value.length > 0 || onClose)) {
               event.preventDefault();
@@ -98,7 +124,7 @@ export function SessionSearchInput({
       {/* The phone keyboard's own search key explains itself; the hint row is desktop-only. */}
       {mobile ? null : (
         <div className="mt-1 flex items-center justify-between gap-2 typography-micro text-muted-foreground">
-          <p id={hintId} className="min-w-0 truncate">{leadingHint ?? t('sessions.search.submitHint')}</p>
+          <p id={hintId} className="min-w-0 truncate">{leadingHint ?? (mode === 'submit' ? t('sessions.search.submitHint') : null)}</p>
           {trailingHint ? <span className="shrink-0">{trailingHint}</span> : null}
         </div>
       )}

@@ -6,10 +6,10 @@ import { takeSessionActionFailure } from '@/sync/session-action-failures';
 import { describeSessionActionError } from '../sessions/sessionActionError';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
-import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry } from '../sessions/sessionRowOrder';
+import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry, type SessionRowLifecycle } from '../sessions/sessionRowOrder';
 import type { BulkDeleteSessionsConfirmState } from '../shell/ConfirmDialogs';
 
-const EMPTY_SESSIONS_BY_ID = new Map<string, { time?: { archived?: number | null } }>();
+const EMPTY_SESSIONS_BY_ID = new Map<string, SessionRowLifecycle>();
 
 type Args = {
   isInlineEditing: boolean;
@@ -61,7 +61,7 @@ export const resolveSelectionFolderIds = (
 
 export const resolveBulkDeleteConfirmation = (
   value: NonNullable<BulkDeleteSessionsConfirmState>,
-  sessionsById: ReadonlyMap<string, { time?: { archived?: number | null } }>,
+  sessionsById: ReadonlyMap<string, SessionRowLifecycle>,
 ): { ready: true; value: NonNullable<BulkDeleteSessionsConfirmState> }
   | { ready: false; value: NonNullable<BulkDeleteSessionsConfirmState> | null } => {
   const sessionIds = value.sessionIds.filter((id) => sessionsById.has(id));

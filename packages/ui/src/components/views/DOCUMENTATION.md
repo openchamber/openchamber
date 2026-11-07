@@ -492,6 +492,15 @@ UI `*.vitest.tsx` fixtures; the isolated Bun runner intentionally does not.
 
 ## Archive page
 
+Archive search keeps browsing separate from searching. An empty field preserves
+the archived-worktree groups and archive actions. A typed query uses the shared
+conversation search for title metadata and indexed message excerpts, with the
+same lifecycle, title-only and author flags the controls write into the field.
+Opening a title selects the session, and an excerpt uses `openSessionLink` to
+focus its message. Neither path restores an archived session. While a query is
+present, the project list narrows the shared query and only shows counts when
+the server can report an exact total.
+
 `ArchiveView` lists archived top-level sessions. A subsession whose parent is
 archived too is left out: it comes back when the parent is restored. A
 subsession archived while its parent stays active is listed, indented under a

@@ -15,6 +15,7 @@ import { EMPTY_MULTI_RUN_INDEX, type MultiRunIndex, type MultiRunSummary } from 
 import { isGroupWork, worktreeFolderMemberId } from './works/sidebarWorks';
 import type { SessionDraft } from '@/stores/useSessionDraftsStore';
 import type { DirectoryOwner } from './sessions/sessionOwnership';
+import type { ConversationResult } from '@/hooks/useConversationSearch';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
@@ -88,7 +89,7 @@ export type SessionSidebarOwnerAuthority = {
 
 // `treeGuides`: the guide lines a Tree row draws over itself, framing the
 // children of an open worktree, folder, session or run.
-type RowBase = { key: string; estimateSize: number; treeGuides?: readonly SessionTreeGuide[] };
+type RowBase = { key: string; estimateSize: number; treeGuides?: readonly SessionTreeGuide[]; searchResult?: ConversationResult };
 
 export type SessionSidebarRow =
   // `label`: the name of one of the user's sections, which has no built-in title.
@@ -126,7 +127,9 @@ export type SessionSidebarRow =
    * Show more while rows remain hidden, Show less once more than the first batch shows; one row holds both.
    * `requestedCount`: how many the user asked for; `currentCount` also moves as sessions arrive and leave.
    */
-  | (RowBase & { kind: 'show-control'; more: boolean; fewer: boolean; hiddenNodes: SessionNode[]; containerKey: string; currentCount: number; requestedCount: number; increment: number; depth?: number; flat?: boolean; detailed?: boolean });
+  | (RowBase & { kind: 'show-control'; more: boolean; fewer: boolean; hiddenNodes: SessionNode[]; containerKey: string; currentCount: number; requestedCount: number; increment: number; depth?: number; flat?: boolean; detailed?: boolean })
+  | (RowBase & { kind: 'search-result'; result: ConversationResult; projectLabel: string | null })
+  | (RowBase & { kind: 'search-more' });
 
 export type SessionSidebarStickyHeader = {
   rowIndex: number;
@@ -191,6 +194,10 @@ export type SessionSidebarRowModelArgs = {
   foldersMap: SessionFoldersMap;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
   normalizedQuery: string;
+  /** Matched conversations enrich existing hierarchy rows and fill their owner's remaining results. */
+  contentSearchResults?: readonly ConversationResult[];
+  hasMoreSearchResults?: boolean;
+  searchIncomplete?: boolean;
   collapsedProjects: ReadonlySet<string>;
   collapsedGroups: ReadonlySet<string>;
   collapsedFolders: ReadonlySet<string>;
@@ -491,6 +498,26 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   const folderOwnerKeyBySessionId = new Map<string, string>();
   const keyOccurrences = new Map<string, number>();
   const search = args.mode === 'search';
+  const resultsById = new Map(search ? args.contentSearchResults?.map((result) => [result.sessionId, result]) : []);
+  const shownSessionIds = new Set<string>();
+  const resultsByProject = new Map<string | null, ConversationResult[]>();
+  const projectByDirectory = new Map<string, string>();
+  for (const section of args.authoritativeSections) {
+    projectByDirectory.set(section.project.normalizedPath, section.project.id);
+    for (const group of section.groups) if (group.directory) projectByDirectory.set(group.directory, section.project.id);
+  }
+  for (const result of resultsById.values()) {
+    let projectId = args.sessionOwnerById.get(result.sessionId)?.projectId ?? null;
+    let directory = result.directory;
+    while (projectId === null && directory) {
+      projectId = projectByDirectory.get(directory) ?? null;
+      const slash = directory.lastIndexOf('/');
+      directory = slash > 0 ? directory.slice(0, slash) : null;
+    }
+    const bucket = resultsByProject.get(projectId);
+    if (bucket) bucket.push(result);
+    else resultsByProject.set(projectId, [result]);
+  }
   const pinned = args.pinnedSessionIds instanceof Set ? args.pinnedSessionIds : new Set(args.pinnedSessionIds);
   const inZone = args.zoneSessionIds ?? EMPTY_ZONE_SESSION_IDS;
   const movedSessionIds = args.movedSessionIds ?? EMPTY_ZONE_SESSION_IDS;
@@ -533,7 +560,20 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     return occurrence === 0 ? base : `${base}:${occurrence}`;
   };
   const push = (row: SessionSidebarRow): void => {
+    if (row.kind === 'session') {
+      shownSessionIds.add(row.node.session.id);
+    }
     rows.push(Object.freeze(row));
+  };
+  const appendSearchResults = (projectId: string | null, projectLabel: string | null): void => {
+    for (const result of resultsByProject.get(projectId) ?? []) {
+      if (shownSessionIds.has(result.sessionId)) continue;
+      shownSessionIds.add(result.sessionId);
+      searchMatchCount += 1;
+      const key = `search-result:${result.sessionId}`;
+      selectionEntries.push({ id: result.sessionId, rowKey: key, scopeKey: projectId, archived: result.archived });
+      push({ kind: 'search-result', key, estimateSize: result.excerpt ? 76 : 40, result, projectLabel });
+    }
   };
   type AppendOptions = {
     nodes: readonly SessionNode[];
@@ -616,6 +656,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       const directory = current.node.session.directory ?? current.directory;
       sessionById.set(current.node.session.id, current.node.session);
       const detailed = options.detailedRoots === true && current.depth === baseDepth;
+      const searchResult = resultsById.get(current.node.session.id);
       // Only a zone's works take its two lines; what nests under one stays a
       // one-line row of the zone, as it does under a project.
       const rowContext: SessionSidebarRenderContext = current.depth > baseDepth && options.renderContext === 'timeline-mixed'
@@ -636,7 +677,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       push({
         kind: 'session',
         key: rowKey,
-        estimateSize: detailed ? TIMELINE_SESSION_ESTIMATE : estimateSessionRow(rowContext),
+        estimateSize: searchResult ? searchResult.excerpt ? 76 : 40 : detailed ? TIMELINE_SESSION_ESTIMATE : estimateSessionRow(rowContext),
+        searchResult,
         expanded: children.length > 0 ? expanded : undefined,
         forceExpanded: children.length > 0 ? search : undefined,
         detailed,
@@ -1009,19 +1051,21 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
 
   const appendChats = (): void => {
-    if (!args.chatGroup) return;
-    if (search && groupSearchMatches(args.chatGroup) === 0 && !(args.archivedChatGroup && groupSearchMatches(args.archivedChatGroup) > 0)) return;
+    const hasSearchResults = (resultsByProject.get(null)?.length ?? 0) > 0;
+    if (!args.chatGroup && !hasSearchResults) return;
+    if (search && !hasSearchResults && args.chatGroup && groupSearchMatches(args.chatGroup) === 0 && !(args.archivedChatGroup && groupSearchMatches(args.archivedChatGroup) > 0)) return;
     const collapsed = appendActivityHeader('chats');
     if (collapsed) return;
     // Chats are one-line rows with the tree's state slot, on a short page
     // that pinned chats do not spend.
-    appendGroup(args.chatGroup, 'activity:chats', null, true, {
+    if (args.chatGroup) appendGroup(args.chatGroup, 'activity:chats', null, true, {
       initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
       renderContext: 'tree-chat',
     });
     if (args.archivedChatGroup) {
       appendGroup(args.archivedChatGroup, 'activity:chats:archived', null, false, { renderContext: 'tree-chat' });
     }
+    appendSearchResults(null, null);
   };
 
   // Pinned, In work and the list by time mix every project's works: one-line
@@ -1170,7 +1214,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     for (const section of projectSections) {
       const descriptors = buildGroupRenderDescriptors(section, { mainWorkspaceOnly: args.showOnlyMainWorkspace });
       // A project whose only matches moved to a zone shows no empty header.
-      if (search && !descriptors.some((descriptor) => !movedGroupKeys.has(descriptor.groupKey) && groupSearchMatches(descriptor.group) > 0)) continue;
+      if (search && !resultsByProject.has(section.project.id) && !descriptors.some((descriptor) => !movedGroupKeys.has(descriptor.groupKey) && groupSearchMatches(descriptor.group) > 0)) continue;
       const projectCollapsed = !search && !args.singleProjectMode && !args.showOnlyMainWorkspace && args.collapsedProjects.has(section.project.id);
       if (!captioned) {
         captioned = true;
@@ -1202,6 +1246,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         appendGroup(descriptor.group, descriptor.groupKey, descriptor.projectId, descriptor.hideGroupLabel, undefined, PROJECT_PLACEMENT,
           descriptor.group.isMain ? worktreesByMemberId : undefined, descriptor.group.isMain ? listedWorktrees : undefined);
       }
+      appendSearchResults(section.project.id, section.project.label ?? section.project.normalizedPath);
     }
   };
 
@@ -1218,7 +1263,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   const appendProjects = (block: Extract<SessionSidebarBlock, { kind: 'projects' }>): void => {
     const excluded = block.excludedProjectIds;
-    const timeEntries = args.singleProjectMode ? null : args.timeEntries ?? null;
+    const timeEntries = args.singleProjectMode || search ? null : args.timeEntries ?? null;
     if (timeEntries) {
       // One list of every other work of every project, most recent first, under
       // one zone header. It is virtualized, so it reveals all of them at once.
@@ -1275,6 +1320,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     appendProjectSections(projectSections, { key: 'projects', always: false });
   };
 
+  if (search && args.blocks && !args.blocks.some((block) => block.kind === 'chats')) appendChats();
   for (const block of args.blocks ?? DEFAULT_BLOCKS) {
     switch (block.kind) {
       case 'chats': appendChats(); break;
@@ -1286,7 +1332,10 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   }
 
-  if (rows.length === 0 || (search && args.singleProjectMode && searchMatchCount === 0)) {
+  if (search && args.hasMoreSearchResults) push({ kind: 'search-more', key: 'search:more', estimateSize: 36 });
+
+  if (search && args.contentSearchResults) searchMatchCount = [...resultsById.keys()].filter((id) => shownSessionIds.has(id)).length;
+  if ((!search || !args.searchIncomplete) && (rows.length === 0 || (search && args.singleProjectMode && searchMatchCount === 0))) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });
   }
   const guides = computeSessionTreeGuides(rows.map(treeLevelOf));

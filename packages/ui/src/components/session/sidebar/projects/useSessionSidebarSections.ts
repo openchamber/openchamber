@@ -8,6 +8,7 @@ import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { getSessionFolderScopes } from '../sessions/sessionFolderIdentity';
 import { countSessionSearchMatches } from '../sessionSidebarRowModel';
+import type { OmniLifecycle } from '@/lib/search/omniQuery';
 
 type ProjectItem = {
   id: string;
@@ -89,6 +90,7 @@ type Args = {
   getGroupingSessions: (sessions: readonly Session[]) => Session[];
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
+  lifecycle?: OmniLifecycle;
   filterSessionNodesForSearch: (nodes: SessionNode[], query: string) => SessionNode[];
   buildGroupSearchText: (group: SessionGroup) => string;
   foldersMap: SessionFoldersMap;
@@ -116,6 +118,7 @@ export const useSessionSidebarSections = (args: Args) => {
     getGroupingSessions,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
+    lifecycle = 'active',
     filterSessionNodesForSearch,
     buildGroupSearchText,
     foldersMap,
@@ -135,7 +138,11 @@ export const useSessionSidebarSections = (args: Args) => {
     const sections = normalizedProjects.map((project) => {
       const activeSessions = getSessionsForProject(project.id);
       const archivedSessions = getArchivedSessionsForProject(project.id);
-      const projectSessions = dedupeSessionsById([...activeSessions, ...archivedSessions]);
+      const projectSessions = dedupeSessionsById(lifecycle === 'active'
+        ? activeSessions
+        : lifecycle === 'archived'
+          ? archivedSessions
+          : [...activeSessions, ...archivedSessions]);
       const groupingSessions = getGroupingSessions(projectSessions);
       const worktreesForProject = availableWorktreesByProject.get(project.normalizedPath) ?? EMPTY_WORKTREES;
       const isRepo = projectRepoStatus.has(project.id)
@@ -218,6 +225,7 @@ export const useSessionSidebarSections = (args: Args) => {
     projectRootBranches,
     gitBranches,
     sessionOrderRanks,
+    lifecycle,
   ]);
 
   const visibleProjectSections = React.useMemo(() => {

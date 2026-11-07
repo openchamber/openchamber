@@ -31,6 +31,7 @@ import { snippetsI18n } from './snippets.i18n';
 import { sidebarWorkI18n } from './sidebar-work.i18n';
 import { sidebarSectionsI18n } from './sidebar-sections.i18n';
 import { worktreeArchiveI18n } from './worktree-archive.i18n';
+import { omniSearchI18n } from './omni-search.i18n';
 import { overviewI18n } from './overview.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { sourceBoardI18n } from './source-board.i18n';
@@ -205,6 +206,7 @@ export const dict: Record<I18nKey, string> = {
   ...sidebarWorkI18n['zh-CN'],
   ...sidebarSectionsI18n['zh-CN'],
   ...worktreeArchiveI18n['zh-CN'],
+  ...omniSearchI18n['zh-CN'],
   ...overviewI18n['zh-CN'],
   ...isolatedSpacesI18n['zh-CN'],
   ...sourceBoardI18n['zh-CN'],

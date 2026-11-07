@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from 'bun:test';
+import { afterAll, expect, jest, test } from 'bun:test';
 import React, { act } from 'react';
 import { Window } from 'happy-dom';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
@@ -24,7 +24,7 @@ afterAll(async () => {
   }
 });
 
-async function fixture(initial = '') {
+async function fixture(initial = '', mode: 'submit' | 'live' = 'submit') {
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
@@ -46,7 +46,7 @@ async function fixture(initial = '') {
       return [session.title];
     }) : sessions, [value]);
     return <>
-      <SessionSearchInput value={value} active={active} onSearch={(query) => { searches.push(query); setValue(query); }}
+      <SessionSearchInput value={value} mode={mode} debounceMs={100} active={active} onSearch={(query) => { searches.push(query); setValue(query); }}
         onClose={() => { closes += 1; }} placeholder="Search sessions" clearLabel="Clear search" />
       <output>{results.length}</output>
     </>;
@@ -102,6 +102,111 @@ test('typing performs no search or parent render at 15,000 sessions; Enter commi
     expect(view.searches).toHaveLength(1);
     expect(view.visited()).toBe(visited);
   } finally { await view.cleanup(); }
+});
+
+const advance = (milliseconds: number) => act(async () => { jest.advanceTimersByTime(milliseconds); });
+
+async function liveFixture(initial = '') {
+  jest.useFakeTimers();
+  const originalSetTimeout = browser.setTimeout;
+  const originalClearTimeout = browser.clearTimeout;
+  browser.setTimeout = globalThis.setTimeout;
+  browser.clearTimeout = globalThis.clearTimeout;
+  const view = await fixture(initial, 'live');
+  return {
+    ...view,
+    restore: () => {
+      browser.setTimeout = originalSetTimeout;
+      browser.clearTimeout = originalClearTimeout;
+      jest.useRealTimers();
+    },
+  };
+}
+
+test('live typing debounces the trimmed query and restarts after each edit', async () => {
+  const view = await liveFixture();
+  try {
+    expect(document.querySelector('[data-session-search-input]')).not.toBeNull();
+    await view.type('old');
+    await advance(99);
+    expect(view.searches).toEqual([]);
+    await view.type('  committed  ');
+    await advance(99);
+    expect(view.searches).toEqual([]);
+    await advance(1);
+    expect(view.searches).toEqual(['committed']);
+  } finally { await view.cleanup(); view.restore(); }
+});
+
+test('live Enter flushes once and clear cancels pending work immediately', async () => {
+  const view = await liveFixture();
+  try {
+    await view.type('query');
+    await view.key('Enter');
+    expect(view.searches).toEqual(['query']);
+    await advance(100);
+    expect(view.searches).toEqual(['query']);
+    await view.type('outdated');
+    await view.clear();
+    expect(view.searches).toEqual(['query', '']);
+    await advance(100);
+    expect(view.searches).toEqual(['query', '']);
+    await view.external('applied');
+    await view.type('   ');
+    expect(view.searches.at(-1)).toBe('');
+  } finally { await view.cleanup(); view.restore(); }
+});
+
+test('live timers cancel on external value changes and inactive input', async () => {
+  const view = await liveFixture();
+  try {
+    await view.type('pending');
+    await view.external('external');
+    await advance(100);
+    expect(view.searches).toEqual([]);
+    expect(view.input.value).toBe('external');
+    await view.type('hidden');
+    await view.active(false);
+    await advance(100);
+    await view.type('inactive');
+    await advance(100);
+    expect(view.searches).toEqual([]);
+  } finally { await view.cleanup(); view.restore(); }
+});
+
+test('live unmount cancels pending search', async () => {
+  const view = await liveFixture();
+  try {
+    await view.type('pending');
+    await view.cleanup();
+    await advance(100);
+    expect(view.searches).toEqual([]);
+  } finally { view.restore(); }
+});
+
+test('live IME cancels precomposition work and commits without another keystroke', async () => {
+  const view = await liveFixture();
+  try {
+    await view.type('outdated');
+    await advance(50);
+    await view.compose('compositionstart');
+    await view.type('人工');
+    await advance(100);
+    await view.key('Enter', { isComposing: true });
+    expect(view.searches).toEqual([]);
+    await view.compose('compositionend');
+    await advance(99);
+    expect(view.searches).toEqual([]);
+    await advance(1);
+    expect(view.searches).toEqual(['人工']);
+    await view.compose('compositionstart');
+    await view.type('');
+    expect(view.searches).toEqual(['人工']);
+    await view.compose('compositionend');
+    expect(view.searches).toEqual(['人工', '']);
+    await advance(100);
+    expect(view.searches).toEqual(['人工', '']);
+  } finally { await view.cleanup(); view.restore(); }
 });
 
 test('edits preserve applied results until Enter and clearing applies immediately', async () => {

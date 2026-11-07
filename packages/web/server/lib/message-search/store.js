@@ -7,10 +7,11 @@
  * a word, in any script, so "світ" finds "світу" and CJK text needs no word
  * segmentation. `sessions` remembers where each session's reading stopped.
  *
- * The file is derived data. A schema change drops and rebuilds it.
+ * The file is derived data. Schema 4 preserves the indexed text and cursors
+ * while adding archive lifecycle state.
  */
 
-const MESSAGE_SEARCH_SCHEMA_VERSION = '3';
+const MESSAGE_SEARCH_SCHEMA_VERSION = '4';
 
 // Private-use characters around each match in a snippet. They cannot occur in
 // ordinary text and are not markup, so a snippet is never rendered as HTML.
@@ -18,6 +19,7 @@ export const MATCH_START = '';
 export const MATCH_END = '';
 
 const MIN_TERM_LENGTH = 3;
+const GROUPED_TOTALS_ROW_CAP = 20_000;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -31,7 +33,9 @@ const SCHEMA = `
     assistant_cursor TEXT,
     user_anchor TEXT,
     assistant_anchor TEXT,
-    synced_updated_at INTEGER
+    synced_updated_at INTEGER,
+    archived_at INTEGER,
+    lifecycle_known INTEGER NOT NULL DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS messages (
     seq INTEGER PRIMARY KEY,
@@ -43,6 +47,7 @@ const SCHEMA = `
     text TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS messages_by_session ON messages (session_id, created_at);
+  CREATE INDEX IF NOT EXISTS messages_by_created ON messages (created_at DESC, session_id DESC, id DESC);
   CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     text, content='messages', content_rowid='seq', tokenize='trigram'
   );
@@ -149,25 +154,45 @@ export const openMessageSearchStore = (connection) => {
       return null;
     }
   })();
-  if (version !== MESSAGE_SEARCH_SCHEMA_VERSION) connection.exec(DROP);
   connection.exec('PRAGMA journal_mode = WAL');
-  connection.exec(SCHEMA);
-  connection.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['schema', MESSAGE_SEARCH_SCHEMA_VERSION]);
+  if (version === '3') {
+    connection.transaction(() => {
+      const columns = new Set(connection.all('PRAGMA table_info(sessions)').map((column) => column.name));
+      if (!columns.has('archived_at')) connection.exec('ALTER TABLE sessions ADD COLUMN archived_at INTEGER');
+      if (!columns.has('lifecycle_known')) connection.exec('ALTER TABLE sessions ADD COLUMN lifecycle_known INTEGER NOT NULL DEFAULT 0');
+      connection.exec(SCHEMA);
+      connection.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['schema', MESSAGE_SEARCH_SCHEMA_VERSION]);
+    });
+  } else if (version !== MESSAGE_SEARCH_SCHEMA_VERSION) {
+    connection.transaction(() => {
+      connection.exec(DROP);
+      connection.exec(SCHEMA);
+      connection.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['schema', MESSAGE_SEARCH_SCHEMA_VERSION]);
+    });
+  } else {
+    connection.exec(SCHEMA);
+  }
 
   const readSession = (sessionId) => connection.get(
-    'SELECT id, directory, title, revert_id, user_cursor, assistant_cursor, user_anchor, assistant_anchor, synced_updated_at FROM sessions WHERE id = ?',
+    'SELECT id, directory, title, revert_id, user_cursor, assistant_cursor, user_anchor, assistant_anchor, synced_updated_at, archived_at, lifecycle_known FROM sessions WHERE id = ?',
     [sessionId],
   );
 
   return {
     readSession,
 
-    upsertSession: ({ id, directory, title, createdAt }) => {
+    upsertSession: ({ id, directory, title, createdAt, archivedAt, lifecycleKnown = false }) => {
       connection.run(
-        `INSERT INTO sessions (id, directory, title, created_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET directory = excluded.directory, title = excluded.title`,
-        [id, directory, title ?? '', createdAt ?? 0],
+        `INSERT INTO sessions (id, directory, title, created_at, archived_at, lifecycle_known) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET directory = excluded.directory, title = excluded.title,
+           archived_at = CASE WHEN excluded.lifecycle_known THEN excluded.archived_at ELSE sessions.archived_at END,
+           lifecycle_known = MAX(sessions.lifecycle_known, excluded.lifecycle_known)`,
+        [id, directory, title ?? '', createdAt ?? 0, archivedAt ?? null, lifecycleKnown ? 1 : 0],
       );
+    },
+
+    setArchiveState: (sessionId, archivedAt) => {
+      connection.run('UPDATE sessions SET archived_at = ?, lifecycle_known = 1 WHERE id = ?', [archivedAt ?? null, sessionId]);
     },
 
     renameSession: (sessionId, title) => {
@@ -244,13 +269,16 @@ export const openMessageSearchStore = (connection) => {
     counts: () => ({
       sessions: connection.get('SELECT count(*) AS n FROM sessions')?.n ?? 0,
       messages: connection.get('SELECT count(*) AS n FROM messages')?.n ?? 0,
+      lifecycleComplete: connection.get("SELECT value FROM meta WHERE key = 'lifecycle_complete'")?.value === '1',
     }),
+
+    markLifecycleComplete: () => connection.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('lifecycle_complete', '1')"),
 
     /**
      * Newest matches first. `before` pages by creation time (with the message
      * id breaking ties), so a page boundary never repeats or skips a hit.
      */
-    search: ({ match, sessionId = null, directories = [], role = null, includeReasoning = true, before = null, limit, order = 'desc' }) => {
+    search: ({ match, sessionId = null, directories = [], role = null, includeReasoning = true, lifecycle = 'all', before = null, limit, order = 'desc' }) => {
       const where = ['messages_fts MATCH ?'];
       const params = [match];
       if (sessionId) {
@@ -266,6 +294,8 @@ export const openMessageSearchStore = (connection) => {
         params.push(role);
       }
       if (!includeReasoning) where.push("m.role <> 'reasoning'");
+      if (lifecycle === 'active') where.push('s.lifecycle_known = 1 AND s.archived_at IS NULL');
+      if (lifecycle === 'archived') where.push('s.lifecycle_known = 1 AND s.archived_at IS NOT NULL');
       if (before) {
         where.push(order === 'desc'
           ? '(m.created_at < ? OR (m.created_at = ? AND m.id < ?))'
@@ -276,7 +306,7 @@ export const openMessageSearchStore = (connection) => {
       params.push(limit);
       return connection.all(
         `SELECT m.id AS rowId, m.message_id AS id, m.session_id AS sessionId, m.role AS role, m.created_at AS createdAt,
-                s.title AS sessionTitle, s.directory AS directory, m.text AS text
+                s.title AS sessionTitle, s.directory AS directory, s.archived_at AS archivedAt, m.text AS text
          FROM messages_fts
          JOIN messages m ON m.seq = messages_fts.rowid
          JOIN sessions s ON s.id = m.session_id
@@ -285,6 +315,106 @@ export const openMessageSearchStore = (connection) => {
          LIMIT ?`,
         params,
       );
+    },
+
+    searchSessions: ({ match, directories = [], role = null, includeReasoning = true, lifecycle = 'all', before = null, limit, exclude = [], withTotals = false }) => {
+      const filters = [];
+      const filterParams = [];
+      if (directories.length > 0) {
+        filters.push(`s.directory IN (${directories.map(() => '?').join(', ')})`);
+        filterParams.push(...directories);
+      }
+      if (role) {
+        filters.push('m.role = ?');
+        filterParams.push(role);
+      }
+      if (!includeReasoning) filters.push("m.role <> 'reasoning'");
+      if (lifecycle === 'active') filters.push('s.lifecycle_known = 1 AND s.archived_at IS NULL');
+      if (lifecycle === 'archived') filters.push('s.lifecycle_known = 1 AND s.archived_at IS NOT NULL');
+      const filterSql = filters.length > 0 ? ` AND ${filters.join(' AND ')}` : '';
+      const orderedMatches = `SELECT m.id AS rowId, m.message_id AS messageId, m.session_id AS sessionId, m.role, m.created_at AS createdAt, m.text, s.title AS sessionTitle, s.directory, s.archived_at AS archivedAt
+        FROM messages AS m INDEXED BY messages_by_created
+        JOIN sessions s ON s.id = m.session_id
+        WHERE m.seq IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)${filterSql}
+        ORDER BY m.created_at DESC, m.session_id DESC, m.id DESC`;
+      const pageHits = [];
+      const representedSessions = new Set();
+      for (const row of connection.iterate(orderedMatches, [match, ...filterParams])) {
+        if (representedSessions.has(row.sessionId)) continue;
+        representedSessions.add(row.sessionId);
+        const isAfterCursor = before && (
+          row.createdAt > before.createdAt
+          || (row.createdAt === before.createdAt && row.sessionId >= before.sessionId)
+        );
+        if (isAfterCursor) continue;
+        pageHits.push(row);
+        if (pageHits.length === limit) break;
+      }
+      const pageIds = pageHits.map((hit) => hit.sessionId);
+      const counts = new Map();
+      if (pageIds.length > 0) {
+        const messageFilters = [];
+        const messageFilterParams = [];
+        if (role) {
+          messageFilters.push('m.role = ?');
+          messageFilterParams.push(role);
+        }
+        if (!includeReasoning) messageFilters.push("m.role <> 'reasoning'");
+        const messageFilterSql = messageFilters.length > 0 ? ` AND ${messageFilters.join(' AND ')}` : '';
+        const rows = connection.all(
+          `SELECT m.session_id AS sessionId, count(DISTINCT m.message_id) AS matchCount
+           FROM messages AS m INDEXED BY messages_by_session
+           WHERE m.session_id IN (${pageIds.map(() => '?').join(', ')})
+             AND m.seq IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)${messageFilterSql}
+           GROUP BY m.session_id`,
+          [...pageIds, match, ...messageFilterParams],
+        );
+        for (const row of rows) counts.set(row.sessionId, row.matchCount);
+      }
+      const hits = pageHits.map((hit) => ({ ...hit, matchCount: counts.get(hit.sessionId) ?? 0 }));
+      let totals = null;
+      if (withTotals) {
+        const totalsFilters = ['messages_fts MATCH ?'];
+        const totalsParams = [match];
+        if (role) {
+          totalsFilters.push('m.role = ?');
+          totalsParams.push(role);
+        }
+        if (!includeReasoning) totalsFilters.push("m.role <> 'reasoning'");
+        const needsSessionFilter = directories.length > 0 || lifecycle !== 'all';
+        if (directories.length > 0) {
+          totalsFilters.push(`s.directory IN (${directories.map(() => '?').join(', ')})`);
+          totalsParams.push(...directories);
+        }
+        if (lifecycle === 'active') totalsFilters.push('s.lifecycle_known = 1 AND s.archived_at IS NULL');
+        if (lifecycle === 'archived') totalsFilters.push('s.lifecycle_known = 1 AND s.archived_at IS NOT NULL');
+        const sessionJoin = needsSessionFilter ? ' JOIN sessions s ON s.id = m.session_id' : '';
+        const matchedSessionIds = new Set();
+        let rowCount = 0;
+        for (const row of connection.iterate(
+          `SELECT m.session_id AS sessionId FROM messages_fts JOIN messages m ON m.seq = messages_fts.rowid${sessionJoin}
+           WHERE ${totalsFilters.join(' AND ')} LIMIT ?`,
+          [...totalsParams, GROUPED_TOTALS_ROW_CAP],
+        )) {
+          rowCount += 1;
+          matchedSessionIds.add(row.sessionId);
+        }
+        if (rowCount < GROUPED_TOTALS_ROW_CAP) {
+          for (const sessionId of exclude) matchedSessionIds.delete(sessionId);
+          const byDirectory = {};
+          const matchedIds = [...matchedSessionIds];
+          for (let offset = 0; offset < matchedIds.length; offset += 500) {
+            const chunk = matchedIds.slice(offset, offset + 500);
+            const sessionRows = connection.all(
+              `SELECT directory FROM sessions WHERE id IN (${chunk.map(() => '?').join(', ')})`,
+              chunk,
+            );
+            for (const row of sessionRows) byDirectory[row.directory] = (byDirectory[row.directory] ?? 0) + 1;
+          }
+          totals = { sessions: matchedSessionIds.size, byDirectory };
+        }
+      }
+      return { hits, totals };
     },
 
     close: () => connection.close(),

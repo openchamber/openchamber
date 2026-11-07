@@ -17,6 +17,51 @@ kept at this root in `types.ts` and `utils.tsx`.
   states, and reveal controls. `SessionSidebarRows.tsx` is the shared desktop
   Web, Electron and VS Code sidebar row renderer. Normal and committed-search modes use the same
   model and the same `@tanstack/react-virtual` instance.
+
+Sidebar search commits an input-debounced query before rebuilding its
+projection. It searches the global active and archived cache, which does not
+bootstrap directories or load transcripts. Lifecycle, admission and exact
+project/worktree scope filter metadata before the shared search hook receives
+it. An unresolved scope disables the hook, so an empty directory list cannot
+become a global content request. VS Code keeps exact workspace admission.
+Search ignores the browsing archive toggle and lists matches under their
+project captions on desktop and phone. Existing tree rows retain their
+ancestors and highlight ranges; content matches enrich those rows with an
+excerpt. Remaining matches enter the same virtual row model under the resolved
+owner. Admitted matches without a resolved owner use Chats. The shared status
+line stays visible during indexing and errors, and the virtual pager remains
+available even when admission removes every hit in a page. Excerpts and other
+message matches open through `openSessionLink`, so opening an archived match
+does not restore it.
+
+A recognized filter activates search even without free text. Filter-only
+search lists every metadata record admitted by that scope and makes no content
+request. An unknown shared-hook total remains null through the collection,
+header and status controls; a loaded page length is never an exact total.
+
+Expanded message matches belong to the effective query, lifecycle, author,
+reasoning policy, search-in mode, indexing preference and runtime identity.
+Changing any of these collapses the expansion synchronously and unmounts its
+request owner. Disabled content leaves no excerpt or other-message action.
+A failed extra page keeps its prior hits, reports the error and leaves the
+pager available for retry.
+
+The selection registry preserves lifecycle for content-only rows using their
+explicit archived boolean. It does not invent a full session or an archive
+timestamp. A complete session record takes precedence when one is present.
+Restore eligibility and delete confirmation read this same registry, including
+for virtualized results without a cached session.
+
+### Why search projects results over the existing hierarchy
+
+The shared hook owns matching and the metadata/content union. The sidebar
+projects that union over its cached trees, retaining ancestors and nesting
+while adding content-only rows under their owners. Search temporarily leaves
+the browsing work zones and time grouping aside so each conversation appears
+once under its project. The input debounce commits queries before projection;
+metadata construction depends on cache, topology and filters, not free-text
+keystrokes. Search rows keep their own height measurements because excerpts
+and expanded message matches change height independently of browsing rows.
 - `list/useSidebarGroupStatus.ts` subscribes to project and standalone Chats
   directories together. Chats uses the same `activity:chats` identity for status
   and row projection, including a Chats-only sidebar. An unresolved global list
