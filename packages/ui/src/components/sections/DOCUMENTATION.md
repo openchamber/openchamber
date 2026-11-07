@@ -155,7 +155,9 @@ Custom-provider icons are OpenChamber profile preferences, keyed by provider
 ID. They are not written into OpenCode config because OpenCode has no provider
 icon field. "Default" stores nothing, so the provider's own logo (or the
 generic fallback) still shows; `ProviderLogo` reads a chosen icon before trying
-provider logos, so Settings and every model picker agree.
+provider logos, so Settings, every model picker, the agent status chip, and
+the message footer agree. The status chip and footer used to draw the logo
+URL themselves, which skipped a chosen icon.
 
 The "Connect provider" page lists `GET /api/integration` minus the
 integrations that already have a connection, MCP OAuth registrations
