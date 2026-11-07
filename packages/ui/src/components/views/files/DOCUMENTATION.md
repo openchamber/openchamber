@@ -73,8 +73,12 @@ there. The metadata poll treats a file deleted while open the same way: without
 unsaved edits it shows the error, with unsaved edits it keeps them. It keeps
 polling a failed file and loads it again once a missing file is back; a file
 that exists but fails to read is never reloaded by the poll
-(`openFilePollStep`). Pruning stale open paths (`removeUnselectedOpenPath`)
-never removes the path on screen.
+(`openFilePollStep`). The poll identifies its baseline by the path on screen,
+not by the path the server answers with: `/api/fs/stat` resolves symlinks, so a
+file opened through a symlinked folder or as a symlink itself would otherwise
+look like a new file on every poll and never reload after an external write
+(`fileStatSnapshotForRequestedPath`). Pruning stale open paths
+(`removeUnselectedOpenPath`) never removes the path on screen.
 
 A pending line jump (`pendingFileNavigationStep`) selects its file only until
 that file has been on screen. If the user then switches tabs while it loads,
