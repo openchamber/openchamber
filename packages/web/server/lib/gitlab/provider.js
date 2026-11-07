@@ -1,5 +1,5 @@
 import { exchangeGitLabDeviceCode, refreshGitLabAccessToken, resolveGitLabClientId, probeGitLabAuth, startGitLabDeviceFlow } from './device-flow.js';
-import { getGlabToken } from './glab-credential.js';
+import { getGlabToken, getGlabTokenResult } from './glab-credential.js';
 import { classifyGitLabFailure } from './network.js';
 import { createGitLabClient, createGitLabDownloader } from './client.js';
 import { createGitLabResourceService } from './resources.js';
@@ -374,29 +374,40 @@ export function createProvider({
     return false;
   };
 
-  const getUsableGlab = async (origin) => {
+  const getGlabCliState = async (origin) => {
     const instance = await store.readInstance(origin);
-    if (instance.cliDisabled) return null;
-    const token = await glabToken(origin);
-    if (!token) return null;
+    if (instance.cliDisabled) return { status: 'disabled' };
+    const lookup = await getGlabTokenResult(origin, { execFile, timeoutMs: cliTimeoutMs });
+    if (lookup.gone) return { status: 'gone' };
+    if (lookup.unknown) return { status: 'unknown' };
     try {
-      return { token, user: await verify(origin, token) };
-    } catch {
-      return null;
+      return { status: 'usable', token: lookup.token, user: await verify(origin, lookup.token) };
+    } catch (error) {
+      // The instance refusing the token (a definite 401) is a login that is
+      // really gone; anything else leaves the question unsettled.
+      return error?.status === 401 ? { status: 'gone' } : { status: 'unknown' };
     }
+  };
+
+  const getUsableGlab = async (origin) => {
+    const state = await getGlabCliState(origin);
+    return state.status === 'usable' ? { token: state.token, user: state.user } : null;
   };
 
   const buildStatus = async (origin, renewed = false) => {
     const instance = await store.readInstance(origin);
     const activeRecord = instance.cliActive ? null : instance.accounts.find((account) => account.id === instance.activeAccountId) ?? null;
     const active = activeRecord?.status === 'invalid' ? null : activeRecord;
-    const cli = await getUsableGlab(origin);
-    if (instance.cliActive && !cli) {
+    const cliState = await getGlabCliState(origin);
+    // Like the gh rule: the user's switch to the glab account is undone only
+    // when that account is really gone. glab reporting no login for the host
+    // or the instance refusing its token settle that; a network blip, a
+    // timeout, a missing glab, or an unreachable instance must not.
+    if (instance.cliActive && cliState.status === 'gone') {
       await store.setCliActive(origin, false);
       return buildStatus(origin);
     }
-    // Like the gh rule: a glab login carries every scope glab was granted, so it
-    // is used only after the user switched to it, never as a silent fallback.
+    const cli = cliState.status === 'usable' ? { token: cliState.token, user: cliState.user } : null;
     const cliCurrent = Boolean(cli && instance.cliActive);
     const accounts = instance.accounts.map((account) => accountView(
       origin, account, Boolean(active && account.id === active.id && !cliCurrent), instance.accounts,
@@ -411,10 +422,12 @@ export function createProvider({
         };
       }
       if (!cli) {
-        if (instance.cliDisabled) {
+        // A switch kept while glab cannot answer is reported, so the user can
+        // turn it off with glab and the instance both down.
+        if (instance.cliDisabled || instance.cliActive) {
           return {
             provider: 'gitlab', instance: origin, status: 'disconnected', connected: false,
-            accounts, cli: { available: false, disabled: true, active: false },
+            accounts, cli: { available: false, disabled: instance.cliDisabled, active: instance.cliActive },
           };
         }
         const clientId = await getClientId(origin);
