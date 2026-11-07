@@ -1142,7 +1142,7 @@ describe('contributes.statusSection', () => {
 
   test('refuses entries outside the package, non-HTML entries, and out-of-range sizes', () => {
     for (const statusSection of [false, {}, { entry: '../status.html' }, { entry: 'status/main.js' }, { entry: 'https://example.com/a.html' },
-      { entry: 'status/index.html', height: 10 }, { entry: 'status/index.html', height: 400 }, { entry: 'status/index.html', height: 100.5 },
+      { entry: 'status/index.html', height: 10 }, { entry: 'status/index.html', height: 481 }, { entry: 'status/index.html', height: 100.5 },
       { entry: 'status/index.html', title: '' }, { entry: 'status/index.html', title: 'x'.repeat(61) }]) {
       expect(parse({ panel: pageless, statusSection })).toMatchObject({ ok: false, code: 'invalid-status-section' });
     }
@@ -1187,9 +1187,11 @@ describe('contributes.statusSection', () => {
   });
 
   test('clamps heights to the host range', () => {
+    expect(parse({ panel: pageless, statusSection: { entry: 'status/index.html', height: 480 } })).toMatchObject({ ok: true });
     expect(clampStatusSectionHeight(5)).toBe(24);
     expect(clampStatusSectionHeight(200.4)).toBe(200);
-    expect(clampStatusSectionHeight(5000)).toBe(320);
+    expect(clampStatusSectionHeight(400)).toBe(400);
+    expect(clampStatusSectionHeight(5000)).toBe(480);
     expect(clampStatusSectionHeight(Number.NaN)).toBe(120);
   });
 });

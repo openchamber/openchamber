@@ -207,7 +207,7 @@ Schrijven is atomair: OpenChamber schrijft een tijdelijk bestand en hernoemt dat
 - `true` hergebruikt `panel.entry`.
 - `entry` wijst naar een aparte HTML-pagina in uw map. Daarmee is `panel.entry` niet nodig en kan de extensie alleen dit onderdeel aanbieden, zonder balkpictogram.
 - `title` vervangt de paneelnaam in de kop, maximaal 60 tekens.
-- `height` is de beginhoogte in pixels, van 24 tot 320, standaard 120. Roep [`host.setHeight()`](/nl/sdk/host/) aan wanneer de inhoud van grootte verandert.
+- `height` is de beginhoogte in pixels, van 24 tot 480, standaard 120. Roep [`host.setHeight()`](/nl/sdk/host/) aan wanneer de inhoud van grootte verandert.
 
 De pagina ziet `ctx.surface` als `status`. OpenChamber laadt haar alleen als Werkstatus zichtbaar is en uw onderdeel is uitgeklapt. Bij inklappen wordt ze verwijderd. Bewaar er dus niets dat u niet opnieuw kunt opbouwen. Een extensie met alleen zo'n onderdeel mag rechten, een service, integratie en bestandstoegang gebruiken, maar geen `page`, `attach`, `actions` of `commands`. Alleen web en desktop. Het voorbeeld `git-graph-status` bevat een volledig onderdeel.
 

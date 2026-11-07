@@ -66,7 +66,7 @@ Tokeny dostępu nigdy nie pojawiają się tutaj ani w wyniku `request`.
 | `onResolve(handler)` | rejestruje obsługę Twoich poleceń z ukośnikiem. Dostaje `{ command, args }` i zwraca element do dołączenia albo `null`. |
 | `setBadge(count)` | oznacza Twoją ikonę na pasku bocznym kropką i pokazuje liczbę (0 do 999) w jej podpowiedzi, albo `null`, żeby ją usunąć |
 | `openCommit(sha)` | otworzyć widok Diff na tym commicie bieżącego projektu. `sha` ma od 7 do 64 znaków szesnastkowych; OpenChamber sam odczytuje commit. |
-| `setHeight(px)` | ustawić wysokość twojej sekcji Work Status. OpenChamber trzyma ją między 24 a 320 pikselami; wyższa treść przewija się wewnątrz strony. W innych miejscach jest ignorowane. |
+| `setHeight(px)` | ustawić wysokość twojej sekcji Work Status. OpenChamber trzyma ją między 24 a 480 pikselami; wyższa treść przewija się wewnątrz strony. W innych miejscach jest ignorowane. |
 | `onFileOpen(listener)` | edytory plików: odebrać plik do edycji, `{ path, name, readOnly }` plus `encoding: "text"` z `content` albo `encoding: "binary"` z `bytes`. Sprawia też, że Cmd/Ctrl+S w twojej stronie zapisuje. |
 | `onFileSnapshot(handler)` | edytory plików: zwrócić `{ content, version }` (albo `{ bytes, version }` w edytorze binarnym), cały zmieniony plik. OpenChamber wywołuje to przy zapisie oraz przed przełączeniem na widok źródła lub pełny ekran. |
 | `onFileSaved(listener)` | edytory plików: migawka z tą `version` jest na dysku. Odpowiedz przez `reportFileChange`. |

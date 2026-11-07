@@ -66,7 +66,7 @@ const host = connectHost();
 | `onResolve(handler)` | 注册你的斜杠命令处理函数。它收到 `{ command, args }`，返回一个要附加的条目或 `null`。 |
 | `setBadge(count)` | 在你的侧栏图标上显示一个圆点，并在提示中显示数字（0 到 999），或传 `null` 清除 |
 | `openCommit(sha)` | 在当前项目的该提交上打开 Diff 视图。`sha` 为 7 到 64 个十六进制字符；OpenChamber 自己读取提交。 |
-| `setHeight(px)` | 设置你的 Work Status 分区的高度。OpenChamber 会把它限制在 24 到 320 像素之间；更高的内容在你的页面内滚动。其他位置会忽略它。 |
+| `setHeight(px)` | 设置你的 Work Status 分区的高度。OpenChamber 会把它限制在 24 到 480 像素之间；更高的内容在你的页面内滚动。其他位置会忽略它。 |
 | `onFileOpen(listener)` | 文件编辑器：获取要编辑的文件，`{ path, name, readOnly }`，外加 `encoding: "text"` 与 `content`，或 `encoding: "binary"` 与 `bytes`。同时让你页面中的 Cmd/Ctrl+S 能够保存。 |
 | `onFileSnapshot(handler)` | 文件编辑器：返回 `{ content, version }`（二进制编辑器则返回 `{ bytes, version }`），即编辑后的完整文件。OpenChamber 在保存时以及切换到源码视图或全屏之前调用它。 |
 | `onFileSaved(listener)` | 文件编辑器：带该 `version` 的快照已写入磁盘。用 `reportFileChange` 回应。 |

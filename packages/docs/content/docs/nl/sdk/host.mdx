@@ -66,7 +66,7 @@ Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
 | `onResolve(handler)` | registreert de afhandeling van slash-opdrachten; ontvangt `{ command, args }` en geeft een te koppelen item of `null` terug |
 | `setBadge(count)` | zet een stip op het balkpictogram en toont het getal van 0 tot 999 in de tooltip; `null` wist het |
 | `openCommit(sha)` | opent de diffweergave voor de commit in het huidige project; `sha` heeft 7 tot 64 hexadecimale tekens; OpenChamber leest de commit zelf |
-| `setHeight(px)` | stelt de hoogte van uw Werkstatus-onderdeel in, begrensd tot 24 tot 320 pixels; grotere inhoud scrolt binnen de pagina; elders genegeerd |
+| `setHeight(px)` | stelt de hoogte van uw Werkstatus-onderdeel in, begrensd tot 24 tot 480 pixels; grotere inhoud scrolt binnen de pagina; elders genegeerd |
 | `onFileOpen(listener)` | voor editors: ontvangt `{ path, name, readOnly }` plus `encoding: "text"` met `content`, of `encoding: "binary"` met `bytes`; activeert ook opslaan via Cmd/Ctrl+S in de pagina |
 | `onFileSnapshot(handler)` | voor editors: geeft het volledige bewerkte bestand als `{ content, version }` of `{ bytes, version }` terug; aangeroepen bij opslaan en vóór wisselen naar bronweergave of volledig scherm |
 | `onFileSaved(listener)` | voor editors: de momentopname met die `version` staat op schijf; antwoord met `reportFileChange` |
