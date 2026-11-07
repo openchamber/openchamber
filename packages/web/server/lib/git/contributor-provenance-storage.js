@@ -152,13 +152,20 @@ export function createContributorProvenanceStore({
     }
   };
   const resolveIdentity = async (directory) => {
-    const [repository, gitPaths] = await Promise.all([
-      resolveRepositoryIdentity(directory), resolveGitPaths(directory),
-    ]);
-    if (!repository?.supported || !isIdentifier(repository.repositoryId) || !gitPaths?.supported || gitPaths.bare) {
+    // A resolver that answers the Git directory too saves the second
+    // `rev-parse` this store would otherwise run for the same directory
+    // (#6084). Length and absoluteness are checked below like any other path.
+    const repository = await resolveRepositoryIdentity(directory);
+    if (!repository?.supported || !isIdentifier(repository.repositoryId) || repository.bare === true) {
       throw invalidStore();
     }
-    const gitDirectory = await fsImpl.realpath(gitPaths.gitDirectory);
+    const gitDirectoryPath = isString(repository.gitDirectory)
+      ? repository.gitDirectory
+      : await resolveGitPaths(directory)
+        .then((gitPaths) => (gitPaths?.supported && !gitPaths.bare ? gitPaths.gitDirectory : null))
+        .catch(() => null);
+    if (!isString(gitDirectoryPath) || !path.isAbsolute(gitDirectoryPath)) throw invalidStore();
+    const gitDirectory = await fsImpl.realpath(gitDirectoryPath);
     const stats = await fsImpl.stat(gitDirectory);
     if (!stats.isDirectory()) throw invalidStore();
     return { worktreeId: worktreeIdFor(repository.repositoryId, gitDirectory, stats), repositoryId: repository.repositoryId, gitDirectory };

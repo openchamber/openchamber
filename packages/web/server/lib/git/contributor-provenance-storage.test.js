@@ -158,6 +158,27 @@ describe('contributor provenance storage', () => {
     });
   });
 
+  it('takes the Git directory from the resolver instead of resolving it twice', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-contributor-oneprobe-'));
+    roots.push(root);
+    const gitDirectory = path.join(root, 'git');
+    await fs.mkdir(gitDirectory);
+    let resolveGitPathsCalls = 0;
+    const store = createContributorProvenanceStore({
+      filePath: path.join(root, 'provenance.json'),
+      // The resolver answers what a record is keyed by, Git directory included.
+      resolveRepositoryIdentity: async () => ({ supported: true, repositoryId: 'repo_one', gitDirectory }),
+      resolveGitPaths: async () => {
+        resolveGitPathsCalls += 1;
+        return { supported: true, bare: false, gitDirectory };
+      },
+    });
+
+    const read = await store.read('/checkout');
+    expect(read).toMatchObject({ revision: 0, provenance: null });
+    expect(resolveGitPathsCalls).toBe(0);
+  });
+
   it('reads a bounded worktree batch from one authoritative store snapshot', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-contributor-batch-'));
     roots.push(root);
