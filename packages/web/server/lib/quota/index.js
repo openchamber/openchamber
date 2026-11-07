@@ -29,5 +29,6 @@ export {
   fetchOllamaCloudQuota,
   fetchZhipuaiQuota,
   fetchWaferQuota,
-  fetchOpenCodeQuota
+  fetchOpenCodeQuota,
+  fetchOneProviderQuota
 } from './providers/index.js';
