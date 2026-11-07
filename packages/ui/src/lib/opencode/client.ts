@@ -71,6 +71,7 @@ import {
 } from "./model"
 import { ascendingId } from "./ids"
 import { runningShellFromWire, shellCancellationNote, type RunningShell, type ShellToStop } from "./background-shell"
+import { runningImageJobFromWire, type RunningImageJob } from "./background-image"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
 import { readMessageThroughAncestors } from "./message-ownership"
@@ -1998,6 +1999,21 @@ class OpencodeService {
    * the directory OpenCode resolved it to (symlinks resolved), which is the
    * directory its shell events carry. Throws on fetch failure.
    */
+  /**
+   * Images OpenCode is generating in the background, for every session. The
+   * job list (OpenCode 2.2.6+) is global, so it names no directory. Null when
+   * this OpenCode has no job list. Throws on fetch failure.
+   */
+  async listRunningImageJobs(): Promise<RunningImageJob[] | null> {
+    try {
+      const jobs = await call("job.list", () => this.client.experimental.job.list({ kind: "image", status: "running" }))
+      return jobs.flatMap((job) => runningImageJobFromWire(job) ?? [])
+    } catch (error) {
+      if (isOpencodeNotFound(error)) return null
+      throw error
+    }
+  }
+
   async listRunningShells(directory: string): Promise<{ directory: string; shells: RunningShell[] }> {
     const response = await call("shell.list", () => this.clientFor(directory).shell.list())
     return {

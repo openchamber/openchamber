@@ -45,6 +45,7 @@ import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { resetPendingSessionAssists } from '@/sync/pending-session-assists';
 import { resetRecoverableQuestions } from '@/sync/recoverable-questions';
 import { resetBackgroundShells } from '@/sync/background-shells';
+import { resetBackgroundImages } from '@/sync/background-images';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
@@ -101,6 +102,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   resetPendingSessionAssists();
   resetRecoverableQuestions();
   resetBackgroundShells();
+  resetBackgroundImages();
   resetSessionOrdering();
   // Turn timings belong to the previous instance's sessions, and the reset also
   // restarts the resume window so the switch is treated as a fresh load.

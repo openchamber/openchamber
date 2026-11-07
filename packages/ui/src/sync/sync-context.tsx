@@ -112,6 +112,7 @@ import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, settledPageKey
 import { requestHostTurnStarts } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
+import { applyBackgroundImageEvents, refreshBackgroundImages } from "./background-images"
 import { applyReplyCommandEvents } from "./reply-commands"
 import {
   CHAT_LOCATION_RELEASE_DELAY_MS,
@@ -330,6 +331,7 @@ const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
     // Before statuses: an idle that follows a command's start in the same
     // flush must see the command.
     applyBackgroundShellEvents(directory, events)
+    applyBackgroundImageEvents(directory, events)
     applyReplyCommandEvents(events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
@@ -2224,6 +2226,7 @@ export function handleEvent(
       // Child stores remain the primary source for synced directories; these
       // indexes cover unopened directories and list/status races.
       applyBackgroundShellEvents(directory, [payload])
+      applyBackgroundImageEvents(directory, [payload])
       applyReplyCommandEvents([payload])
       applyGlobalSessionStatusEvent(directory, payload)
       if (!heldForAutoAnswer) applyGlobalBlockingRequestEvents(directory, [payload])
@@ -2252,6 +2255,10 @@ export function handleEvent(
       scheduleCatalogReload(result.kind, childStores, null)
     }
     if (payload.type === "server.connected") {
+      // OpenCode restarted behind a live stream: an image it was generating
+      // may be gone, and the job list says which.
+      void runBackgroundNetworkTask(() => refreshBackgroundImages(() => opencodeClient.listRunningImageJobs()))
+        .catch(() => undefined)
       // OpenCode answers for the first time, boot window or not: directory
       // bootstraps that failed while it was starting get their one retry.
       if (expectedRuntimeKey === getRuntimeKey() && claimFirstServerConnect(childStores, expectedRuntimeKey)) {
@@ -3364,6 +3371,10 @@ export function SyncProvider(props: {
         void useMessageQueueStore.getState().resync().catch(() => undefined)
         // OpenCode keeps file watches in memory; a restart behind the gap dropped them.
         renewWatchedFiles()
+        // Images in progress have no other source after a start or a gap: the
+        // job list answers for every session at once.
+        void runBackgroundNetworkTask(() => refreshBackgroundImages(() => opencodeClient.listRunningImageJobs()))
+          .catch(() => undefined)
         useConfigStore.setState({
           isConnected: true,
           hasEverConnected: true,
