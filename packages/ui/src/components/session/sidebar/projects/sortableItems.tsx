@@ -13,6 +13,8 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Icon } from '@/components/icon/Icon';
 import { cn, getRevealLabelKey } from '@/lib/utils';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { toast } from '@/components/ui';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
@@ -207,6 +209,19 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     setOpenSidebarMenuKey(open ? menuInstanceKey : null);
   }, [menuInstanceKey, setOpenSidebarMenuKey]);
 
+  const handleCopyPath = React.useCallback(() => {
+    if (!projectDirectory) return;
+    void copyTextToClipboard(projectDirectory)
+      .then((result) => {
+        if (result.ok) {
+          toast.success(t('sessions.sidebar.project.copyPath.success'));
+          return;
+        }
+        toast.error(t('sessions.sidebar.project.copyPath.error'));
+      })
+      .catch(() => toast.error(t('sessions.sidebar.project.copyPath.error')));
+  }, [projectDirectory, t]);
+
   const renderProjectMenuItems = (Item: React.ElementType) => (
     <>
       {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
@@ -243,6 +258,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Item onClick={onOpenFolder}>
           <Icon name="folder-received" className="me-1.5 h-4 w-4" />
           {t(getRevealLabelKey())}
+        </Item>
+      )}
+      {projectDirectory && (
+        <Item onClick={handleCopyPath}>
+          <Icon name="link" className="me-1.5 h-4 w-4" />
+          {t('sessions.sidebar.project.actions.copyPath')}
         </Item>
       )}
       <Item onClick={onRenameStart}>
