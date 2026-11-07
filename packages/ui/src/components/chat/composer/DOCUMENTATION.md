@@ -1595,11 +1595,13 @@ Send and Queue buttons retain their normal behavior. The Enter-to-send setting
 and its search entry are hidden on mobile without changing the desktop preference.
 
 The mobile "Return key sends" setting relabels the keycap with
-`enterkeyhint="send"` and makes it submit. Its deferred Enter restores the real
-Shift only while a hardware keyboard is attached: iOS autocapitalization reports
-a phantom Shift at sentence starts, so a soft-keyboard Send always submits, while
-a hardware Shift+Enter still inserts a newline. Alt/Option+Enter inserts a
-newline, and Ctrl/Cmd+Enter is unchanged.
+`enterkeyhint="send"` and makes it submit. In both Return modes a deferred Enter
+restores the real Shift only while a hardware keyboard is attached
+(`shouldPreserveDeferredEnterShift`): iOS autocapitalization reports a phantom
+Shift at sentence starts, so a soft-keyboard Send always submits and a soft
+Return never continues a list, while a hardware Shift+Enter still inserts a
+newline or continues the list. Alt/Option+Enter inserts a newline, and
+Ctrl/Cmd+Enter is unchanged.
 
 Comment fields use `components/comments/useCommentEnterSubmit.ts` for the same
 policy. Enter attaches on desktop; on mobile it follows "Return key sends".
@@ -1633,3 +1635,13 @@ setting controls plain Enter there: "Send with Enter" sends on Enter, "Send with
 Ctrl/Cmd+Enter" inserts a newline. Shift+Enter and Alt/Option+Enter always insert
 a newline, and Ctrl/Cmd+Enter always sends. Ctrl/Cmd+Alt/Option+Enter keeps
 the Ctrl/Cmd+Enter send behavior.
+
+Shift+Enter at the end of a numbered item continues the list: the next line
+carries the following number with the same indentation and delimiter (`1.` →
+`2.`, `1)` → `2)`). Anywhere else Shift+Enter is the plain newline above,
+including numbered text inside a code fence: `text.ts` reads fences through
+`matchFenceOpen` and `isFenceClose`, the same boundaries the highlighter uses,
+so an unclosed fence runs to the end of the prompt.
+`getOrderedListContinuationEdit` in `text.ts` owns that rule and runs inside the
+same markdown-source branch as auto-pairing, so autocomplete and Alt/Option+Enter
+keep their own handling.
