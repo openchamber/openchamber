@@ -133,8 +133,10 @@ class BridgeViewController: CAPBridgeViewController {
             WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         )
         observeHardwareKeyboard()
-        // App-local plugin: iOS Shortcuts / Siri new-session requests (ShortcutRequests.swift).
+        // App-local plugins: iOS Shortcuts / Siri new-session requests (ShortcutRequests.swift)
+        // and files received from the system share sheet (SharedFiles.swift).
         bridge?.registerPluginInstance(ShortcutRequestsPlugin())
+        bridge?.registerPluginInstance(SharedFilesPlugin())
         bridge?.registerPluginInstance(RuntimeWebSocketPlugin())
     }
 

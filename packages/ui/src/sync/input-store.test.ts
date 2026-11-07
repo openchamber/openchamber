@@ -691,3 +691,28 @@ describe("input-store draft submit", () => {
     expect(useInputStore.getState().pendingDraftSubmit).toBeNull()
   })
 })
+
+describe("input-store draft attachments", () => {
+  const file = new File(["shared"], "notes.txt", { type: "text/plain" })
+
+  beforeEach(() => {
+    useInputStore.setState({ pendingDraftAttachments: null })
+  })
+
+  test("the requested draft takes the files once", () => {
+    useInputStore.getState().requestDraftAttachments(7, [file])
+
+    expect(useInputStore.getState().consumePendingDraftAttachments(7)).toEqual([file])
+    expect(useInputStore.getState().consumePendingDraftAttachments(7)).toBeNull()
+  })
+
+  test("another draft or a session drops the files instead of attaching them", () => {
+    useInputStore.getState().requestDraftAttachments(7, [file])
+    expect(useInputStore.getState().consumePendingDraftAttachments(8)).toBeNull()
+    expect(useInputStore.getState().pendingDraftAttachments).toBeNull()
+
+    useInputStore.getState().requestDraftAttachments(7, [file])
+    expect(useInputStore.getState().consumePendingDraftAttachments(null)).toBeNull()
+    expect(useInputStore.getState().pendingDraftAttachments).toBeNull()
+  })
+})

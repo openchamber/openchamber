@@ -60,7 +60,12 @@ try {
 } finally {
   // 4. Always restore the Podfile + Pods so device/TestFlight builds keep the scanner. Pods/
   //    and Podfile.lock return to their original state (a no-op for git once this completes).
-  if (strippedPodfile !== originalPodfile) {
+  //    A caller that runs the simulator UI tests right after this build sets
+  //    IOS_SIM_BUILD_KEEP_PODS=1: restoring MLKit would force the test build back to x86_64,
+  //    which cannot install on an arm64-only simulator.
+  if (process.env.IOS_SIM_BUILD_KEEP_PODS === '1') {
+    console.log('[ios-sim-build] keeping the simulator Podfile (IOS_SIM_BUILD_KEEP_PODS=1).');
+  } else if (strippedPodfile !== originalPodfile) {
     writeFileSync(podfilePath, originalPodfile);
     run('pod', ['install'], iosAppDir);
   }

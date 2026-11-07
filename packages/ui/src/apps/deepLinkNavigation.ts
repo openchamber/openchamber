@@ -1,7 +1,10 @@
 import React from 'react';
+import { toast } from 'sonner';
 
 import { isCapacitorApp } from '@/lib/platform';
 import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests';
+import { subscribeToNativeSharedFiles, type RejectedSharedFile } from '@/lib/nativeSharedFiles';
+import { formatMessage, useI18nStore, type I18nKey, type I18nParams } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useInputStore } from '@/sync/input-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -40,7 +43,14 @@ interface DeepLinkHandlers {
  */
 type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string };
 
-type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent;
+/**
+ * Files shared to the app from the system share sheet (the iOS share extension). Like a
+ * Shortcuts request it never comes from a URL: the extension writes an App Group inbox and
+ * the plugin hands the page what it staged.
+ */
+type SharedFilesIntent = { type: 'shared-files'; files: File[]; rejected: RejectedSharedFile[] };
+
+type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent | SharedFilesIntent;
 
 let handlers: DeepLinkHandlers = {};
 let ready = false;
@@ -67,10 +77,44 @@ const openShortcutSession = (intent: ShortcutNewSessionIntent): void => {
   useInputStore.getState().requestDraftSubmit(useSessionUIStore.getState().newSessionDraft.draftId, text);
 };
 
+const REJECTED_FILE_REASONS: Record<string, string> = {
+  'too-large': 'too large',
+  'batch-limit': 'share size limit',
+  'too-many': 'too many files',
+  'unsupported-type': 'unsupported type',
+  unreadable: 'unreadable',
+};
+
+/**
+ * Opens a draft and leaves the files for its composer: they attach once that draft is on
+ * screen, so nothing lands on the session the user happened to leave open. Rejected names
+ * are reported instead of dropped silently — the same report the file picker gives.
+ */
+const openSharedFilesSession = (intent: SharedFilesIntent): void => {
+  if (intent.rejected.length > 0) {
+    const t = (key: I18nKey, params?: I18nParams): string => (
+      formatMessage(useI18nStore.getState().dictionary, key, params)
+    );
+    const summary = intent.rejected
+      .map((file) => `${file.name}: ${REJECTED_FILE_REASONS[file.reason] ?? file.reason}`)
+      .join('\n');
+    toast.error(t('chat.chatInput.toast.someFilesSkipped', { summary }));
+  }
+  if (intent.files.length === 0) return;
+
+  useSessionUIStore.getState().openNewSessionDraft();
+  const draftId = useSessionUIStore.getState().newSessionDraft.draftId;
+  useInputStore.getState().requestDraftAttachments(draftId, intent.files);
+};
+
 const execute = (intent: NavigationIntent): boolean => {
   switch (intent.type) {
     case 'shortcut-new-session':
       openShortcutSession(intent);
+      return true;
+
+    case 'shared-files':
+      openSharedFilesSession(intent);
       return true;
 
     case 'session':
@@ -203,6 +247,10 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
 
     cleanup.push(subscribeToNativeShortcutRequests((request) => {
       applyDeepLinkIntent({ type: 'shortcut-new-session', projectId: request.projectId, text: request.text });
+    }));
+
+    cleanup.push(subscribeToNativeSharedFiles((payload) => {
+      applyDeepLinkIntent({ type: 'shared-files', files: payload.files, rejected: payload.rejected });
     }));
 
     void import('@capacitor/push-notifications')

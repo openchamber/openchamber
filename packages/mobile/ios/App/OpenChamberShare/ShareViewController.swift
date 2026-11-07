@@ -1,0 +1,89 @@
+import UIKit
+
+/// Receives a file from the system share sheet, stages it in the App Group inbox and
+/// brings the app forward. The page then attaches it to a new session draft; the app
+/// itself never opens a draft from here.
+final class ShareViewController: UIViewController {
+    private var started = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.startAnimating()
+        let label = UILabel()
+        label.text = "Adding to OpenChamber…"
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.textColor = .secondaryLabel
+        let stack = UIStackView(arrangedSubviews: [spinner, label])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !started else { return }
+        started = true
+        Task { await receive() }
+    }
+
+    private func receive() async {
+        do {
+            let directory = try ShareInbox.resetDirectory()
+            let records = await ShareStaging.records(from: extensionContext, in: directory)
+            guard !records.isEmpty else { throw ShareInboxError.noFiles }
+            try ShareInbox.write(records, in: directory)
+            NSLog(
+                "[ShareInbox] staged %@",
+                records.map { "\($0.rejected ?? "ok") \($0.name) (\($0.mimeType), \($0.size))" }
+                    .joined(separator: ", ")
+            )
+            openApp()
+            extensionContext?.completeRequest(returningItems: nil)
+        } catch {
+            presentFailure(error)
+        }
+    }
+
+    /// The share sheet cannot open the containing app through `UIApplication.shared` (it is
+    /// unavailable in extensions), and `extensionContext.open` only works for some extension
+    /// points. Both are attempted; neither waits, because a share extension that hangs here
+    /// would be killed with the file already staged. If both fail the inbox stays put and the
+    /// app takes it the next time it becomes active.
+    private func openApp() {
+        extensionContext?.open(ShareInbox.openURL, completionHandler: nil)
+
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let application = current as? UIApplication {
+                application.open(ShareInbox.openURL, options: [:], completionHandler: nil)
+                return
+            }
+            responder = current.next
+        }
+    }
+
+    private func presentFailure(_ error: Error) {
+        let message: String
+        switch error as? ShareInboxError {
+        case .noFiles:
+            message = "No file could be shared with OpenChamber."
+        default:
+            message = "OpenChamber couldn't receive this file."
+        }
+        NSLog("[ShareInbox] failed %@", String(describing: error))
+        let alert = UIAlertController(title: "OpenChamber", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            self?.extensionContext?.completeRequest(returningItems: nil)
+        })
+        present(alert, animated: true)
+    }
+}

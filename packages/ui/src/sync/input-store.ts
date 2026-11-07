@@ -244,6 +244,12 @@ export type InputState = {
    * finds a different draft open drops it.
    */
   pendingDraftSubmit: { draftId: number; text: string } | null
+  /**
+   * Files a native share left for one new-session draft (the iOS share extension).
+   * Bound to the draft's id like `pendingDraftSubmit`, so they never attach to a
+   * session or to another draft the user happened to open.
+   */
+  pendingDraftAttachments: { draftId: number; files: File[] } | null
   /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
@@ -272,6 +278,9 @@ export type InputState = {
   requestDraftSubmit: (draftId: number, text: string) => void
   /** Takes the pending text when it belongs to this draft; any other pending request is dropped. */
   consumePendingDraftSubmit: (draftId: number | null) => string | null
+  requestDraftAttachments: (draftId: number, files: File[]) => void
+  /** Takes the pending files when they belong to this draft; any other pending request is dropped. */
+  consumePendingDraftAttachments: (draftId: number | null) => File[] | null
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
   requestBtwComposer: (request: PendingBtwComposerRequest) => void
@@ -319,6 +328,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pinnedSyntheticParts: new Map(),
   pendingPresetSubmit: null,
   pendingDraftSubmit: null,
+  pendingDraftAttachments: null,
   pendingGuestIssue: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
@@ -392,6 +402,15 @@ export const useInputStore = create<InputState>()((set, get) => ({
     if (pendingDraftSubmit === null) return null
     set({ pendingDraftSubmit: null })
     return pendingDraftSubmit.draftId === draftId ? pendingDraftSubmit.text : null
+  },
+
+  requestDraftAttachments: (draftId, files) => set({ pendingDraftAttachments: { draftId, files } }),
+
+  consumePendingDraftAttachments: (draftId) => {
+    const { pendingDraftAttachments } = get()
+    if (pendingDraftAttachments === null) return null
+    set({ pendingDraftAttachments: null })
+    return pendingDraftAttachments.draftId === draftId ? pendingDraftAttachments.files : null
   },
 
   setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),

@@ -4215,6 +4215,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
     }, [addAttachedFile, imageSaveMode, saveImagesWithPathCitation, t]);
 
+    // Files a native share (the iOS share extension) left for this draft attach once the
+    // draft's composer is the one on screen. They take the picked-file path, so the same
+    // type and size checks and the same attachment chips apply. A request for another
+    // draft is dropped, never attached to whatever the user is looking at.
+    const pendingDraftAttachments = useInputStore((state) => state.pendingDraftAttachments);
+    React.useEffect(() => {
+        if (pendingDraftAttachments == null || columnPinned) return;
+        if (draftSubmitDraftId === null || pendingDraftAttachments.draftId !== draftSubmitDraftId) return;
+        const files = useInputStore.getState().consumePendingDraftAttachments(draftSubmitDraftId);
+        if (files?.length) void attachFiles(files);
+    }, [attachFiles, columnPinned, draftSubmitDraftId, pendingDraftAttachments]);
+
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
             const data = (await vscodeApi?.pickFiles?.({ extensions: ACCEPTED_ATTACHMENT_EXTENSIONS })) as {
