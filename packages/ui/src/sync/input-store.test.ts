@@ -706,13 +706,13 @@ describe("input-store draft attachments", () => {
     expect(useInputStore.getState().consumePendingDraftAttachments(7)).toBeNull()
   })
 
-  test("another draft or a session drops the files instead of attaching them", () => {
+  test("another draft asking leaves the files for the draft they were requested for", () => {
     useInputStore.getState().requestDraftAttachments(7, [file])
     expect(useInputStore.getState().consumePendingDraftAttachments(8)).toBeNull()
-    expect(useInputStore.getState().pendingDraftAttachments).toBeNull()
+    expect(useInputStore.getState().pendingDraftAttachments).not.toBeNull()
 
-    useInputStore.getState().requestDraftAttachments(7, [file])
     expect(useInputStore.getState().consumePendingDraftAttachments(null)).toBeNull()
+    expect(useInputStore.getState().consumePendingDraftAttachments(7)).toEqual([file])
     expect(useInputStore.getState().pendingDraftAttachments).toBeNull()
   })
 })

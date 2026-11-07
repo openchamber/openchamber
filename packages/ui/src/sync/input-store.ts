@@ -408,9 +408,12 @@ export const useInputStore = create<InputState>()((set, get) => ({
 
   consumePendingDraftAttachments: (draftId) => {
     const { pendingDraftAttachments } = get()
-    if (pendingDraftAttachments === null) return null
+    if (pendingDraftAttachments === null || draftId === null) return null
+    // Another composer asking must not take the files from the draft they were requested
+    // for: it can mount a beat before that draft does.
+    if (pendingDraftAttachments.draftId !== draftId) return null
     set({ pendingDraftAttachments: null })
-    return pendingDraftAttachments.draftId === draftId ? pendingDraftAttachments.files : null
+    return pendingDraftAttachments.files
   },
 
   setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),
