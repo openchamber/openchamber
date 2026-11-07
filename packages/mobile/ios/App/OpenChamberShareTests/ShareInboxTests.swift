@@ -164,9 +164,9 @@ final class ShareInboxTests: XCTestCase {
 
     func testTextOnlyShareIsDelivered() throws {
         let inbox = try ShareInbox.resetDirectory(in: container)
-        XCTAssertFalse(ShareInbox.hasPending(), "a reset inbox holds nothing until a share is written")
+        XCTAssertFalse(ShareInbox.hasPending(in: container), "a reset inbox holds nothing until a share is written")
         try writeManifest([], text: "https://openchamber.dev/session/abc")
-        XCTAssertTrue(ShareInbox.hasPending())
+        XCTAssertTrue(ShareInbox.hasPending(in: container))
 
         let taken = ShareInbox.take(in: container)
 

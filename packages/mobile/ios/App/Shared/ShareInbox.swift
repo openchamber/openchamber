@@ -68,7 +68,11 @@ enum ShareInbox {
 
     static func hasPending() -> Bool {
         guard let container else { return false }
-        return FileManager.default.fileExists(atPath: inbox(in: container).appendingPathComponent(manifestName).path)
+        return hasPending(in: container)
+    }
+
+    static func hasPending(in container: URL) -> Bool {
+        FileManager.default.fileExists(atPath: inbox(in: container).appendingPathComponent(manifestName).path)
     }
 
     /// Files the page can attach, the ones that were refused when they were shared, and the
