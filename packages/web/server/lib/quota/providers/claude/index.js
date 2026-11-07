@@ -41,8 +41,10 @@ const fingerprintOf = (credential) =>
 
 const cooldownFromHeader = (response) => {
   const raw = response.headers.get('retry-after');
-  const retryAfter = Number(raw);
-  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+  // `Retry-After: 0` asks for an immediate retry, so it ends the cooldown.
+  // `Number(null)` is 0 as well, so a missing header must not reach this check.
+  const retryAfter = raw ? Number(raw) : Number.NaN;
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
     return Math.min(retryAfter * 1000, MAX_COOLDOWN_MS);
   }
   const retryAt = raw ? Date.parse(raw) : Number.NaN;
