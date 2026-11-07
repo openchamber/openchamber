@@ -2044,6 +2044,7 @@ const openChamberSessionService = createOpenChamberSessionService({
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   isAutoReady: async () => (await routingRuntime.describe()).autoReady,
+  readProjectSetup: (projectID) => projectConfigRuntime.readProjectSetup(projectID),
 });
 // Browser actions are published to whichever OpenChamber clients are connected;
 // the one owning the browser panel answers. `emitRequest` returns the number of

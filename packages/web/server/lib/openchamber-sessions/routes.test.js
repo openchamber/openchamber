@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
 import request from 'supertest';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSessionKnowledgeRuntime, KNOWLEDGE_ENTRY_KEYS } from '../session-knowledge/runtime.js';
 
 const createWorktreeMock = vi.fn(async () => ({
@@ -1459,6 +1459,191 @@ describe('openchamber session routes', () => {
     }));
     expect(response.body.directory).toBe('/repo/worktrees/feature-fix');
     expect(response.body.worktree.branch).toBe('feature/fix');
+  });
+
+  describe('the project\'s setup commands in a new worktree', () => {
+    // The merged view `projectConfigRuntime.readProjectSetup` answers.
+    const setupView = ({ shared = [], personal = [], trusted = true } = {}) => ({
+      setupWorktree: [...shared, ...personal],
+      trust: { hash: shared.length > 0 ? 'sha256:x' : null, trusted },
+      shared: { setupWorktree: shared },
+      personal: { setupWorktree: personal, setupWorktreeMode: 'append' },
+    });
+    const createdWorktree = { name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' };
+
+    it('runs them in a worktree that session.create makes, in the project path', async () => {
+      createWorktreeMock.mockResolvedValueOnce(createdWorktree);
+      const readProjectSetup = vi.fn(async () => setupView({ shared: ['bash copy.sh "$ROOT_PROJECT_PATH"'], personal: ['pnpm install'] }));
+      const { app } = createApp({ readProjectSetup });
+
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'side-task' } })
+        .expect(200);
+
+      expect(readProjectSetup).toHaveBeenCalledWith('proj_1');
+      expect(createWorktreeMock).toHaveBeenCalledWith('/repo/app', {
+        mode: 'new', name: 'side-task', startCommand: 'bash copy.sh "/repo/app" && pnpm install',
+      }, expect.any(Object));
+      expect(response.body).not.toHaveProperty('untrustedSetupCommandsSkipped');
+    });
+
+    it('skips shared commands nobody trusted and says so in the result', async () => {
+      createWorktreeMock.mockResolvedValueOnce(createdWorktree);
+      const readProjectSetup = vi.fn(async () => setupView({ shared: ['pnpm install'], personal: ['make env'], trusted: false }));
+      const { app } = createApp({ readProjectSetup });
+
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', worktree: { name: 'side-task' } })
+        .expect(200);
+
+      expect(createWorktreeMock.mock.calls[0][1]).toEqual({ mode: 'new', name: 'side-task', startCommand: 'make env' });
+      expect(response.body.untrustedSetupCommandsSkipped).toEqual(['pnpm install']);
+    });
+
+    it('hands them to a worktree made from a pull request', async () => {
+      const createChangeRequestWorktree = vi.fn(async () => ({ name: 'feature-fix', branch: 'feature/fix', path: '/repo/worktrees/feature-fix' }));
+      const { app } = createApp({ createChangeRequestWorktree, readProjectSetup: vi.fn(async () => setupView({ shared: ['pnpm install'] })) });
+
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', pullRequest: 42 })
+        .expect(200);
+
+      expect(createChangeRequestWorktree).toHaveBeenCalledExactlyOnceWith({ directory: '/repo/app', number: 42, startCommand: 'pnpm install' });
+    });
+
+    it('runs none outside a registered project', async () => {
+      createWorktreeMock.mockResolvedValueOnce({ ...createdWorktree, path: '/elsewhere/worktrees/side-task' });
+      const readProjectSetup = vi.fn();
+      const { app } = createApp({ readProjectSetup });
+
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/elsewhere', worktree: { name: 'side-task' } })
+        .expect(200);
+
+      expect(readProjectSetup).not.toHaveBeenCalled();
+      expect(createWorktreeMock.mock.calls[0][1]).toEqual({ mode: 'new', name: 'side-task' });
+    });
+
+    it('runs them in the worktree a session moves into, from the project that holds the session', async () => {
+      const readProjectSetup = vi.fn(async () => setupView({ shared: ['pnpm install'], trusted: false }));
+      const service = createOpenChamberSessionService({
+        readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_ai', path: '/repo/ai' }] }),
+        sanitizeProjects: (projects) => projects,
+        validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+        buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+        getOpenCodeAuthHeaders: () => ({}),
+        waitForOpenCodeReady: vi.fn(async () => undefined),
+        worktreeBootstrapStore,
+        hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
+        archiveStore: createMemoryArchiveStore(),
+        sessionMetadataStore: createMemorySessionMetadataStore(),
+        getBranches: vi.fn(async () => ({ all: [], defaultBranches: {} })),
+        resolveWorktreeTopLevel: vi.fn(async (directory) => ({ root: '/repo', prefix: directory.replace('/repo/', '') })),
+        readProjectSetup,
+      });
+
+      const result = await service.moveToWorktree('ses_1', { directory: '/repo/ai/src', worktree: { name: 'side-task', startRef: 'main' } });
+
+      expect(readProjectSetup).toHaveBeenCalledWith('proj_ai');
+      expect(result.untrustedSetupCommandsSkipped).toEqual(['pnpm install']);
+    });
+  });
+
+  describe('waiting for the worktree bootstrap', () => {
+    const serviceWith = (getWorktreeBootstrapStatus, bootstrap) => createOpenChamberSessionService({
+      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }] }),
+      sanitizeProjects: (projects) => projects,
+      validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      worktreeBootstrapStore,
+      hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
+      archiveStore: createMemoryArchiveStore(),
+      sessionMetadataStore: createMemorySessionMetadataStore(),
+      getWorktreeBootstrapStatus,
+      waitForActiveWorktreeBootstrap: () => bootstrap.promise,
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('keeps waiting past the deadline while the setup commands run after git finished', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createWorktreeMock.mockResolvedValueOnce({ name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' });
+      const bootstrap = Promise.withResolvers();
+      let state = { status: 'pending', phase: 'git-ready' };
+      const service = serviceWith(vi.fn(async () => state), bootstrap);
+
+      const pending = service.create({ directory: '/repo/app', worktree: { name: 'side-task' } });
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+      state = { status: 'ready', phase: 'setup-ready' };
+      bootstrap.resolve();
+
+      await expect(pending).resolves.toMatchObject({ directory: '/repo/worktrees/side-task' });
+      expect(sessionCreateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers not ready and starts no session once the setup deadline passed', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createWorktreeMock.mockResolvedValueOnce({ name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' });
+      const service = serviceWith(vi.fn(async () => ({ status: 'pending', phase: 'git-ready' })), Promise.withResolvers());
+
+      const pending = service.create({ directory: '/repo/app', worktree: { name: 'side-task' }, prompt: 'Run this' });
+      const refusal = expect(pending).rejects.toMatchObject({
+        statusCode: 503, partial: true, partialAction: 'worktree-created', directory: '/repo/worktrees/side-task',
+      });
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+
+      await refusal;
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+      expect(sessionPromptMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses a session in a checkout whose setup is still running', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const service = serviceWith(vi.fn(async () => ({ status: 'pending', phase: 'git-ready' })), Promise.withResolvers());
+
+      const pending = service.create({ directory: '/repo/app' });
+      const refusal = expect(pending).rejects.toMatchObject({ statusCode: 503, message: expect.stringContaining('still running') });
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 1_000);
+
+      await refusal;
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('takes a bootstrap that finished right at the deadline as finished', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createWorktreeMock.mockResolvedValueOnce({ name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' });
+      const service = serviceWith(vi.fn(async () => ({ status: 'ready', phase: 'setup-ready' })), Promise.withResolvers());
+
+      const pending = service.create({ directory: '/repo/app', worktree: { name: 'side-task' } });
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      const result = await pending;
+      expect(result).not.toHaveProperty('setupStillRunning');
+      expect(sessionCreateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops at the deadline while git is still filling the folder', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      createWorktreeMock.mockResolvedValueOnce({ name: 'side-task', branch: 'side-task', path: '/repo/worktrees/side-task' });
+      const service = serviceWith(vi.fn(async () => ({ status: 'pending', phase: 'directory-created' })), Promise.withResolvers());
+
+      const pending = service.create({ directory: '/repo/app', worktree: { name: 'side-task' } });
+      const failure = expect(pending).rejects.toMatchObject({ message: 'Timed out waiting for the worktree bootstrap' });
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      await failure;
+      expect(sessionCreateMock).not.toHaveBeenCalled();
+    });
   });
 
   it('refuses a pull request it cannot make a worktree for and creates no session', async () => {

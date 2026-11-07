@@ -250,6 +250,36 @@ other.
   `session.move`. A failure after the worktree exists removes it again and
   puts the changes back; when restoring fails too, the error names the stash
   so nothing is lost. A 409 means the changes did not apply on the start ref.
+- A new worktree from `session.create` (`worktree` or `pullRequest`) or
+  `session.moveToWorktree` runs the project's setup commands, as one from the
+  New worktree dialog does. The server resolves them itself
+  (`../projects/worktree-setup.js`) from the registered project's merged setup
+  (`readProjectSetup`), because no client is there to show the trust prompt:
+  shared commands the user has not trusted are left out, the personal ones
+  still run, and the result names the skipped ones in
+  `untrustedSetupCommandsSkipped`. That is the dialog's answer when the user
+  skips them. The project is the one a move's start folder follows (below),
+  for a create too. A directory outside every registered project gets no
+  setup. The commands run inside the bootstrap, so the session is created or
+  moved only after they finished, whatever `setupWorktreeWait` says: an agent
+  works in the folder at once. The 60-second bootstrap deadline covers git's
+  part; once the bootstrap reports `git-ready`, the commands get three more
+  minutes, which keeps the call well inside the agent tool's request window
+  (Bun's fetch gives up after about six minutes). A command still running past
+  that gets a 503 and no work starts in the worktree, so a command that never
+  exits cannot hold every agent create and an agent never edits files a setup
+  is still writing. A create answers `partialAction: worktree-created` with no
+  session, as for any failed prerequisite below; the retry in that folder gets
+  the same answer until the setup finishes. A move answers
+  `partialAction: worktree-setup-running` with the worktree's `directory`, stops
+  before stashing anything and leaves the session and its files where they
+  were: a setup command could overwrite a carried file once the stash, the only
+  other copy, is dropped. A move that goes ahead applies its `carry` files after
+  the setup, so a carried dependency change needs the install run again. A
+  failing command is logged and does not fail the bootstrap, as on every
+  creation path. A move that fails after the worktree exists stops the setup
+  commands (`cancelSetup` in `removeWorktree`), so a command that never exits
+  cannot strand the worktree; the changes go back without waiting for that.
 - A session created in a new worktree (`session.create` with `worktree` or
   `pullRequest`) or moved into one (`session.moveToWorktree`) starts in the same
   folder of that worktree as the project opens on in its repository: a project
@@ -293,7 +323,7 @@ other.
   Explicit model/agent pairs keep their existing validation,
   and send/fork reuse the session selection before requesting defaults.
 - Worktree-dependent operations await the tracked bootstrap promises, including
-  setup, with a 60-second deadline, then check the final status once. Git-ready
+  setup, with the deadlines above, then check the final status once. Git-ready
   alone is insufficient. Creating in an existing checkout subdirectory checks
   bootstrap at the checkout root while retaining the session's requested folder.
   If a create prerequisite fails after making a worktree,
