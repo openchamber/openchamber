@@ -685,6 +685,14 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     && /^\/(?:guests\/[a-z][a-z0-9-]*|tracker\/ext-[a-z][a-z0-9-]*)\/oauth\/callback$/.test(req.path || '')
   );
 
+  // An MCP server's OAuth callback lands on the OpenChamber origin because a
+  // browser on another machine cannot reach OpenCode's loopback listener. The
+  // route forwards it there only for a state bound to a live sign-in.
+  const isMcpOauthCallback = (req) => (
+    req.method === 'GET'
+    && /^\/mcp\/oauth\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?\/callback$/.test(req.path || '')
+  );
+
   // An HTML preview runs in an opaque-origin sandbox and carries no session.
   // The grant in its path is the capability; the fs route checks it.
   const isFilePreviewRead = (req) => (
@@ -702,7 +710,7 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   const requireApiAuth = async (req, res, next) => {
     const pathname = (req.originalUrl || '').split('?')[0];
     if (selfAuthenticatedApiPaths.has(pathname)) return next();
-    if (isGuestOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
+    if (isGuestOauthCallback(req) || isMcpOauthCallback(req) || isFilePreviewRead(req) || isGuestFrameFileRead(req)) {
       return next();
     }
     const requestScope = tunnelAuthController.classifyRequestScope(req);
