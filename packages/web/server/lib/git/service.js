@@ -5740,6 +5740,7 @@ export async function previewWorktreeCreate(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
   await fsp.mkdir(context.worktreeRoot, { recursive: true });
+  context.worktreeRoot = await fsp.realpath(context.worktreeRoot);
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -6199,6 +6200,7 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
     : result);
 
   await fsp.mkdir(context.worktreeRoot, { recursive: true });
+  context.worktreeRoot = await fsp.realpath(context.worktreeRoot);
 
   const preferredName = String(preparedInput?.worktreeName || preparedInput?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(preparedInput?.branchName || '').trim());

@@ -111,6 +111,12 @@ A stale status row can outlive its repository. Returning empty contents would re
 - `removeWorktree` deletes an unregistered leftover only under the data-dir root, so worktrees created before the setting was set stay removable while a shared configured folder such as `".."` can never make a sibling project eligible for deletion; a config read failure there falls back to the data-dir root instead of blocking the removal. Creation still fails loudly on an unreadable config so a worktree is never created in an unchosen folder.
 - Both the web and VS Code readers merge a secondary user config file (`opencode.jsonc` beside `opencode.json`) as an override layer, as OpenCode does, so `worktree.directory` set there applies in every runtime.
 
+#### Why preview and creation resolve the parent after creating it
+
+Preview and creation return the filesystem-resolved path Git lists, including when home, `XDG_DATA_HOME` or `worktree.directory` contains a symlink. The parent can be absent for the first worktree, so these operations create it before calling `realpath`. The resolved parent also owns candidate selection and failed-create cleanup. Context resolution leaves the worktree parent untouched. A resolution failure rejects the operation before a candidate is created.
+
+Existing sessions keep their stored directory. Recover an alias-path session through OpenCode's `POST /api/session/{sessionID}/move` with `{"directory":"<real worktree path>"}` on the same OpenCode server that owns it. This creation rule does not move checkout files or rewrite session history.
+
 ### Worktree teardown commands
 
 `DELETE /api/git/worktrees` takes an optional `teardownCommand`: the project's
