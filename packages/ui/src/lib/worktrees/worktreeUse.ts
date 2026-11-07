@@ -26,6 +26,22 @@ export const withSessionsNowInWorktree = (sessionIds: readonly string[], path: s
   ...new Set([...sessionIds, ...sessionsInWorktree(useGlobalSessionsStore.getState().activeSessions, path).map((session) => session.id)]),
 ];
 
+/**
+ * The active sessions working in the worktree now, from the global list and
+ * the live stores: a live store can hold a session the global list has not
+ * loaded yet, and a delete that keeps sessions must not leave one behind in
+ * a folder that is gone. Archived sessions are left out.
+ */
+export const activeSessionsInWorktreeNow = (path: string, liveSessions: readonly Session[]): Session[] => {
+  const root = normalizePath(path);
+  if (!root) return [];
+  const merged = new Map(sessionsInWorktree(useGlobalSessionsStore.getState().activeSessions, root).map((session) => [session.id, session]));
+  for (const session of liveSessions) {
+    if (!merged.has(session.id) && !session.time?.archived && isInside(resolveGlobalSessionDirectory(session), root)) merged.set(session.id, session);
+  }
+  return [...merged.values()];
+};
+
 export type WorktreeUse = 'free' | 'busy' | 'inUse' | 'unknown';
 
 /**
