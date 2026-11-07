@@ -234,6 +234,7 @@ describe('managed OpenCode config file', () => {
       includeRender: false,
       includeImage: false,
       includeSecret: false,
+      includeUsage: false,
       includeWorkflow: false,
       codeMode: false,
     });
@@ -302,6 +303,33 @@ describe('managed OpenCode config file', () => {
       includeRender: false,
       includeImage: false,
       includeSecret: false,
+      includeUsage: false,
+      includeWorkflow: false,
+      codeMode: false,
+    });
+  });
+
+  it('injects the usage tool only when it is switched on, also as the only tool', async () => {
+    const off = await createHarness({ settings: {} });
+    await off.runtime.buildManagedChildEnv();
+    expect(off.agentToolRuntime.materializePlugin).toHaveBeenLastCalledWith(expect.objectContaining({ includeUsage: false }));
+
+    const { runtime, agentToolRuntime } = await createHarness({
+      settings: { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false, agentSecretToolEnabled: false, agentUsageToolEnabled: true },
+    });
+    await runtime.buildManagedChildEnv();
+
+    expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith({
+      includeControl: false,
+      includeSchedule: false,
+      includeWeb: false,
+      includeMemory: false,
+      includeKnowledge: false,
+      includeNotify: false,
+      includeRender: false,
+      includeImage: false,
+      includeSecret: false,
+      includeUsage: true,
       includeWorkflow: false,
       codeMode: false,
     });
@@ -324,6 +352,7 @@ describe('managed OpenCode config file', () => {
       includeRender: true,
       includeImage: false,
       includeSecret: true,
+      includeUsage: false,
       includeWorkflow: false,
       codeMode: true,
     });

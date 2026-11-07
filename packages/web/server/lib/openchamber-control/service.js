@@ -9,6 +9,7 @@ import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
+import { createUsageReadAction } from './usage-read.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
 import { CHATS_SCOPE_PUBLIC_ID } from '../scheduled-tasks/chats-scope.js';
 
@@ -320,6 +321,9 @@ export const createOpenChamberControlService = (dependencies) => {
     createClient = OpenCode.make,
     // Reads an agent's reference images and writes the generated ones.
     imageFsPromises = nodeFsPromises,
+    // Loads the quota module (`../quota/index.js`) for `usage.read`; absent
+    // means the server cannot read usage.
+    loadQuota = null,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
     now = Date.now,
   } = dependencies;
@@ -445,6 +449,7 @@ export const createOpenChamberControlService = (dependencies) => {
     readSettings: readSettingsFromDiskMigrated,
     fsPromises: imageFsPromises,
   });
+  const readUsage = loadQuota ? createUsageReadAction({ readSettings: readSettingsFromDiskMigrated, loadQuota }) : null;
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -1013,6 +1018,10 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (action === 'image.generate') {
         return await generateImage(input, { directory: asNonEmptyString(contextDirectory), signal: options.signal });
+      }
+      if (action === 'usage.read') {
+        if (!readUsage) throw new OpenChamberControlError('Usage is not available on this server', 503);
+        return await readUsage(input, { signal: options.signal });
       }
       if (action === 'secret.request') {
         return await secretRequests.request(input, {

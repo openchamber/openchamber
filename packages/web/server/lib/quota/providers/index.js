@@ -212,6 +212,20 @@ const providerEntries = () => [...Object.entries(registry), ...extensionQuotaPro
 
 const pendingFetches = new Map();
 
+// The registry entries Settings > Usage never reads. Its built-in list
+// (`QUOTA_PROVIDERS` in packages/ui/src/lib/quota/providers/index.ts) shows
+// GitHub Copilot once; the add-on entry asks GitHub a second time.
+const NOT_ON_USAGE_PAGE = new Set([copilot.providerIdAddon]);
+
+/**
+ * The providers Settings > Usage reads, built-ins first, then the attached
+ * extensions: what an agent reading usage may ask, so it never makes a
+ * request the page does not make.
+ */
+export const listUsagePageProviders = () => providerEntries()
+  .filter(([id]) => !NOT_ON_USAGE_PAGE.has(id))
+  .map(([providerId, provider]) => ({ providerId, providerName: provider.providerName }));
+
 
 /**
  * Providers with a usable credential. OpenCode's stored credentials are read

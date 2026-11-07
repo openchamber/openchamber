@@ -64,6 +64,11 @@ the list loses its usage card with no error.
 | `zenmux` | ZenMux | `providers/zenmux.js` | Optional Platform API key stored under `~/.config/openchamber/quota/zenmux.json` (`platformApiKey`). The OpenCode chat key is not used. |
 | `xai` | xAI | `providers/xai.js` | `xai` OAuth entry in OpenCode `auth.json` |
 
+## Who reads quota
+
+- The Usage page and the work status panel, through `GET /api/quota/providers` and `GET /api/quota/:providerId` (`routes.js`).
+- The `openchamber_usage` agent tool (`../openchamber-control/usage-read.js`), which calls the same `listConfiguredQuotaProviders` and `fetchQuotaForProvider` in-process, with the page's deadlines and fallback. It asks only `listUsagePageProviders()`: every registry entry except `github-copilot-addon`, which the page never reads, then the attached extensions. The UI's built-in list (`QUOTA_PROVIDERS` in `packages/ui/src/lib/quota/providers/index.ts`) and this one are kept equal by a test in `usage-read.test.js`, so a new provider is added to both, and a registry entry the page does not show joins `NOT_ON_USAGE_PAGE`.
+
 ## Internal-only provider module
 - `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
 
