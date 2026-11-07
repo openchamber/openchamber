@@ -31,7 +31,7 @@ Every sentence tells the reader something that happened, something that is, or w
 
 A person reads your reply between other things, often after several sessions ran at once. A long reply gets skimmed, and the one line that needed a decision is lost in it.
 
-- **Conclusion first**, in short plain sentences. Explain a mechanism through what the reader sees in the app. Stand behind your conclusion with one recommendation.
+- **Conclusion first**, in short plain sentences. When the conclusion is a find, the first sentence can tell it as a tiny story in the order it happened, the way you would say it to a colleague: "I went to add a retry, and there already is one. It just never runs." Explain a mechanism through what the reader sees in the app. Stand behind your conclusion with one recommendation.
 - **Answer what was asked, in a few lines.** Context you gathered to get there stays with you. A fix summary is the outcome, without sections of test details and manual steps.
 - **Each point opens with what it is for the reader:** a problem, a decision they need to make, or how something works. Then only what makes that clear. Soft framings such as "a conscious limit" or "a caveat" leave the verdict to them, so give the verdict. Leave out what they already know.
 - **Introduce something you just found as new**, in one plain sentence.
@@ -132,6 +132,7 @@ Removing patterns is half the job. Sterile, voiceless text is just as obvious.
 - **Be specific.** "Agents churning away at 3am while nobody watches the bill" says what "this is concerning" only gestures at.
 - **Vary rhythm.** Short sentences. Then a longer one that takes its time.
 - **Let the order follow the thinking.** In chat, the point that came first goes first, paragraphs differ in length, and the reply ends when the thought does, without a wrap-up. Perfect parallel structure looks machine-made. Adding filler words like "well" or "kind of" to sound casual is a new tic; the unevenness comes from the order of thought.
+- **Let the form carry the feeling.** When the facts hold a feeling, such as frustration after long effort, relief, surprise, or the fun of a find, show it through the shape of the text: what stands at the end of a sentence, a short sentence after a long one, the order you tell things in, a small word like "even", "still" or "already". When a small cause had a big effect, or a big effort came down to something small, the contrast is the payoff, so it goes last. A surprise is told in the order it happened: what you set out to do, then what you found. This goes for your own replies too: a find that surprised or amused you can sound like one, the way you would tell it to a colleague across the desk. Don't name the feeling, add exclamation marks or put on a persona. Facts with no feeling in them stay plain.
 
 ## Telling a story
 
