@@ -65,6 +65,8 @@ import { listSnippets, getSnippet, createSnippet, updateSnippet, deleteSnippet, 
 import {
   listPluginEntries,
   getPluginEntry,
+  readGlobalPluginEntries,
+  addGlobalPluginEntry,
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,
@@ -236,6 +238,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       onExtensionSessionEventsChanged = () => {},
       extensionNotificationChannels = null,
       surfaceViewerHeaders,
+      // How an extension's OpenCode plugin reaches OpenCode right now (`guests/opencode-plugin.js`).
+      getOpenCodePluginDelivery = () => 'file',
       openchamberUserConfigRoot,
       managedChatsRoot,
       normalizeDirectoryPath,
@@ -815,6 +819,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       onGuestsChanged: () => announceChange('openchamber:guests-changed'),
       watchFolderInstalls: true,
       surfaceViewerHeaders, trackers,
+      opencodePlugins: { delivery: getOpenCodePluginDelivery, readGlobalEntries: readGlobalPluginEntries, addGlobalEntry: addGlobalPluginEntry },
     }));
     // The providers extensions served before the restart, before any request reads the list.
     await extensionSourceControlProviders.reconcile().catch((error) => {

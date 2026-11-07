@@ -31,6 +31,7 @@ const CAPABILITY_ROWS = {
   sessionControl: { icon: 'robot-2', titleKey: 'settings.extensions.capability.sessionControl', detailKey: 'settings.extensions.capability.sessionControl.detail' },
   instructions: { icon: 'book-open', titleKey: 'settings.extensions.capability.instructions', detailKey: 'settings.extensions.capability.instructions.detail' },
   skills: { icon: 'sparkling', titleKey: 'settings.extensions.capability.skills', detailKey: 'settings.extensions.capability.skills.detail' },
+  opencodePlugin: { icon: 'puzzle', titleKey: 'settings.extensions.capability.opencodePlugin', detailKey: 'settings.extensions.capability.opencodePlugin.detail' },
 } satisfies Record<GuestCapability, { icon: IconName; titleKey: I18nKey; detailKey: I18nKey }>;
 
 type GuestApprovalDialogProps = {

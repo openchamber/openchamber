@@ -1,6 +1,6 @@
 # Extension gallery
 
-Fifteen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Sixteen examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |
@@ -18,6 +18,7 @@ Fifteen examples to use, explore, and adapt. The five panel extensions also have
 | `tracker-provider` | **Teaboard Tracker** | Run `bun packages/sdk/examples/tracker-provider/tracker-server.ts`, allow the local service, then connect the server's address and the token `demo` on the **Teaboard** card under Extension accounts in Settings → Integrations. Search its items in the picker and start a worktree from one; the token stays in OpenChamber. It has no panel; see [its README](./tracker-provider/README.md). |
 | `agent-desk` | **Agent Desk** | Allow what it asks for and open its panel: a tick arrives every minute with no polling, and **Start a session** opens one from the service. Type `@rel` in the composer, or ask an agent for a `DeskChart`. |
 | `quota-provider` | **Teapot Usage** | Run `bun packages/sdk/examples/quota-provider/usage-server.ts`, store its key `demo` for a `teapot` provider in OpenCode (Settings → Providers → custom provider), allow the local service, then open Settings → Usage: the **Teapot Usage** card sits after the built-ins with the plan, two windows and a balance, and joins Work Status like any of them. The service receives only the `teapot` credential, which the approval dialog names. It has no panel; see [its README](./quota-provider/README.md). |
+| `opencode-plugin` | **Teapot Tools** | Allow **Add a plugin to OpenCode**, then open Settings → Plugins: `teapot-tools` is listed as active within seconds, and in a chat the agent can call `teapot_status`. Disable the extension and the plugin leaves; remove it and it is gone. Where OpenChamber's managed config does not reach OpenCode (an external OpenCode, your own `OPENCODE_CONFIG`), the extension's screen says so and offers **Add to global config**. It has no panel; see [its README](./opencode-plugin/README.md). |
 
 ## Install and explore
 
@@ -69,6 +70,7 @@ bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/session-ev
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/notification-webhook/service/main.ts packages/sdk/examples/notification-webhook/service/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/tracker-provider/service/main.ts packages/sdk/examples/tracker-provider/service/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/quota-provider/service/main.ts packages/sdk/examples/quota-provider/service/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/opencode-plugin/plugin/index.ts packages/sdk/examples/opencode-plugin/plugin/index.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/panel/main.ts packages/sdk/examples/agent-desk/panel/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/panel/background.ts packages/sdk/examples/agent-desk/panel/background.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/agent-desk/blocks/chart.ts packages/sdk/examples/agent-desk/blocks/chart.js

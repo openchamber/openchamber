@@ -214,6 +214,7 @@ const installedGuestSchema = z.object({
   sessionControl: z.object({ content: z.boolean() }).optional().catch(undefined),
   instructions: z.literal(true).optional().catch(undefined),
   skills: z.literal(true).optional().catch(undefined),
+  opencodePlugin: z.literal(true).optional().catch(undefined),
   mentions: z.object({ label: z.string().trim().min(1) }).optional().catch(undefined),
   needsConfiguration: z.string().trim().min(1).optional().catch(undefined),
   blocks: z.array(guestBlockSchema).max(GUEST_BLOCKS_MAX).optional(),
@@ -236,8 +237,16 @@ const installedGuestSchema = z.object({
   update: guestUpdateSchema.optional(),
 });
 
+// A delivery state this build does not know draws nothing: the card would otherwise offer a button for a case it cannot describe.
+const openCodePluginsSchema = z.object({
+  delivery: z.enum(['file', 'restart', 'none', 'remote']),
+  globalConfigPath: z.string().nullable(),
+  inGlobalConfig: z.array(z.string()),
+});
+
 const catalogSchema = z.object({
   guests: z.array(z.unknown()),
+  opencodePlugins: openCodePluginsSchema.optional().catch(undefined),
 });
 
 // What Settings can still show of a row it cannot read, so the user can
@@ -257,7 +266,7 @@ export const parseGuestCatalogJson = (json: string): GuestCatalog | null => {
   try {
     const parsed = catalogSchema.safeParse(JSON.parse(json));
     if (!parsed.success) return null;
-    const catalog: GuestCatalog = { guests: [], unreadable: [] };
+    const catalog: GuestCatalog = { guests: [], unreadable: [], opencodePlugins: parsed.data.opencodePlugins ?? null };
     for (const row of parsed.data.guests) {
       const guest = installedGuestSchema.safeParse(row);
       if (guest.success) {

@@ -28,7 +28,7 @@ import {
   isUnsafeUnauthenticatedLanAllowed,
   readAdvertisedLanUrl,
 } from './lib/security/bind-host.js';
-import { isEnterpriseMode, isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR, readEnterprisePolicy } from './lib/enterprise-mode.js';
+import { isEnterpriseMode, isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR, readEnterprisePolicy, watchEnterprisePolicy } from './lib/enterprise-mode.js';
 import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
@@ -180,6 +180,7 @@ import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
+import { openCodePluginDelivery } from './lib/guests/opencode-plugin.js';
 import { createLimitFailoverRuntime } from './lib/limit-failover/runtime.js';
 import { prepareInstanceDir } from './lib/opencode/instance-dir.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
@@ -385,6 +386,7 @@ let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let limitFailoverRuntime = null;
 let managedConfigRuntime = null;
+let stopEnterprisePolicyWatch = () => {};
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -2373,7 +2375,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getRelayService: () => relayServiceInstance,
   getRelayReconcileTimer: () => relayReconcileTimer,
   getSpacesHost: () => spacesHost,
-  stopFolderWatches: featureRoutesRuntime.stopFolderWatches,
+  stopFolderWatches: () => {
+    stopEnterprisePolicyWatch();
+    featureRoutesRuntime.stopFolderWatches();
+  },
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -2423,7 +2428,18 @@ async function main(options = {}) {
     limitFailoverRuntime,
     readSettings: () => readSettingsFromDiskMigrated(),
     listExtensionSkillDirectories: guestAgentContext.skillDirectories,
+    listExtensionPluginDirectories: guestAgentContext.pluginDirectories,
     openchamberVersion: OPENCHAMBER_VERSION,
+  });
+  // A policy that changes while the app runs: the managed file lists what the
+  // catalog now refuses until it is rewritten, and every card re-reads the catalog.
+  stopEnterprisePolicyWatch = watchEnterprisePolicy({
+    onChange: () => {
+      managedConfigRuntime.refreshManagedConfigFile().catch((error) => {
+        console.warn('Failed to rewrite the managed OpenCode config after a policy change:', error?.message ?? error);
+      });
+      broadcastOpenChamberUiEvent({ type: 'openchamber:guests-changed' });
+    },
   });
   await ensureChatsDir({ fsPromises, chatsDir: OPENCHAMBER_CHATS_DIR, warn: (message) => console.warn(`[data-dir] ${message}`) });
 
@@ -2993,6 +3009,12 @@ async function main(options = {}) {
         managedConfigRuntime?.refreshManagedConfigFile(),
       ]);
     },
+    // Lifecycle state that exists before OpenCode is up: the mode is the server's environment, not a probe.
+    getOpenCodePluginDelivery: () => openCodePluginDelivery({
+      external: isExternalOpenCode || ENV_SKIP_OPENCODE_START,
+      origin: ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || null,
+      ownsConfigFile: managedConfigRuntime?.ownsConfigFile() ?? true,
+    }),
     extensionNotificationChannels,
     surfaceViewerHeaders: (guestId, viewerId) => guestSurfaceRuntime?.viewerHeaders(guestId, viewerId) ?? null,
     builtInExtensionsDir: options.builtInExtensionsDir,

@@ -12,6 +12,7 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
 import { ensureGuestStorageIds, onExtensionStoreWrite, readExtensionStore } from './persist.js';
 import { buildPublicSocketBindings } from './sockets.js';
 import { isReservedBuiltInId, readBuiltInRegistry } from './builtins.js';
+import { resolveOpenCodePluginFolder } from './opencode-plugin.js';
 
 const builtInsByStore = new Map();
 
@@ -373,6 +374,13 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     }
     guest.skills = parsed.manifest.contributes.skills;
   }
+  // The package's OpenCode plugin folder: a directory with a package.json naming an entry that exists, or the install fails.
+  if (parsed.manifest.contributes.opencodePlugin) {
+    if (!await resolveOpenCodePluginFolder(fs, packageRoot, parsed.manifest.contributes.opencodePlugin)) {
+      return { ok: false, code: 'invalid-opencode-plugin' };
+    }
+    guest.opencodePlugin = parsed.manifest.contributes.opencodePlugin;
+  }
   return { ok: true, guest };
 };
 
@@ -538,6 +546,9 @@ export const toPublicGuest = (guest) => {
   }
   if (guest.skills) {
     row.skills = true;
+  }
+  if (guest.opencodePlugin) {
+    row.opencodePlugin = true;
   }
   if (guest.mentions) {
     row.mentions = { label: guest.mentions.label };

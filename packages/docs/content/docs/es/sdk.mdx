@@ -108,9 +108,28 @@ Dibujar un panel y leer la sesión actual no requiere permisos. Todo lo que act�
 | `files` | leer y escribir archivos dentro del proyecto abierto (`readFile`, `writeFile`, `listDir`, `stat` con una ruta relativa) |
 | `model` | generación de texto puntual con el Small Model del usuario (`generate`), fuera de cualquier sesión |
 
-Otras nueve se añaden por ti: `network` cuando declaras una `integration`, `service` cuando declaras un `service`, `filesystem` cuando declaras patrones `filesystem`, `origins` cuando declaras `origins`, `conversation` cuando una acción de sesión pide los mensajes (ver [Acciones, comandos y la insignia](#acciones-comandos-y-la-insignia)), `transcript` cuando `sessionEvents` o `sessionControl` piden `content` (ver [Eventos de sesión](/sdk/host/#eventos-de-sesión)), `sessionControl` cuando tu servicio actúa sobre sesiones (ver [Llamar a OpenChamber](/sdk/host/#llamar-a-openchamber-desde-tu-servicio)), `instructions` cuando añade contenido a lo que leen los agentes, y `skills` cuando declaras `contributes.skills`, una carpeta del paquete con skills que llegan a todos los agentes mientras la extensión está activa.
+Otras diez se añaden por ti: `network` cuando declaras una `integration`, `service` cuando declaras un `service`, `filesystem` cuando declaras patrones `filesystem`, `origins` cuando declaras `origins`, `conversation` cuando una acción de sesión pide los mensajes (ver [Acciones, comandos y la insignia](#acciones-comandos-y-la-insignia)), `transcript` cuando `sessionEvents` o `sessionControl` piden `content` (ver [Eventos de sesión](/sdk/host/#eventos-de-sesión)), `sessionControl` cuando tu servicio actúa sobre sesiones (ver [Llamar a OpenChamber](/sdk/host/#llamar-a-openchamber-desde-tu-servicio)), `instructions` cuando añade contenido a lo que leen los agentes, y `skills` cuando declaras `contributes.skills`, una carpeta del paquete con skills que llegan a todos los agentes mientras la extensión está activa, y `opencodePlugin` cuando declaras `contributes.opencodePlugin` (ver más abajo).
 
 El usuario ve la lista completa una vez, al instalar la extensión, y la aprueba o quita la extensión. Si una versión nueva pide más, el diálogo vuelve a aparecer. Una llamada que necesita una capacidad que el usuario no ha aprobado falla con `NOT_GRANTED`.
+
+## Un plugin de OpenCode en tu paquete
+
+Una extensión puede incluir un plugin de OpenCode, para que la gente instale una sola cosa en vez de dos. Declara `"opencodePlugin": "plugin"`, una carpeta dentro del paquete con `index.js` o `server.js` en su raíz. OpenCode no lee `main`, así que para una entrada en otro lugar define `name` y `exports` en el `package.json` de la carpeta. La entrada exporta por defecto `{ id, setup }`, la forma que carga OpenCode; no importa nada, porque OpenCode la carga con un `import()` simple desde tu carpeta, donde no hay nada instalado. El `input` de una herramienta es JSON Schema plano, y su `execute` responde `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+El diálogo de aprobación recibe una fila más, **Añadir un plugin a OpenCode**, que dice con claridad que el código del plugin se ejecuta dentro de OpenCode con todo el acceso del usuario. Una vez permitido, OpenChamber lista tu carpeta en la configuración de OpenCode que gestiona, el mismo archivo que lleva `contributes.skills`; el OpenCode que ejecuta vigila ese archivo y carga el plugin en un par de segundos. Desactivar o eliminar la extensión lo retira del mismo modo. No se escribe nada en el `opencode.json` del usuario: ese archivo es suyo, y un plugin allí sobreviviría a tu extensión y se ejecutaría en cada OpenCode de la máquina.
+
+Cuando ese archivo no llega a OpenCode, la pantalla de la extensión lo dice y ofrece **Añadir a la configuración global**, que escribe tu carpeta en la configuración global de OpenCode del usuario como una entrada que desde entonces es suya. Eso ocurre cuando OpenChamber no inició el OpenCode con el que habla, o cuando el entorno del servidor define su propio `OPENCODE_CONFIG` (el plugin se carga entonces en el siguiente arranque de OpenCode). Un OpenCode en otra máquina no puede cargar una carpeta de esta; la pantalla lo dice y no ofrece nada. Un plugin que no carga lo informa OpenCode en Ajustes → Plugins cuando tiene una entrada allí; tu extensión sigue funcionando en cualquier caso. La instalación rechaza un paquete cuya carpeta del plugin falta o cuyo `package.json` no indica un archivo de entrada.
+
+VS Code y las apps móviles no cargan extensiones, así que ningún plugin llega a ellas. Una sesión dentro de un espacio aislado ejecuta su propio OpenCode, que nunca lee la configuración del host. El modo empresa trata el plugin como un servicio local: solo se instala desde un repositorio aprobado por el administrador. El SDK tiene un ejemplo funcional, `examples/opencode-plugin`.
 
 ## Generar texto
 

@@ -108,9 +108,28 @@ Ein Panel zeichnen und die aktuelle Session lesen braucht keine Berechtigung. Al
 | `files` | Dateien innerhalb des offenen Projekts lesen und schreiben (`readFile`, `writeFile`, `listDir`, `stat` mit einem relativen Pfad) |
 | `model` | einmalige Textgenerierung mit dem Small Model des Nutzers (`generate`), außerhalb jeder Session |
 
-Neun weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, `origins`, wenn du `origins` deklarierst, `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)), `transcript`, wenn `sessionEvents` oder `sessionControl` `content` anfordert (siehe [Sitzungsereignisse](/sdk/host/#sitzungsereignisse)), `sessionControl`, wenn dein Dienst auf Sitzungen einwirkt (siehe [OpenChamber aufrufen](/sdk/host/#openchamber-aus-deinem-dienst-aufrufen)), `instructions`, wenn er ergänzt, was Agenten lesen, und `skills`, wenn du `contributes.skills` deklarierst, einen Paketordner mit Skills, die jeden Agenten erreichen, solange die Erweiterung aktiv ist.
+Zehn weitere kommen automatisch dazu: `network`, wenn du eine `integration` deklarierst, `service`, wenn du einen `service` deklarierst, `filesystem`, wenn du `filesystem`-Muster deklarierst, `origins`, wenn du `origins` deklarierst, `conversation`, wenn eine Session-Aktion die Nachrichten anfordert (siehe [Aktionen, Befehle und das Badge](#aktionen-befehle-und-das-badge)), `transcript`, wenn `sessionEvents` oder `sessionControl` `content` anfordert (siehe [Sitzungsereignisse](/sdk/host/#sitzungsereignisse)), `sessionControl`, wenn dein Dienst auf Sitzungen einwirkt (siehe [OpenChamber aufrufen](/sdk/host/#openchamber-aus-deinem-dienst-aufrufen)), `instructions`, wenn er ergänzt, was Agenten lesen, und `skills`, wenn du `contributes.skills` deklarierst, einen Paketordner mit Skills, die jeden Agenten erreichen, solange die Erweiterung aktiv ist, und `opencodePlugin`, wenn du `contributes.opencodePlugin` deklarierst (siehe unten).
 
 Der Nutzer sieht die vollständige Liste einmal, bei der Installation der Erweiterung, und bestätigt sie oder entfernt die Erweiterung. Fordert eine neue Version mehr an, erscheint der Dialog erneut. Ein Aufruf, der eine nicht bestätigte Berechtigung braucht, schlägt mit `NOT_GRANTED` fehl.
+
+## Ein OpenCode-Plugin in deinem Paket
+
+Eine Erweiterung kann ein OpenCode-Plugin mitliefern, sodass die Leute eine Sache installieren statt zwei. Deklariere `"opencodePlugin": "plugin"`, einen Ordner im Paket mit `index.js` oder `server.js` auf oberster Ebene. OpenCode liest `main` nicht, für einen Einstieg an anderer Stelle setze also `name` und `exports` in der `package.json` des Ordners. Der Einstieg exportiert per Default `{ id, setup }`, die Form, die OpenCode lädt; er importiert nichts, weil OpenCode ihn mit einem bloßen `import()` aus deinem Ordner lädt, wo nichts installiert ist. Das `input` eines Tools ist reines JSON Schema, und sein `execute` antwortet mit `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+Der Freigabedialog bekommt eine weitere Zeile, **Ein Plugin zu OpenCode hinzufügen**, die klar sagt, dass Plugin-Code innerhalb von OpenCode mit dem vollen Zugriff des Nutzers läuft. Nach der Freigabe trägt OpenChamber deinen Ordner in die OpenCode-Konfiguration ein, die es verwaltet, dieselbe Datei wie bei `contributes.skills`; das von OpenChamber gestartete OpenCode beobachtet diese Datei und lädt das Plugin innerhalb weniger Sekunden. Deaktivieren oder Entfernen der Erweiterung nimmt es auf demselben Weg wieder heraus. In die eigene `opencode.json` des Nutzers wird nichts geschrieben: Diese Datei gehört dem Nutzer, und ein Plugin darin würde deine Erweiterung überleben und in jedem OpenCode auf dem Rechner laufen.
+
+Wo diese Datei OpenCode nicht erreicht, sagt die Seite der Erweiterung das und bietet **Zur globalen Konfiguration hinzufügen** an, was deinen Ordner als Eintrag, der dem Nutzer gehört, in die globale OpenCode-Konfiguration schreibt. Das ist der Fall, wenn OpenChamber das OpenCode, mit dem es spricht, nicht gestartet hat, oder wenn die Umgebung des Servers ein eigenes `OPENCODE_CONFIG` setzt (das Plugin lädt dann beim nächsten Start von OpenCode). Ein OpenCode auf einem anderen Rechner kann keinen Ordner von diesem laden; die Seite sagt das und bietet nichts an. Ein Plugin, das nicht lädt, meldet OpenCode unter Einstellungen → Plugins, sobald es dort einen Eintrag hat; deine Erweiterung funktioniert in jedem Fall weiter. Die Installation lehnt ein Paket ab, dessen Plugin-Ordner fehlt oder dessen `package.json` keine Einstiegsdatei nennt.
+
+VS Code und die Mobile-Apps laden keine Erweiterungen, also erreicht sie kein Plugin. Eine Sitzung in einem isolierten Space läuft mit einem eigenen OpenCode, das die Konfiguration des Hosts nie liest. Der Enterprise-Modus behandelt das Plugin wie einen lokalen Dienst: Es installiert sich nur aus einem Repository, das der Administrator freigegeben hat. Das SDK hat ein lauffähiges Beispiel, `examples/opencode-plugin`.
 
 ## Text erzeugen
 

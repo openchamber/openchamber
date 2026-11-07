@@ -1630,6 +1630,20 @@ describe('services that act on their own', () => {
     expect(parse({ panel: pageless, skills: '../skills' })).toMatchObject({ ok: false, code: 'invalid-skills' });
   });
 
+  test('an OpenCode plugin is a folder inside the package and asks for its own capability', () => {
+    const accepted = parse({ panel: pageless, opencodePlugin: 'plugin' });
+    expect(accepted.ok).toBe(true);
+    if (accepted.ok) expect(accepted.manifest.contributes.opencodePlugin).toBe('plugin');
+    expect(parse({ panel: pageless, opencodePlugin: 'plugins/teapot' }).ok).toBe(true);
+    expect(requestedGuestCapabilities({ opencodePlugin: 'plugin' })).toEqual(['opencodePlugin']);
+    expect(requestedGuestCapabilities({ skills: 'skills', opencodePlugin: 'plugin' })).toEqual(['skills', 'opencodePlugin']);
+    // The value becomes a path OpenCode executes code from: nothing that leaves the package, no URL, no NUL, no empty value.
+    for (const hostile of ['../x', '/etc', 'file:///x', 'https://example.test/plugin', 'plugin\0', '', ' ', 'a//b', './plugin', 'plugin\\win']) {
+      expect(parse({ panel: pageless, opencodePlugin: hostile }), hostile).toMatchObject({ ok: false, code: 'invalid-opencode-plugin' });
+    }
+    expect(requestedGuestCapabilities({ skills: 'skills' })).toEqual(['skills']);
+  });
+
   test('mentions need no frame', () => {
     expect(parse({ panel: pageless, service, mentions: { label: 'Notes' } }).ok).toBe(true);
   });

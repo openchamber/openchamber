@@ -54,6 +54,7 @@ Afficher un panneau et lire quel projet et quelle session sont ouverts ne demand
 - **Lire ce que dit l'agent en arrière-plan** : la réponse finale de chaque tour, les questions que l'agent pose et ce pour quoi il demande une permission, dans chaque projet, envoyés au service local de l'extension. N'autorise cela que si tu fais confiance à la destination choisie par l'extension.
 - **Démarrer des sessions et envoyer des messages toute seule** : son service local le fait sans fenêtre ouverte, ce qui coûte des jetons et peut lancer des outils.
 - **Ajouter à ce que lisent les agents** : du texte dans les instructions de tes sessions, et des skills proposés à chaque agent tant que l'extension est active.
+- **Ajouter un plugin à OpenCode** : le plugin du paquet est chargé dans ton OpenCode tant que l'extension est active. Le code du plugin s'exécute dans OpenCode avec tous tes accès, comme un service local, donc ne l'autorise que si tu fais confiance à l'auteur.
 
 Un service local peut aussi continuer à tourner tant qu'OpenChamber tourne, ou se réveiller selon un calendrier. La boîte de dialogue le dit sous **Exécuter un service local**, et elle indique quand ce que tu tapes après `@` va au service. Une extension peut ajouter ses propres lignes au menu `@` et ses propres blocs aux réponses de l'agent. Mettre l'extension en pause retire tout cela.
 
@@ -66,6 +67,14 @@ Quand une version plus récente demande plus que ce que tu as autorisé, la cart
 En plus de son panneau dans la barre latérale, une extension peut ajouter des entrées à des menus que tu utilises déjà : les actions d'un message du chat, le menu d'une session, le menu + à côté de la zone de chat et des commandes slash comme `/task ABC-12` qui attachent quelque chose sans rien ouvrir. Elle peut aussi donner à ses propres outils une vraie icône, un titre et une mise en page de sortie dans le chat, comme en ont les outils intégrés d'OpenChamber. L'extension décide lesquels elle propose ; tous restent désactivés tant que tu n'as pas autorisé l'extension.
 
 Certaines extensions affichent une image en direct au lieu d'un panneau à elles : ce dans quoi un agent travaille sur le serveur, par exemple un navigateur ou un simulateur. Cliquez dans l'image ou tapez pour prendre le contrôle ; la ligne d'état indique **Vous avez le contrôle** et les actions de navigateur de l'agent sont refusées jusqu'à ce que vous appuyiez sur **Rendre à l'agent**. Copier et coller fonctionnent normalement. Un autre appareil connecté en même temps voit qui a le contrôle et ne peut pas le prendre. Une telle extension peut ajouter ses propres commandes à côté de l'image, par exemple une barre d'adresse au-dessus ou une colonne d'outils sur le côté.
+
+## Une extension avec un plugin OpenCode
+
+Une extension peut embarquer un plugin OpenCode, pour que tu installes une seule chose au lieu de deux. Son dialogue de permissions a une ligne qui commence par **Ajouter un plugin à OpenCode**. Une fois autorisé, OpenChamber ajoute le plugin à l'OpenCode qu'il fait tourner pour toi en quelques secondes, sans redémarrage ; désactiver ou supprimer l'extension le retire de la même façon. Rien n'est écrit dans ton propre `opencode.json`, donc le plugin ne survit jamais à l'extension et ne tourne jamais dans l'OpenCode que tu lances dans un terminal.
+
+Quand OpenChamber n'a pas démarré l'OpenCode auquel il parle, ou que ton environnement définit son propre `OPENCODE_CONFIG`, la configuration d'OpenChamber n'atteint pas cet OpenCode. L'écran de l'extension le dit et propose **Ajouter à la configuration globale**. Cela écrit le dossier du plugin dans ta configuration OpenCode globale : il tourne alors dans chaque OpenCode de cet ordinateur, terminal compris, reste actif quand l'extension est désactivée, et c'est à toi de le gérer dans **Réglages → Plugins**. Si tu supprimes l'extension, OpenCode liste cette entrée comme un plugin en échec et continue de tourner jusqu'à ce que tu supprimes l'entrée là-bas. Un OpenCode sur une autre machine ne peut pas charger un dossier de celle-ci ; l'écran le dit.
+
+VS Code et l'application mobile ne chargent aucune extension. Une session dans un espace isolé fait tourner son propre OpenCode, qui ne reçoit jamais le plugin. En mode entreprise, le plugin compte comme un service local : l'extension ne s'installe que depuis un dépôt listé par ton administrateur.
 
 ## Une extension comme hébergeur Git
 

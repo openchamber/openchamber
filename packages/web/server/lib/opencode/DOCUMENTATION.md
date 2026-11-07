@@ -1217,8 +1217,11 @@ under a running child.
   stay on disk on purpose: an older OpenChamber running on the same data dir
   still reads and writes them, so deleting them as stale breaks that server's
   agent tools.
-  The file contains only `plugins`: `-opencode.browser` first, then the absolute
-  directory of every OpenChamber plugin currently switched on. OpenCode's
+  The file's `plugins` list is `-opencode.browser` first, then the absolute
+  directory of every OpenChamber plugin currently switched on, then the plugin
+  folders of active extensions (`contributes.opencodePlugin`, listed by
+  `guests/agent-context.js` `pluginDirectories`): OpenCode loads in list
+  order, so an extension never shadows a managed tool. OpenCode's
   built-in browser tools need OpenCode's own desktop app to attach a browser;
   OpenChamber does not, so they would always fail with `browser.disconnected`
   and steer agents away from `openchamber_web`. A project config listing
@@ -1234,13 +1237,32 @@ under a running child.
   a tool switched on later then reaches a process that can already call back.
 - `persistSettings` rewrites the file (temp + rename) whenever
   `agentControlToolEnabled`, `agentScheduleToolEnabled`, `agentWebToolEnabled`, `agentMemoryToolEnabled`,
-  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentSecretToolEnabled`, `agentWorkflowToolEnabled` or `agentToolsCodeMode` changes. Plugin directories are written before the
+  `agentKnowledgeToolEnabled`, `agentNotifyToolEnabled`, `agentRenderToolEnabled`, `agentSecretToolEnabled`, `agentWorkflowToolEnabled` or `agentToolsCodeMode` changes, and the guest change listener rewrites it after an extension is installed, approved, paused, resumed, updated or removed. Plugin directories are written before the
   file names them, and a disabled plugin is removed from the list. OpenCode
-  reloads within a couple of seconds; no restart is involved.
+  reloads within a couple of seconds; no restart is involved. Writes run one at
+  a time: the catalog is read before the file is written, so two refreshes
+  could land in read order and bring back the folder of an extension that
+  was just paused; a refresh requested during a write runs the whole
+  read-then-write once more instead, so the file always ends with the newest
+  catalog (`refreshManagedConfigFile` and `buildManagedChildEnv` share that
+  runner). A policy change while the app runs also rewrites it
+  (`watchEnterprisePolicy` in `../enterprise-mode.js`, started by `index.js`):
+  without that, a folder the policy now refuses would stay loaded until the
+  next catalog event. A folder listed here and in the user's global config at
+  once is loaded once by OpenCode 2.2.5 (checked live), so nothing is filtered.
 - Fallback: when the user's own environment already sets `OPENCODE_CONFIG`,
-  OpenChamber does not take it over. It merges its plugin directories into
-  `OPENCODE_CONFIG_CONTENT` instead, and those installs keep the old behavior —
-  a managed-tool toggle needs an OpenCode restart to take effect.
+  OpenChamber does not take it over. It merges its plugin directories, the
+  extensions' plugin folders among them, into `OPENCODE_CONFIG_CONTENT`
+  instead, and those installs keep the old behavior: a managed-tool toggle or
+  an extension change needs an OpenCode restart to take effect. The extension
+  card then says so and offers "Add to global config" (`guests/DOCUMENTATION.md`),
+  which writes the folder into the user's global `opencode.json(c)` through
+  `plugins.js` `addGlobalPluginEntry`; OpenCode watches that file, so the
+  plugin loads without a restart, in every OpenCode on the machine.
+- An external OpenCode (connected by URL, not spawned) reads neither the file
+  nor the content; `refreshManagedConfigFile` still writes the file, which is
+  harmless. The card's delivery state (`guests/opencode-plugin.js`) tells the
+  user, and the same button is the way in.
 
 ### Session title prompt
 

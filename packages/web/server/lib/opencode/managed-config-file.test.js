@@ -11,7 +11,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirectories, openchamberVersion } = {}) => {
+const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirectories, listExtensionPluginDirectories, openchamberVersion } = {}) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-managed-config-'));
   temporaryDirectories.push(dataDir);
   const agentToolRuntime = {
@@ -36,6 +36,7 @@ const createHarness = async ({ settings = {}, env = {}, listExtensionSkillDirect
     agentToolRuntime,
     readSettings: () => current.settings,
     listExtensionSkillDirectories,
+    listExtensionPluginDirectories,
     openchamberVersion,
   });
   const readConfigFile = async () => JSON.parse(await fs.readFile(path.join(dataDir, MANAGED_CONFIG_FILE_NAME), 'utf8'));
@@ -89,6 +90,54 @@ describe('managed OpenCode config file', () => {
     skills.current = [];
     await runtime.refreshManagedConfigFile();
     expect((await readConfigFile()).skills).toEqual([path.join(dataDir, 'skills')]);
+  });
+
+  it('lists the plugin folders of active extensions after its own plugins and drops them once none is', async () => {
+    const plugins = { current: ['/pkg/plugin'] };
+    const { dataDir, runtime, readConfigFile, titleDirectory } = await createHarness({ settings: {}, listExtensionPluginDirectories: async () => plugins.current });
+    await runtime.buildManagedChildEnv();
+    expect((await readConfigFile()).plugins).toEqual(['-opencode.browser', path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'), titleDirectory, '/pkg/plugin']);
+    plugins.current = [];
+    await runtime.refreshManagedConfigFile();
+    expect((await readConfigFile()).plugins).toEqual(['-opencode.browser', path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'), titleDirectory]);
+  });
+
+  it('merges extension plugin folders into OPENCODE_CONFIG_CONTENT when the user owns OPENCODE_CONFIG', async () => {
+    const { dataDir, runtime, titleDirectory } = await createHarness({
+      settings: {},
+      env: { OPENCODE_CONFIG: '/home/user/opencode.json', OPENCODE_CONFIG_CONTENT: '{"plugins":["/pkg/plugin"]}' },
+      listExtensionPluginDirectories: async () => ['/pkg/plugin'],
+    });
+    const childEnv = await runtime.buildManagedChildEnv();
+    // The user's own copy of the same folder is not listed twice; ours come after OpenChamber's.
+    expect(JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT).plugins).toEqual([
+      '-opencode.browser', path.join(dataDir, 'agent-tool', 'openchamber-agent-tool'), titleDirectory, '/pkg/plugin',
+    ]);
+  });
+
+  it('runs one read-then-write at a time, so the file ends with the newest catalog', async () => {
+    // The first refresh reads a catalog that still lists the plugin and is slow;
+    // a pause then triggers a second refresh whose read answers nothing. Written
+    // in read order, the stale list would land last and bring the plugin back.
+    let release;
+    const slowRead = new Promise((resolve) => { release = resolve; });
+    const reads = [];
+    const { runtime, readConfigFile } = await createHarness({
+      settings: {},
+      listExtensionPluginDirectories: async () => {
+        reads.push(reads.length);
+        if (reads.length === 1) { await slowRead; return ['/pkg/plugin']; }
+        return [];
+      },
+    });
+    const first = runtime.refreshManagedConfigFile();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = runtime.refreshManagedConfigFile();
+    release();
+    await Promise.all([first, second]);
+    expect((await readConfigFile()).plugins).not.toContain('/pkg/plugin');
+    // The joined request ran the read once more rather than writing beside the first.
+    expect(reads.length).toBe(2);
   });
 
   it('materializes every listed plugin directory before naming it', async () => {

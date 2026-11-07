@@ -108,9 +108,28 @@ Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko
 | `files` | odczyt i zapis plików w otwartym projekcie (`readFile`, `writeFile`, `listDir`, `stat` ze ścieżką względną) |
 | `model` | jednorazowe generowanie tekstu za pomocą Small Model użytkownika (`generate`), poza jakąkolwiek sesją |
 
-Dziewięć kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)), `transcript`, gdy `sessionEvents` lub `sessionControl` prosi o `content` (zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji)), `sessionControl`, gdy Twoja usługa działa na sesjach (zobacz [Wywoływanie OpenChamber](/sdk/host/#wywoływanie-openchamber-z-usługi)), `instructions`, gdy uzupełnia to, co czytają agenci, oraz `skills`, gdy deklarujesz `contributes.skills`, folder pakietu ze skillami, które docierają do każdego agenta, dopóki rozszerzenie jest włączone.
+Dziesięć kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)), `transcript`, gdy `sessionEvents` lub `sessionControl` prosi o `content` (zobacz [Zdarzenia sesji](/sdk/host/#zdarzenia-sesji)), `sessionControl`, gdy Twoja usługa działa na sesjach (zobacz [Wywoływanie OpenChamber](/sdk/host/#wywoływanie-openchamber-z-usługi)), `instructions`, gdy uzupełnia to, co czytają agenci, oraz `skills`, gdy deklarujesz `contributes.skills`, folder pakietu ze skillami, które docierają do każdego agenta, dopóki rozszerzenie jest włączone, oraz `opencodePlugin`, gdy deklarujesz `contributes.opencodePlugin` (patrz niżej).
 
 Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją zatwierdza, albo usuwa rozszerzenie. Jeśli nowa wersja prosi o więcej, okno pojawia się ponownie. Wywołanie, które wymaga niezatwierdzonego uprawnienia, kończy się błędem `NOT_GRANTED`.
+
+## Plugin OpenCode w Twoim pakiecie
+
+Rozszerzenie może dostarczać plugin OpenCode, więc ludzie instalują jedną rzecz zamiast dwóch. Zadeklaruj `"opencodePlugin": "plugin"`, folder w pakiecie z `index.js` lub `server.js` w katalogu głównym. OpenCode nie czyta `main`, więc dla pliku wejściowego w innym miejscu dodaj do `package.json` tego folderu `name` i `exports`. Plik wejściowy eksportuje domyślnie `{ id, setup }`, kształt, który ładuje OpenCode; niczego nie importuje, bo OpenCode ładuje go zwykłym `import()` z Twojego folderu, gdzie nic nie jest zainstalowane. `input` narzędzia to zwykły JSON Schema, a jego `execute` odpowiada `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+Okno zatwierdzania dostaje jeszcze jeden wiersz, **Dodawanie pluginu do OpenCode**, który mówi wprost, że kod pluginu działa wewnątrz OpenCode z pełnymi uprawnieniami użytkownika. Po zezwoleniu OpenChamber wpisuje Twój folder do konfiguracji OpenCode, którą zarządza, tego samego pliku, który niesie `contributes.skills`; OpenCode uruchomiony przez OpenChamber obserwuje ten plik i ładuje plugin w ciągu kilku sekund. Wyłączenie lub usunięcie rozszerzenia zabiera go tą samą drogą. Do własnego `opencode.json` użytkownika nic nie jest zapisywane: ten plik należy do użytkownika, a plugin w nim przeżyłby Twoje rozszerzenie i działał w każdym OpenCode na komputerze.
+
+Tam, gdzie ten plik nie dociera do OpenCode, ekran rozszerzenia mówi o tym i oferuje **Dodaj do globalnej konfiguracji**, co zapisuje Twój folder do globalnej konfiguracji OpenCode użytkownika jako wpis, który od tej chwili należy do niego. Dzieje się tak, gdy OpenChamber nie uruchomił OpenCode, z którym rozmawia, albo gdy środowisko serwera ustawia własne `OPENCODE_CONFIG` (plugin ładuje się wtedy przy następnym uruchomieniu OpenCode). OpenCode na innym komputerze nie może załadować folderu z tego komputera; ekran mówi o tym i niczego nie oferuje. Plugin, który się nie ładuje, OpenCode zgłasza w Ustawieniach → Pluginy, gdy ma tam wpis; Twoje rozszerzenie działa dalej w każdym przypadku. Instalacja odrzuca pakiet, którego folder pluginu nie istnieje albo którego `package.json` nie wskazuje pliku wejściowego.
+
+VS Code i aplikacje mobilne nie ładują rozszerzeń, więc żaden plugin tam nie trafia. Sesja w izolowanej przestrzeni uruchamia własne OpenCode, które nigdy nie czyta konfiguracji hosta. Tryb enterprise traktuje plugin jak lokalną usługę: instaluje się tylko z repozytorium wskazanego przez administratora. SDK ma działający przykład, `examples/opencode-plugin`.
 
 ## Generowanie tekstu
 

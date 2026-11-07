@@ -108,9 +108,28 @@ Een paneel tonen en de huidige sessie lezen vereist geen toestemming. Voor hande
 | `files` | bestanden in het geopende project lezen en schrijven via `readFile`, `writeFile`, `listDir` en `stat` met een relatief pad |
 | `model` | eenmalig tekst genereren met het Small Model via `generate`, buiten een sessie |
 
-Negen rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt, `transcript` als `sessionEvents` of `sessionControl` om `content` vraagt, `sessionControl` als uw service op sessies inwerkt, `instructions` als die aanvult wat agents lezen, en `skills` als u `contributes.skills` opgeeft, een map in het pakket met skills die elke agent bereiken zolang de extensie aanstaat. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge), [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen) en [OpenChamber aanroepen](/nl/sdk/host/#openchamber-aanroepen-vanuit-uw-service).
+Tien rechten worden automatisch toegevoegd: `network` bij een `integration`, `service` bij een `service`, `filesystem` bij `filesystem`-patronen, `origins` bij `origins`, `conversation` als een sessieactie berichten opvraagt, `transcript` als `sessionEvents` of `sessionControl` om `content` vraagt, `sessionControl` als uw service op sessies inwerkt, `instructions` als die aanvult wat agents lezen, en `skills` als u `contributes.skills` opgeeft, een map in het pakket met skills die elke agent bereiken zolang de extensie aanstaat. Zie [Acties, opdrachten en de badge](#acties-opdrachten-en-de-badge), [Sessiegebeurtenissen](/nl/sdk/host/#sessiegebeurtenissen) en [OpenChamber aanroepen](/nl/sdk/host/#openchamber-aanroepen-vanuit-uw-service). En `opencodePlugin` wanneer u `contributes.opencodePlugin` declareert (zie hieronder).
 
 Bij installatie ziet de gebruiker de volledige lijst en kan die goedkeuren of de extensie verwijderen. Vraagt een nieuwe versie meer, dan verschijnt het venster opnieuw. Een aanroep waarvoor een nog niet goedgekeurd recht nodig is, faalt met `NOT_GRANTED`.
+
+## Een OpenCode-plugin in uw pakket
+
+Een extensie kan een OpenCode-plugin meeleveren, zodat mensen één ding installeren in plaats van twee. Declareer `"opencodePlugin": "plugin"`, een map in het pakket met `index.js` of `server.js` in de hoofdmap. OpenCode leest `main` niet, dus voor een entry op een andere plek zet je `name` en `exports` in de `package.json` van de map. De entry exporteert standaard `{ id, setup }`, de vorm die OpenCode laadt; hij importeert niets, want OpenCode laadt hem met een kale `import()` uit uw map, waar niets geïnstalleerd is. De `input` van een tool is gewoon JSON Schema, en zijn `execute` antwoordt `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+Het goedkeuringsvenster krijgt een regel erbij, **Een plugin toevoegen aan OpenCode**, die duidelijk zegt dat plugincode binnen OpenCode draait met de volledige toegang van de gebruiker. Na toestemming zet OpenChamber uw map in de OpenCode-configuratie die het beheert, hetzelfde bestand als voor `contributes.skills`; de OpenCode die het draait, bewaakt dat bestand en laadt de plugin binnen een paar seconden. De extensie uitschakelen of verwijderen haalt hem op dezelfde manier weg. Er wordt niets in de eigen `opencode.json` van de gebruiker geschreven: dat bestand is van de gebruiker, en een plugin daarin zou uw extensie overleven en in elke OpenCode op de computer draaien.
+
+Waar dat bestand OpenCode niet bereikt, zegt het scherm van de extensie dat en biedt het **Toevoegen aan globale configuratie** aan, wat uw map in de globale OpenCode-configuratie van de gebruiker schrijft als een vermelding die vanaf dan van de gebruiker is. Dat gebeurt wanneer OpenChamber de OpenCode waarmee het praat niet heeft gestart, of wanneer de omgeving van de server een eigen `OPENCODE_CONFIG` instelt (de plugin laadt dan bij de volgende start van OpenCode). Een OpenCode op een andere machine kan geen map van deze machine laden; het scherm zegt dat en biedt niets aan. Een plugin die niet laadt, meldt OpenCode onder Instellingen → Plugins zodra er een vermelding is; uw extensie blijft hoe dan ook werken. De installatie weigert een pakket waarvan de pluginmap ontbreekt of waarvan de `package.json` geen entry-bestand noemt.
+
+VS Code en de mobiele apps laden geen extensies, dus daar komt geen plugin aan. Een sessie in een geïsoleerde space draait zijn eigen OpenCode, dat de configuratie van de host nooit leest. De bedrijfsmodus behandelt de plugin als een lokale service: hij installeert alleen vanuit een repository die de beheerder heeft toegestaan. De SDK heeft een werkend voorbeeld, `examples/opencode-plugin`.
 
 ## Tekst genereren
 

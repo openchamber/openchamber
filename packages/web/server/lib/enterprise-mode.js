@@ -86,7 +86,14 @@ import { z } from 'zod';
  *   extension serving as a usage provider receives the credentials OpenCode
  *   holds for the providers its manifest lists, which the user approved in
  *   the dialog, and no conversation content (`quota/extension-quota.js`);
- *   the allowlist is its gate too, re-read on every call.
+ *   the allowlist is its gate too, re-read on every call. An extension that
+ *   ships an OpenCode plugin (`opencodePlugin`: code inside OpenCode itself)
+ *   answers to the same list at install, in the managed OpenCode config
+ *   (`guests/agent-context.js`), and at the card's button that writes the
+ *   user's global OpenCode config (`guests/routes.js`), re-read before the
+ *   write. The managed config is rewritten when the policy changes while the
+ *   app runs (`watchEnterprisePolicy` below, started by `../index.js`), so a
+ *   plugin or skill the policy now refuses leaves the running OpenCode.
  *
  * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
  * enterprise mode: managed OpenCode then starts only from that path, never
@@ -217,6 +224,28 @@ const envFlag = (env, name) => {
 const envString = (env, name) => (env[name] ?? '').trim() || null;
 
 const envList = (env, name) => (env[name] ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+
+/**
+ * Calls `onChange` once the policy in effect differs from the last read: a
+ * managed OpenCode config written before the change still lists what the
+ * policy now refuses (`guests/agent-context.js`), and only a rewrite takes it
+ * out of the running OpenCode. A poll, since the policy file lives at a fixed
+ * path that may not exist yet and is read on every use anyway.
+ *
+ * @param {{ onChange: () => void, intervalMs?: number, read?: () => object }} options
+ * @returns {() => void} stops the watch
+ */
+export const watchEnterprisePolicy = ({ onChange, intervalMs = 15_000, read = readEnterprisePolicy }) => {
+  let last = JSON.stringify(read());
+  const timer = setInterval(() => {
+    const next = JSON.stringify(read());
+    if (next === last) return;
+    last = next;
+    onChange();
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+};
 
 /**
  * The policy in effect, from the file and the environment together.

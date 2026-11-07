@@ -109,9 +109,28 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
 | `shells` | watch the shell commands your agents run in the background, read their output, and stop them (`onRunningShells`, `readShellOutput`, `stopShell`) |
 
-Nine more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), `transcript` when `sessionEvents` or `sessionControl` asks for `content` (see [Session events](/sdk/host/#session-events)), `sessionControl` when your service acts on sessions (see [Calling OpenChamber](/sdk/host/#calling-openchamber-from-your-service)), `instructions` when it adds to what agents read, and `skills` when you declare `contributes.skills`, a package folder of skills that reach every agent while the extension is on.
+Ten more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)), `transcript` when `sessionEvents` or `sessionControl` asks for `content` (see [Session events](/sdk/host/#session-events)), `sessionControl` when your service acts on sessions (see [Calling OpenChamber](/sdk/host/#calling-openchamber-from-your-service)), `instructions` when it adds to what agents read, `skills` when you declare `contributes.skills`, a package folder of skills that reach every agent while the extension is on, and `opencodePlugin` when you declare `contributes.opencodePlugin` (see [An OpenCode plugin in your package](#an-opencode-plugin-in-your-package)).
 
 The user sees the full list once, when they install the extension, and approves it or removes the extension. If a new version asks for more, the dialog appears again. A call that needs a capability the user has not approved fails with `NOT_GRANTED`.
+
+## An OpenCode plugin in your package
+
+An extension can ship an OpenCode plugin, so people install one thing instead of two. Declare `"opencodePlugin": "plugin"`, a folder inside the package with `index.js` or `server.js` at its root. OpenCode does not read `main`, so for an entry anywhere else give the folder's `package.json` a `name` and `exports`. The entry default-exports `{ id, setup }`, the shape OpenCode loads; it imports nothing, because OpenCode loads it with a bare `import()` from your folder, where nothing is installed. A tool's `input` is plain JSON Schema, and its `execute` answers `{ content }`.
+
+```json
+{
+  "contributes": {
+    "panel": { "id": "teapot-tools", "name": "Teapot Tools", "icon": "cup" },
+    "opencodePlugin": "plugin"
+  }
+}
+```
+
+The approval dialog gets one more row, **Add a plugin to OpenCode**, which says plainly that plugin code runs inside OpenCode with the user's full access. Once allowed, OpenChamber lists your folder in the OpenCode config it manages, the same file that carries `contributes.skills`; the OpenCode it runs watches that file and loads the plugin within a couple of seconds. Disabling or removing the extension takes the plugin out the same way. Nothing is written into the user's own `opencode.json`: that file is theirs, and a plugin there would outlive your extension and run in every OpenCode on the machine.
+
+Where that file does not reach OpenCode, the extension's screen says so and offers **Add to global config**, which writes your folder into the user's global OpenCode config as an entry they own from then on. That happens when OpenChamber did not start the OpenCode it talks to, or when the server's environment sets its own `OPENCODE_CONFIG` (the plugin then loads at the next OpenCode start). An OpenCode on another machine cannot load a folder from this one; the screen says so and offers nothing. A plugin that fails to load is reported by OpenCode on Settings → Plugins when it has an entry there; your extension keeps working either way. The install refuses a package whose plugin folder is missing or whose `package.json` names no entry file.
+
+VS Code and the mobile apps load no extensions, so no plugin reaches them. A session inside an isolated space runs its own OpenCode, which never reads the host's config. Enterprise mode treats the plugin like a local service: it installs only from a repository the administrator listed. The SDK has a working example, `examples/opencode-plugin`.
 
 ## Generate text
 
