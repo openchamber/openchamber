@@ -198,11 +198,27 @@ const patchScheduledTask = (existing, input) => {
     name = asNonEmptyString(input.name);
     if (!name) throw new OpenChamberControlError('name cannot be empty', 400);
   }
-  const replacesSchedule = ['daily', 'weekly', 'once', 'cron'].some((key) => asNonEmptyString(input[key]));
+  const selectors = ['daily', 'weekly', 'once', 'cron'].filter((key) => input[key] !== undefined);
+  if (selectors.length > 1 || (selectors.length === 1 && !asNonEmptyString(input[selectors[0]]))) {
+    throw new OpenChamberControlError('Provide exactly one nonempty daily, weekly, once, or cron selector', 400);
+  }
   const timezone = asNonEmptyString(input.timezone);
-  const schedule = replacesSchedule
+  let schedule = selectors.length === 1
     ? buildSchedule(input)
     : (timezone ? { ...existing.schedule, timezone } : existing.schedule);
+  if (input.time !== undefined) {
+    const time = asNonEmptyString(input.time);
+    if (!time || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      throw new OpenChamberControlError('time must be HH:mm', 400);
+    }
+    if (schedule.kind === 'once') {
+      schedule = { ...schedule, time };
+    } else if (schedule.kind === 'weekly' && schedule.times.length === 1) {
+      schedule = { ...schedule, times: [time] };
+    } else {
+      throw new OpenChamberControlError('time requires a once or single-time weekly schedule; provide an explicit schedule to replace other schedules', 400);
+    }
+  }
   return {
     id: existing.id,
     targetSessionId: input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId,
@@ -467,27 +483,6 @@ export const createOpenChamberControlService = (dependencies) => {
       total: matching.length,
       next: offset + limit < matching.length ? offset + limit : null,
     };
-  };
-
-  // Only validate a named model so tasks with a removed model stay editable.
-  const assertNamedModelKnown = async (projectID, input, task) => {
-    if (input.model === undefined) return;
-    const parsed = parseModel(input.model);
-    const directory = await scheduledTaskService.resolveExecutionDirectory(projectID, task.targetSessionId);
-    const client = await getClient(directory);
-    const catalog = await client.model.list();
-    const entries = Array.isArray(catalog.data) ? catalog.data : [];
-    if (entries.length === 0) return;
-    // Same matcher as the session routes' `findCatalogModel`: a catalog entry
-    // may carry a display override in `id`, and the `modelID` is the upstream
-    // name the fire path dispatches and the UI's model strings carry, so
-    // either form names a model that will run.
-    const known = entries
-      .some((model) => model.providerID === parsed.providerID
-        && (model.id === parsed.modelID || model.modelID === parsed.modelID));
-    if (!known) {
-      throw new OpenChamberControlError(`unknown model: ${parsed.providerID}/${parsed.modelID}`, 400);
-    }
   };
 
   // /api/session/active is global in v2 and reports only `{ type: 'running' }`.
@@ -1021,7 +1016,6 @@ export const createOpenChamberControlService = (dependencies) => {
             return { scheduler: await scheduledTaskService.status(), tasks: await scheduledTaskService.list(projectID) };
           case 'schedule.create': {
             const task = buildScheduledTask(input);
-            await assertNamedModelKnown(projectID, input, task);
             const result = await scheduledTaskService.upsert(projectID, task);
             return { task: result.task, created: result.created };
           }
@@ -1029,7 +1023,6 @@ export const createOpenChamberControlService = (dependencies) => {
             const existing = (await scheduledTaskService.list(projectID)).find((task) => task.id === taskID);
             if (!existing) throw new OpenChamberControlError(`Scheduled task not found: ${taskID}`, 404);
             const task = patchScheduledTask(existing, input);
-            await assertNamedModelKnown(projectID, input, task);
             const result = await scheduledTaskService.upsert(projectID, task);
             return { task: result.task, updated: true };
           }

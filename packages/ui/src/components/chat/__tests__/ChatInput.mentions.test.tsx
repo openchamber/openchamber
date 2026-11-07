@@ -326,7 +326,7 @@ test('the queued row Send preserves the newer remembered effort', async () => {
 test('hand-typed @coder review keeps the session selectable even after coder becomes a chip', async () => {
   await withComposer(async ({ container, view, type, rows, choose }) => {
     await type('@coder ');
-    expect(container.querySelector('[title="@coder"]')).not.toBeNull();
+    expect(container.querySelector('[data-mention-name="coder"]')).not.toBeNull();
     await type('review');
     expect(view.state.doc.toString()).toBe('@coder review');
     expect(rows().some((row) => row.textContent?.includes(review.title))).toBe(true);
@@ -342,7 +342,7 @@ test('Enter completes an agent query before the next frame and later s/k cannot 
     await type('@cod');
     await key('Enter');
     expect(view.state.doc.toString()).toBe('@coder ');
-    expect(container.querySelector('[title="@coder"]')).not.toBeNull();
+    expect(container.querySelector('[data-mention-name="coder"]')).not.toBeNull();
     expect(rows().length).toBe(0);
     await type('s');
     expect(rows().length).toBe(0);
@@ -401,11 +401,11 @@ const fileScenario = async (relativePath: string, directory: boolean, selectWith
       await key('Enter');
     } else await choose(name);
     expect(view.state.doc.toString()).toBe(`@${relativePath} `);
-    expect(container.querySelector(`[title="@${relativePath}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-mention-name="${relativePath}"]`)).not.toBeNull();
     expect(rows().length).toBe(0);
     await type('sk');
     expect(view.state.doc.toString()).toBe(`@${relativePath} sk`);
-    expect(container.querySelector(`[title="@${relativePath}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-mention-name="${relativePath}"]`)).not.toBeNull();
     expect(rows().length).toBe(0);
   });
 };

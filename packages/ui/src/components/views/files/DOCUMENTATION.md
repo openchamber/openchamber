@@ -73,8 +73,12 @@ there. The metadata poll treats a file deleted while open the same way: without
 unsaved edits it shows the error, with unsaved edits it keeps them. It keeps
 polling a failed file and loads it again once a missing file is back; a file
 that exists but fails to read is never reloaded by the poll
-(`openFilePollStep`). Pruning stale open paths (`removeUnselectedOpenPath`)
-never removes the path on screen.
+(`openFilePollStep`). The poll identifies its baseline by the path on screen,
+not by the path the server answers with: `/api/fs/stat` resolves symlinks, so a
+file opened through a symlinked folder or as a symlink itself would otherwise
+look like a new file on every poll and never reload after an external write
+(`fileStatSnapshotForRequestedPath`). Pruning stale open paths
+(`removeUnselectedOpenPath`) never removes the path on screen.
 
 A pending line jump (`pendingFileNavigationStep`) selects its file only until
 that file has been on screen. If the user then switches tabs while it loads,
@@ -219,8 +223,8 @@ through −/+ steps, Ctrl/⌘ + wheel or trackpad pinch, Safari gesture events,
 a two-finger touch pinch, and double-click between fit and 1:1, anchored at
 the pointer; a zoomed image larger than the viewer pans by mouse drag;
 `imageZoom.ts` holds the scale math; round arrows fixed to the viewer's
-edges, and the arrow keys while the viewer has focus and the image is at fit,
-show the previous and next image of the same folder, see below),
+edges, and the arrow keys while the image is at fit, show the previous and
+next image of the same folder, see below),
 `PdfArtifact` (a frame where the runtime has a PDF viewer; elsewhere pages
 drawn by pdf.js, see below), `MediaArtifact` (native audio/video
 element, duration and dimensions once metadata loads, a stated failure when
@@ -263,10 +267,20 @@ wrapping at the ends. SVG counts, since it opens in the image preview. A step
 opens the neighbour the way a single click in the tree does (`openContextFile`
 with `preview`): on desktop one preview tab follows the steps while the tab
 the user started from stays; on the phone the Files surface shows the
-neighbour in place and Back still leads to the folder being browsed. The
-viewer unmounts while the next image loads, so a step remembers its target and
-the viewer showing it within five seconds takes the focus back for the next
-key. A folder that cannot be read shows no arrows.
+neighbour in place and Back still leads to the folder being browsed. A folder
+that cannot be read shows no arrows.
+
+The arrow keys are heard on the document: while the focus is in the panel
+that holds the viewer, and not in a text field or a control that moves with
+the arrow keys (a tab strip, a menu, a list), or on the page itself after a
+click in that panel. With the focus on the page the browser scrolls whatever
+was clicked last, so a key after a click into a wide code block in the chat
+still scrolls that block. A click
+in the tree leaves the focus on the row, and the viewer unmounts while the
+next image loads, which drops the focus to the page; a listener on the viewer
+alone missed both. A viewer that is laid out nowhere, behind another tab of
+the panel, ignores the keys, and the first viewer to handle a key marks it
+handled, so the docked viewer behind the fullscreen one cannot step twice.
 
 Non-text artifacts the browser must own (PDF, audio, video, fonts) are loaded
 through `getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', …)` with

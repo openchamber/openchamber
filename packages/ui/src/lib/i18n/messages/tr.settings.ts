@@ -1447,6 +1447,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': 'Kullanım yenileniyor...',
   'settings.usage.page.header.lastUpdated': 'Son güncelleme: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'Plan: {plan} · Son güncelleme: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': 'Hesap: {account} · Son güncelleme: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'Çalışma durumu panelinde göster',
   'settings.usage.page.options.showInWorkStatus': 'Çalışma Durumu Panelinde Göster',
   'settings.usage.page.options.showInWorkStatusTooltip': 'Etkinleştirildiğinde bu provider\'ın kullanımı çalışma durumu panelinde görünür.',

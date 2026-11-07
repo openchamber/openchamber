@@ -12,6 +12,7 @@ import {
   updateMcpConfig,
   createMcpConfig,
   deleteMcpConfig,
+  setSkillEnabled,
   type JsonValue,
 } from './opencodeConfig';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
@@ -456,6 +457,35 @@ describe('opencodeConfig comment-preserving config writes (issue #3587)', () => 
         },
       },
     });
+  });
+
+  test('adds and removes only its own skill statement, every other line stays as written', () => {
+    const rules = [
+      '{',
+      '  "policies": [',
+      '    // team rule: no internal skills',
+      '    { "action": "skill.use", "resource": "internal-*", "effect": "deny" }',
+    ];
+    const original = [...rules, '  ]', '}', ''].join('\n');
+    const configPath = writeConfigFile('skills.jsonc', original);
+    process.env.OPENCODE_CONFIG = configPath;
+
+    assert.deepEqual(setSkillEnabled({ id: 'deploy', enabled: false, scope: 'user' }), { changed: [configPath] });
+    assert.equal(fs.readFileSync(configPath, 'utf8'), [
+      ...rules.slice(0, -1),
+      `${rules.at(-1)},`,
+      '    {',
+      '      "action": "skill.use",',
+      '      "resource": "deploy",',
+      '      "effect": "deny"',
+      '    }',
+      '  ]',
+      '}',
+      '',
+    ].join('\n'));
+
+    setSkillEnabled({ id: 'deploy', enabled: true, scope: 'user' });
+    assert.equal(fs.readFileSync(configPath, 'utf8'), original);
   });
 
   test('falls back to a normalized rewrite when the edit cannot round-trip', () => {

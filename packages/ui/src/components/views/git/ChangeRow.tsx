@@ -3,11 +3,22 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import type { GitStatus } from '@/lib/api/types';
+import { useDeviceInfo } from '@/lib/device';
+import { longPressHandlers } from '@/lib/longPress';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { describeChange } from './changeStatus';
 import { changedPathName } from './changesTree';
 import { ChangedPathLabel } from './ChangedPathLabel';
+
+/** Line counts of a changed file; the side with nothing to say stays out on a narrow row. */
+export const ChangeStats: React.FC<{ insertions: number; deletions: number; hideZero?: boolean }> = ({ insertions, deletions, hideZero = false }) => (
+  <span className="shrink-0 typography-micro tabular-nums">
+    {hideZero && insertions === 0 ? null : <span style={{ color: 'var(--status-success)' }}>+{insertions}</span>}
+    {hideZero ? (insertions > 0 && deletions > 0 ? ' ' : null) : <span className="text-muted-foreground mx-0.5">/</span>}
+    {hideZero && deletions === 0 ? null : <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>}
+  </span>
+);
 
 interface ChangeRowProps {
   file: GitStatus['files'][number];
@@ -44,6 +55,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
 }) {
   const descriptor = useMemo(() => describeChange(file), [file]);
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   const indicatorLabel = t(descriptor.descriptionKey);
   const insertions = stats?.insertions ?? 0;
   const deletions = stats?.deletions ?? 0;
@@ -91,13 +103,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
     </button>
   );
 
-  const statsLabel = (
-    <span className="shrink-0 typography-micro">
-      <span style={{ color: 'var(--status-success)' }}>+{insertions}</span>
-      <span className="text-muted-foreground mx-0.5">/</span>
-      <span style={{ color: 'var(--status-error)' }}>-{deletions}</span>
-    </span>
-  );
+  const statsLabel = <ChangeStats insertions={insertions} deletions={deletions} hideZero={isMobile} />;
 
   const revertButton = showRevert ? (
     <Tooltip>
@@ -106,7 +112,10 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           type="button"
           onClick={handleRevertClick}
           disabled={isReverting}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className={cn(
+            // On a phone a long press on the row reverts; the button stays for screen readers.
+            isMobile ? 'sr-only' : 'flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+          )}
           aria-label={t('gitView.changes.revertFileAria', { path: file.path })}
         >
           {isReverting ? (
@@ -122,11 +131,16 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
 
   return (
     <div
-      className={`group flex items-center gap-2 py-1.5 cursor-pointer ${rowPaddingClassName ?? 'px-3'}`}
+      className={cn(
+        'group flex items-center gap-2 cursor-pointer',
+        rowPaddingClassName ?? 'px-3',
+        isMobile ? 'min-h-11 select-none rounded-md active:bg-interactive-hover' : 'py-1.5',
+      )}
       role="button"
       tabIndex={0}
       onClick={onViewDiff}
       onKeyDown={handleKeyDown}
+      {...(isMobile && showRevert && !isReverting ? longPressHandlers(onRevert) : null)}
       style={indentPx > 0 ? { paddingInlineStart: `${indentPx}px` } : undefined}
     >
         {actionAtStart ? actionButton : null}
@@ -152,7 +166,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
               </span>
             );
           }
-          return <ChangedPathLabel path={file.path} className="flex-1 typography-ui-label" />;
+          return <ChangedPathLabel path={file.path} nameFirst={isMobile} className="flex-1 typography-ui-label" />;
         })()}
         {actionAtStart ? (
           <>

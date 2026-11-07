@@ -141,6 +141,20 @@ test('a malformed user-level entry does not shadow a valid system entry', async 
   });
 });
 
+test('terminal specs pass the directory to xdg-terminal-exec with a flag it understands', () => {
+  const specs = buildLinuxOpenSpecs({
+    targetPath: '/tmp/project',
+    appId: 'terminal',
+    appName: 'Terminal',
+    targetKind: 'project',
+    entries: [],
+    env: TEST_ENV,
+  });
+  const fallback = specs.find((spec) => spec.program === 'xdg-terminal-exec');
+  assert.ok(fallback, 'terminal specs should include an xdg-terminal-exec spec');
+  assert.deepEqual(fallback.args, ['--dir=/tmp/project']);
+});
+
 test('entries mixing ASCII and non-ASCII still match through their ASCII part', () => {
   const entry = parseEntryAt(`[Desktop Entry]
 Type=Application

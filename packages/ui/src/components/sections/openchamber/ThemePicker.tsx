@@ -4,8 +4,8 @@ import { Popover } from '@base-ui/react/popover';
 
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
-import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSearch } from '@/components/ui/MobileSheetList';
 import { Command, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { commandSearchAtBottomClass, usePopupSideOnOpen } from '@/components/ui/popup-side';
@@ -174,34 +174,25 @@ export function ThemePicker({ options, value, onValueChange, placeholder, ariaLa
           <span className="min-w-0 flex-1 truncate">{selected?.label ?? placeholder}</span>
           <Icon name="arrow-down-s" className="size-4 opacity-50" />
         </button>
-        <MobileOverlayPanel open={open} title={ariaLabel} onClose={() => setOpen(false)}>
-          <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('settings.openchamber.visual.field.searchThemes')}
-              aria-label={t('settings.openchamber.visual.field.searchThemes')}
-              className="h-9"
-            />
-            <div className="flex flex-col" role="listbox" aria-label={ariaLabel}>
-              {filtered.length === 0 ? emptyState : filtered.map((option) => (
-                <div key={option.id} className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={option.id === value}
-                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                    onClick={() => select(option.id)}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                    {option.id === value ? (
-                      <Icon name="check" className="size-4 shrink-0 text-muted-foreground" />
-                    ) : null}
-                  </button>
-                  {renderDeleteButton(option)}
-                </div>
-              ))}
-            </div>
+        <MobileOverlayPanel
+          open={open}
+          title={ariaLabel}
+          onClose={() => setOpen(false)}
+          subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={t('settings.openchamber.visual.field.searchThemes')} />}
+        >
+          <div role="listbox" aria-label={ariaLabel}>
+            {filtered.length === 0 ? emptyState : filtered.map((option) => (
+              <MobileSheetRow
+                key={option.id}
+                role="option"
+                aria-selected={option.id === value}
+                selected={option.id === value}
+                action={renderDeleteButton(option)}
+                onClick={() => select(option.id)}
+              >
+                {option.label}
+              </MobileSheetRow>
+            ))}
           </div>
         </MobileOverlayPanel>
       </>

@@ -52,6 +52,9 @@ const isAndroid = (): boolean => {
   return capacitor?.getPlatform?.() === 'android';
 };
 
+/** Android's camera runs behind the WebView, so the app draws the scanner screen; iOS presents its own. */
+export const qrScanDrawsOwnScreen = (): boolean => isAndroid();
+
 export const parseConnectionPayload = (raw: string): MobileConnectionPayload | MobilePairingPayload | null => {
   const trimmed = raw.trim();
   if (!trimmed) return null;

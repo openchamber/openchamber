@@ -286,6 +286,37 @@ describe('routeMessage directory scoping', () => {
     expect(calls[0].sessionId).toBe('session-a');
     expect(calls[0].directory).toBe('/session/project');
   });
+
+  // OpenCode records a shell command past a staged revert's boundary, where the
+  // next prompt's commit deletes it (#6319).
+  test('commits a staged revert before running a shell command, and only then', async () => {
+    const childStores = new ChildStoreManager();
+    const store = childStores.ensureChild('/session/project', { bootstrap: false });
+    setActionRefs(childStores, () => '/session/project');
+    const requests = [];
+    let committed = () => undefined;
+    const commit = spyOn(opencodeClient, 'commitRevert').mockImplementation((sessionId, directory) => new Promise((resolve) => {
+      committed = () => { requests.push(['committed', sessionId, directory]); resolve(); };
+    }));
+    const shell = spyOn(opencodeClient, 'shellSession').mockImplementation(async (params) => { requests.push(['shell', params.sessionId]); return 'msg'; });
+    const runShell = () => routeMessage({ sessionId: 'session-a', directory: '/session/project', content: 'pwd', providerID: 'provider-a', modelID: 'model-a', inputMode: 'shell' });
+    try {
+      store.setState({ session: [{ id: 'session-a', revert: { messageID: 'msg_reverted' } }] });
+      const staged = runShell();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(requests).toEqual([]);
+      committed();
+      await staged;
+      store.setState({ session: [{ id: 'session-a' }] });
+      await runShell();
+    } finally {
+      commit.mockRestore();
+      shell.mockRestore();
+      setActionRefs(new ChildStoreManager(), () => '');
+    }
+
+    expect(requests).toEqual([['committed', 'session-a', '/session/project'], ['shell', 'session-a'], ['shell', 'session-a']]);
+  });
 });
 
 describe('resolveSendSelection thinking level', () => {

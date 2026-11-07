@@ -44,6 +44,7 @@ test('preserves semantic credits-used data through the quota response parser', a
     ok: true,
     configured: true,
     planLabel: 'Copilot Business',
+    accountLabel: 'other@example.com',
     usage: { windows: { premium_interactions: window } },
     fetchedAt: 1,
   };
@@ -51,4 +52,6 @@ test('preserves semantic credits-used data through the quota response parser', a
   const result = await fetchQuota('github-copilot');
   expect(result.usage?.windows.premium_interactions).toEqual(window);
   expect(result.planLabel).toBe('Copilot Business');
+  expect(result.accountLabel).toBe('other@example.com');
 });
+

@@ -371,6 +371,8 @@ export type RenderedPageAsk =
   | { kind: "chat-sent-earlier" }
   /** The chat could not draw the page's ui; the agent got the parser's errors. */
   | { kind: "not-drawn" }
+  /** The user declined to answer on the page. */
+  | { kind: "declined" }
   | { kind: "unanswered" }
 
 // A page sent without a title is named after its own <title>, else its first
@@ -421,7 +423,10 @@ export function renderedPage(
   const answer = result.answer
   if (answer?.answered === true) return { ...page, title, ask: { kind: "answered", summary: answer.summary, data: answer.data } }
   if (answer?.answered === false) {
-    const kind = answer.reason === "chat-sent-earlier" ? "chat-sent-earlier" : answer.reason === "ui-not-drawn" ? "not-drawn" : "answered-in-chat"
+    const kind = answer.reason === "chat-sent-earlier" ? "chat-sent-earlier"
+      : answer.reason === "ui-not-drawn" ? "not-drawn"
+        : answer.reason === "declined" ? "declined"
+          : "answered-in-chat"
     return { ...page, title, ask: { kind } }
   }
   return { ...page, title, ask: { kind: "show" } }

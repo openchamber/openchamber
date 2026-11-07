@@ -75,6 +75,12 @@ mock.module('../sessions/SessionTreeItem', () => ({
   },
 }));
 
+// Dialogs read the device and its tablet layout as they render; this fixture has no real page to read them from.
+mock.module('@/lib/device', () => ({
+  useDeviceInfo: () => ({ isMobile: false }),
+  useTabletLayout: () => ({ enabled: false, roomyForPanels: false }),
+}));
+
 const { SessionGroupSection } = await import('./SessionGroupSection');
 
 const folder: SessionFolder = {

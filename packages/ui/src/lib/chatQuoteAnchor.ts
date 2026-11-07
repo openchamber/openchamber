@@ -25,10 +25,10 @@ export type ChatQuoteAnchor = {
     start: number;
     /**
      * Set when the text lives in a page the agent showed (`openchamber_render`)
-     * instead of the message's own text: the stream is then that page's body,
-     * measured and re-found inside its frame. Anchors without it are unchanged.
+     * instead of the message's own text: the stream is then that page's body.
+     * UI pages render in the chat; other pages measure inside their frame.
      */
-    page?: { partId: string };
+    page?: { partId: string; kind?: 'ui' };
 };
 
 export const chatQuoteAnchorSchema = z.object({
@@ -36,7 +36,7 @@ export const chatQuoteAnchorSchema = z.object({
     prefix: z.string(),
     suffix: z.string(),
     start: z.number(),
-    page: z.object({ partId: z.string() }).optional(),
+    page: z.object({ partId: z.string(), kind: z.literal('ui').optional() }).optional(),
 });
 
 // The page bootstrap (message/parts/htmlRender.ts) repeats both numbers.
@@ -60,6 +60,11 @@ export function findChatQuoteRoots(scope: ParentNode, messageId: string): Elemen
     return [...scope.querySelectorAll(`[data-message-id="${CSS.escape(messageId)}"]`)]
         .flatMap((message) => message.querySelector(CHAT_QUOTE_ROOT_SELECTOR) ?? [])
         .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top);
+}
+
+/** The UI render page named by a quote, whether hoisted or in the final answer. */
+export function findUiRenderQuoteRoot(scope: ParentNode, messageId: string, partId: string): Element | null {
+    return scope.querySelector(`[data-ui-render-message="${CSS.escape(messageId)}"][data-ui-render-part="${CSS.escape(partId)}"]`);
 }
 
 // The anchor's context around `index`, as far as `stream` reaches: a row of

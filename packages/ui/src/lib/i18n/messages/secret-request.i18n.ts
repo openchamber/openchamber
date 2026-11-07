@@ -2,6 +2,8 @@
 export const secretRequestI18n = {
   en: {
     'chat.secretRequest.inputLabel': 'Secret value',
+    'chat.secretRequest.showSecret': 'Show secret',
+    'chat.secretRequest.hideSecret': 'Hide secret',
     'chat.secretRequest.placeholder': 'Paste the value',
     'chat.secretRequest.save': 'Save securely',
     'chat.secretRequest.decline': 'Decline',
@@ -17,6 +19,8 @@ export const secretRequestI18n = {
   },
   nl: {
     'chat.secretRequest.inputLabel': 'Waarde van het geheim',
+    'chat.secretRequest.showSecret': 'Geheim tonen',
+    'chat.secretRequest.hideSecret': 'Geheim verbergen',
     'chat.secretRequest.placeholder': 'Plak de waarde',
     'chat.secretRequest.save': 'Veilig opslaan',
     'chat.secretRequest.decline': 'Weigeren',
@@ -32,6 +36,8 @@ export const secretRequestI18n = {
   },
   de: {
     'chat.secretRequest.inputLabel': 'Wert des Geheimnisses',
+    'chat.secretRequest.showSecret': 'Geheimnis anzeigen',
+    'chat.secretRequest.hideSecret': 'Geheimnis verbergen',
     'chat.secretRequest.placeholder': 'Wert einfügen',
     'chat.secretRequest.save': 'Sicher speichern',
     'chat.secretRequest.decline': 'Ablehnen',
@@ -47,6 +53,8 @@ export const secretRequestI18n = {
   },
   es: {
     'chat.secretRequest.inputLabel': 'Valor del secreto',
+    'chat.secretRequest.showSecret': 'Mostrar secreto',
+    'chat.secretRequest.hideSecret': 'Ocultar secreto',
     'chat.secretRequest.placeholder': 'Pega el valor',
     'chat.secretRequest.save': 'Guardar de forma segura',
     'chat.secretRequest.decline': 'Rechazar',
@@ -62,6 +70,8 @@ export const secretRequestI18n = {
   },
   fr: {
     'chat.secretRequest.inputLabel': 'Valeur du secret',
+    'chat.secretRequest.showSecret': 'Afficher le secret',
+    'chat.secretRequest.hideSecret': 'Masquer le secret',
     'chat.secretRequest.placeholder': 'Collez la valeur',
     'chat.secretRequest.save': 'Enregistrer en sécurité',
     'chat.secretRequest.decline': 'Refuser',
@@ -77,6 +87,8 @@ export const secretRequestI18n = {
   },
   ja: {
     'chat.secretRequest.inputLabel': 'シークレットの値',
+    'chat.secretRequest.showSecret': 'シークレットを表示',
+    'chat.secretRequest.hideSecret': 'シークレットを隠す',
     'chat.secretRequest.placeholder': '値を貼り付け',
     'chat.secretRequest.save': '安全に保存',
     'chat.secretRequest.decline': '断る',
@@ -92,6 +104,8 @@ export const secretRequestI18n = {
   },
   ko: {
     'chat.secretRequest.inputLabel': '비밀 값',
+    'chat.secretRequest.showSecret': '비밀 표시',
+    'chat.secretRequest.hideSecret': '비밀 숨기기',
     'chat.secretRequest.placeholder': '값을 붙여넣으세요',
     'chat.secretRequest.save': '안전하게 저장',
     'chat.secretRequest.decline': '거절',
@@ -107,6 +121,8 @@ export const secretRequestI18n = {
   },
   pl: {
     'chat.secretRequest.inputLabel': 'Wartość sekretu',
+    'chat.secretRequest.showSecret': 'Pokaż sekret',
+    'chat.secretRequest.hideSecret': 'Ukryj sekret',
     'chat.secretRequest.placeholder': 'Wklej wartość',
     'chat.secretRequest.save': 'Zapisz bezpiecznie',
     'chat.secretRequest.decline': 'Odmów',
@@ -122,6 +138,8 @@ export const secretRequestI18n = {
   },
   'pt-BR': {
     'chat.secretRequest.inputLabel': 'Valor do segredo',
+    'chat.secretRequest.showSecret': 'Mostrar segredo',
+    'chat.secretRequest.hideSecret': 'Ocultar segredo',
     'chat.secretRequest.placeholder': 'Cole o valor',
     'chat.secretRequest.save': 'Salvar com segurança',
     'chat.secretRequest.decline': 'Recusar',
@@ -137,6 +155,8 @@ export const secretRequestI18n = {
   },
   tr: {
     'chat.secretRequest.inputLabel': 'Gizli değer',
+    'chat.secretRequest.showSecret': 'Gizli değeri göster',
+    'chat.secretRequest.hideSecret': 'Gizli değeri gizle',
     'chat.secretRequest.placeholder': 'Değeri yapıştırın',
     'chat.secretRequest.save': 'Güvenle kaydet',
     'chat.secretRequest.decline': 'Reddet',
@@ -152,6 +172,8 @@ export const secretRequestI18n = {
   },
   uk: {
     'chat.secretRequest.inputLabel': 'Значення секрету',
+    'chat.secretRequest.showSecret': 'Показати секрет',
+    'chat.secretRequest.hideSecret': 'Приховати секрет',
     'chat.secretRequest.placeholder': 'Вставте значення',
     'chat.secretRequest.save': 'Зберегти безпечно',
     'chat.secretRequest.decline': 'Відхилити',
@@ -167,6 +189,8 @@ export const secretRequestI18n = {
   },
   'zh-CN': {
     'chat.secretRequest.inputLabel': '密钥值',
+    'chat.secretRequest.showSecret': '显示密钥',
+    'chat.secretRequest.hideSecret': '隐藏密钥',
     'chat.secretRequest.placeholder': '粘贴值',
     'chat.secretRequest.save': '安全保存',
     'chat.secretRequest.decline': '拒绝',
@@ -182,6 +206,8 @@ export const secretRequestI18n = {
   },
   'zh-TW': {
     'chat.secretRequest.inputLabel': '密鑰值',
+    'chat.secretRequest.showSecret': '顯示密鑰',
+    'chat.secretRequest.hideSecret': '隱藏密鑰',
     'chat.secretRequest.placeholder': '貼上值',
     'chat.secretRequest.save': '安全儲存',
     'chat.secretRequest.decline': '拒絕',
@@ -197,6 +223,8 @@ export const secretRequestI18n = {
   },
   ar: {
     'chat.secretRequest.inputLabel': 'قيمة السر',
+    'chat.secretRequest.showSecret': 'إظهار السر',
+    'chat.secretRequest.hideSecret': 'إخفاء السر',
     'chat.secretRequest.placeholder': 'الصق القيمة',
     'chat.secretRequest.save': 'حفظ بأمان',
     'chat.secretRequest.decline': 'رفض',
@@ -212,6 +240,8 @@ export const secretRequestI18n = {
   },
   he: {
     'chat.secretRequest.inputLabel': 'ערך הסוד',
+    'chat.secretRequest.showSecret': 'הצגת הסוד',
+    'chat.secretRequest.hideSecret': 'הסתרת הסוד',
     'chat.secretRequest.placeholder': 'הדביקו את הערך',
     'chat.secretRequest.save': 'שמירה מאובטחת',
     'chat.secretRequest.decline': 'דחייה',

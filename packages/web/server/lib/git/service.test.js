@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { simpleGit } from 'simple-git';
 import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
+import { parseDiffFiles } from '../walkthrough/hunks.js';
 import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sources.js';
 import { registerGitRoutes } from './routes.js';
 import { isUserAction } from '../environment/refresh-scope.js';
@@ -853,6 +854,49 @@ describe.runIf(canRunGit())('diff output with diff.external configured', () => {
     expect(range).toContain('diff --git');
     expect(range).toContain('@@');
     expect(range).not.toContain('EXTERNAL-DIFF-OUTPUT');
+  });
+
+  it('keeps a/ and b/ header prefixes when diff.mnemonicPrefix or diff.noprefix is enabled', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    await writeFile(tmpDir, 'file.txt', 'one\n');
+    await git.add('file.txt');
+    await git.commit('Initial');
+    await git.raw(['branch', 'base-branch']);
+    await git.checkoutLocalBranch('head-branch');
+    await writeFile(tmpDir, 'file.txt', 'two\n');
+    await git.add('file.txt');
+    await git.commit('Second');
+    const commitHash = (await git.revparse(['HEAD'])).trim();
+    await writeFile(tmpDir, 'file.txt', 'three\n');
+    await writeFile(tmpDir, 'new.txt', 'untracked\n');
+
+    // Verify diff.mnemonicPrefix alone first (where git would emit c/, w/, and i/
+    // prefixes), then with diff.noprefix enabled on top (where noprefix wins).
+    for (const [key, value] of [
+      ['diff.mnemonicPrefix', 'true'],
+      ['diff.noprefix', 'true'],
+    ]) {
+      runGit(tmpDir, ['config', key, value]);
+
+      const workingDiff = await getDiff(tmpDir, { path: 'file.txt' });
+      expect(workingDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      const rangeDiff = await getRangeDiff(tmpDir, { base: 'base-branch', head: 'head-branch' });
+      expect(rangeDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      const commitDiff = await getCommitDiff(tmpDir, { hash: commitHash });
+      expect(commitDiff).toContain('diff --git a/file.txt b/file.txt');
+
+      for (const [source, expectedPaths] of [
+        [{ kind: 'working-tree', scope: 'all' }, ['file.txt', 'new.txt']],
+        [{ kind: 'branch', baseRef: 'base-branch', headRef: 'head-branch' }, ['file.txt', 'new.txt']],
+        [{ kind: 'commit', hash: commitHash }, ['file.txt']],
+      ]) {
+        const { sections } = await loadSourceSections(tmpDir, source);
+        const files = sections.flatMap((section) => parseDiffFiles(section.patch, section.scope).files);
+        expect(files.map((file) => file.path)).toEqual(expectedPaths);
+      }
+    }
   });
 });
 
@@ -2763,6 +2807,37 @@ describe('createWorktree with OpenCode worktree.directory', () => {
       }
     }
   };
+
+  it('returns preview and creation paths that match Git when home is a symlink', async () => {
+    if (!canRunGit()) return;
+    const parent = createTempDir();
+    const realRoot = path.join(parent, 'real');
+    const aliasRoot = path.join(parent, 'alias');
+    fs.mkdirSync(realRoot);
+    fs.symlinkSync(realRoot, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, 'opencode.json'), JSON.stringify({ worktree: null }));
+    vi.stubEnv('OPENCODE_CONFIG', path.join(repo, 'opencode.json'));
+    vi.stubEnv('HOME', aliasRoot);
+    vi.stubEnv('USERPROFILE', aliasRoot);
+    vi.stubEnv('XDG_CONFIG_HOME', path.join(realRoot, '.config'));
+    vi.stubEnv('XDG_DATA_HOME', undefined);
+    try {
+      const input = {
+        mode: 'new', worktreeName: 'canonical-tree', branchName: 'openchamber/canonical-tree',
+        returnAfterDirectoryCreated: true,
+      };
+      const preview = await previewWorktreeCreate(repo, input);
+      const created = await createWorktree(repo, input);
+      await waitForActiveWorktreeBootstrap(created.path);
+      const listed = (await getWorktrees(repo)).find((entry) => entry.branch === created.branch);
+      expect(listed).toBeDefined();
+      expect(created.path.replaceAll('\\', '/')).toBe(listed.path.replaceAll('\\', '/'));
+      expect(preview.path.replaceAll('\\', '/')).toBe(listed.path.replaceAll('\\', '/'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 
   it('creates and previews under a configured relative folder', withDataHome(async () => {
     if (!canRunGit()) return;

@@ -14,6 +14,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow } from '@/components/ui/MobileSheetList';
 import { Icon } from "@/components/icon/Icon";
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/lib/i18n';
@@ -84,54 +85,27 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     onClose={closeMobilePanel}
                     title={t('settings.commands.agentSelector.title')}
                 >
-                <div className="space-y-1">
-                    <button
-                        type="button"
-                        className={cn(
-                            'flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-start',
-                            !agentName ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-foreground hover:bg-interactive-hover'
-                        )}
+                <MobileSheetRow
+                    selected={!agentName}
+                    onClick={() => {
+                        handleAgentChange('');
+                        closeMobilePanel();
+                    }}
+                >
+                    {t('settings.commands.agentSelector.notSelected')}
+                </MobileSheetRow>
+                {agents.map((agent) => (
+                    <MobileSheetRow
+                        key={agent.name}
+                        selected={agent.name === agentName}
                         onClick={() => {
-                            handleAgentChange('');
+                            handleAgentChange(agent.name);
                             closeMobilePanel();
                         }}
                     >
-                        <span className={cn('typography-meta', !agentName ? 'font-medium' : 'text-muted-foreground')}>
-                            {t('settings.commands.agentSelector.notSelected')}
-                        </span>
-                        {!agentName && <div className="h-2 w-2 rounded-full bg-current" />}
-                    </button>
-                    {agents.map((agent) => {
-                        const isSelected = agent.name === agentName;
-
-                        return (
-                            <button
-                                key={agent.name}
-                                type="button"
-                                className={cn(
-                                    'flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-start',
-                                    isSelected ? 'bg-interactive-selection text-interactive-selection-foreground' : 'text-foreground hover:bg-interactive-hover'
-                                )}
-                                onClick={() => {
-                                    handleAgentChange(agent.name);
-                                    closeMobilePanel();
-                                }}
-                            >
-                                <div className="flex flex-col">
-                                    <span className="typography-meta font-medium">{agentLabel(agent)}</span>
-                                    {agent.description && (
-                                        <span className="typography-micro text-muted-foreground">
-                                            {agent.description}
-                                        </span>
-                                    )}
-                                </div>
-                                {isSelected && (
-                                    <div className="h-2 w-2 rounded-full bg-current" />
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
+                        {agentLabel(agent)}
+                    </MobileSheetRow>
+                ))}
             </MobileOverlayPanel>
         );
     };
@@ -145,7 +119,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     disabled={!isReady}
                     className={cn(
                         dropdownTriggerVariants({ size: 'mobile' }),
-                        'w-full',
+                        'w-fit max-w-full',
                         className
                     )}
                 >

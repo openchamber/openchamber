@@ -1482,6 +1482,7 @@ export const settingsDict = {
   "settings.usage.page.header.refreshing": "Оновлення використання...",
   "settings.usage.page.header.lastUpdated": "Останнє оновлення: {time}",
   "settings.usage.page.header.lastUpdatedWithPlan": "План: {plan} · Останнє оновлення: {time}",
+  "settings.usage.page.header.lastUpdatedWithAccount": "Обліковий запис: {account} · Останнє оновлення: {time}",
   "settings.usage.page.options.showInWorkStatusAria": "Показувати в панелі статусу роботи",
   "settings.usage.page.options.showInWorkStatus": "Показувати в панелі статусу роботи",
   "settings.usage.page.options.showInWorkStatusTooltip": "Якщо ввімкнути, використання цього провайдера буде видно в панелі статусу роботи.",

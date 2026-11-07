@@ -114,7 +114,7 @@ const SetupCommands: React.FC<{ projectRef: ProjectRef; setup: ProjectSetup; set
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground" aria-label={t('settings.projects.worktrees.commandMenuAria')} disabled={!editable}>
-                      <Icon name="more-2" className="size-4" />
+                      <Icon name="more" className="size-4" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-fit min-w-40">

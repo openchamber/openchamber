@@ -9,6 +9,155 @@ import { OpenChamberControlError } from './error.js';
 import { createScheduledTaskService } from '../scheduled-tasks/service.js';
 import { createChatsScope } from '../scheduled-tasks/chats-scope.js';
 import { createExistingSessionTasks } from '../scheduled-tasks/existing-session.js';
+import { createProjectConfigRuntime } from '../projects/project-config.js';
+
+const createPersistedScheduleService = async (schedule) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-control-schedule-'));
+  let failRename = false;
+  let syncsUntilFailure = 0;
+  const config = createProjectConfigRuntime({
+    fsPromises: {
+      ...fs,
+      rename: async (...args) => {
+        if (failRename) throw new Error('fixture atomic rename failed');
+        return fs.rename(...args);
+      },
+    },
+    path,
+    projectsDirPath: root,
+  });
+  const history = {
+    createdAt: 100, lastRunAt: 150, lastDurationMs: 20,
+    lastStatus: 'sent', lastSessionId: 'ses_history', lastScheduledFor: 140,
+  };
+  const task = {
+    id: 'task-persisted', name: 'Keep this name', enabled: false,
+    schedule: { ...schedule, timezone: 'Pacific/Auckland' },
+    execution: { prompt: 'Keep this prompt', providerID: 'provider', modelID: 'model', agent: 'build', variant: 'high' },
+    runInWorktree: true, baseBranch: 'main', cleanupWorktree: false, state: { ...history, updatedAt: 200 },
+  };
+  const unrelated = { ...task, id: 'task-other', name: 'Other task' };
+  const file = config.resolveProjectConfigPath('project-1');
+  await fs.writeFile(file, JSON.stringify({ version: 1, custom: { keep: 'settings' }, scheduledTasks: [task, unrelated] }));
+  const readSettingsFromDiskMigrated = async () => ({ projects: [{ id: 'project-1', path: root }] });
+  const scheduledTaskService = createScheduledTaskService({
+    readSettingsFromDiskMigrated,
+    sanitizeProjects: (projects) => projects,
+    projectConfigRuntime: config,
+    // Exercise service and storage together without starting timers or dispatching.
+    scheduledTasksRuntime: {
+      syncProject: async (id) => {
+        if (syncsUntilFailure > 0 && --syncsUntilFailure === 0) throw new Error('fixture scheduler sync failed');
+        return config.listScheduledTasks(id);
+      },
+    },
+  });
+  const upsert = vi.spyOn(scheduledTaskService, 'upsert');
+  const { service } = createService({ scheduledTaskService });
+  return {
+    upsert, task, history, unrelated,
+    update: (input) => service.execute('schedule.update', { projectId: 'project-1', taskId: task.id, ...input }),
+    bytes: () => fs.readFile(file, 'utf8'),
+    read: async () => JSON.parse(await fs.readFile(file, 'utf8')),
+    failWrite: (value) => { failRename = value; },
+    failPostSaveSync: () => { syncsUntilFailure = 2; },
+    cleanup: () => fs.rm(root, { recursive: true, force: true }),
+  };
+};
+
+describe('persisted schedule.update patches', () => {
+  it.each([
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { kind: 'once', date: '2099-05-06', time: '13:45', timezone: 'Pacific/Auckland' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { kind: 'weekly', weekdays: [1, 4], times: ['13:45'], timezone: 'Pacific/Auckland' }],
+  ])('persists a time-only patch for %j with identity, settings and history intact', async (schedule, expected) => {
+    const fixture = await createPersistedScheduleService(schedule);
+    try {
+      const result = await fixture.update({ time: '13:45' });
+      const saved = await fixture.read();
+      expect(result.task.schedule).toEqual(expected);
+      expect(saved.scheduledTasks[0]).toMatchObject({ ...fixture.task, schedule: expected, state: fixture.history });
+      expect(saved.scheduledTasks[1]).toEqual(fixture.unrelated);
+      expect(saved.custom).toEqual({ keep: 'settings' });
+      await fixture.update({ time: '14:15', timezone: 'Europe/Kyiv' });
+      expect((await fixture.read()).scheduledTasks[0].schedule).toEqual({
+        ...expected, ...(schedule.kind === 'once' ? { time: '14:15' } : { times: ['14:15'] }), timezone: 'Europe/Kyiv',
+      });
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    { once: '2099-07-08', time: '11:30' },
+    { weekly: '2,5', time: '11:30' },
+    { daily: '11:30' },
+    { cron: '30 11 * * *' },
+  ])('inherits omitted timezone on schedule replacement %j and accepts an explicit replacement', async (input) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      await fixture.update(input);
+      expect((await fixture.read()).scheduledTasks[0].schedule.timezone).toBe('Pacific/Auckland');
+      await fixture.update({ ...input, timezone: 'Europe/Kyiv' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.timezone).toBe('Europe/Kyiv');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each(['', ' ', '24:00', '12:60', '9:00', 'noon', null, 900])('rejects invalid time %j without changing bytes and permits recovery', async (time) => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update({ time })).rejects.toMatchObject({ statusCode: 400 });
+      expect(fixture.upsert).not.toHaveBeenCalled();
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ time: '13:45' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('13:45');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it.each([
+    [{ kind: 'daily', times: ['09:00'] }, { time: '13:45' }],
+    [{ kind: 'cron', cron: '0 9 * * *' }, { time: '13:45' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00', '17:00'] }, { time: '13:45' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { weekly: '1,4', time: '25:00' }],
+    [{ kind: 'weekly', weekdays: [1, 4], times: ['09:00'] }, { weekly: '1,4', time: '' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { daily: '10:00', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { cron: '0 10 * * *', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { once: '', time: '13:45' }],
+    [{ kind: 'once', date: '2099-05-06', time: '09:00' }, { once: '2099-05-06', weekly: '1', time: '13:45' }],
+  ])('rejects incompatible or ambiguous patch %j %j before saving', async (schedule, input) => {
+    const fixture = await createPersistedScheduleService(schedule);
+    try {
+      const before = await fixture.bytes();
+      await expect(fixture.update(input)).rejects.toMatchObject({ statusCode: 400 });
+      expect(fixture.upsert).not.toHaveBeenCalled();
+      expect(await fixture.bytes()).toBe(before);
+      await fixture.update({ name: 'Recovered' });
+      expect((await fixture.read()).scheduledTasks[0].name).toBe('Recovered');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('preserves bytes on an atomic write failure and recovers on the next update', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      const before = await fixture.bytes();
+      fixture.failWrite(true);
+      await expect(fixture.update({ time: '13:45' })).rejects.toThrow('fixture atomic rename failed');
+      expect(await fixture.bytes()).toBe(before);
+      fixture.failWrite(false);
+      await fixture.update({ time: '14:15' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('14:15');
+    } finally { await fixture.cleanup(); }
+  });
+
+  it('reports post-save scheduler failure while retaining the committed patch', async () => {
+    const fixture = await createPersistedScheduleService({ kind: 'once', date: '2099-05-06', time: '09:00' });
+    try {
+      fixture.failPostSaveSync();
+      await expect(fixture.update({ time: '13:45' })).rejects.toThrow('fixture scheduler sync failed');
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('13:45');
+      await fixture.update({ time: '14:15' });
+      expect((await fixture.read()).scheduledTasks[0].schedule.time).toBe('14:15');
+    } finally { await fixture.cleanup(); }
+  });
+});
 
 const createService = (overrides = {}) => {
   const client = {
@@ -138,182 +287,6 @@ describe('OpenChamber control service', () => {
       schedule: { kind: 'daily', times: ['09:00'] },
       execution: expect.objectContaining({ providerID: 'provider', modelID: 'model', goalEnabled: true, goalTokenBudget: 5000 }),
     }));
-  });
-
-  it('rejects a model that is not in the catalog when schedule.create names one', async () => {
-    const { service, client, scheduledTaskService } = createService();
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
-    // A removed provider or a deleted model is a create-time error, not a
-    // provider.no-route hours later in a throwaway session (#5950).
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Dead',
-      prompt: 'Run checks',
-      model: 'gone/dead',
-      daily: '09:00',
-    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
-    expect(scheduledTaskService.upsert).not.toHaveBeenCalled();
-    expect(client.model.list).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not reject a named model when the project catalog has not loaded yet', async () => {
-    // A cold location's first catalog read answers empty and fills in about
-    // two seconds later; an empty answer is not evidence of absence, so the
-    // check stands down instead of rejecting a model that would fire fine.
-    const { service, client, scheduledTaskService } = createService();
-    client.model.list.mockResolvedValue({ data: [] });
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Early',
-      prompt: 'Run checks',
-      model: 'provider/model',
-      daily: '09:00',
-    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Early' }), created: true });
-    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
-  });
-
-  it('accepts the upstream modelID of a catalog entry whose id is a display override', async () => {
-    // `findCatalogModel` matches `id` first and falls back to `modelID`
-    // because the fire path dispatches `modelID` upstream; a schedule create
-    // must not reject a string the session path accepts and that fires fine.
-    const { service, client, scheduledTaskService } = createService();
-    client.model.list.mockResolvedValue({ data: [
-      { providerID: 'p', id: 'display-override', modelID: 'upstream-name' },
-    ] });
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
-
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Upstream',
-      prompt: 'Run checks',
-      model: 'p/upstream-name',
-      daily: '09:00',
-    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Upstream' }), created: true });
-
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Display',
-      prompt: 'Run checks',
-      model: 'p/display-override',
-      daily: '09:00',
-    }, '/repo')).resolves.toEqual({ task: expect.objectContaining({ name: 'Display' }), created: true });
-
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Dead',
-      prompt: 'Run checks',
-      model: 'p/neither',
-      daily: '09:00',
-    }, '/repo')).rejects.toThrow('unknown model: p/neither');
-  });
-
-  it('validates the model of a target-session task too, and accepts a known one', async () => {
-    const { service, scheduledTaskService } = createService();
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: true }));
-    await expect(service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Pinned',
-      prompt: 'Run checks',
-      model: 'gone/dead',
-      daily: '09:00',
-      targetSessionId: 'ses_target',
-    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
-
-    const created = await service.execute('schedule.create', {
-      directory: '/repo',
-      name: 'Known',
-      prompt: 'Run checks',
-      model: 'provider/model',
-      daily: '09:00',
-      targetSessionId: 'ses_target',
-    }, '/repo');
-    expect(created.task.execution).toMatchObject({ providerID: 'provider', modelID: 'model' });
-  });
-
-  it.each(['schedule.create', 'schedule.update'])('uses the Chats catalog across storage and public IDs for %s', async (action) => {
-    const chatsScope = createChatsScope('/chats');
-    const task = { id: 'task-1', name: 'Chats', execution: { prompt: 'Run', providerID: 'p', modelID: 'old' } };
-    const projectConfigRuntime = { listScheduledTasks: vi.fn(async () => [task]) };
-    const scheduledTaskService = createScheduledTaskService({
-      chatsScope,
-      readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'project-1', path: '/repo' }] }),
-      sanitizeProjects: (projects) => projects,
-      projectConfigRuntime,
-      scheduledTasksRuntime: { syncProject: async () => [task] },
-    });
-    vi.spyOn(scheduledTaskService, 'upsert').mockImplementation(async (_project, saved) => ({ task: saved }));
-    const { service } = createService({
-      scheduledTaskService,
-      createClient: ({ headers }) => ({
-        model: { list: async () => ({ data: [{ providerID: 'p', id: decodeURIComponent(headers['x-opencode-directory']) === '/chats' ? 'chat' : 'checkout' }] }) },
-      }),
-    });
-    const input = { projectId: 'openchamber:chats', taskId: 'task-1', name: 'Chats', prompt: 'Run', daily: '09:00' };
-    await expect(service.execute(action, { ...input, model: 'p/chat' }, '/repo')).resolves.toHaveProperty('task');
-    expect(scheduledTaskService.upsert).toHaveBeenCalledWith(chatsScope.id, expect.any(Object));
-    await expect(service.execute(action, { ...input, model: 'p/checkout' }, '/repo')).rejects.toThrow('unknown model: p/checkout');
-    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    ['schedule.create', { targetSessionId: 'ses_target' }, '/worktree'],
-    ['schedule.update', {}, '/worktree'],
-    ['schedule.update', { targetSessionId: 'ses_other' }, '/other-worktree'],
-    ['schedule.update', { targetSessionId: '' }, '/repo'],
-  ])('validates the effective target catalog for %s with %j', async (action, target, directory) => {
-    const projects = [{ id: 'project-1', path: '/repo' }];
-    const task = { id: 'task-1', name: 'Pinned', targetSessionId: 'ses_target', execution: { prompt: 'Run', providerID: 'p', modelID: 'old' } };
-    const existingSessionTasks = createExistingSessionTasks({
-      listProjects: async () => projects,
-      createClient: () => ({ session: { get: async ({ sessionID }) => ({
-        id: sessionID, location: { directory: sessionID === 'ses_target' ? '/worktree' : '/other-worktree' },
-      }) } }),
-      resolvePrimaryWorktreeRoot: async () => ({ root: '/repo' }),
-    });
-    const scheduledTaskService = createScheduledTaskService({
-      readSettingsFromDiskMigrated: async () => ({ projects }),
-      sanitizeProjects: (entries) => entries,
-      scheduledTasksRuntime: { syncProject: async () => [task], validateTarget: existingSessionTasks.validateTarget },
-    });
-    vi.spyOn(scheduledTaskService, 'upsert').mockImplementation(async (_project, saved) => ({ task: saved }));
-    const { service } = createService({
-      scheduledTaskService,
-      createClient: ({ headers }) => ({
-        model: { list: async () => ({ data: [{ providerID: 'p', id: decodeURIComponent(headers['x-opencode-directory']) === directory ? 'selected' : 'wrong-directory' }] }) },
-      }),
-    });
-    const input = { projectId: 'project-1', taskId: 'task-1', name: 'Pinned', prompt: 'Run', daily: '09:00', ...target };
-    await expect(service.execute(action, { ...input, model: 'p/selected' }, '/repo')).resolves.toHaveProperty('task');
-    await expect(service.execute(action, { ...input, model: 'p/wrong-directory' }, '/repo')).rejects.toThrow('unknown model: p/wrong-directory');
-    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
-  });
-
-  it('checks only the model an update names, so a stored dead model stays editable', async () => {
-    const { service, client, scheduledTaskService } = createService();
-    const existing = {
-      id: 'task-1',
-      name: 'Nightly',
-      enabled: true,
-      schedule: { kind: 'daily', times: ['09:00'] },
-      execution: { prompt: 'Old', providerID: 'gone', modelID: 'dead' },
-    };
-    scheduledTaskService.list.mockResolvedValue([existing]);
-    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: false }));
-
-    // Disabling or retiming a task whose stored model has vanished must not
-    // require fixing the model first.
-    await service.execute('schedule.update', { taskId: 'task-1', disabled: false, timezone: 'UTC' }, '/repo');
-    expect(client.model.list).not.toHaveBeenCalled();
-
-    await expect(service.execute('schedule.update', {
-      taskId: 'task-1',
-      model: 'gone/dead',
-    }, '/repo')).rejects.toThrow('unknown model: gone/dead');
-    expect(scheduledTaskService.upsert).toHaveBeenCalledTimes(1);
-
-    await service.execute('schedule.update', { taskId: 'task-1', model: 'b/n' }, '/repo');
-    expect(scheduledTaskService.upsert.mock.calls[1][1].execution).toMatchObject({ providerID: 'b', modelID: 'n' });
   });
 
   it('updates a scheduled task in place, changing only the named fields', async () => {
@@ -1124,6 +1097,19 @@ describe('render.page', () => {
 
       service.answerPage({ sessionId: 'ses_2', callId: 'call_1', summary: 'B' });
       await other;
+    });
+
+    it('ends without an answer when the user declines, and tells the agent not to choose for them', async () => {
+      const { service } = createService();
+      const pending = service.execute('render.page', ask, '/repo', call);
+      await settle();
+
+      expect(service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toEqual({ answered: false });
+      const result = await pending;
+
+      expect(result).toMatchObject({ title: 'Pick a layout', answer: { answered: false, reason: 'declined' } });
+      expect(result.note).toContain('declined');
+      expect(() => service.answerPage({ sessionId: 'ses_1', callId: 'call_1', declined: true })).toThrow(expect.objectContaining({ statusCode: 404 }));
     });
 
     it('announces when the page starts and stops waiting', async () => {

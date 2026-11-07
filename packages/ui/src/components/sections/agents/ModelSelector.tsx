@@ -165,6 +165,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             tooltipsEnabled={tooltipsEnabled && (isActuallyMobile ? isMobilePanelOpen : isDropdownOpen)}
             isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
             onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
+            {...(isActuallyMobile ? {
+                autoFocus: false,
+                maxHeightClassName: 'min-h-0 flex-1',
+                providersStartCollapsed: true,
+                showKeyboardHints: false,
+            } : null)}
         />
     );
 
@@ -177,7 +183,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     disabled={!isReady}
                     className={cn(
                         dropdownTriggerVariants({ size: 'mobile' }),
-                        'w-full',
+                        'w-fit max-w-full',
                         className,
                     )}
                 >
@@ -202,6 +208,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     open={isMobilePanelOpen}
                     onClose={closePicker}
                     title={t('settings.agents.modelSelector.title')}
+                    scrollContent={false}
                 >
                     {picker}
                 </MobileOverlayPanel>

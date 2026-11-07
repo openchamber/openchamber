@@ -262,7 +262,7 @@ test('mobile comparisons drill into files, retry, resume, change source, and yie
     nestedIsRepository = false;
     initialDiff = { path: 'nested/', staged: false };
     await render();
-    expect(container.querySelector('h2')?.textContent).toBe('nested/');
+    expect(container.querySelector('h2')?.textContent).toBe('nested');
     expect(container.textContent).not.toContain('Separate Git repository');
     expect(container.textContent).toContain('Content of this file cannot be viewed.');
     await click('[aria-label="Back"]');
@@ -532,11 +532,11 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     const added = container.querySelector('[title="src/added.ts"]')?.closest('button');
     const modified = container.querySelector('[title="src/modified.ts"]')?.closest('button');
     expect(added?.textContent).toContain('A');
-    expect(added?.textContent).toContain('+1 -0');
+    expect(added?.textContent).toContain('+1');
     expect(modified?.textContent).toContain('M');
     expect(modified?.textContent).toContain('+1 -1');
     await openFile('src/added.ts');
-    expect(container.querySelector('h2')?.textContent).toBe('src/added.ts');
+    expect(container.querySelector('h2')?.textContent).toBe('added.ts');
     expect(container.textContent).toContain('Last turn');
     expect(container.textContent).toContain('Content of this file cannot be viewed.');
     await click('[aria-label="Back"]');
@@ -562,14 +562,14 @@ test('mobile changes last turn scope lists the turn diffs, opens one, and shows 
     expect(container.querySelector('[title="src/retried.ts"]')).not.toBeNull();
     // A chip's file opens from Last turn when the turn has it.
     await renderPane({ path: '/repo/src/retried.ts', staged: false, scope: 'turn' });
-    expect(container.querySelector('h2')?.textContent).toBe('src/retried.ts');
+    expect(container.querySelector('h2')?.textContent).toBe('retried.ts');
     expect(container.textContent).toContain('Last turn');
     // Without it the same request lands on Changes, on that file.
     await renderPane({ path: '/repo/src/working.png', staged: false, scope: 'turn' });
-    for (let tick = 0; tick < 20 && container.querySelector('h2')?.textContent !== 'src/working.png'; tick += 1) {
+    for (let tick = 0; tick < 20 && container.querySelector('h2')?.textContent !== 'working.png'; tick += 1) {
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     }
-    expect(container.querySelector('h2')?.textContent).toBe('src/working.png');
+    expect(container.querySelector('h2')?.textContent).toBe('working.png');
     expect(container.textContent).not.toContain('Last turn');
     await click('[aria-label="Back"]');
     expect(container.querySelector('[aria-label="Select change mode"]')?.textContent).toBe('Changes');

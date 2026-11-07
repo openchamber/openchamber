@@ -184,7 +184,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
           title={t('contextUsage.mobile.title')}
         >
           <div className="flex flex-col gap-1.5">
-            <div className="rounded-xl border border-edge-muted bg-sidebar/30 px-3 py-2 space-y-1">
+            <div className="oc-tile rounded-lg px-3 py-2 space-y-1">
               <div className="flex justify-between items-center">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usedTokens')}</span>
                 <span className="typography-meta text-foreground font-medium">{isMeasured ? formatTokens(reading.totalTokens) : UNKNOWN_VALUE}</span>

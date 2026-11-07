@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { useMobileChatInsets } from '@/lib/mobileChatInsets';
+import { MOBILE_HEADER_BUTTON_CLASS, MOBILE_HEADER_CLASS, MOBILE_HEADER_TITLE_CLASS } from '@/components/ui/mobileHeader';
 
 const SURFACE_ROOT_ID = 'mobile-surface-root';
 const ENTER_DELAY_MS = 16;
@@ -207,13 +208,13 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
       {!headerless ? (
         <header
           className={cn(
-            'flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3',
+            MOBILE_HEADER_CLASS,
             !noHeaderBorder && 'border-b border-edge',
           )}
         >
           <button
             type="button"
-            className="-ms-1 flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={MOBILE_HEADER_BUTTON_CLASS}
             aria-label={t('mobile.surface.closeAria')}
             onClick={onClose}
             style={{ touchAction: 'manipulation' }}
@@ -223,7 +224,7 @@ export const MobileFullscreenSurface: React.FC<MobileFullscreenSurfaceProps> = (
           <div className="min-w-0 flex-1 px-1">
             {title ? (
               typeof title === 'string' ? (
-                <h2 className="truncate typography-ui-label text-foreground">{title}</h2>
+                <h2 className={cn('truncate', MOBILE_HEADER_TITLE_CLASS)}>{title}</h2>
               ) : (
                 title
               )

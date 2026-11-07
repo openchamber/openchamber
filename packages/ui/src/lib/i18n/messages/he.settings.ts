@@ -1514,6 +1514,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': 'מרענן נתוני שימוש…',
   'settings.usage.page.header.lastUpdated': 'עדכון אחרון: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'תוכנית: {plan} · עדכון אחרון: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': 'חשבון: {account} · עדכון אחרון: {time}',
   'settings.usage.page.options.showInWorkStatusAria': 'הצג בחלונית מצב העבודה',
   'settings.usage.page.options.showInWorkStatus': 'הצג בחלונית מצב העבודה',
   'settings.usage.page.options.showInWorkStatusTooltip': 'כשהאפשרות פעילה, השימוש בספק הזה יוצג בחלונית מצב העבודה.',

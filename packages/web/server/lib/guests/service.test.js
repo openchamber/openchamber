@@ -34,6 +34,11 @@ http.createServer((req, res) => {
     res.end('no');
     return;
   }
+  if (req.url === '/data-dir') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ dataDir: process.env.OPENCHAMBER_SERVICE_DATA_DIR }));
+    return;
+  }
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
@@ -59,6 +64,26 @@ afterEach(async () => {
 });
 
 describe('guest service proxy', () => {
+  test('gives the service its own data folder, created before the start', async () => {
+    const { dir, persistPath, packageRoot } = await writeFixture();
+    try {
+      const result = await proxyGuestServiceRequest({
+        guestId: 'docker',
+        packageRoot,
+        service: { entry: 'service/main.js' },
+        granted: ['service'],
+        persistPath,
+        method: 'GET',
+        path: '/data-dir',
+      });
+      const { dataDir } = JSON.parse(result.body);
+      expect(dataDir).toBe(path.join(dir, 'guest-data', 'docker'));
+      expect((await fs.stat(dataDir)).isDirectory()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('refuses when permissions need a grant', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
     try {

@@ -19,13 +19,28 @@ other.
   (`../scheduled-tasks/DOCUMENTATION.md`, *Local approval*).
   `schedule.list` also returns scheduler status as `scheduler`.
   `schedule.update` patches a task in place: only the fields the call names
-  change, the id and run state stay, and a task driven by a loop file is
+  change, the id and run history stay, and a task driven by a loop file is
   refused (the file is its source).
+  A standalone `time` changes a once task's time while keeping its date, or a
+  single-time weekly task's time while keeping its weekdays. It must be a
+  nonempty `HH:mm` value. Daily, cron and multi-time weekly tasks require an
+  explicit schedule replacement; incompatible or ambiguous time patches fail
+  before upsert. Omitted timezone inherits the stored timezone through project
+  config normalization, including schedule replacements. An explicit nonempty
+  timezone replaces it. Timezone clearing and creation behavior are unchanged.
+  Rejected patches leave the requested fields, schedule and run history
+  unchanged by the patch. The preceding task list reconciles the scheduler
+  before validation and may persist legitimate state recalculations, including
+  `state.updatedAt`, even when the patch is rejected before upsert. A failed
+  atomic patch write preserves the prior valid snapshot at that write boundary.
+  Scheduler synchronization also follows the save; a failure there retains the
+  committed change on disk.
   `schedule.create` and `schedule.update` accept `targetSessionId`, validated
   by the scheduled-task service. An empty `targetSessionId` on update clears
   the target. Create
-  without a model inherits the target selection; an explicit agent overrides
-  it. A task without a target still requires a model. When a call names a
+  without a model inherits the target selection; a model or agent the task
+  names switches the target session to it on every run, so the tool
+  descriptions say so. A task without a target still requires a model. When a call names a
   model, it is checked against the execution directory's catalog first. The
   scheduled-task service resolves the project checkout or Chats root through
   its storage/public ID mapping. A target task uses the target session's own
@@ -71,7 +86,9 @@ other.
   `awaitAnswer` the action waits in `createPageAnswers`, keyed by session and
   call id, until `answerPage` resolves it (`POST /api/openchamber/render/answer`
   from the chat: a summary of at most 500 characters and data of at most
-  16,000 characters as JSON) or the request is aborted. Nothing outlives the
+  16,000 characters as JSON, or `declined: true` when the user declined, which
+  ends the call with `{ answered: false, reason: "declined" }` and a note that
+  tells the agent not to choose for them) or the request is aborted. Nothing outlives the
   call, so a second answer, an answer for a call that ended, and an answer
   after a server restart are a `404`, never a silent success.
   Before it waits, the action reads the session's OpenCode inbox. A message
@@ -389,6 +406,14 @@ other.
   forwards the action like the rest.
 
 ## Decisions
+
+### Why time-only patches require an unambiguous schedule
+
+A once task has one time and a single-time weekly task has one slot to replace.
+Daily and cron selectors already encode their time, and a multi-time weekly
+task does not identify which slot a standalone `time` should change. Rejecting
+those patches lets callers provide an explicit replacement without silently
+dropping slots or ignoring the requested time.
 
 ### Why a background message waits behind a page and does not end it
 

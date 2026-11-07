@@ -1367,6 +1367,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': '正在重新整理用量...',
   'settings.usage.page.header.lastUpdated': '最後更新：{time}',
   'settings.usage.page.header.lastUpdatedWithPlan': '方案：{plan} · 最後更新：{time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': '帳戶：{account} · 最後更新：{time}',
   'settings.usage.page.options.showInWorkStatusAria': '在工作狀態面板中顯示',
   'settings.usage.page.options.showInWorkStatus': '在工作狀態面板中顯示',
   'settings.usage.page.options.showInWorkStatusTooltip': '啟用後，該供應商的用量會顯示在工作狀態面板中。',

@@ -189,6 +189,7 @@ import { createUnreadBaseline } from './lib/openchamber-sessions/unread-baseline
 import { createTurnDurationRecorder } from './lib/openchamber-sessions/turn-duration.js';
 import { createOpenCodeClient } from './lib/openchamber-sessions/opencode-client.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
+import { createModelCatalogReader } from './lib/scheduled-tasks/model-catalog.js';
 import { createOpenChamberControlService } from './lib/openchamber-control/service.js';
 import { createPluginNotificationEmitter } from './lib/notifications/emit-route.js';
 import { OpenChamberControlError } from './lib/openchamber-control/error.js';
@@ -2001,6 +2002,14 @@ const emitAgentMemoryChangedEvent = (event) => {
     }
   }
 };
+// The catalog a scheduled run resolves its model against, read through the
+// same client the rest of the server uses. Every writer that stores a model
+// goes through the service, so one reader keeps one rule.
+const readModelCatalog = createModelCatalogReader({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  isOpenCodeDirectoryTrusted: (directory) => openCodeTrust.isTrusted(directory),
+});
 const scheduledTaskService = createScheduledTaskService({
   readSettingsFromDiskMigrated,
   sanitizeProjects,
@@ -2008,6 +2017,7 @@ const scheduledTaskService = createScheduledTaskService({
   scheduledTasksRuntime,
   chatsScope: scheduledChatsScope,
   resolvePrimaryWorktreeRoot,
+  readModelCatalog,
 });
 const openChamberSessionService = createOpenChamberSessionService({
   onSessionArchived: (sessionID, archivedAt) => extensionSessionEvents.processPayload({

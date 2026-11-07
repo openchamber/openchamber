@@ -11,7 +11,7 @@ mock.module('vscode', () => ({
   Uri: { file: (fsPath) => ({ fsPath }) },
 }));
 
-const { createWorktree, getWorktreeBootstrapStatus } = await import('./gitService.ts?worktree-bootstrap-test');
+const { createWorktree, previewWorktreeCreate, listGitWorktrees, getWorktreeBootstrapStatus, removeWorktree } = await import('./gitService.ts?worktree-bootstrap-test');
 
 const runGit = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -24,10 +24,15 @@ describe('VS Code worktree bootstrap phases', () => {
     });
   });
 
-  it('runs the start command OpenCode keeps for the project in the new worktree', async () => {
+  it('runs the project start command in a canonical new worktree', async () => {
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-start-'));
     const previousXdgDataHome = process.env.XDG_DATA_HOME;
-    process.env.XDG_DATA_HOME = path.join(scratch, 'data');
+    const previousOpenCodeConfig = process.env.OPENCODE_CONFIG;
+    const realData = path.join(scratch, 'real-data');
+    const aliasData = path.join(scratch, 'alias-data');
+    fs.mkdirSync(realData);
+    fs.symlinkSync(realData, aliasData, process.platform === 'win32' ? 'junction' : 'dir');
+    process.env.XDG_DATA_HOME = path.join(aliasData, 'new-data');
     // The project is a subfolder of the repository: the read goes to that
     // folder, which OpenCode already serves.
     const repository = path.join(scratch, 'repo');
@@ -39,6 +44,7 @@ describe('VS Code worktree bootstrap phases', () => {
     fs.writeFileSync(path.join(projectFolder, 'README.md'), '# Test\n');
     runGit(repository, ['add', 'app/README.md']);
     runGit(repository, ['commit', '-m', 'init']);
+    fs.writeFileSync(path.join(repository, 'opencode.json'), JSON.stringify({ worktree: null }));
 
     const askedFor = [];
     const markerScript = path.join(scratch, 'project-start.cjs');
@@ -51,21 +57,34 @@ describe('VS Code worktree bootstrap phases', () => {
     });
 
     try {
-      const created = await createWorktree(projectFolder, {
+      process.env.OPENCODE_CONFIG = path.join(repository, 'opencode.json');
+      const input = {
         mode: 'new',
         branchName: 'feature/project-start',
         worktreeName: 'project-start',
         returnAfterDirectoryCreated: true,
-      });
+      };
+      const preview = await previewWorktreeCreate(projectFolder, input);
+      const created = await createWorktree(projectFolder, input);
 
       const deadline = Date.now() + 10_000;
       while ((await getWorktreeBootstrapStatus(created.path)).phase !== 'setup-ready' && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      expect(fs.readFileSync(path.join(created.path, 'START_RAN'), 'utf8')).toBe(fs.realpathSync(created.path));
-      expect(askedFor.map((directory) => fs.realpathSync(directory))).toEqual([fs.realpathSync(projectFolder)]);
+      try {
+        const listed = (await listGitWorktrees(repository)).find((entry) => entry.branch === created.branch);
+        expect(listed).toBeDefined();
+        expect(created.path.replaceAll('\\', '/')).toBe(listed.path.replaceAll('\\', '/'));
+        expect(preview.path.replaceAll('\\', '/')).toBe(listed.path.replaceAll('\\', '/'));
+        expect(fs.readFileSync(path.join(created.path, 'START_RAN'), 'utf8')).toBe(fs.realpathSync(created.path));
+        expect(askedFor.map((directory) => fs.realpathSync(directory))).toEqual([fs.realpathSync(projectFolder)]);
+      } finally {
+        await removeWorktree(repository, { directory: created.path });
+      }
     } finally {
       configureProjectStartCommandSource(null);
+      if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
+      else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
       if (previousXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
       else process.env.XDG_DATA_HOME = previousXdgDataHome;
       fs.rmSync(scratch, { recursive: true, force: true });

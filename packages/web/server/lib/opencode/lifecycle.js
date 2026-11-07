@@ -760,11 +760,16 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
     phaseStartedAt = performance.now();
 
+    // The user's variables go over the inherited environment (a PATH entry
+    // in front of the managed PATH) and under everything OpenChamber itself
+    // sets for OpenCode.
+    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
+
     // Re-arm OpenCode's own V1 -> V2 session import for sessions a bundled
     // OpenCode 1.x created after the migration already completed. Only for the
     // managed process, only while it is not running, and never fatal.
     try {
-      const topUp = topUpV1SessionMigration();
+      const topUp = topUpV1SessionMigration({ env: inheritedEnv });
       if (topUp && topUp.status !== 'skipped') {
         console.log('[OpenCode] V1 session migration top-up:', topUp);
       }
@@ -772,10 +777,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
-    // The user's variables go over the inherited environment (a PATH entry
-    // in front of the managed PATH) and under everything OpenChamber itself
-    // sets for OpenCode.
-    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
     // What OpenChamber sets for OpenCode is recorded as injected, so a shell
     // the agent opens can tell it from the user's own variables.
     const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(

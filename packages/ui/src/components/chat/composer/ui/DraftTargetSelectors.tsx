@@ -13,8 +13,9 @@ import React from 'react';
 import { useWidthMorph } from '@/lib/motion/useSizeMorph';
 
 import { Icon } from '@/components/icon/Icon';
-import { Input } from '@/components/ui/input';
+import type { IconName } from '@/components/icon/icons';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { MobileSheetRow, MobileSheetSearch, MobileSheetSection } from '@/components/ui/MobileSheetList';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Popover } from '@base-ui/react/popover';
@@ -618,35 +619,25 @@ export function ProjectPickerSheet({
     }, [open]);
 
     return (
-        <MobileOverlayPanel open={open} title={title} onClose={onClose}>
-            <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-                <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    aria-label={searchPlaceholder}
-                    placeholder={searchPlaceholder}
-                    className="h-9"
-                />
-                <div className="flex flex-col">
-                    {rankByQuery(projects, query, (project) => [getProjectDisplayLabel(project), project.path])
-                        .map((project) => (
-                            <button
-                                key={project.id}
-                                type="button"
-                                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                onClick={() => {
-                                    onSelectProject(project.id);
-                                    onClose();
-                                }}
-                            >
-                                <span className="min-w-0 flex-1"><ProjectLabel project={project} theme={theme} /></span>
-                                {project.id === selectedProjectId ? (
-                                    <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                                ) : null}
-                            </button>
-                        ))}
-                </div>
-            </div>
+        <MobileOverlayPanel
+            open={open}
+            title={title}
+            onClose={onClose}
+            subheader={<MobileSheetSearch value={query} onChange={setQuery} placeholder={searchPlaceholder} />}
+        >
+            {rankByQuery(projects, query, (project) => [getProjectDisplayLabel(project), project.path])
+                .map((project) => (
+                    <MobileSheetRow
+                        key={project.id}
+                        selected={project.id === selectedProjectId}
+                        onClick={() => {
+                            onSelectProject(project.id);
+                            onClose();
+                        }}
+                    >
+                        <ProjectLabel project={project} theme={theme} />
+                    </MobileSheetRow>
+                ))}
         </MobileOverlayPanel>
     );
 }
@@ -705,95 +696,68 @@ export function MobileDraftTargetSheets(
                 open={openPicker === 'branch'}
                 title={t('chat.chatInput.branch')}
                 onClose={() => onOpenPickerChange(null)}
+                subheader={<MobileSheetSearch value={branchQuery} onChange={setBranchQuery} placeholder={t('chat.chatInput.draftPicker.searchBranches')} />}
             >
-                <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
-                    <Input
-                        value={branchQuery}
-                        onChange={(event) => setBranchQuery(event.target.value)}
-                        placeholder={t('chat.chatInput.draftPicker.searchBranches')}
-                        className="h-9"
-                    />
-                    <div className="flex flex-col">
-                        {(() => {
-                            const matches = (label: string) => matchesRankQuery([label], branchQuery);
-                            const selectedValue = selectedDirectory
-                                ?? branchItems[0]?.value
-                                ?? normalizePath(selectedProject.path)
-                                ?? '';
-                            const renderRow = (value: string, label: React.ReactNode, key?: string) => (
-                                <button
-                                    key={key ?? value}
-                                    type="button"
-                                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                    onClick={() => {
-                                        onDirectoryChange(value);
-                                        onOpenPickerChange(null);
-                                    }}
-                                >
-                                    <span className="min-w-0 flex-1 truncate">{label}</span>
-                                    {value === selectedValue ? (
-                                        <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                                    ) : null}
-                                </button>
-                            );
-                            return (
-                                <>
-                                    {projectRootBranchOption && matches(projectRootBranchOption.label) ? (
-                                        <>
-                                            <div className="px-2 pb-1 pt-1.5 text-muted-foreground typography-meta">
-                                                {t('chat.chatInput.projectRoot')}
-                                            </div>
-                                            {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
-                                        </>
-                                    ) : null}
-                                    <div className="my-1 h-px bg-border" />
-                                    <WorktreeCreateActions
-                                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                        onQuick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}
-                                        onCustom={onCreateCustomWorktree ? () => { onOpenPickerChange(null); onCreateCustomWorktree(); } : undefined}
-                                    />
-                                    <div className="my-1 h-px bg-border" />
-                                    <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
-                                        {t('chat.chatInput.worktrees')}
-                                    </div>
-                                    {rankByQuery(worktreeBranchOptions, branchQuery, (option) => [option.label])
-                                        .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
-                                    {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
-                                        ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
-                                        : null}
-                                    {spaceBranchOptions.length > 0 ? (
-                                        <>
-                                            <div className="my-1 h-px bg-border" />
-                                            <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
-                                                {t('spaces.picker.section')}
-                                            </div>
-                                            {rankByQuery(spaceBranchOptions, branchQuery, (option) => [option.label]).map((option) => renderRow(option.value, (
-                                                <span className="inline-flex min-w-0 items-center gap-1.5">
-                                                    <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
-                                                    <span className="truncate">{option.label}</span>
-                                                </span>
-                                            )))}
-                                        </>
-                                    ) : null}
+                {(() => {
+                    const matches = (label: string) => matchesRankQuery([label], branchQuery);
+                    const selectedValue = selectedDirectory
+                        ?? branchItems[0]?.value
+                        ?? normalizePath(selectedProject.path)
+                        ?? '';
+                    const renderRow = (value: string, label: React.ReactNode, key?: string, icon?: IconName) => (
+                        <MobileSheetRow
+                            key={key ?? value}
+                            icon={icon}
+                            selected={value === selectedValue}
+                            onClick={() => {
+                                onDirectoryChange(value);
+                                onOpenPickerChange(null);
+                            }}
+                        >
+                            {label}
+                        </MobileSheetRow>
+                    );
+                    return (
+                        <>
+                            {projectRootBranchOption && matches(projectRootBranchOption.label) ? (
+                                <MobileSheetSection title={t('chat.chatInput.projectRoot')}>
+                                    {renderRow(projectRootBranchOption.value, projectRootBranchOption.label)}
+                                </MobileSheetSection>
+                            ) : null}
+                            <MobileSheetSection title={t('chat.chatInput.worktrees')}>
+                                <MobileSheetRow icon="flashlight" onClick={() => { onOpenPickerChange(null); void createWorktreeDraft(); }}>
+                                    {t('chat.chatInput.worktreeQuick')}
+                                </MobileSheetRow>
+                                {onCreateCustomWorktree ? (
+                                    <MobileSheetRow icon="git-branch" onClick={() => { onOpenPickerChange(null); onCreateCustomWorktree(); }}>
+                                        {t('chat.chatInput.worktreeCustom')}
+                                    </MobileSheetRow>
+                                ) : null}
+                                {rankByQuery(worktreeBranchOptions, branchQuery, (option) => [option.label])
+                                    .map((option) => renderRow(option.value, `${option.pending ? '⏳ ' : ''}${option.label}`))}
+                                {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
+                                    ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
+                                    : null}
+                            </MobileSheetSection>
+                            {spaceBranchOptions.length > 0 || onCreateSpace ? (
+                                <MobileSheetSection title={t('spaces.picker.section')}>
+                                    {rankByQuery(spaceBranchOptions, branchQuery, (option) => [option.label])
+                                        .map((option) => renderRow(option.value, option.label, undefined, 'instance'))}
                                     {onCreateSpace ? (
-                                        <div className="px-2 pb-1 pt-2">
-                                            <button
-                                                type="button"
-                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
-                                                onClick={() => {
-                                                    onOpenPickerChange(null);
-                                                    onCreateSpace();
-                                                }}
-                                            >
-                                                {t('spaces.picker.new')}
-                                            </button>
-                                        </div>
+                                        <MobileSheetRow
+                                            onClick={() => {
+                                                onOpenPickerChange(null);
+                                                onCreateSpace();
+                                            }}
+                                        >
+                                            {t('spaces.picker.new')}
+                                        </MobileSheetRow>
                                     ) : null}
-                                </>
-                            );
-                        })()}
-                    </div>
-                </div>
+                                </MobileSheetSection>
+                            ) : null}
+                        </>
+                    );
+                })()}
             </MobileOverlayPanel>
         </>
     );

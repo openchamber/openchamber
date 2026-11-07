@@ -1515,6 +1515,7 @@ export const settingsDict = {
   'settings.usage.page.header.refreshing': '使用量を更新中...',
   'settings.usage.page.header.lastUpdated': '最終更新: {time}',
   'settings.usage.page.header.lastUpdatedWithPlan': 'プラン: {plan} · 最終更新: {time}',
+  'settings.usage.page.header.lastUpdatedWithAccount': 'アカウント: {account} · 最終更新: {time}',
   'settings.usage.page.options.showInWorkStatusAria': '作業ステータスパネルに表示',
   'settings.usage.page.options.showInWorkStatus': '作業ステータスパネルに表示',
   'settings.usage.page.options.showInWorkStatusTooltip': '有効にすると、このプロバイダーの使用量が作業ステータスパネルに表示されます。',

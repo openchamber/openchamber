@@ -539,9 +539,14 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;
-  the popup itself may open nothing further. Chromium reports `window.open(url)`
-  without window features as a new tab, the same as a target=_blank link, so the
-  session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
+  the popup itself may open nothing further. The popup runs in the panel's
+  session, with its sign-ins and permission rules. Electron gives such a window
+  the session's plain Chrome user agent only on navigations the app starts
+  (electron/electron#45897), so main cancels the popup's first navigation before
+  it is sent and starts it again itself; later navigations keep that agent. A
+  form posted into a new window is not repeated and keeps Electron's agent.
+  Chromium reports `window.open(url)` without window features as a new tab, the
+  same as a target=_blank link, so the session's preload (`browser-panel-preload.cjs`, exposes nothing) marks every
   `window.open` that keeps its opener as a popup. A link aimed at a new tab is
   noopener by default and becomes a panel tab
   (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
@@ -557,6 +562,11 @@ only for a shown, non-minimized window. The read-only
 minimize and restore. Shared quota readouts use it to stop provider refresh in
 hidden windows. Focus changes do not change visibility. Chromium's document
 visibility is insufficient here because desktop disables background throttling.
+
+On macOS, `openchamber:window-resized` asks the renderer to refresh titlebar
+geometry after a resize and when the window enters or leaves fullscreen. Native
+fullscreen transitions can change the titlebar insets without changing window
+bounds.
 
 Renderer code should call the desktop bridge exposed by `preload.mjs`. Do not import Electron from shared UI code.
 

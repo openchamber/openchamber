@@ -87,6 +87,7 @@ import {
   unarchiveSessions as unarchiveSessionsAction,
   updateSessionTitle as updateSessionTitleAction,
   optimisticSend,
+  commitStagedRevert,
   refetchSessionMessages,
   revertToMessage as revertToMessageAction,
   forkFromMessage as forkFromMessageAction,
@@ -246,6 +247,7 @@ export async function routeMessage(params: {
     await params.ready
     assertRuntimeCurrent()
     params.beforeSend?.()
+    await commitStagedRevert(params.sessionId, sendDirectory())
     await opencodeClient.shellSession({
       runtimeKey: params.runtimeKey,
       sessionId: params.sessionId,
@@ -1152,17 +1154,21 @@ const createSessionWithDraftLifecycle = async (
  * user explicitly picked "Default", so the sent value alone cannot tell the two
  * apart, and recording it raw clears a real "Default". The live selection can
  * tell them apart, because its `override` keeps `null` for "Default" — but only
- * while it still describes the agent and model being sent to. Otherwise the
- * send's own value is all there is to go on.
+ * while it still describes the agent and model being sent to, and only for a
+ * send from the main chat, whose composer that selection is: a `/btw` fork or
+ * a chat pinned in the side panel keeps its own level on the same agent and
+ * model. Otherwise the send's own value is all there is to go on.
  */
 const resolveVariantToRecord = (
+  sendsFromMainChat: boolean,
   agentName: string | undefined,
   providerID: string,
   modelID: string,
   sentVariant: string | null | undefined,
 ): string | null | undefined => {
   const config = useConfigStore.getState()
-  const describesThisSend = config.currentProviderId === providerID
+  const describesThisSend = sendsFromMainChat
+    && config.currentProviderId === providerID
     && config.currentModelId === modelID
     && config.currentAgentName === agentName
   return describesThisSend ? config.currentVariantSelection.override : sentVariant
@@ -1327,7 +1333,9 @@ const finishDraftSession = (
 const saveDraftSessionSelection = (sessionId: string, selection: DraftSessionSelection): string | undefined => {
   const configState = useConfigStore.getState()
   const effectiveDraftAgent = trimAgent(selection.agent) ?? configState.currentAgentName
+  // Only the main chat opens a new-session draft.
   const variantOverride = resolveVariantToRecord(
+    true,
     effectiveDraftAgent,
     selection.providerID,
     selection.modelID,
@@ -2448,7 +2456,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           effectiveAgent,
           providerID,
           modelID,
-          resolveVariantToRecord(effectiveAgent, providerID, modelID, variant),
+          resolveVariantToRecord(targetSessionId === get().currentSessionId, effectiveAgent, providerID, modelID, variant),
         )
       }
 

@@ -240,6 +240,16 @@ export function InlineCommentInput({
     save();
   };
 
+  // Three worded actions do not fit one row on a phone; the paperclip reads without its word.
+  const compactAttach = isMobile && Boolean(suggestionCode) && !saveLabel;
+
+  const commentContext = (
+    <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
+      {fileLabel ? <span className="min-w-0 truncate font-medium text-foreground" title={fileLabel}>{baseName(fileLabel)}</span> : null}
+      {rangeLabel ? <span className="shrink-0 whitespace-nowrap">{rangeLabel}</span> : null}
+    </span>
+  );
+
   return (
     <div
       className={cn(
@@ -264,6 +274,7 @@ export function InlineCommentInput({
         )}
       >
         {fieldPicker.picker}
+        {isMobile && !floating ? <div className="px-3 pt-2">{commentContext}</div> : null}
         <textarea
           ref={textareaRef}
           rows={floating ? 1 : 2}
@@ -309,11 +320,11 @@ export function InlineCommentInput({
             <TooltipContent side="top" sideOffset={6}>{t('inlineComment.actions.comment')}</TooltipContent>
           </Tooltip>
         ) : (
+          // A phone has no tooltips and no room for one line: the context heads
+          // the field and the actions say what they do in words.
           <div className="flex min-w-0 items-center gap-1.5 pb-1.5 pe-1.5 ps-3">
-            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-              {fileLabel ? <span className="min-w-0 truncate font-medium text-foreground" title={fileLabel}>{baseName(fileLabel)}</span> : null}
-              {rangeLabel ? <span className="shrink-0 whitespace-nowrap">{rangeLabel}</span> : null}
-            </span>
+            {isMobile ? null : commentContext}
+            <div className={isMobile ? 'flex flex-1 flex-wrap items-center justify-end gap-1.5' : 'contents'}>
             {fileLabel && lineRange ? lineActions.map((entry) => (
               <Tooltip key={`${entry.guest.id}:${entry.action.id}`}>
                 <TooltipTrigger asChild>
@@ -339,7 +350,11 @@ export function InlineCommentInput({
                 <TooltipContent side="top" sideOffset={6}>{entry.action.label}</TooltipContent>
               </Tooltip>
             )) : null}
-            {suggestionCode ? (
+            {suggestionCode && isMobile ? (
+              <Button type="button" variant="ghost" size="sm" className="me-auto shrink-0 px-0 text-muted-foreground" onClick={insertSuggestion}>
+                {t('review.action.suggest')}
+              </Button>
+            ) : suggestionCode ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button type="button" variant="ghost" size="icon" className="size-7 shrink-0 text-muted-foreground" onClick={insertSuggestion} aria-label={t('review.action.suggest')}>
@@ -350,24 +365,26 @@ export function InlineCommentInput({
               </Tooltip>
             ) : null}
             {review ? (
-              <Button type="button" variant="outline" size="xs" className="shrink-0" onClick={() => void addToReview()} disabled={!text.trim() || addingToReview}>
+              <Button type="button" variant="outline" size={isMobile ? 'sm' : 'xs'} className="shrink-0" onClick={() => void addToReview()} disabled={!text.trim() || addingToReview}>
                 {addingToReview ? <Spinner className="size-3.5" /> : null}
                 {t('review.action.addToReview')}
               </Button>
             ) : null}
             <Button
               type="button"
-              size="xs"
+              size={compactAttach ? 'icon' : isMobile ? 'sm' : 'xs'}
               className="shrink-0"
+              aria-label={saveLabel ?? t('review.action.attach')}
               onClick={handleSaveClick}
               onPointerDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
               disabled={!text.trim() || saving}
             >
               {saving ? <Spinner className="size-3.5" /> : saveLabel ? null : <Icon name="attachment-2" className="size-3.5" />}
-              {saveLabel ?? t('review.action.attach')}
+              {compactAttach ? null : saveLabel ?? t('review.action.attach')}
               {isMobile ? null : <span className="text-[0.6875rem] opacity-70">{saveShortcut}</span>}
             </Button>
+            </div>
           </div>
         )}
       </div>

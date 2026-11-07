@@ -318,9 +318,15 @@ instead of riding along with the next prompt, and the reverted user message is
 the first user message at or after the marker. Sending or compacting past the
 marker commits it: OpenCode deletes the boundary message and everything after
 it in one `session.revert.committed` event, with no `message.removed` per
-record. `events.ts` translates it into a `session.revert.committed` sync
-event, which the reducer applies by trimming messages and parts from the
-boundary and dropping the marker in one step, followed by the plain
+record. A UI block answer, a command run from a reply and a `!` command commit
+it first (`commitStagedRevert`): OpenCode admits them past the boundary without
+committing, so the next prompt's commit would delete them, and a block answer
+would not even start a turn. Committing makes the revert final the way a send
+does; refusing that input while a revert is staged would leave the user a block
+they cannot answer and no hint why. `events.ts` translates OpenCode's event
+into a `session.revert.committed` sync event, which the reducer applies by
+trimming messages and parts from the boundary and dropping the marker in one
+step, followed by the plain
 `revert: null` patch the global session list needs. The loaded window is
 always the transcript's tail, so a boundary the window does not hold is
 older than everything loaded: the reducer empties the window when the store's
@@ -473,7 +479,10 @@ Agent selection uses it before old per-agent choices or pinned models.
 agent choices. Both a named effort and explicit `Default` survive reload, with
 the same 150-session persistence bound as the existing selections. Old payloads
 without effort entries remain valid; malformed effort entries grant no authority.
-Session deletion clears these entries. A saved effort choice precedes older
+Session deletion clears these entries. A send saves the effort it carried for
+its session; only a send from the main chat reads the main composer's live
+selection, to tell an explicit Default from no choice, so a `/btw` fork or a
+pinned chat on the main chat's agent and model keeps its own effort. A saved effort choice precedes older
 message history so a reload cannot undo a saved picker change. While a live model
 pick is pending, it and its effort win over external switches. Otherwise the
 session record can switch to another model and effort. The store also

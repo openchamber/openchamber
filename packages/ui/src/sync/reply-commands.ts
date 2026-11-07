@@ -4,6 +4,7 @@ import type { SyncEvent } from '@/lib/opencode/events';
 import { ascendingId } from '@/lib/opencode/ids';
 import { replyCommandContinuation, replyCommandNote, type ReplyCommandNote } from '@/lib/opencode/reply-command';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { commitStagedRevert } from './session-actions';
 
 // Runs started by this client, watched from the event stream: the block that
 // started one may scroll away or its session may close before the command
@@ -52,6 +53,7 @@ export const runReplyCommand = async (params: {
     shellMessageID: ascendingId('msg'),
     continuationID: ascendingId('msg'),
   };
+  await commitStagedRevert(params.sessionId, params.directory);
   await opencodeClient.addSessionNote({ ...replyCommandNote(note), ...target });
   const run: WatchedRun = { note, target };
   watched.set(note.shellMessageID, run);

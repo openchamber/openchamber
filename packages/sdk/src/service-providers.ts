@@ -340,6 +340,12 @@ export const sourceControlProviderTimeoutMs = (method: SourceControlProviderMeth
  * `createNotificationsOutbound` and `createTrackerOutbound` read it.
  */
 export const OPENCHAMBER_HOST_CALLBACK_URL = 'OPENCHAMBER_HOST_CALLBACK_URL';
+/**
+ * Environment variable with the absolute path of the service's own data folder.
+ * The host creates it before the start, keeps it through updates and restarts,
+ * and deletes it when the extension is removed.
+ */
+export const OPENCHAMBER_SERVICE_DATA_DIR = 'OPENCHAMBER_SERVICE_DATA_DIR';
 /** Route on the callback listener a service sends a forge request to. */
 export const SOURCE_CONTROL_OUTBOUND_PATH = '/source-control/outbound';
 export const SOURCE_CONTROL_OUTBOUND_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;

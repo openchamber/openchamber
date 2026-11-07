@@ -212,7 +212,7 @@ export interface OpenCodePolicyConfig {
   policies?: OpenCodePolicyStatement[];
   experimental?: { policies?: OpenCodePolicyStatement[] };
 }
-/** Adds (`disabled`) or removes the exact `skill:<id>` deny in one config object; returns whether it changed. */
+/** Adds (`disabled`) or removes the exact deny for skill `id` (`skill.use`, or legacy `integration.use` `skill:<id>`) in one config object; returns whether it changed. */
 export function writeSkillDisabled(config: OpenCodePolicyConfig, id: string, disabled: boolean): boolean;
 export interface WebSearchConfigLayers {
   userConfig: object | null;

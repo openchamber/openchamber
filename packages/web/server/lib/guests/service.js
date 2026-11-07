@@ -8,6 +8,7 @@ import {
   GUEST_REQUEST_RESPONSE_MAX,
   GUEST_REQUEST_TIMEOUT_MS,
   OPENCHAMBER_HOST_CALLBACK_URL,
+  OPENCHAMBER_SERVICE_DATA_DIR,
   isGuestRequestPath,
 } from '@openchamber/sdk';
 
@@ -22,6 +23,7 @@ import {
   releaseGuestService,
 } from './service-registry.js';
 import { resolveServiceSocketEnv } from './sockets.js';
+import { guestDataDir } from './storage.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const SERVICE_READY_TIMEOUT_MS = 15_000;
@@ -436,6 +438,7 @@ const collectProcessOutput = (child, maxChars = 2_000) => {
  *   entry: string,
  *   socketBindings?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>,
  *   socketOverrides?: Record<string, string>,
+ *   dataDir: string,
  * }} params
  */
 const startGuestService = async ({
@@ -444,6 +447,7 @@ const startGuestService = async ({
   entry,
   socketBindings = [],
   socketOverrides = {},
+  dataDir,
   epoch,
   lifecycle,
 }) => {
@@ -489,6 +493,9 @@ const startGuestService = async ({
   const socketEnv = socketBindings.length > 0
     ? await resolveServiceSocketEnv(socketBindings, socketOverrides)
     : {};
+  await fs.mkdir(dataDir, { recursive: true, mode: 0o700 }).catch(() => {
+    throw new GuestServiceError('The service\'s data folder could not be created.', 'SERVICE_FAILED');
+  });
   if (cancelled()) {
     throw stoppedError();
   }
@@ -496,6 +503,7 @@ const startGuestService = async ({
     ...inheritedServiceEnv(process.env),
     OPENCHAMBER_SERVICE_PORT: String(port),
     [SERVICE_TOKEN_ENV]: token,
+    [OPENCHAMBER_SERVICE_DATA_DIR]: dataDir,
     ELECTRON_RUN_AS_NODE: '1',
   };
   if (Object.keys(socketEnv).length > 0) {
@@ -711,6 +719,7 @@ export const openGuestServiceRequest = async ({
       entry: service.entry,
       socketBindings,
       socketOverrides,
+      dataDir: guestDataDir(persistPath, guestId),
       epoch,
       lifecycle,
     });

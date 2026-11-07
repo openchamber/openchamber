@@ -129,6 +129,8 @@ export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the p
 
 const UI_NOT_DRAWN_NOTE = "The chat could not draw this ui, so the user saw its source instead of fields. Fix the program from the errors below and call again.";
 
+const DECLINED_NOTE = "The user declined to answer on the page. Don't choose for them and don't ask the same question again. Stop here: say in one short line that you left it, and wait for their next message.";
+
 const CHAT_SENT_EARLIER_NOTE = "The page did not wait: the user had already written in the chat before it appeared, and that message follows this result. They wrote it without seeing the page, so it is not an answer to it. Continue from that message; show the page again only if it still fits.";
 
 const pageKey = (sessionId, callId) => `${sessionId}\u0000${callId}`;
@@ -195,6 +197,15 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
         throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
       }
       resolveNotDrawn({ answered: false, reason: 'ui-not-drawn', errors });
+      return { answered: false };
+    }
+    // The user declined: the call ends without an answer they did not mean.
+    if (input.declined === true) {
+      const resolveDeclined = waiting.get(pageKey(sessionId, callId));
+      if (!resolveDeclined) {
+        throw new OpenChamberControlError('This page is no longer waiting for an answer', 404);
+      }
+      resolveDeclined({ answered: false, reason: 'declined' });
       return { answered: false };
     }
     const summary = isString(input.summary) ? input.summary.trim() : '';
@@ -288,6 +299,9 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers, hasUnreadChat }
   const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
   if (answer.reason === 'ui-not-drawn') {
     return { title, answer: { answered: false, reason: 'ui-not-drawn' }, note: [UI_NOT_DRAWN_NOTE, ...answer.errors].join('\n') };
+  }
+  if (answer.reason === 'declined') {
+    return { title, answer, note: DECLINED_NOTE };
   }
   return withHidden({ title, answer }, ANSWERED_NOTE);
 };

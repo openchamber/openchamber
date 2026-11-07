@@ -35,7 +35,11 @@ type SwitcherItemsOptions = {
   currentSessionId?: string | null;
   /** How many parent sessions to return (default 7 — the desktop dropdown). */
   maxParents?: number;
+  /** Plain recency: a pinned session gets no head start. */
+  ignorePins?: boolean;
 };
+
+const NO_PINS = new Set<string>();
 
 const formatProjectLabel = (project: { label?: string | null; path: string } | null): string | null => {
   if (!project) return null;
@@ -107,7 +111,7 @@ export const selectSwitcherParents = (
 };
 
 export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions = {}): SwitcherItem[] => {
-  const { scopeProjectId = null, currentSessionId = null, maxParents = MAX_PARENT_SESSIONS } = options;
+  const { scopeProjectId = null, currentSessionId = null, maxParents = MAX_PARENT_SESSIONS, ignorePins = false } = options;
   const activeSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const projects = useProjectsStore((state) => state.projects);
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
@@ -175,7 +179,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
 
     const parents = selectSwitcherParents(
       activeSessions,
-      pinnedSessionIds,
+      ignorePins ? NO_PINS : pinnedSessionIds,
       sessionOrderRanks,
       scopeProjectId,
       currentSessionId,
@@ -214,7 +218,7 @@ export const useSwitcherItems = (enabled: boolean, options: SwitcherItemsOptions
         },
       };
     });
-  }, [activeSessions, availableWorktreesByProject, branchesByDirectory, currentSessionId, enabled, findProjectForDirectory, isVSCode, maxParents, pinnedSessionIds, projects, scopeProjectId, sessionOrderRanks, worktreeByPath]);
+  }, [activeSessions, availableWorktreesByProject, branchesByDirectory, currentSessionId, enabled, findProjectForDirectory, ignorePins, isVSCode, maxParents, pinnedSessionIds, projects, scopeProjectId, sessionOrderRanks, worktreeByPath]);
 
   return items;
 };
