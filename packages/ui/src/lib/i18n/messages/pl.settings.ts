@@ -490,6 +490,7 @@ export const settingsDict = {
   'settings.mcp.page.actions.starting': 'Uruchamianie...',
   'settings.mcp.page.actions.test': 'Testuj',
   'settings.mcp.page.actions.testConnection': 'Testuj połączenie',
+  'settings.mcp.page.actions.signIn': 'Zaloguj się',
   'settings.mcp.page.actions.signInAgain': 'Zaloguj się ponownie',
   'settings.mcp.page.actions.testing': 'Testowanie...',
   'settings.mcp.page.actions.working': 'Praca...',

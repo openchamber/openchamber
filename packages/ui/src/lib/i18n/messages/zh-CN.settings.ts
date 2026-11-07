@@ -1924,6 +1924,7 @@ export const settingsDict = {
   'settings.mcp.page.actions.clearAuth': '清除授权',
   'settings.mcp.page.actions.test': '测试',
   'settings.mcp.page.actions.testConnection': '测试连接',
+  'settings.mcp.page.actions.signIn': '登录',
   'settings.mcp.page.actions.signInAgain': '重新登录',
   'settings.mcp.page.actions.working': '处理中...',
   'settings.mcp.page.actions.starting': '启动中...',
