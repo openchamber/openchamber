@@ -1447,6 +1447,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': 'ניווט',
   'settings.openchamber.keyboardShortcuts.category.application': 'אפליקציה',
   'settings.openchamber.keyboardShortcuts.actions.edit': 'ערוך',
+  'settings.openchamber.keyboardShortcuts.actions.clear': 'נקה',
   'settings.openchamber.keyboardShortcuts.actions.confirm': 'אישור',
   'settings.openchamber.keyboardShortcuts.dialog.title': 'עריכת {action}',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': "אפשר להקיש עד שני צירופי מקשים, ובכל אחד עד שלושה מקשים. אחרי הצירוף הראשון יש עד 3 שניות להקיש צירוף שני. \"אישור\" מחיל את השינוי ו\"ביטול\" מבטל אותו. Backspace מסיר את הצירוף האחרון.",

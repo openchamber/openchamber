@@ -1318,6 +1318,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': 'Navigation',
   'settings.openchamber.keyboardShortcuts.category.application': 'Application',
   'settings.openchamber.keyboardShortcuts.actions.edit': 'Modifier',
+  'settings.openchamber.keyboardShortcuts.actions.clear': 'Effacer',
   'settings.openchamber.keyboardShortcuts.actions.confirm': 'Confirmer',
   'settings.openchamber.keyboardShortcuts.dialog.title': 'Modifier {action}',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': 'Appuyez sur deux combinaisons de touches au maximum, avec trois touches au plus chacune. Après la première, attendez jusqu’à 3 secondes une seconde combinaison. Utilisez Confirmer pour appliquer ou Annuler pour abandonner. Retour arrière supprime la dernière.',

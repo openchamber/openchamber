@@ -1415,6 +1415,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': '탐색',
   'settings.openchamber.keyboardShortcuts.category.application': '애플리케이션',
   'settings.openchamber.keyboardShortcuts.actions.edit': '편집',
+  'settings.openchamber.keyboardShortcuts.actions.clear': '해제',
   'settings.openchamber.keyboardShortcuts.actions.confirm': '확인',
   'settings.openchamber.keyboardShortcuts.dialog.title': '{action} 편집',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': '키 조합을 최대 두 개까지 누르세요. 각 조합에는 최대 세 개의 키를 사용할 수 있습니다. 첫 번째 조합 뒤에는 두 번째 조합을 위해 최대 3초 동안 기다립니다. 적용하려면 확인을, 취소하려면 취소를 선택하세요. Backspace로 마지막 조합을 삭제합니다.',

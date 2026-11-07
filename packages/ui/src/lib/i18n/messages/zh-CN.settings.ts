@@ -1415,6 +1415,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': '导航',
   'settings.openchamber.keyboardShortcuts.category.application': '应用程序',
   'settings.openchamber.keyboardShortcuts.actions.edit': '编辑',
+  'settings.openchamber.keyboardShortcuts.actions.clear': '清除',
   'settings.openchamber.keyboardShortcuts.actions.confirm': '确认',
   'settings.openchamber.keyboardShortcuts.dialog.title': '编辑{action}',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': '最多输入两个按键组合，每个组合最多同时按下三个按键。输入第一个组合后，最多等待 3 秒以输入第二个组合。点击确认应用，或点击取消放弃；按 Backspace 删除最后一个组合。',

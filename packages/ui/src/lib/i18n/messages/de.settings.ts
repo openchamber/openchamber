@@ -1389,6 +1389,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': 'Navigation',
   'settings.openchamber.keyboardShortcuts.category.application': 'Anwendung',
   'settings.openchamber.keyboardShortcuts.actions.edit': 'Bearbeiten',
+  'settings.openchamber.keyboardShortcuts.actions.clear': 'Löschen',
   'settings.openchamber.keyboardShortcuts.actions.confirm': 'Bestätigen',
   'settings.openchamber.keyboardShortcuts.dialog.title': '{action} bearbeiten',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': 'Drücken Sie bis zu zwei Tastenkombinationen mit jeweils höchstens drei Tasten. Warten Sie nach der ersten bis zu 3 Sekunden auf eine zweite Kombination. Wählen Sie Bestätigen zum Anwenden oder Abbrechen zum Verwerfen. Mit der Rücktaste entfernen Sie die letzte.',

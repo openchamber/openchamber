@@ -1447,6 +1447,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': 'التنقل',
   'settings.openchamber.keyboardShortcuts.category.application': 'التطبيق',
   'settings.openchamber.keyboardShortcuts.actions.edit': 'تعديل',
+  'settings.openchamber.keyboardShortcuts.actions.clear': 'مسح',
   'settings.openchamber.keyboardShortcuts.actions.confirm': 'تأكيد',
   'settings.openchamber.keyboardShortcuts.dialog.title': 'تعديل {action}',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': 'اضغط حتى تركيبتي مفاتيح، بحد أقصى ثلاثة مفاتيح لكل منهما. بعد الأولى، انتظر حتى 3 ثوانٍ للتركيبة الثانية. استخدم «تأكيد» للتطبيق أو «إلغاء» للتجاهل. يزيل Backspace التركيبة الأخيرة.',
