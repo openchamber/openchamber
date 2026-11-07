@@ -18,6 +18,9 @@ import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/us
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { useSessionSearchEffects } from './sidebar/shell/useSessionSearchEffects';
+import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
+import { updateDesktopSettings } from '@/lib/persistence';
+import { useKeybinds } from '@/hooks/useKeybind';
 import { useSessionProjectViewState } from './sidebar/projects/useSessionProjectViewState';
 import { useProjectRepoStatus } from './sidebar/projects/useProjectRepoStatus';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
@@ -38,7 +41,7 @@ import {
 import { resolveProjectForCreatedSession, resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { checkIsGitRepository } from '@/lib/gitApi';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { normalizePath } from './sidebar/utils';
 import { recordWorktreesSeen } from './sidebar/projects/worktreeFirstSeen';
 import { captureRuntimeInstance, getRuntimeKey } from '@/lib/runtime-switch';
@@ -531,6 +534,79 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     [normalizedProjects, projectSortOrder, manualProjectOrder],
   );
   const projectView = useSessionProjectViewState({ isVSCode, projects: sortedProjects });
+
+  useKeybinds({
+    collapse_sessions_all: () => {
+      if (isVSCode) return false;
+      projectView.actions.collapseAll();
+      return true;
+    },
+    expand_sessions_all: () => {
+      if (isVSCode) return false;
+      projectView.actions.expandAll();
+      return true;
+    },
+    // Sessions-pane display controls. Each mirrors its display-menu item and
+    // declines where that item is hidden, letting another registration take
+    // the chord.
+    toggle_chats_section: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = !store.showChatsSection;
+      store.setShowChatsSection(next);
+      void updateDesktopSettings({ sidebarShowChatsSection: next });
+    },
+    toggle_pinned_section: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = !store.showPinnedSection;
+      store.setShowPinnedSection(next);
+      void updateDesktopSettings({ sidebarShowPinnedSection: next });
+    },
+    toggle_work_section: () => {
+      if (isVSCode || !isVisible) return false;
+      if (!useUIStore.getState().sessionWorkEnabled) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = !store.showWorkSection;
+      store.setShowWorkSection(next);
+      void updateDesktopSettings({ sidebarShowWorkSection: next });
+    },
+    toggle_detailed_rows: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = !store.detailedZoneRows;
+      store.setDetailedZoneRows(next);
+      void updateDesktopSettings({ sidebarDetailedZoneRows: next });
+    },
+    toggle_list_grouping: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      const next = resolveSidebarGrouping(store) === 'time' ? 'project' : 'time';
+      store.setSidebarGrouping(next);
+      void updateDesktopSettings({ sidebarGrouping: next });
+    },
+    toggle_project_display: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      if (resolveSidebarGrouping(store) === 'time') return false;
+      const next = store.projectDisplayMode === 'single' ? 'all' : 'single';
+      store.setProjectDisplayMode(next);
+      void updateDesktopSettings({ sidebarProjectDisplayMode: next });
+    },
+    cycle_project_sort: () => {
+      if (isVSCode || !isVisible) return false;
+      const store = useSessionDisplayStore.getState();
+      if (resolveSidebarGrouping(store) === 'time') return false;
+      const order = ['manual', 'a-z', 'z-a', 'date-added', 'recent'] as const;
+      const next = order[(order.indexOf(store.projectSortOrder) + 1) % order.length];
+      store.setProjectSortOrder(next);
+      void updateDesktopSettings({ sidebarProjectSortOrder: next });
+    },
+    toggle_selection_mode: () => {
+      if (isVSCode || !isVisible) return false;
+      useSessionMultiSelectStore.getState().toggleMode();
+    },
+  });
 
   // VS Code has no Archive page: its archived sessions sit inline behind the header toggle.
   const searchEmptyState = React.useMemo(() => (

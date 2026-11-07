@@ -9,6 +9,8 @@ import {
   isShortcutAvailable,
   parseShortcut,
   SHORTCUT_SCHEMA,
+  shortcutMatchesRecordedCombo,
+  UNASSIGNED_SHORTCUT,
   type ShortcutCategory,
 } from './index';
 
@@ -110,13 +112,41 @@ describe('shortcut schema', () => {
     expect(Object.keys(combos)).toHaveLength(10);
   });
 
-  test('every action ships with a default binding', () => {
-    // Palette-only commands live outside this schema entirely; an action in
-    // the schema without a binding would be dead weight in Settings.
-    // Desktop-category actions are the exception: they register as OS-level
-    // global shortcuts, not in-app bindings, so their default is unassigned.
+  test('a digit prefix answers to the prefix plus the digits it accepts', () => {
+    const sessionTab = getShortcutAction('switch_session_tab');
+    const contextSurface = getShortcutAction('switch_context_surface');
+    if (!sessionTab || !contextSurface) throw new Error('Digit-prefix actions missing');
+
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+1')).toBe(true);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+0')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+alt+1')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+a')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(contextSurface, 'mod+alt+0')).toBe(true);
+    expect(shortcutMatchesRecordedCombo(contextSurface, 'mod+1')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'alt+1', { switch_session_tab: 'alt' })).toBe(true);
+    expect(shortcutMatchesRecordedCombo(sessionTab, 'mod+1', { switch_session_tab: UNASSIGNED_SHORTCUT })).toBe(false);
+  });
+
+  test('a sequence answers to its second key with the leader modifiers held', () => {
+    const archive = getShortcutAction('archive_current_session');
+    const bulkDelete = getShortcutAction('sessions_bulk_delete');
+    if (!archive || !bulkDelete) throw new Error('Actions missing');
+
+    expect(shortcutMatchesRecordedCombo(archive, 'mod+k backspace')).toBe(true);
+    expect(shortcutMatchesRecordedCombo(archive, 'mod+k mod+backspace')).toBe(true);
+    expect(shortcutMatchesRecordedCombo(archive, 'mod+k mod+shift+backspace')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(archive, 'mod+j mod+backspace')).toBe(false);
+    expect(shortcutMatchesRecordedCombo(bulkDelete, 'mod+k mod+backspace')).toBe(false);
+  });
+
+  test('every action ships with a default binding or is explicitly unassigned', () => {
+    // A customizable action may use UNASSIGNED_SHORTCUT when it stays off until
+    // the user assigns it. Desktop-category actions are the other exception:
+    // they register as OS-level global shortcuts, not in-app bindings, so their
+    // default is unassigned.
     for (const action of SHORTCUT_SCHEMA) {
       if (action.category === 'desktop') continue;
+      if (action.defaultBinding === UNASSIGNED_SHORTCUT) continue;
       expect(getEffectiveShortcutCombo(action.id)).not.toBe('');
     }
   });
