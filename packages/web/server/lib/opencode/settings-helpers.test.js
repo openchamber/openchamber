@@ -283,6 +283,16 @@ describe('settings helpers', () => {
     expect(helpers.formatSettingsResponse({ editorFontSize: 20 })).toMatchObject({ editorFontSize: 20 });
   });
 
+  it('sanitizes and returns the persisted chat font size', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ chatFontSize: 117.4 })).toEqual({ chatFontSize: 117 });
+    expect(helpers.sanitizeSettingsUpdate({ chatFontSize: 20 })).toEqual({ chatFontSize: 50 });
+    expect(helpers.sanitizeSettingsUpdate({ chatFontSize: 300 })).toEqual({ chatFontSize: 200 });
+    expect(helpers.sanitizeSettingsUpdate({ chatFontSize: Number.NaN })).toEqual({});
+    expect(helpers.formatSettingsResponse({ chatFontSize: 120 })).toMatchObject({ chatFontSize: 120 });
+  });
+
   it('accepts messageStreamTransport as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -914,7 +924,7 @@ describe('settings registry gate', () => {
     allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
     largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
-    fontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', uiFontWeight: 'balanced', padding: 100, cornerRadius: 8,
+    fontSize: 100, chatFontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', uiFontWeight: 'balanced', padding: 100, cornerRadius: 8,
     shortcutOverrides: { 'chat.send': 'mod+enter' },
     defaultModel: 'anthropic/claude', defaultVariant: 'high', defaultAgent: 'build', smallModelUseDefault: false, smallModelOverride: 'anthropic/haiku', smallModelVariant: 'high',
     walkthroughModelOverride: 'anthropic/claude', walkthroughModelVariant: 'high', zenModel: 'zen/model', fallbackModel: 'openai/gpt', fallbackVariant: 'high', accountSwitchProviders: ['anthropic'],
