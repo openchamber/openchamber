@@ -275,6 +275,13 @@ describe('waiting for a call to settle in the background', () => {
     expect(await wait.settled).toBe('ended');
   });
 
+  test('resolves ended when a list read no longer has the command', async () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
+    const wait = waitForShellSettle('sh_1', 1000);
+    replaceDirectoryShells('/repo', [], backgroundShellRevision());
+    expect(await wait.settled).toBe('ended');
+  });
+
   test('a settle and an end in one batch resolve background, with the command already gone from the index', async () => {
     applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
     const wait = waitForShellSettle('sh_1', 1000);

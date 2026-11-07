@@ -38,6 +38,9 @@ const unmarkStopping = (shellID: string): void => {
 };
 
 /** Whether a Stop of this command, started while the turn waited for it, is on its way or done. */
+export const isForegroundShellStopping = (shellID: string): boolean => useStoppingShells.getState().ids.has(shellID);
+
+/** `isForegroundShellStopping` for rendering: the other Stops of the command stay off while it runs. */
 export const useForegroundShellStopping = (shellID: string | undefined): boolean => (
   useStoppingShells(useCallback((state) => (shellID ? state.ids.has(shellID) : false), [shellID]))
 );

@@ -282,6 +282,8 @@ export const replaceDirectoryShells = (rawDirectory: string, shells: readonly Ru
     draft.set(shell.id, shell);
   }
   if (draft) publish(draft, ended.length > 0 ? withEnded(state.ended, ended) : null);
+  // A command whose end fell into a stream gap ended all the same.
+  for (const shell of ended) settleWaiters.get(shell.id)?.resolve('ended');
 };
 
 export const backgroundShellRevision = (): number => revision;
