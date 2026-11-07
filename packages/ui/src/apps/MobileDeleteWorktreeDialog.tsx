@@ -11,6 +11,7 @@ import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import { canDeleteWorktreeBranch, getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree, type ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { archiveSessionsThenRemoveWorktree, deleteWithoutTeardownToast } from '@/lib/worktrees/worktreeRemovalFlow';
+import { checkoutHoldsDirectory } from '@/lib/worktrees/worktreePaths';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { withSessionsNowInWorktree } from '@/lib/worktrees/worktreeUse';
 import { BoundGitNetworkOperationError, GitOperationResultError } from '@/lib/boundGitNetworkOperation';
@@ -79,12 +80,14 @@ export const MobileDeleteWorktreeDialog: React.FC<MobileDeleteWorktreeDialogProp
     };
   }, [open, project.path, worktreeBranch, worktreePath]);
 
-  // Match the desktop behavior by archiving, rather than deleting, linked sessions.
+  // The sessions working in the worktree, its subfolders included: a session
+  // left out would point at a folder that is gone.
   const linkedSessions = React.useMemo(() => {
     if (!worktreePath) return [] as Session[];
     const merged = new Map<string, Session>();
     for (const session of [...globalActiveSessions, ...liveSessions]) {
-      if (getSessionDirectory(session) === worktreePath) merged.set(session.id, session);
+      const directory = getSessionDirectory(session);
+      if (directory && checkoutHoldsDirectory(worktreePath, directory)) merged.set(session.id, session);
     }
     return Array.from(merged.values());
   }, [globalActiveSessions, liveSessions, worktreePath]);
