@@ -508,6 +508,73 @@ describe('input-needed notification for an MCP elicitation', () => {
   });
 });
 
+describe('notification project through the trigger runtime', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('names the project of the session record, not the active project', async () => {
+    const settings = {
+      nativeNotificationsEnabled: true,
+      notificationMode: 'always',
+      notifyOnCompletion: true,
+      locale: 'en',
+      activeProjectId: 'project-a',
+      projects: [
+        { id: 'project-a', label: 'Project A', path: '/work/project-a' },
+        { id: 'project-b', label: 'Project B', path: '/work/project-b' },
+      ],
+      notificationTemplates: {
+        completion: { title: '{project_name} · {session_name}', message: '{last_message}' },
+      },
+    };
+    const readSettingsFromDisk = async () => settings;
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/session/active') return Response.json({ data: {} });
+      if (url.pathname === '/api/session') return Response.json({ data: [], cursor: {} });
+      if (url.pathname === '/api/session/ses_b') {
+        return Response.json({ data: { id: 'ses_b', title: 'Session B', parentID: null, location: { directory: '/work/project-b' } } });
+      }
+      return new Response(null, { status: 404 });
+    }));
+
+    const templates = createNotificationTemplateRuntime({
+      readSettingsFromDisk,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      resolveGitBinaryForSpawn: () => 'git',
+    });
+    const emitDesktopNotification = vi.fn(() => true);
+    const runtime = createNotificationTriggerRuntime({
+      readSettingsFromDisk,
+      readSessionMetadata: async () => ({}),
+      prepareNotificationLastMessage: async ({ message }) => message,
+      buildTemplateVariables: templates.buildTemplateVariables,
+      extractLastMessageText: () => 'done',
+      fetchLastAssistantMessageText: async () => 'done',
+      resolveNotificationTemplate: templates.resolveNotificationTemplate,
+      shouldApplyResolvedTemplateMessage: templates.shouldApplyResolvedTemplateMessage,
+      emitDesktopNotification,
+      broadcastUiNotification: vi.fn(),
+      sendPushToAllUiSessions: vi.fn(async () => undefined),
+      sendApnsToAllUiSessions: vi.fn(async () => undefined),
+      isAnyInteractiveClientVisible: () => true,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getOpenCodeAuthHeaders: () => ({}),
+    });
+
+    await runtime.maybeSendPushForTrigger(stepStarted('ses_b', 'msg_b'));
+    await runtime.maybeSendPushForTrigger(turnEnded('ses_b'));
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({
+      kind: 'ready',
+      title: 'Project B · Session B',
+    });
+  });
+});
+
 describe('notifications for a chat of an isolated space', () => {
   // The chat lives in the OpenCode inside the space; the host's OpenCode answers 404 for it.
   const SPACE = '32aa0c80b805';

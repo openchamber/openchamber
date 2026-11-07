@@ -54,6 +54,7 @@ export const createNotificationTriggerRuntime = (deps) => {
         buildOpenCodeUrl: (fetchPath) => `http://space${fetchPath}`,
         getOpenCodeAuthHeaders: () => ({}),
         fetchImpl: spaceFetchFor(spaceId) ?? unreachableSpaceFetch,
+        isSpace: true,
       }
     : hostSource);
   const hostActivityProbe = createSessionActivityProbe({ ...hostSource, timeoutMs: 2000 });
