@@ -771,7 +771,11 @@ export const ContextSurfacePanes: React.FC = () => {
             interactive={interactive[pluginZone.zone]}
             isOpen={pluginZone.isOpen}
             hidden={contentHidden(pluginZone.zone)}
-            className={cn('absolute inset-0', shown ? 'block' : 'hidden')}
+            // Invisible rather than display:none, like the browser tabs
+            // above: toggling display on a sandboxed iframe drops its
+            // compositing layer and the first frame after it is shown again
+            // is just the host surface (issue #6087).
+            className={cn('absolute inset-0', !shown && 'invisible pointer-events-none')}
           >
             <React.Suspense fallback={null}>
               {!sharedSurface ? (
