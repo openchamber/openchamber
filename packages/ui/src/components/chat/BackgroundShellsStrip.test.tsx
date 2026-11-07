@@ -11,6 +11,7 @@ import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
 import { BackgroundShellsStrip } from './BackgroundShellsStrip';
+import { stopForegroundShell } from './message/parts/foregroundShellStop';
 
 const session = (id: string, parentID?: string): Session => ({
   id, parentID, projectID: 'project', directory: '/repo', title: id, cost: 0,
@@ -167,6 +168,38 @@ describe('BackgroundShellsStrip', () => {
       ]);
       expect(button('Stop all')?.disabled).toBe(true);
     } finally {
+      stop.mockRestore();
+    }
+  });
+
+  test('a command its chat row is stopping offers no second stop here', async () => {
+    const waited = shell('sh_waited', 'ses_root', 'bun run test');
+    // The row's stop moved the call to the background and is still on its way.
+    const background = spyOn(opencodeClient, 'backgroundSessionWork').mockImplementation(() => {
+      applyBackgroundShellEvents('/repo', [{
+        type: 'message.tool.transition',
+        properties: {
+          sessionID: 'ses_root', messageID: 'msg_1', partID: 'call_sh_waited',
+          transition: { kind: 'success', output: '', metadata: { status: 'running', shellID: 'sh_waited' }, executed: true, end: 2 },
+        },
+      }]);
+      return new Promise<void>(() => {});
+    });
+    const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
+    try {
+      await act(async () => { applyBackgroundShellEvents('/repo', [startEvent(waited)]); });
+      await act(async () => { void stopForegroundShell({ sessionID: 'ses_root', sessionDirectory: '/repo', shell: { shellID: 'sh_waited', shellDirectory: '/repo', command: 'bun run test' } }); });
+      expect(button('Stop')?.disabled).toBe(true);
+
+      await start(shell('sh_dev', 'ses_root', 'bun run dev'));
+      await act(async () => button('Stop all')?.click());
+      expect(stop.mock.calls).toEqual([[{
+        sessionID: 'ses_root',
+        sessionDirectory: '/repo',
+        shells: [{ shellID: 'sh_dev', shellDirectory: '/repo', command: 'bun run dev' }],
+      }]]);
+    } finally {
+      background.mockRestore();
       stop.mockRestore();
     }
   });

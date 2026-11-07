@@ -16,6 +16,7 @@ import {
   useBackgroundShellsStore,
   type TrackedShell,
 } from '@/sync/background-shells';
+import { isForegroundShellStopping, useForegroundShellStopping } from './message/parts/foregroundShellStop';
 
 interface BackgroundShellsStripProps {
   sessionId: string | null;
@@ -68,7 +69,8 @@ const useStopShells = (rootSessionId: string, rootDirectory: string | undefined)
   const [stoppingIds, setStoppingIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
   const stop = React.useCallback((shells: readonly TrackedShell[]) => {
-    const pending = shells.filter((shell) => !stoppingIds.has(shell.id));
+    // A command its chat row is stopping already gets no second note.
+    const pending = shells.filter((shell) => !stoppingIds.has(shell.id) && !isForegroundShellStopping(shell.id));
     if (pending.length === 0) return;
     setStoppingIds((current) => new Set([...current, ...pending.map((shell) => shell.id)]));
     const bySession = new Map<string, [TrackedShell, ...TrackedShell[]]>();
@@ -109,6 +111,7 @@ const ShellRow: React.FC<{
   onStop: (shell: TrackedShell) => void;
 }> = ({ shell, fromSubagent, stopping, onStop }) => {
   const { t } = useI18n();
+  const stoppingFromRow = useForegroundShellStopping(shell.id);
 
   return (
     <div className="flex oc-composer-row items-center gap-2 ps-3 pe-1.5">
@@ -138,7 +141,7 @@ const ShellRow: React.FC<{
               type="button"
               variant="ghost"
               size="sm"
-              disabled={stopping}
+              disabled={stopping || stoppingFromRow}
               onClick={() => onStop(shell)}
               onMouseDown={(event) => event.preventDefault()}
               aria-label={t('chat.backgroundShells.stopAria', { command: shell.command })}
