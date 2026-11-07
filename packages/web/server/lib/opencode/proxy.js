@@ -213,7 +213,7 @@ const directoriesAsOpenCodeReadsThem = (req, url) => {
       try {
         directory = decodeURIComponent(header);
       } catch {
-        // OpenCode rejects a malformed value; nothing to match.
+        // OpenCode falls back to the raw header if decoding fails.
       }
     }
     directories.push(directory);
@@ -232,9 +232,16 @@ export const normalizeForwardedDirectoryHeaders = (headers) => {
   }
 
   try {
-    headers['x-opencode-directory'] = decodeURIComponent(rawDirectory);
+    const decodedDirectory = decodeURIComponent(rawDirectory);
+    try {
+      http.validateHeaderValue('x-opencode-directory', decodedDirectory);
+    } catch {
+      // OpenCode can decode this value, but Node cannot carry it as a raw header.
+      return headers;
+    }
+    headers['x-opencode-directory'] = decodedDirectory;
   } catch {
-    // Leave malformed values untouched; upstream will reject invalid paths.
+    // OpenCode falls back to the raw value when URI decoding fails.
   }
   delete headers['x-opencode-directory-encoding'];
   return headers;
@@ -1112,9 +1119,7 @@ export const registerOpenCodeProxy = (app, deps) => {
    * cannot be read.
    */
   const checkoutGateFolders = async (req, res, url) => {
-    const folders = [];
-    const named = url.searchParams.get('directory') || req.get('x-opencode-directory');
-    if (named) folders.push(named);
+    const folders = directoriesAsOpenCodeReadsThem(req, url).filter(Boolean);
     const movedSessionID = sessionMoveOf(req.method, new URL(req.originalUrl || req.url, 'http://localhost').pathname);
     if (!movedSessionID) return { folders };
     let source;
@@ -1323,18 +1328,6 @@ export const registerOpenCodeProxy = (app, deps) => {
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {
           proxyReq.setHeader('Authorization', authHeaders.Authorization);
-        }
-
-        if (req.headers?.['x-opencode-directory-encoding'] === 'uri') {
-          const rawDirectory = req.headers['x-opencode-directory'];
-          if (typeof rawDirectory === 'string') {
-            try {
-              proxyReq.setHeader('x-opencode-directory', decodeURIComponent(rawDirectory));
-            } catch {
-              proxyReq.setHeader('x-opencode-directory', rawDirectory);
-            }
-          }
-          proxyReq.removeHeader?.('x-opencode-directory-encoding');
         }
 
         // Defensive: request identity encoding from upstream OpenCode.
