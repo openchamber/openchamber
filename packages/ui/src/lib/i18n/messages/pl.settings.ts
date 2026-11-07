@@ -1775,6 +1775,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': 'Oczekiwanie na autoryzację…',
   'settings.providers.page.auth.oauth.waitingHint': 'Dokończ logowanie w przeglądarce. Zostaw tę stronę otwartą — połączenie zakończy się samo.',
   'settings.providers.page.auth.oauth.codeHint': 'Skopiuj kod autoryzacji z przeglądarki i wklej go tutaj.',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': 'Jeśli przeglądarka zatrzyma się na stronie, która się nie otwiera, skopiuj jej adres i wklej go tutaj.',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': 'Wklej adres z przeglądarki',
   'settings.providers.page.auth.oauth.deviceCodeLabel': 'Kod urządzenia',
   'settings.providers.page.auth.oauth.linkLabel': 'Link autoryzacyjny',
   'settings.providers.page.auth.oauth.promptRequired': 'Wypełnij pole „{field}”, aby kontynuować',

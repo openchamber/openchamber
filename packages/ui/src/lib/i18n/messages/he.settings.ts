@@ -1862,6 +1862,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': 'ממתין להרשאה…',
   'settings.providers.page.auth.oauth.waitingHint': 'יש להשלים את ההתחברות בדפדפן. כדאי להשאיר את הדף הזה פתוח — החיבור יושלם מעצמו.',
   'settings.providers.page.auth.oauth.codeHint': 'יש להעתיק את קוד ההרשאה מהדפדפן ולהדביק אותו כאן.',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': 'אם הדפדפן נעצר בדף שלא נפתח, העתיקו את הכתובת של הדף והדביקו אותה כאן.',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': 'הדביקו את הכתובת מהדפדפן',
   'settings.providers.page.auth.oauth.deviceCodeLabel': 'קוד מכשיר',
   'settings.providers.page.auth.oauth.linkLabel': 'קישור הרשאה',
   'settings.providers.page.auth.oauth.promptRequired': 'יש למלא את “{field}” כדי להמשיך',

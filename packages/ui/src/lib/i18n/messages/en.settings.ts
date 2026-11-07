@@ -1864,6 +1864,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': 'Waiting for authorization…',
   'settings.providers.page.auth.oauth.waitingHint': 'Finish signing in in your browser. Keep this page open — the connection completes on its own.',
   'settings.providers.page.auth.oauth.codeHint': 'Copy the authorization code from your browser and paste it here.',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': 'If the browser ends up on a page that won\'t open, copy that page\'s address and paste it here.',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': 'Paste the address from the browser',
   'settings.providers.page.auth.oauth.deviceCodeLabel': 'Device code',
   'settings.providers.page.auth.oauth.linkLabel': 'Authorization link',
   'settings.providers.page.auth.oauth.promptRequired': 'Fill in “{field}” to continue',

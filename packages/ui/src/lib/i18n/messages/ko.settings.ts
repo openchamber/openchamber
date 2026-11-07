@@ -1838,6 +1838,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': '인증을 기다리는 중…',
   'settings.providers.page.auth.oauth.waitingHint': '브라우저에서 로그인을 완료하세요. 이 페이지를 열어 두면 연결이 자동으로 완료됩니다.',
   'settings.providers.page.auth.oauth.codeHint': '브라우저에서 인증 코드를 복사해 여기에 붙여넣으세요.',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': '브라우저가 열리지 않는 페이지에서 멈추면 그 페이지의 주소를 복사해 여기에 붙여 넣으세요.',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': '브라우저의 주소 붙여 넣기',
   'settings.providers.page.auth.oauth.deviceCodeLabel': '기기 코드',
   'settings.providers.page.auth.oauth.linkLabel': '인증 링크',
   'settings.providers.page.auth.oauth.promptRequired': '계속하려면 “{field}”을(를) 입력하세요',

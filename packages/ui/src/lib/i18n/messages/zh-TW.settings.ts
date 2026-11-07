@@ -1716,6 +1716,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': '正在等待授權…',
   'settings.providers.page.auth.oauth.waitingHint': '請在瀏覽器中完成登入。保持此頁面開啟，連線會自動完成。',
   'settings.providers.page.auth.oauth.codeHint': '從瀏覽器複製授權碼並貼上到這裡。',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': '如果瀏覽器停在一個打不開的頁面上，請複製該頁面的網址並貼到這裡。',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': '貼上瀏覽器中的網址',
   'settings.providers.page.auth.oauth.deviceCodeLabel': '裝置碼',
   'settings.providers.page.auth.oauth.linkLabel': '授權連結',
   'settings.providers.page.auth.oauth.promptRequired': '請填寫「{field}」後繼續',

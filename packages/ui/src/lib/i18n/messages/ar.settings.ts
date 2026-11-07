@@ -1862,6 +1862,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': 'بانتظار التفويض…',
   'settings.providers.page.auth.oauth.waitingHint': 'أكمل تسجيل الدخول في المتصفح. أبقِ هذه الصفحة مفتوحة — سيكتمل الاتصال تلقائيًا.',
   'settings.providers.page.auth.oauth.codeHint': 'انسخ رمز التفويض من المتصفح والصقه هنا.',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': 'إذا انتهى المتصفح على صفحة لا تُفتح، فانسخ عنوان تلك الصفحة والصقه هنا.',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': 'الصق العنوان من المتصفح',
   'settings.providers.page.auth.oauth.deviceCodeLabel': 'رمز الجهاز',
   'settings.providers.page.auth.oauth.linkLabel': 'رابط التفويض',
   'settings.providers.page.auth.oauth.promptRequired': 'املأ «{field}» للمتابعة',

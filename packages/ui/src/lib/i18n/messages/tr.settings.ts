@@ -1728,6 +1728,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': 'Yetkilendirme bekleniyor…',
   'settings.providers.page.auth.oauth.waitingHint': 'Tarayıcınızda oturum açmayı tamamlayın. Bu sayfayı açık tutun — bağlantı kendi kendine tamamlanır.',
   'settings.providers.page.auth.oauth.codeHint': 'Yetkilendirme kodunu tarayıcınızdan kopyalayıp buraya yapıştırın.',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': 'Tarayıcı açılmayan bir sayfada kalırsa o sayfanın adresini kopyalayıp buraya yapıştırın.',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': 'Tarayıcıdaki adresi yapıştırın',
   'settings.providers.page.auth.oauth.deviceCodeLabel': 'Cihaz kodu',
   'settings.providers.page.auth.oauth.linkLabel': 'Yetkilendirme bağlantısı',
   'settings.providers.page.auth.oauth.promptRequired': 'Devam etmek için “{field}” alanını doldurun',

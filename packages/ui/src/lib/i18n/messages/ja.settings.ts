@@ -1871,6 +1871,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': '認証を待っています…',
   'settings.providers.page.auth.oauth.waitingHint': 'ブラウザーでサインインを完了してください。このページは開いたままにしてください。接続は自動的に完了します。',
   'settings.providers.page.auth.oauth.codeHint': 'ブラウザーから認証コードをコピーして、ここに貼り付けてください。',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': 'ブラウザーが開けないページで止まった場合は、そのページのアドレスをコピーしてここに貼り付けてください。',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': 'ブラウザーのアドレスを貼り付け',
   'settings.providers.page.auth.oauth.deviceCodeLabel': 'デバイスコード',
   'settings.providers.page.auth.oauth.linkLabel': '認証リンク',
   'settings.providers.page.auth.oauth.promptRequired': '続行するには「{field}」を入力してください',

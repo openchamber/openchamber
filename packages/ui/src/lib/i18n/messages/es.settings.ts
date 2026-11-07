@@ -1815,6 +1815,8 @@ export const settingsDict = {
   "settings.providers.page.auth.oauth.waiting": "Esperando la autorización…",
   "settings.providers.page.auth.oauth.waitingHint": "Termina de iniciar sesión en el navegador. Mantén esta página abierta: la conexión se completará sola.",
   "settings.providers.page.auth.oauth.codeHint": "Copia el código de autorización del navegador y pégalo aquí.",
+  "settings.providers.page.auth.oauth.pasteRedirectHint": "Si el navegador termina en una página que no se abre, copia su dirección y pégala aquí.",
+  "settings.providers.page.auth.oauth.pasteRedirectPlaceholder": "Pega la dirección del navegador",
   "settings.providers.page.auth.oauth.deviceCodeLabel": "Código del dispositivo",
   "settings.providers.page.auth.oauth.linkLabel": "Enlace de autorización",
   "settings.providers.page.auth.oauth.promptRequired": "Completa «{field}» para continuar",

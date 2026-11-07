@@ -1865,6 +1865,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': 'Wachten op autorisatie…',
   'settings.providers.page.auth.oauth.waitingHint': 'Rond het aanmelden in uw browser af. Laat deze pagina open — de verbinding wordt vanzelf voltooid.',
   'settings.providers.page.auth.oauth.codeHint': 'Kopieer de autorisatiecode uit uw browser en plak die hier.',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': 'Komt de browser uit op een pagina die niet opent, kopieer dan het adres van die pagina en plak het hier.',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': 'Plak het adres uit de browser',
   'settings.providers.page.auth.oauth.deviceCodeLabel': 'Apparaatcode',
   'settings.providers.page.auth.oauth.linkLabel': 'Autorisatielink',
   'settings.providers.page.auth.oauth.promptRequired': 'Vul “{field}” in om door te gaan',

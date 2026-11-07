@@ -1815,6 +1815,8 @@ export const settingsDict = {
   "settings.providers.page.auth.oauth.waiting": "Очікуємо на авторизацію…",
   "settings.providers.page.auth.oauth.waitingHint": "Завершіть вхід у браузері. Не закривайте цю сторінку — підключення завершиться саме.",
   "settings.providers.page.auth.oauth.codeHint": "Скопіюйте код авторизації з браузера і вставте його сюди.",
+  "settings.providers.page.auth.oauth.pasteRedirectHint": "Якщо браузер зупиниться на сторінці, яка не відкривається, скопіюйте її адресу і вставте сюди.",
+  "settings.providers.page.auth.oauth.pasteRedirectPlaceholder": "Вставте адресу з браузера",
   "settings.providers.page.auth.oauth.deviceCodeLabel": "Код пристрою",
   "settings.providers.page.auth.oauth.linkLabel": "Посилання для авторизації",
   "settings.providers.page.auth.oauth.promptRequired": "Заповніть «{field}», щоб продовжити",

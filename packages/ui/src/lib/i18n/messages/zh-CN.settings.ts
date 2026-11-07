@@ -1838,6 +1838,8 @@ export const settingsDict = {
   'settings.providers.page.auth.oauth.waiting': '正在等待授权…',
   'settings.providers.page.auth.oauth.waitingHint': '请在浏览器中完成登录。保持此页面打开，连接会自动完成。',
   'settings.providers.page.auth.oauth.codeHint': '从浏览器复制授权码并粘贴到此处。',
+  'settings.providers.page.auth.oauth.pasteRedirectHint': '如果浏览器停在一个打不开的页面上，请复制该页面的地址并粘贴到这里。',
+  'settings.providers.page.auth.oauth.pasteRedirectPlaceholder': '粘贴浏览器中的地址',
   'settings.providers.page.auth.oauth.deviceCodeLabel': '设备码',
   'settings.providers.page.auth.oauth.linkLabel': '授权链接',
   'settings.providers.page.auth.oauth.promptRequired': '请填写“{field}”后继续',
