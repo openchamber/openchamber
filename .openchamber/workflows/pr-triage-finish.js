@@ -11,9 +11,9 @@ export const meta = {
 // READY PR after the maintainer's go, which rebases onto current main first.
 const SKILL = '.agents/skills/triage-prs/SKILL.md';
 const SOL = 'openai/gpt-6.1-sol';
-// The review runs on another model than the fix, so it reads what Sol read past.
+// The review runs on another model than the fix, so it reads what Opus read past.
 const OPUS = 'claude-agent/opus#medium';
-const models = { fix: SOL, review: OPUS, apply: SOL, ...(args.models || {}) };
+const models = { fix: OPUS, review: SOL, apply: OPUS, ...(args.models || {}) };
 const requested = Array.isArray(args.prs) ? args.prs : [];
 if (requested.length === 0 || !requested.every((number) => Number.isInteger(number) && number > 0)) {
   throw new Error('args.prs is required: a list of positive integer PR numbers');

@@ -92,6 +92,7 @@ Hold build-heavy agents to about 3 at a time on a laptop with a limiter in the s
 - **A dropped concern is checked in the whole diff.** Conflict hunks are not the whole PR: auto-merged hunks of a concern you decided to leave out still land. Before finishing, grep the staged diff for that concern by its own terms.
 - **Review findings on the branch are verified, not obeyed.** Read every unresolved bot and reviewer comment against the current head: one a later push fixed or made moot is done, the rest stand however old they are. Answer each finding the way `openchamber-change-discipline` (*Answering Review Findings*) says, and a finding you decline gets a written reason in the PR, so the next reader does not raise it again.
 - **A red check is read before it is believed.** Find which check failed: the review bot's `automation` job failing means the bot did not run, and a test that fails on the PR but passes on current `main` is a stale run, not the PR.
+- **A PR that must not close its issue says `Part of #N`.** Dropping the link from the body makes the contribution gate close the PR; `Part of` keeps it passing without closing the issue on merge.
 - **Renovate PRs that touch the same file conflict with each other once one lands.** Merge them one at a time; for the rest tick the rebase checkbox in the PR body (`gh pr edit --body-file`) and come back.
 
 ### Decision rounds through the question tool
@@ -140,6 +141,8 @@ Maintainer decisions that settle a PR without asking again. A PR that contradict
 - **Provider retry timing stays the provider's**: no cap that retries before `Retry-After`, and no "Retry now" control that holds and wakes the wait ([#6024](https://github.com/openchamber/openchamber/pull/6024), [#6029](https://github.com/openchamber/openchamber/pull/6029)).
 - **Retry never reverts.** A revert restores every file that changed in the folder during the turn, whoever changed it, so a one-click retry built on revert silently undoes other sessions' and the user's edits ([#5997](https://github.com/openchamber/openchamber/pull/5997), [#6005](https://github.com/openchamber/openchamber/issues/6005)).
 - **Every Git network transfer gets its own audit entry** (kind, endpoint fingerprint, transport reference) before it starts, including endpoints found after planning such as nested submodules ([#6011](https://github.com/openchamber/openchamber/pull/6011), `lib/git/network-operations.js`).
+- **An extension reads the host OpenCode through a fixed list of routes**: writes, config, RPC and future routes are refused on the server, because a single permission must not hide full API access ([#6376](https://github.com/openchamber/openchamber/pull/6376), `guests/opencode-provider`).
+- **A plugin switch belongs to OpenChamber**: it covers every project of the OpenCode the app starts, and leaves the TUI, an external OpenCode and the user's config alone ([#6342](https://github.com/openchamber/openchamber/pull/6342)).
 - **Archiving or deleting a session takes its subagent and review sessions with it**; forks and promoted `/btw` sessions stay active, and a subsession restores on its own only while its parent is active ([#5665](https://github.com/openchamber/openchamber/pull/5665), `components/session/sidebar/DOCUMENTATION.md`).
 
 ## Message templates
