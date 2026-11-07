@@ -49,10 +49,12 @@ initial and 45-second global poller, with bounded startup recovery.
 `useSessionListSync` must not create a second global polling lifecycle.
 
 The global sessions cache is the complete source for active and archived
-coverage. Initialized directory stores only supply sessions missing from that
-cache. Live busy and retry state comes from `global-session-status`, never from
-the global cache or persisted history. A failed global or directory fetch keeps
-existing data; it is never treated as an authoritative empty list.
+coverage. Raw active and archived IDs suppress directory fallback copies, even
+when archive display filtering leaves the archived record out. Initialized
+directory stores only supply sessions missing from that cache. Live busy and
+retry state comes from `global-session-status`, never from the global cache or
+persisted history. A failed global or directory fetch keeps existing data; it
+is never treated as an authoritative empty list.
 
 Activity indicators use `SessionActivityIndicator` in project and timeline rows,
 header tabs, switchers and collapsed aggregates. Each state is a static icon:
