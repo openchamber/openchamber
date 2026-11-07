@@ -541,6 +541,11 @@ the page's folder. VS Code renders `srcDoc` in the same sandbox. The server
 side (read root, CORS, CSP) is described in
 `packages/web/server/lib/fs/DOCUMENTATION.md`.
 
+Adopting new content through `applyLoadedTextContent` bumps the file revision,
+which asks for a new grant and reloads the frame, so a page changed on disk
+shows up in an open preview. A save from the editor sets the content directly;
+the preview gets it when the user switches back from the code.
+
 On a relay connection the panel says the preview is unavailable and offers the
 code, asks for no grant, and the toolbar has no "Annotate page". The browser loads the page and its files itself,
 and a URL it loads never enters the tunnel. Reading the page through the tunnel

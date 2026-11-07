@@ -1791,6 +1791,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
     lastLoadedFileContentRef.current = content;
     lastLoadedFileRevisionRef.current += 1;
+    setFileContentRevision((revision) => revision + 1);
     setLoadedFileLineEnding(lineEnding);
     setFileContent(editorContent);
     diagramXmlRef.current = editorContent;
