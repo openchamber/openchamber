@@ -1052,6 +1052,26 @@ describe("read timeouts (#2470)", () => {
     await new Promise((resolve) => setTimeout(resolve, 60))
     expect(settled).toBe(false)
   })
+
+  test("a usage stats read outlasts the read timeout (#6366)", async () => {
+    const client = createRuntimeOpencodeClient({ baseUrl: "http://runtime.test/api", requestTimeoutMs: 20 })
+    const caller = new AbortController()
+    let settled = false
+    responses.push(HANG)
+    const read = client.experimental.session.stats({}, { signal: caller.signal }).then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(settled).toBe(false)
+    // The caller's abort ends the hanging read so the test leaves nothing pending.
+    caller.abort()
+    await read
+  })
 })
 
 describe("sendCommand context", () => {
