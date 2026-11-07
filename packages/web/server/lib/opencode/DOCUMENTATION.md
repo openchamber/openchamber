@@ -1321,6 +1321,17 @@ would keep them. Keeping only location-starting requests out leaves the
 recovery path (session list, binding reads, Download again, archive) working
 without that risk.
 
+### Why the proxy drops browser fetch metadata and not adds origins to OpenCode's CORS list
+
+Since 2.2.6 OpenCode answers 403 to an `/api` request whose `Sec-Fetch-Site`
+is `cross-site` or `same-site` unless its `Origin` is on OpenCode's CORS list.
+Packaged clients reach this server cross-site (`openchamber-ui://app`,
+`capacitor://localhost`, `https://localhost`), so every proxied call failed.
+OpenChamber vets its own clients before proxying, and to OpenCode the request
+comes from this server, so both forwarding paths drop `sec-fetch-*`
+(`proxy-headers.js`). Passing `--cors` for each packaged origin was weighed and
+rejected: it fails for an external OpenCode OpenChamber does not launch.
+
 ### Why the proxy deadline is configurable
 
 Slow gateways can exceed the default 240000 ms deadline. Operators can set

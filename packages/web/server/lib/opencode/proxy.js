@@ -6,6 +6,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 
 import {
   applyForwardProxyResponseHeaders,
+  BROWSER_FETCH_METADATA_HEADERS,
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
 } from '../../proxy-headers.js';
@@ -1339,6 +1340,10 @@ export const registerOpenCodeProxy = (app, deps) => {
         // Defensive: request identity encoding from upstream OpenCode.
         // This avoids compressed-body/header mismatches in multi-proxy setups.
         proxyReq.setHeader('accept-encoding', 'identity');
+
+        // Same reason as collectForwardProxyHeaders: OpenCode refuses requests
+        // a packaged client's browser marks cross-site.
+        for (const name of BROWSER_FETCH_METADATA_HEADERS) proxyReq.removeHeader(name);
 
         replayParsedBody(proxyReq, req);
       },

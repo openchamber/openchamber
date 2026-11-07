@@ -8,7 +8,7 @@
     # OpenCode CLI, pinned to the tag matching OpenChamber's OpenCode 2.x
     # requirement. Keep in sync with packages/electron/package.json
     # (opencodeCli.version) and the @opencode/client pin. Bump all together.
-    opencode.url = "github:anomalyco/opencode/v2.2.5";
+    opencode.url = "github:anomalyco/opencode/v2.2.6";
   };
 
   outputs =
@@ -63,15 +63,15 @@
                   node_modules = pkgs.callPackage "${opencode}/nix/node_modules.nix" {
                     rev = opencode.rev or "dirty";
                     # A tag can carry stale hashes: OpenCode's bot refreshes
-                    # nix/hashes.json on dev after the release. v2.2.5 changed
-                    # dependencies after the last refresh, so its own hashes
-                    # fail. Keyed by tag, so a bump falls back to upstream's.
+                    # nix/hashes.json on dev after the release, and v2.2.5 and
+                    # v2.2.6 both changed dependencies after the last refresh.
+                    # Keyed by tag, so a bump falls back to upstream's. A system
+                    # missing here also falls back to upstream's.
                     hash =
                       {
-                        "v2.2.5" = {
-                          "x86_64-linux" = "sha256-+GgLX4lq8fPOJVoDGp220uiCTLB0ZwrBkcNo36q9MZU=";
-                          "aarch64-linux" = "sha256-x903Q+5ThC84PQjCp/4Id/2pRXT7YtYNFHfkLvFsO+0=";
-                          "aarch64-darwin" = "sha256-bp2jsa4iX5jX4O3vWQC9TRSwsAtnkzXX86O90NaJdq8=";
+                        "v2.2.6" = {
+                          "aarch64-linux" = "sha256-5NbIY40rdIfcXcGIiVkx5km31Mj0zodCuZfEjaiCIyw=";
+                          "aarch64-darwin" = "sha256-KKBjcy7DhWMxNR+hGWkpp90D60YIFCfjRFQuiPYymAY=";
                         };
                       }.${opencodeTag}.${system}
                         or (builtins.fromJSON (builtins.readFile "${opencode}/nix/hashes.json")).nodeModules.${system};
