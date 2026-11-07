@@ -525,7 +525,7 @@ mounted, the section is visible, and the section is expanded; the collapsible
 drops its children when folded. `PluginPane` itself is lazy-loaded, so a panel
 without extension sections never loads it. The frame's height starts at the
 manifest `height` (default 120px) and follows the guest's `setHeight`, clamped
-to 24..320px; taller content scrolls inside the frame, never the host. The last
+to 24..480px; taller content scrolls inside the frame, never the host. The last
 requested height is remembered per extension id and version for the app
 session (a module-level map, one number per installed extension), so folding
 and reopening a section does not jump back to the manifest default.
@@ -546,7 +546,7 @@ with `surface: 'popover'`. Folding or hiding the section removes the card with
 its owner; project/runtime and authorization changes also dismiss it. Pointer
 travel into the card and keyboard dismissal are handled by the SDK anchor
 helper and the host overlay controller. This does not increase the status
-frame's 320px height limit. The public contract is in `packages/sdk/API.md`,
+frame's 480px height limit. The public contract is in `packages/sdk/API.md`,
 under Anchored popovers.
 
 ### Sections the app draws

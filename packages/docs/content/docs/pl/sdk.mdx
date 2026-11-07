@@ -207,7 +207,7 @@ Zapisy są atomowe: OpenChamber zapisuje plik tymczasowy i zmienia jego nazwę, 
 - `true` używa `panel.entry`.
 - `entry` to osobna strona HTML w twoim folderze. Z nią nie potrzebujesz `panel.entry`, więc rozszerzenie może być tylko tą sekcją, bez ikony na pasku bocznym.
 - `title` zastępuje nazwę panelu w nagłówku sekcji, do 60 znaków.
-- `height` to początkowa wysokość w pikselach, od 24 do 320 (domyślnie 120). Wywołaj [`host.setHeight()`](/sdk/host/), gdy zmieni się rozmiar treści.
+- `height` to początkowa wysokość w pikselach, od 24 do 480 (domyślnie 120). Wywołaj [`host.setHeight()`](/sdk/host/), gdy zmieni się rozmiar treści.
 
 Twoja strona widzi `ctx.surface` jako `status`. OpenChamber ładuje ją tylko wtedy, gdy panel Work Status jest widoczny, a twoja sekcja rozwinięta, i zwalnia ją, gdy użytkownik zwinie sekcję, więc nie trzymaj tam niczego, czego nie da się odtworzyć. Rozszerzenie z samą sekcją może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `git-graph-status` to kompletna sekcja.
 

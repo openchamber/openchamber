@@ -66,7 +66,7 @@ const host = connectHost();
 | `onResolve(handler)` | スラッシュコマンドのハンドラーを登録する。`{ command, args }` を受け取り、添付する項目または `null` を返す。 |
 | `setBadge(count)` | レールのアイコンにドットを付け、数字(0 から 999)をツールチップに表示する。`null` で消す |
 | `openCommit(sha)` | 現在のプロジェクトのそのコミットで Diff ビューを開く。`sha` は 7〜64 文字の 16 進数で、コミットは OpenChamber 自身が読み込みます。 |
-| `setHeight(px)` | Work Status セクションの高さを設定する。OpenChamber は 24〜320 ピクセルに収め、それより高い内容はページ内でスクロールします。他の場所では無視されます。 |
+| `setHeight(px)` | Work Status セクションの高さを設定する。OpenChamber は 24〜480 ピクセルに収め、それより高い内容はページ内でスクロールします。他の場所では無視されます。 |
 | `onFileOpen(listener)` | ファイルエディター: 編集するファイルを受け取る。`{ path, name, readOnly }` に加えて、`encoding: "text"` なら `content`、`encoding: "binary"` なら `bytes` が入ります。ページ内の Cmd/Ctrl+S でも保存されるようになります。 |
 | `onFileSnapshot(handler)` | ファイルエディター: 編集済みのファイル全体を `{ content, version }`(バイナリエディターなら `{ bytes, version }`)で返す。OpenChamber は保存時と、ソース表示や全画面に切り替える前に呼び出します。 |
 | `onFileSaved(listener)` | ファイルエディター: その `version` のスナップショットがディスクに書き込まれた。`reportFileChange` で応答してください。 |

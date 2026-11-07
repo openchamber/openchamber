@@ -209,7 +209,7 @@ Writes are atomic: OpenChamber writes a temporary file and renames it, so a read
 - `true` reuses `panel.entry`.
 - `entry` is a separate HTML page in your folder. With it you don't need `panel.entry`, so the extension can be just this section, with no rail icon.
 - `title` replaces the panel name in the section header, up to 60 characters.
-- `height` is the starting height in pixels, from 24 to 320 (120 by default). Call [`host.setHeight()`](/sdk/host/) when your content changes size.
+- `height` is the starting height in pixels, from 24 to 480 (120 by default). Call [`host.setHeight()`](/sdk/host/) when your content changes size.
 
 Your page sees `ctx.surface` as `status`. OpenChamber loads it only while the Work Status panel is visible and your section is expanded, and unloads it when the user collapses the section, so keep nothing there you can't rebuild. A section-only extension can use capabilities, a service, an integration, and files, but not `page`, `attach`, `actions`, or `commands`. Web and desktop only. The `git-graph-status` example is a complete section.
 
