@@ -372,7 +372,11 @@ const pluginConfigErrorStatus = (message: string): number => {
 // extension refused comes back as 400 with its code, so the dialog can say so
 // under the field.
 const pluginEntryErrorResponse = (message: string, code: string | undefined): Response => {
-  const status = code === 'UNLOADABLE_SPEC' ? 400 : pluginConfigErrorStatus(message);
+  const status = code === 'UNLOADABLE_SPEC'
+    ? 400
+    : code === 'SWITCH_UNAVAILABLE' || code === 'SWITCH_OVERRIDDEN'
+      ? 409
+      : pluginConfigErrorStatus(message);
   return jsonResponse({ error: message, code }, status);
 };
 
@@ -1093,6 +1097,26 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  const pluginEntryEnabledMatch = pathname.match(/^\/api\/config\/plugins\/entry\/([^/]+)\/enabled$/);
+  if (pluginEntryEnabledMatch && method === 'PUT') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', {
+        method,
+        target: 'entry',
+        action: 'enabled',
+        pluginId: decodeURIComponent(pluginEntryEnabledMatch[1]),
+        body,
+        directory,
+      });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return pluginEntryErrorResponse(message, error instanceof BridgeRequestError ? error.code : undefined);
+    }
+  }
+
   if (pathname === '/api/config/plugins/entry' && method === 'POST') {
     try {
       const body = await extractJsonBody(input, init, method);
@@ -1114,6 +1138,26 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
         method,
         target: 'entry',
         pluginId: decodeURIComponent(pluginEntryMatch[1]),
+        body,
+        directory,
+      });
+      return jsonResponse(data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return pluginEntryErrorResponse(message, error instanceof BridgeRequestError ? error.code : undefined);
+    }
+  }
+
+  const pluginFileEnabledMatch = pathname.match(/^\/api\/config\/plugins\/file\/([^/]+)\/enabled$/);
+  if (pluginFileEnabledMatch && method === 'PUT') {
+    try {
+      const body = await extractJsonBody(input, init, method);
+      const directory = getRequestDirectoryHint(url, input, init);
+      const data = await sendBridgeMessage('api:config/plugins', {
+        method,
+        target: 'file',
+        action: 'enabled',
+        pluginId: decodeURIComponent(pluginFileEnabledMatch[1]),
         body,
         directory,
       });

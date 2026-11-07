@@ -590,15 +590,20 @@ export type IntegrationPolicy = { resource: string; effect: "allow" | "deny"; pa
 function integrationResource(policy: { action: string; resource: string }): string | null {
   if (policy.action === "mcp.use") return `mcp:${policy.resource}`
   if (policy.action === "skill.use") return `skill:${policy.resource}`
-  if (policy.action === "integration.use" && /^(mcp|skill):/.test(policy.resource)) return policy.resource
+  if (policy.action === "plugin.use") return `plugin:${policy.resource}`
+  if (policy.action === "integration.use" && /^(mcp|skill|plugin):/.test(policy.resource)) return policy.resource
   return null
 }
 
 /**
- * The MCP server and skill statements of every config document, in the order
+ * The MCP server, skill and plugin statements of every config document, in the order
  * OpenCode decides by (`ManagedPolicy.statements` upstream): documents
  * reversed, so the last matching statement wins. Statements from a connected
  * OpenCode Console workspace are not part of `/api/config`.
+ *
+ * OpenCode 2.2 decodes `integration.use` into one action per kind
+ * (`plugin.use`, `skill.use`, `mcp.use`) and drops the resource prefix, so the
+ * document carries the normalized form. Both spellings mean the same rule.
  */
 export function readIntegrationPolicies(entries: readonly ConfigEntry[]): IntegrationPolicy[] {
   return entries
@@ -621,7 +626,7 @@ function matchesWildcard(input: string, pattern: string): boolean {
   return new RegExp(`^${escaped}$`, "s").test(input.replaceAll("\\", "/"))
 }
 
-/** The statement that decides an MCP server (`mcp:<name>`) or skill (`skill:<id>`), or null when none matches. */
+/** The statement that decides an MCP server (`mcp:<name>`), skill (`skill:<id>`) or plugin (`plugin:<target>`), or null when none matches. */
 export function findIntegrationPolicy(policies: readonly IntegrationPolicy[], resource: string): IntegrationPolicy | null {
   for (let index = policies.length - 1; index >= 0; index -= 1) {
     if (matchesWildcard(resource, policies[index].resource)) return policies[index]
@@ -629,7 +634,7 @@ export function findIntegrationPolicy(policies: readonly IntegrationPolicy[], re
   return null
 }
 
-/** Whether OpenCode drops this MCP server (`mcp:<name>`) or skill (`skill:<id>`) by policy. */
+/** Whether OpenCode drops this MCP server (`mcp:<name>`), skill (`skill:<id>`) or plugin (`plugin:<target>`) by policy. */
 export function isIntegrationDenied(policies: readonly IntegrationPolicy[], resource: string): boolean {
   return findIntegrationPolicy(policies, resource)?.effect === "deny"
 }

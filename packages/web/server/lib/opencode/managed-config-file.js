@@ -1,4 +1,4 @@
-import { appendManagedCommand, appendManagedPermissions, appendManagedPlugin, appendManagedSkills } from './managed-plugin-config.js';
+import { appendManagedCommand, appendManagedPermissions, appendManagedPolicies, appendManagedPlugin, appendManagedSkills } from './managed-plugin-config.js';
 import { managedPermissionRules } from '../agent-tool/runtime.js';
 import { isLimitFailoverConfigured } from '../limit-failover/policy.js';
 import { materializeSessionTitlePlugin } from './session-title-plugin.js';
@@ -35,12 +35,13 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * only ever change across a restart.
  *
  * The file is OpenChamber-owned and holds `plugins`: the built-in plugins
- * OpenChamber disables, then its own plugin directories; and `permissions`
- * its tools need, such as the workflow answer tool denied everywhere but in
- * the sessions that allow it. OpenCode appends every layer's permissions to
- * each agent, so ours add to the user's rules and replace none. `skills` lists
- * our extension-writing skill and the folders active extensions ship, and
- * `commands` the command that starts extension work. It sits above
+ * OpenChamber disables, then its own plugin directories; `policies`: the
+ * `integration.use` denials for the plugins switched off in OpenChamber; and
+ * `permissions` its tools need, such as the workflow answer tool denied
+ * everywhere but in the sessions that allow it. OpenCode appends every layer's
+ * permissions to each agent, so ours add to the user's rules and replace none.
+ * `skills` lists our extension-writing skill and the folders active extensions
+ * ship, and `commands` the command that starts extension work. It sits above
  * the user's global `opencode.json` and below their project config, so it never
  * shadows a project-level choice. The plugin folders active extensions ship
  * come after OpenChamber's own plugins: OpenCode loads in list order, so an
@@ -62,6 +63,7 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * @param {() => Promise<string[]>} [dependencies.listExtensionSkillDirectories] skill folders of active extensions
  * @param {() => Promise<string[]>} [dependencies.listExtensionPluginDirectories] OpenCode plugin folders of active extensions
  * @param {string} [dependencies.openchamberVersion] the running app, which the extension-writing skill pins its SDK to
+ * @param {() => { action: string, resource: string, effect: string }[]} [dependencies.readPluginDenials] the plugins switched off in OpenChamber; throws when they cannot be established
  */
 export const createManagedConfigRuntime = ({
   fsPromises,
@@ -74,15 +76,17 @@ export const createManagedConfigRuntime = ({
   listExtensionSkillDirectories = async () => [],
   listExtensionPluginDirectories = async () => [],
   openchamberVersion,
+  readPluginDenials = () => [],
 }) => {
   const filePath = path.join(instanceDir, MANAGED_CONFIG_FILE_NAME);
 
   /** The user owns `OPENCODE_CONFIG` when their environment already set it. */
   const ownsConfigFile = () => (env.OPENCODE_CONFIG ?? '').trim().length === 0;
 
-  const writeConfigFile = async ({ disabled, directories, extensionPlugins, permissions, skills, commands }) => {
+  const writeConfigFile = async ({ disabled, directories, extensionPlugins, permissions, policies, skills, commands }) => {
     await fsPromises.mkdir(instanceDir, { recursive: true });
     const config = { plugins: [...disabled, ...directories, ...extensionPlugins], skills, commands };
+    if (policies.length > 0) config.policies = policies;
     if (permissions.length > 0) config.permissions = permissions;
     const text = `${JSON.stringify(config, null, 2)}\n`;
     // Temp + rename: OpenCode reacts to the write immediately, and a partial
@@ -132,7 +136,7 @@ export const createManagedConfigRuntime = ({
     const authoring = await materializeAuthoringSkill({ fsPromises, instanceDir, openchamberVersion });
     const skills = [authoring.skillsRoot, ...await listExtensionSkillDirectories()];
     const extensionPlugins = await listExtensionPluginDirectories();
-    return { disabled, directories, extensionPlugins, permissions, skills, commands: { [EXTENSION_AUTHORING_COMMAND]: authoring.command } };
+    return { disabled, directories, extensionPlugins, permissions, policies: readPluginDenials(), skills, commands: { [EXTENSION_AUTHORING_COMMAND]: authoring.command } };
   };
 
   let writing = null;
@@ -175,6 +179,7 @@ export const createManagedConfigRuntime = ({
     for (const directory of [...enabled.disabled, ...enabled.directories, ...enabled.extensionPlugins]) {
       content = appendManagedPlugin(content, directory, 'managed plugin');
     }
+    if (enabled.policies.length > 0) content = appendManagedPolicies(content, enabled.policies);
     if (enabled.permissions.length > 0) content = appendManagedPermissions(content, enabled.permissions);
     content = appendManagedSkills(content, enabled.skills);
     for (const [name, command] of Object.entries(enabled.commands)) content = appendManagedCommand(content, name, command);

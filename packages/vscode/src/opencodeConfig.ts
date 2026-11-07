@@ -24,6 +24,13 @@ import { isGitSpec, isPluginControlSpec } from '../../web/server/lib/opencode/pl
 import { mergeCustomProviderConfig, validateCustomProviderConfig } from '../../web/server/lib/opencode/providers.js';
 import { canonicalPluginPath, resolveLocalPluginPath } from '../../web/server/lib/opencode/plugin-paths.js';
 import {
+  isPluginDenialOverridden,
+  pluginPolicyResource,
+  pluginSwitchState,
+  type PluginSwitchState,
+} from '../../web/server/lib/opencode/plugin-switches.js';
+import { readPluginSwitches, setPluginSwitch } from './plugin-switches';
+import {
   toAgentEntity,
   fromAgentEntity,
   isLegacyAgentFrontmatter,
@@ -119,7 +126,10 @@ export type PluginEntry = {
   scope: PluginScope;
   kind: 'config';
   parsedKind: PluginParsedKind;
+  sourcePath?: string;
   resolvedPath?: string;
+  policyResource?: string;
+  switchState?: PluginSwitchState;
 };
 
 export type PluginFile = {
@@ -129,6 +139,8 @@ export type PluginFile = {
   kind: 'file';
   absolutePath: string;
   resolvedPath?: string;
+  policyResource?: string;
+  switchState?: PluginSwitchState;
 };
 
 export type PluginRegistryResult =
@@ -1504,7 +1516,27 @@ const getPluginTarget = (id: string, workingDirectory?: string | null): null | {
   return { scope, path: source.path, config: source.config, plugin: [...plugin], index, spec };
 };
 
-export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
+/**
+ * The configs OpenCode loads ahead of the switch denials, earliest first; the
+ * earliest-loaded policy wins. The managed file is `OPENCODE_CONFIG`, right after
+ * the global files. A user-owned `OPENCODE_CONFIG` moves the denials to
+ * `OPENCODE_CONFIG_CONTENT`, which loads after every file.
+ */
+const configsAheadOfManagedLayer = (workingDirectory?: string): unknown[] => {
+  const layers = readConfigLayers(workingDirectory);
+  return layers.paths.customPath
+    ? getPluginConfigSources(workingDirectory).map((source) => source.config)
+    : [layers.userConfig, layers.userOverrideConfig];
+};
+
+const readSwitchContext = (workingDirectory?: string, switchDirectory?: string) => (
+  switchDirectory
+    ? { read: readPluginSwitches(switchDirectory), configsAhead: configsAheadOfManagedLayer(workingDirectory) }
+    : null
+);
+
+export const listPluginEntries = (workingDirectory?: string, switchDirectory?: string): PluginEntry[] => {
+  const switches = readSwitchContext(workingDirectory, switchDirectory);
   const entries: PluginEntry[] = [];
   for (const source of getPluginConfigSources(workingDirectory)) {
     for (const item of readPluginList(source.config)) {
@@ -1514,9 +1546,15 @@ export const listPluginEntries = (workingDirectory?: string): PluginEntry[] => {
         scope: source.scope,
         kind: 'config',
         parsedKind: pluginParsedKind(item.entry.package),
+        sourcePath: source.path,
         resolvedPath: resolveLocalPluginPath(item.entry.package, source.path),
       };
       if (item.entry.options) entry.options = item.entry.options;
+      const policyResource = pluginPolicyResource(item.entry.package, source.path);
+      if (policyResource) {
+        entry.policyResource = policyResource;
+        if (switches) entry.switchState = pluginSwitchState(switches.read, policyResource, switches.configsAhead);
+      }
       entries.push(entry);
     }
   }
@@ -1563,6 +1601,49 @@ export const deletePluginEntry = (id: string, workingDirectory?: string): void =
   writeConfig(writePluginArray(target.config, target.plugin), target.path);
 };
 
+/**
+ * Record one switch in the OpenChamber store. The managed config layer the
+ * extension's OpenCode reads carries the deny; the user's config keeps the entry
+ * and its options untouched. A rule of theirs that would beat the deny refuses
+ * the change, so the page never reports a plugin as off while it keeps loading.
+ */
+const recordPluginSwitch = (resource: string, enabled: boolean, workingDirectory: string | undefined, switchDirectory: string) => {
+  if (!enabled && isPluginDenialOverridden(resource, configsAheadOfManagedLayer(workingDirectory))) {
+    throw codedError('A rule in the OpenCode config allows this plugin, so OpenChamber cannot switch it off', 'SWITCH_OVERRIDDEN');
+  }
+  return { enabled, resource, ...setPluginSwitch(switchDirectory, resource, enabled) };
+};
+
+export const setPluginEntryEnabled = (
+  id: string,
+  enabled: boolean,
+  workingDirectory?: string,
+  switchDirectory?: string,
+) => {
+  if (!switchDirectory) {
+    throw codedError('Plugin switches apply only to the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
+  }
+  const target = getPluginTarget(id, workingDirectory);
+  if (!target) throw codedError('Plugin entry not found', 'NOT_FOUND');
+  const spec = parsePluginRaw(target.plugin[target.index]).spec;
+  const resource = pluginPolicyResource(spec, target.path);
+  if (!resource) throw codedError(`Plugin "${spec}" has no policy target`, 'INVALID_SPEC');
+  return recordPluginSwitch(resource, enabled, workingDirectory, switchDirectory);
+};
+
+export const setPluginFileEnabled = (
+  id: string,
+  enabled: boolean,
+  workingDirectory?: string,
+  switchDirectory?: string,
+) => {
+  if (!switchDirectory) {
+    throw codedError('Plugin switches apply only to the OpenCode OpenChamber starts', 'SWITCH_UNAVAILABLE');
+  }
+  const target = getPluginFileTarget(id, workingDirectory);
+  return recordPluginSwitch(`plugin:${target.filePath}`, enabled, workingDirectory, switchDirectory);
+};
+
 const getPluginDir = (scope: PluginScope, workingDirectory?: string | null): string => {
   if (scope === 'project') {
     if (!workingDirectory) throw codedError('Project plugin scope requires working directory', 'INVALID_SCOPE');
@@ -1581,7 +1662,8 @@ const getPluginFileTarget = (id: string, workingDirectory?: string): { scope: Pl
   return { scope, fileName, filePath: path.join(getPluginDir(scope, workingDirectory), fileName) };
 };
 
-export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
+export const listPluginDirFiles = (workingDirectory?: string, switchDirectory?: string): PluginFile[] => {
+  const switches = readSwitchContext(workingDirectory, switchDirectory);
   const files: PluginFile[] = [];
   for (const scope of ['user', 'project'] as const) {
     let dir: string;
@@ -1595,14 +1677,19 @@ export const listPluginDirFiles = (workingDirectory?: string): PluginFile[] => {
       if (!entry.isFile()) continue;
       try {
         const fileName = validatePluginFileName(entry.name);
-        files.push({
+        const absolutePath = path.join(dir, fileName);
+        const policyResource = `plugin:${absolutePath}`;
+        const file: PluginFile = {
           id: encodePluginId('file', `${scope}:${fileName}`),
           fileName,
           scope,
           kind: 'file',
-          absolutePath: path.join(dir, fileName),
-          resolvedPath: canonicalPluginPath(path.join(dir, fileName)),
-        });
+          absolutePath,
+          resolvedPath: canonicalPluginPath(absolutePath),
+          policyResource,
+        };
+        if (switches) file.switchState = pluginSwitchState(switches.read, policyResource, switches.configsAhead);
+        files.push(file);
       } catch {
         // Ignore unsupported files in the plugins directory.
       }

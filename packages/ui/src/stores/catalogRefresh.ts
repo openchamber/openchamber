@@ -69,8 +69,13 @@ const refreshMcp = async (): Promise<void> => {
   await useMcpConfigStore.getState().loadMcpConfigs({ force: true });
 };
 
+// The policy readers follow the list: a switch flipped here or in another
+// client reaches OpenCode's config only after the write, so this event is what
+// shows the change.
 const refreshPlugins = async (): Promise<void> => {
-  await usePluginsStore.getState().loadPlugins({ force: true });
+  const { bumpPolicyRevision, loadPlugins } = usePluginsStore.getState();
+  bumpPolicyRevision();
+  await loadPlugins({ force: true });
 };
 
 // The current list stays on screen until the fresh one lands: emptying it
