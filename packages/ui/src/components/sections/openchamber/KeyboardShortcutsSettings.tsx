@@ -131,7 +131,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
           >
             <div>
               {categoryActions.map((action) => (
-                <SettingsFieldRow key={action.id} label={t(action.settingsLabelKey)} settingsItem={shortcutSearchItemId(action.id)}>
+                <SettingsFieldRow key={action.id} label={t(action.settingsLabelKey)} settingsItem={shortcutSearchItemId(action.id)} controlClassName="flex-wrap">
                   <kbd
                     className="min-w-32 oc-tile-inset rounded-md px-2 py-1 text-center typography-meta text-foreground"
                   >
@@ -149,6 +149,16 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                     }}
                   >
                     {t('settings.openchamber.keyboardShortcuts.actions.edit')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="!font-normal"
+                    disabled={shortcutOverrides[action.id] === UNASSIGNED_SHORTCUT}
+                    onClick={() => save(action.id, UNASSIGNED_SHORTCUT)}
+                  >
+                    {t('settings.openchamber.keyboardShortcuts.actions.clear')}
                   </Button>
                   {action.id in shortcutOverrides ? (
                     <Button

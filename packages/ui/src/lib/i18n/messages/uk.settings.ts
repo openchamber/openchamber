@@ -1415,6 +1415,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.category.navigation": "Навігація",
   "settings.openchamber.keyboardShortcuts.category.application": "Застосунок",
   "settings.openchamber.keyboardShortcuts.actions.edit": "Редагувати",
+  "settings.openchamber.keyboardShortcuts.actions.clear": "Очистити",
   "settings.openchamber.keyboardShortcuts.actions.confirm": "Підтвердити",
   "settings.openchamber.keyboardShortcuts.dialog.title": "Редагувати {action}",
   "settings.openchamber.keyboardShortcuts.dialog.instructions": "Натисніть до двох комбінацій клавіш, не більше трьох клавіш у кожній. Після першої зачекайте до 3 секунд на другу комбінацію. Виберіть Підтвердити, щоб застосувати, або Скасувати, щоб відхилити. Backspace видаляє останню.",

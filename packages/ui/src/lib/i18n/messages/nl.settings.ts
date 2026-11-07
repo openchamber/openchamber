@@ -1448,6 +1448,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': 'Navigatie',
   'settings.openchamber.keyboardShortcuts.category.application': 'Toepassing',
   'settings.openchamber.keyboardShortcuts.actions.edit': 'Bewerken',
+  'settings.openchamber.keyboardShortcuts.actions.clear': 'Wissen',
   'settings.openchamber.keyboardShortcuts.actions.confirm': 'Bevestigen',
   'settings.openchamber.keyboardShortcuts.dialog.title': '{action} bewerken',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': 'Druk maximaal twee toetscombinaties in, met elk maximaal drie toetsen. Wacht na de eerste tot 3 seconden op een tweede combinatie. Gebruik Bevestigen om toe te passen of Annuleren om te verwerpen. Backspace verwijdert de laatste.',

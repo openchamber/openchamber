@@ -1415,6 +1415,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.category.navigation": "Navegação",
   "settings.openchamber.keyboardShortcuts.category.application": "Aplicação",
   "settings.openchamber.keyboardShortcuts.actions.edit": "Editar",
+  "settings.openchamber.keyboardShortcuts.actions.clear": "Limpar",
   "settings.openchamber.keyboardShortcuts.actions.confirm": "Confirmar",
   "settings.openchamber.keyboardShortcuts.dialog.title": "Editar {action}",
   "settings.openchamber.keyboardShortcuts.dialog.instructions": "Pressione até duas combinações de teclas, com no máximo três teclas em cada uma. Após a primeira, aguarde até 3 segundos por uma segunda combinação. Use Confirmar para aplicar ou Cancelar para descartar. Backspace remove a última.",

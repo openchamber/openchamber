@@ -1448,6 +1448,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': 'ナビゲーション',
   'settings.openchamber.keyboardShortcuts.category.application': 'アプリケーション',
   'settings.openchamber.keyboardShortcuts.actions.edit': '編集',
+  'settings.openchamber.keyboardShortcuts.actions.clear': '解除',
   'settings.openchamber.keyboardShortcuts.actions.confirm': '確認',
   'settings.openchamber.keyboardShortcuts.dialog.title': '{action} を編集',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': 'キーの組み合わせを最大2つ入力でき、各組み合わせは最大3キーです。最初の組み合わせの後、2つ目の組み合わせを最大3秒待ちます。適用するには確認、破棄するにはキャンセルを選択してください。Backspace で最後の組み合わせを削除します。',

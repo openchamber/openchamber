@@ -1300,6 +1300,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': '導覽',
   'settings.openchamber.keyboardShortcuts.category.application': '應用程式',
   'settings.openchamber.keyboardShortcuts.actions.edit': '編輯',
+  'settings.openchamber.keyboardShortcuts.actions.clear': '清除',
   'settings.openchamber.keyboardShortcuts.actions.confirm': '確認',
   'settings.openchamber.keyboardShortcuts.dialog.title': '編輯 {action}',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': '最多輸入兩個按鍵組合，每個組合最多同時按下三個按鍵。輸入第一個組合後，最多等待 3 秒以輸入第二個組合。點擊確認套用，或點擊取消放棄；按 Backspace 刪除最後一個組合。',

@@ -2562,6 +2562,7 @@ export const settingsDict = {
   'settings.openchamber.keyboardShortcuts.category.navigation': 'Gezinme',
   'settings.openchamber.keyboardShortcuts.category.application': 'Uygulama',
   'settings.openchamber.keyboardShortcuts.actions.edit': 'Düzenle',
+  'settings.openchamber.keyboardShortcuts.actions.clear': 'Temizle',
   'settings.openchamber.keyboardShortcuts.actions.confirm': 'Onayla',
   'settings.openchamber.keyboardShortcuts.dialog.title': '{action} düzenle',
   'settings.openchamber.keyboardShortcuts.dialog.instructions': 'En fazla iki tuş bileşimine basın, her birinde en fazla üç tuş. İlkinden sonra ikinci bileşim için en fazla 3 saniye bekleyin; tek bileşim için boş bırakın.',
