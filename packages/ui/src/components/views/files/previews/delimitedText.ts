@@ -19,13 +19,96 @@ type DelimitedTable = {
 
 export const DEFAULT_TABLE_ROW_CAP = 100_000;
 
-export const delimiterForPath = (filePath: string): ',' | '\t' => (
+/** The separators a preview can read. */
+type TableDelimiter = ',' | ';' | '\t';
+
+const delimiterForPath = (filePath: string): TableDelimiter => (
   filePath.toLowerCase().endsWith('.tsv') ? '\t' : ','
 );
 
+// A dozen records settle the separator; a large export is not read past them.
+const SNIFF_RECORD_LIMIT = 12;
+const SNIFF_DELIMITERS: TableDelimiter[] = [',', ';', '\t'];
+
+/**
+ * How many fields each of the first records holds when read with `delimiter`,
+ * under the parser's quoting rules. Stops at the record limit, so sniffing a
+ * 100k-row export costs its first few lines.
+ */
+const firstRecordWidths = (content: string, delimiter: TableDelimiter): number[] => {
+  const widths: number[] = [];
+  const start = content.charCodeAt(0) === 0xfeff ? 1 : 0;
+  let fields = 1;
+  let hasContent = false;
+  let quoted = false;
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (quoted) {
+      if (char === '"') {
+        if (content[index + 1] === '"') index += 1;
+        else quoted = false;
+      }
+      hasContent = true;
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      hasContent = true;
+      continue;
+    }
+    if (char === delimiter) {
+      fields += 1;
+      hasContent = true;
+      continue;
+    }
+    if (char === '\n' || char === '\r') {
+      if (char === '\r' && content[index + 1] === '\n') index += 1;
+      // A trailing newline is not an empty record, the way the parser reads it.
+      if (hasContent || fields > 1) widths.push(fields);
+      if (widths.length >= SNIFF_RECORD_LIMIT) return widths;
+      fields = 1;
+      hasContent = false;
+      continue;
+    }
+    hasContent = true;
+  }
+  if (hasContent || fields > 1) widths.push(fields);
+  return widths;
+};
+
+/**
+ * The separator a file is actually written with. A `.tsv` path stays a hard
+ * hint, so a tab file is never read as comma-separated. Every other path is
+ * decided by content: spreadsheets in decimal-comma locales export semicolon
+ * `.csv` files, which the extension alone cannot tell apart from comma ones.
+ *
+ * The separator holding its column count across the first records wins, then
+ * the one giving the wider table, then the comma. A file with no separator
+ * keeps the comma it had before, and a comma file whose values hold semicolons
+ * keeps its comma, because splitting that file on `;` loses the column count.
+ */
+export const resolveDelimiter = (filePath: string, content: string): ',' | ';' | '\t' => {
+  if (delimiterForPath(filePath) === '\t') return '\t';
+  let best: TableDelimiter = ',';
+  let bestConsistent = -1;
+  let bestColumns = -1;
+  for (const candidate of SNIFF_DELIMITERS) {
+    const widths = firstRecordWidths(content, candidate);
+    if (widths.length === 0) continue;
+    const consistent = widths.filter((width) => width === widths[0]).length;
+    const columns = Math.max(...widths);
+    if (consistent > bestConsistent || (consistent === bestConsistent && columns > bestColumns)) {
+      best = candidate;
+      bestConsistent = consistent;
+      bestColumns = columns;
+    }
+  }
+  return best;
+};
+
 export const parseDelimitedText = (
   content: string,
-  delimiter: ',' | '\t',
+  delimiter: ',' | ';' | '\t',
   rowCap: number = DEFAULT_TABLE_ROW_CAP,
 ): DelimitedTable => {
   const records: string[][] = [];
@@ -109,7 +192,7 @@ const fieldText = (value: string, delimiter: string): string => (
  * and line endings included. `record` counts the way the parser does, the
  * heading being 0; a record or a column past the end is added.
  */
-export const setDelimitedField = (content: string, delimiter: ',' | '\t', record: number, column: number, value: string): string => {
+export const setDelimitedField = (content: string, delimiter: ',' | ';' | '\t', record: number, column: number, value: string): string => {
   const start = content.charCodeAt(0) === 0xfeff ? 1 : 0;
   let recordIndex = 0;
   let fieldIndex = 0;
@@ -214,7 +297,7 @@ const recordSpans = (content: string, delimiter: string): Array<{ start: number;
 };
 
 /** A row of empty fields before `record`, or `record` gone; every other byte stays. */
-export const shiftDelimitedRow = (content: string, delimiter: ',' | '\t', record: number, delta: 1 | -1): string => {
+export const shiftDelimitedRow = (content: string, delimiter: ',' | ';' | '\t', record: number, delta: 1 | -1): string => {
   const records = recordSpans(content, delimiter);
   const target = records[record];
   if (!target) return content;
@@ -225,7 +308,7 @@ export const shiftDelimitedRow = (content: string, delimiter: ',' | '\t', record
 };
 
 /** A column of empty fields before `column`, or `column` gone. */
-export const shiftDelimitedColumn = (content: string, delimiter: ',' | '\t', column: number, delta: 1 | -1): string => {
+export const shiftDelimitedColumn = (content: string, delimiter: ',' | ';' | '\t', column: number, delta: 1 | -1): string => {
   const records = recordSpans(content, delimiter);
   let result = content;
   // From the end, so earlier offsets stay true.
