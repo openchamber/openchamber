@@ -6,14 +6,21 @@ import { findMcpIntegration, getMcpOAuthMethods } from './mcpOAuthIntegration';
 /**
  * The OAuth integration OpenCode registered for an MCP server, or null while
  * it is unknown or when the server has no OAuth sign-in. Nothing is read
- * while `enabled` is false.
+ * while `enabled` is false. `onUnavailable` runs once when the lookup ends
+ * without a sign-in to offer: the retries ran out, or the integration has no
+ * OAuth method. Null alone cannot tell that apart from "still looking".
  */
 export const useMcpOAuthIntegration = (
   serverName: string,
   directory: string | null,
   enabled = true,
+  onUnavailable?: () => void,
 ): IntegrationInfo | null => {
   const [integration, setIntegration] = React.useState<IntegrationInfo | null>(null);
+  const onUnavailableRef = React.useRef(onUnavailable);
+  React.useEffect(() => {
+    onUnavailableRef.current = onUnavailable;
+  });
 
   React.useEffect(() => {
     let cancelled = false;
@@ -34,17 +41,21 @@ export const useMcpOAuthIntegration = (
         const found = findMcpIntegration(data, serverName) ?? null;
         if (found) {
           setIntegration(found);
+          if (getMcpOAuthMethods(found).length === 0) onUnavailableRef.current?.();
           return;
         }
-        if (attempt < 8) {
-          setTimeout(() => { void load(attempt + 1); }, 750);
-        }
+        retryOrGiveUp(attempt);
       } catch (error) {
         if (cancelled) return;
         console.error('Failed to load MCP integrations:', error);
-        if (attempt < 8) {
-          setTimeout(() => { void load(attempt + 1); }, 750);
-        }
+        retryOrGiveUp(attempt);
+      }
+    };
+    const retryOrGiveUp = (attempt: number) => {
+      if (attempt < 8) {
+        setTimeout(() => { void load(attempt + 1); }, 750);
+      } else {
+        onUnavailableRef.current?.();
       }
     };
     void load();
