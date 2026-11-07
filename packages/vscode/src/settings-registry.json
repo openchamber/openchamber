@@ -180,6 +180,9 @@
     "agentRenderToolEnabled": {
       "scope": "instance"
     },
+    "agentUsageToolEnabled": {
+      "scope": "instance"
+    },
     "agentImageToolEnabled": {
       "scope": "instance"
     },
@@ -187,9 +190,6 @@
       "scope": "instance"
     },
     "agentSecretToolEnabled": {
-      "scope": "instance"
-    },
-    "agentUsageToolEnabled": {
       "scope": "instance"
     },
     "agentToolsCodeMode": {
