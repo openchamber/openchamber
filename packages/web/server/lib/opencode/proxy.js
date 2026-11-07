@@ -421,6 +421,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     // The folder trust check (`../opencode-trust`): requests for a folder
     // whose configuration runs code wait for the user's trust.
     openCodeTrust = null,
+    // MCP OAuth from a browser on another machine (`mcp-oauth.js`).
+    mcpOAuthSignIn = null,
   } = deps;
 
   /**
@@ -534,6 +536,10 @@ export const registerOpenCodeProxy = (app, deps) => {
     console.log('Setting up OpenCode API gate (OpenCode not started yet)');
   }
   app.set('opencodeProxyConfigured', true);
+
+  // The provider's redirect carries no session and names no folder, so it goes
+  // ahead of the gates below; the attempt it belongs to already passed them.
+  mcpOAuthSignIn?.registerCallbackRoute(app);
 
   // Registered ahead of the readiness hold: the trust answer is OpenChamber's
   // own and needs no running OpenCode.
@@ -1381,6 +1387,7 @@ export const registerOpenCodeProxy = (app, deps) => {
   });
 
   app.use('/api', applyProxyResponseDeadline);
+  mcpOAuthSignIn?.registerStartRoutes(app, { readBody });
   // v1's interactive provider/MCP OAuth callbacks are gone: v2 runs provider
   // connection through `/api/integration/*`, which answers immediately and
   // needs no special deadline.
