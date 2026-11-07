@@ -12,11 +12,10 @@ O OpenChamber roda sobre um servidor OpenCode. Por padrão, ele inicia um para v
 Quando o OpenChamber inicia, ele procura por um servidor nesta ordem:
 
 1. reutilizar um servidor que ele já iniciou
-2. conectar a um servidor externo, se você indicou (veja abaixo)
-3. detectar automaticamente um servidor na porta padrão (`4096`)
-4. caso contrário, iniciar e gerenciar o seu próprio
+2. conectar a um servidor externo, se você configurou um
+3. caso contrário, iniciar e gerenciar o próprio servidor
 
-Se nada estiver configurado, o passo 4 acontece automaticamente e você já está pronto para usar.
+Por padrão, o OpenChamber gerencia o próprio servidor em uma porta atribuída. A porta pode mudar após uma reinicialização. O OpenChamber não se conecta automaticamente a outro servidor OpenCode na porta `4096`.
 
 ## Conectar a um servidor que você já executa
 
