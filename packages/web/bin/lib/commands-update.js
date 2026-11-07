@@ -6,7 +6,7 @@ import {
   removePidFile,
   stopInstanceProcess,
 } from './cli-process.js';
-import { getStartupServicePid, restartStartupService } from './cli-startup.js';
+import { findStartupServiceInstance, restartStartupService } from './cli-startup.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -39,7 +39,10 @@ function createUpdateCommand({
   packageManagerPath,
   serveCommand,
   discoverInstances = discoverRunningInstances,
-  startupService = { getPid: getStartupServicePid, restart: restartStartupService },
+  startupService = {
+    findInstance: findStartupServiceInstance,
+    restart: restartStartupService,
+  },
   waitForVersion = waitForServerVersion,
 }) {
   return async function updateCommand(options = {}) {
@@ -100,12 +103,20 @@ function createUpdateCommand({
     }
     updateSpin?.message(`Updating to ${updateInfo.version || 'latest'}...`);
 
-    // systemd starts its service again whenever the process exits, so the old
-    // release would come back while the package manager replaces its files.
-    // The service keeps running through the install and systemd restarts it
-    // afterwards, the way the Update button does.
-    const servicePid = startupService.getPid();
-    const serviceInstance = runningInstances.find((instance) => instance.pid === servicePid);
+    // The process manager starts the service again whenever its process
+    // exits, so the old release would come back while the package manager
+    // replaces its files. The service keeps running through the install and
+    // the manager restarts it afterwards, the way the Update button does.
+    let serviceInstance;
+    try {
+      serviceInstance = startupService.findInstance(runningInstances);
+    } catch (error) {
+      updateSpin?.error('Update stopped');
+      if (showOutput) {
+        clackOutro('update failed');
+      }
+      throw error;
+    }
     const cliInstances = runningInstances.filter((instance) => instance !== serviceInstance);
 
     if (cliInstances.length > 0) {
@@ -156,7 +167,15 @@ function createUpdateCommand({
     // with this restart. A unit written by an older release can still point
     // at the install the package manager just deleted, or at the old release.
     if (serviceInstance) {
-      startupService.restart();
+      try {
+        await startupService.restart(serviceInstance);
+      } catch (error) {
+        updateSpin?.error('Startup service did not restart');
+        if (showOutput) {
+          clackOutro('update failed');
+        }
+        throw error;
+      }
       if (!await waitForVersion(serviceInstance, updateInfo.version)) {
         updateSpin?.error('Startup service did not restart');
         if (showOutput) {
