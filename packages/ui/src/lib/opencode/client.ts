@@ -12,6 +12,7 @@
  * here when they are part of the same directory/session workflows.
  */
 
+import { AgentUnavailableError } from "./agent-unavailable-error"
 import { isLocationNotFoundError } from "./location-errors"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode/client"
 import type {
@@ -159,13 +160,7 @@ export class OpencodeApiError extends Error {
   }
 }
 
-/** A send named an agent the session's folder does not have; nothing was sent. */
-export class AgentUnavailableError extends Error {
-  constructor(readonly agent: string, readonly directory: string | undefined) {
-    super(`Agent '${agent}' is not available in ${directory ?? "the session's folder"}`)
-    this.name = "AgentUnavailableError"
-  }
-}
+export { AgentUnavailableError }
 
 const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optional(), ref: z.string().optional() })
 
@@ -1444,9 +1439,12 @@ class OpencodeService {
    *
    * OpenCode records an agent the session's folder does not have and fails
    * only the next turn, so the agent is checked first: a missing one stops the
-   * send before anything, the model included, is switched.
+   * send before anything, the model included, is switched. A form reply goes
+   * through here too, because its continuation is a turn. The runtime is checked
+   * once more after the last switch, so a caller never acts on a server it did
+   * not start with.
    */
-  private async applySendSelection(
+  async applySendSelection(
     sessionID: string,
     selection: { model?: ModelSelection; agent?: string },
     directory: string | null | undefined,
@@ -1464,6 +1462,7 @@ class OpencodeService {
       this.assertRuntimeUnchanged(runtimeKey)
       await this.switchSessionAgent(sessionID, selection.agent, directory)
     }
+    this.assertRuntimeUnchanged(runtimeKey)
   }
 
   /**

@@ -18,7 +18,7 @@ import {
   submitRecoveredAnswer,
   type RecoveredQuestion,
 } from "./recoverable-questions"
-import { resolveSendSelection } from "./session-selection"
+import { resolveCheckedSendSelection, resolveSendSelection } from "./session-selection"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -32,7 +32,7 @@ import { readGlobalSessionLineage } from "@/stores/sessionLineage"
 import { isRestorableOnItsOwn } from "./session-restore-rule"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { waitForOpenCodeStartup } from "./opencode-startup-gate"
-import { registerSessionDirectory } from "./sync-refs"
+import { getAllSyncSessions, getDirectoryState, registerSessionDirectory } from "./sync-refs"
 import { useGlobalSessionStatusStore } from "./global-session-status"
 import { recordSendFailure } from "./send-failure-log"
 import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
@@ -69,6 +69,7 @@ import { trackPromptInFlight } from "./prompts-in-flight"
 import { messagesBefore, messagesFrom } from "./message-ordering"
 import { deleteChatDirectory } from "@/lib/chatDirectories"
 import { createChatDraftIdentity, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
+import { LOCATION_SCOPED_FORM_SESSION_ID } from "./location-scoped-forms"
 import { cancelSessionTitleGeneration } from "./session-title-generation"
 import { recordSessionActionFailure } from "./session-action-failures"
 import { applyForkInheritance } from "@/lib/sessionForkInheritance"
@@ -2578,17 +2579,112 @@ export async function dismissOpenPermissionsForSession(sessionId: string): Promi
 /** One filled-in form: every field the agent declared, keyed by field key. */
 export type FormAnswer = Record<string, string | number | boolean | string[]>
 
+/** What a form's session should run on next; a missing half stays as it is. */
+type FormSelection = {
+  model?: { providerID: string; modelID: string; variant?: string | null }
+  agent?: string
+}
+
+/**
+ * The selection of the composer that belongs to a form's session. The main
+ * chat's composer lives in the app-wide config. Any other session, a pinned
+ * chat or a `/btw` fork, holds its picks per session, and a child session
+ * answered from its parent has none: its record, a workflow's binding included,
+ * stays. A reply never copies another chat's model, agent or effort.
+ */
+function resolveFormSelection(sessionId: string, directory: string | undefined): FormSelection {
+  const picks = useSelectionStore.getState()
+  const agentPick = picks.getSessionAgentPick(sessionId) ?? undefined
+  if (useSessionUIStore.getState().currentSessionId === sessionId) {
+    const config = useConfigStore.getState()
+    return {
+      agent: agentPick ?? config.currentAgentName ?? undefined,
+      model: config.currentProviderId && config.currentModelId
+        ? {
+            providerID: config.currentProviderId,
+            modelID: config.currentModelId,
+            variant: config.currentVariantSelection.override === null ? null : config.currentVariant,
+          }
+        : undefined,
+    }
+  }
+  const record = (getDirectoryState(directory)?.session ?? getAllSyncSessions()).find((session) => session.id === sessionId)
+  const recordModel = record?.model
+  const modelPick = picks.getSessionModelPick(sessionId)
+  const model = modelPick ?? (recordModel ? { providerId: recordModel.providerID, modelId: recordModel.id } : null)
+  const agent = agentPick ?? record?.agent
+  const savedEffort = model && agent
+    ? picks.getAgentModelVariantForSession(sessionId, agent, model.providerId, model.modelId)
+    : undefined
+  // An effort saved before a switch made elsewhere is older than the record.
+  const effortPicked = savedEffort !== undefined && !(recordModel
+    && picks.isSessionModelSwitched(sessionId, `${recordModel.providerID}/${recordModel.id}#${recordModel.variant ?? ""}`))
+  if (!model || (!modelPick && !effortPicked)) return { agent: agentPick }
+  const recordEffort = recordModel?.providerID === model.providerId && recordModel.id === model.modelId
+    ? recordModel.variant
+    : undefined
+  return {
+    agent: agentPick,
+    model: { providerID: model.providerId, modelID: model.modelId, variant: effortPicked ? savedEffort : recordEffort },
+  }
+}
+
+/**
+ * Puts a form's session on its composer's selection before the answer resumes
+ * the turn, as a send does (#6053): an unchanged selection switches nothing,
+ * and a failed switch leaves the answer unsent. Auto reaches the session as
+ * the sentinel; the server routes the reply itself and switches to the real
+ * model before it forwards the answer. Returns what to settle once the answer
+ * is accepted.
+ */
+async function applyFormSelection(sessionId: string, directory: string | undefined, runtimeKey: string): Promise<() => void> {
+  // No session owns a location-scoped form, so nothing can be switched for it.
+  if (sessionId === LOCATION_SCOPED_FORM_SESSION_ID) return () => {}
+  const { model, agent } = resolveFormSelection(sessionId, directory)
+  if (!model && !agent) return () => {}
+  const settleModelPick = model
+    ? useSelectionStore.getState().captureSessionModelPickSettlement(sessionId, model.providerID, model.modelID, runtimeKey)
+    : undefined
+  const selection = await resolveCheckedSendSelection(sessionId, directory, {
+    // Without a model the agent half is all that is compared and used.
+    providerID: model?.providerID ?? "",
+    modelID: model?.modelID ?? "",
+    variant: model?.variant,
+    agent,
+  })
+  await opencodeClient.applySendSelection(
+    sessionId,
+    { model: model ? selection.model : undefined, agent: selection.agent },
+    directory,
+    runtimeKey,
+  )
+  return () => settleModelPick?.()
+}
+
 export async function replyToForm(
   sessionId: string,
   formId: string,
   answer: FormAnswer,
 ): Promise<void> {
+  // The client resolves its server at call time, so everything past an await
+  // first proves it still works for the runtime the user answered in.
+  const isCurrentRuntime = captureRuntimeInstance()
+  const runtimeKey = getRuntimeKey()
+  const assertRuntimeCurrent = () => {
+    if (!isCurrentRuntime()) throw new Error("Form reply was cancelled because the runtime changed.")
+  }
   await waitForConnectionOrThrow()
+  assertRuntimeCurrent()
   const directory = getRequestReplyDirectory("form", sessionId, formId)
   try {
+    const settleSelection = await applyFormSelection(sessionId, directory, runtimeKey)
+    assertRuntimeCurrent()
     if (await opencodeClient.replyToForm(sessionId, formId, answer, directory) !== true) {
       throw new Error("Form reply failed")
     }
+    // The stores belong to another server now, and this form is not on it.
+    if (!isCurrentRuntime()) return
+    settleSelection()
     // A successful reply is authoritative: the backend resolved the form, so
     // clear it from the local store deterministically instead of waiting for
     // the SSE `form.replied` event. A lost event (SSE gap) would leave the
@@ -2599,7 +2695,7 @@ export async function replyToForm(
     removeFormRequestFromChildStores(sessionId, formId)
     noteLocalFormReplied(formId)
   } catch (error) {
-    if (isFormRequestNotFoundError(error)) {
+    if (isCurrentRuntime() && isFormRequestNotFoundError(error)) {
       removeFormRequestFromChildStores(sessionId, formId)
       recoverStaleBlockingRequest(sessionId)
     }

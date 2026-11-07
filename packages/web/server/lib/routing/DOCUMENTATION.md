@@ -70,7 +70,10 @@ Auto. There is no env gate — the feature shipped dark behind
   swallowed and marks the session (`noteModelSelection`), and every
   `POST /api/session/:id/{prompt,command}` in a marked session is routed
   (`routeSend`) and switches the session onto the answer before the send is
-  forwarded. Both sit ahead of the generic proxy, which replays a parsed body.
+  forwarded. So is `POST /api/session/:id/form/:formId/reply`: the answer
+  resumes a turn, so it is routed on the values the user filled in, and a
+  failure answers with an error and leaves the form pending. Both sit ahead of
+  the generic proxy, which replays a parsed body.
   The message queue calls `resolveAutoSelection` itself and applies the answer
   with the model/agent switches it already makes. Without a fallback model the
   runtime throws 400 rather than forwarding. The OpenChamber session service

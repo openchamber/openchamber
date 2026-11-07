@@ -18,7 +18,7 @@ import { useScopedBlockingForms, useRecoveredQuestions, useSessions } from '@/sy
 import { useRequestReveal } from '@/sync/request-reveal';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
-import { isFormRequestNotFoundError } from '@/sync/form-request-error';
+import { agentUnavailableFrom, isFormRequestNotFoundError } from '@/sync/form-request-error';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { FormFieldControl } from './FormFieldControl';
 import { WebSearchConsentDock } from './WebSearchConsent';
@@ -220,6 +220,11 @@ const FormDockPanel: React.FC<{
         } catch (error) {
             if (!recovered && isFormRequestNotFoundError(error)) {
                 dropFormDraft(draftScope);
+                return;
+            }
+            const unavailableAgent = agentUnavailableFrom(error instanceof Error ? error : null);
+            if (unavailableAgent) {
+                toast.error(t('chat.chatInput.toast.agentUnavailable', { agent: unavailableAgent }));
                 return;
             }
             toast.error(t('chat.formCard.submitFailed'), { description: t('chat.formCard.tryAgain') });

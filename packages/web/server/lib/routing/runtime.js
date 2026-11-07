@@ -42,9 +42,13 @@ const commandBodySchema = z.object({ name: z.string().trim().min(1), text: z.str
 // v2 sends one user turn as flat text; the context the composer attached went
 // ahead of it as synthetic messages, which are never the request being routed.
 const promptBodySchema = z.object({ text: z.string().nullish() });
+// A form reply carries the filled-in fields, keyed by ids the agent made up.
+const formReplyBodySchema = z.object({ answer: z.record(z.string(), z.unknown()) });
 
-/** The user's words for this send: the prompt text, or the slash command. */
+/** The user's words for this send: the prompt text, the slash command, or a form's answers. */
 export const requestTextOf = (body) => {
+  const formReply = formReplyBodySchema.safeParse(body);
+  if (formReply.success) return Object.values(formReply.data.answer).flat().join('\n').trim();
   const command = commandBodySchema.safeParse(body);
   if (command.success) {
     const args = command.data.text?.trim();

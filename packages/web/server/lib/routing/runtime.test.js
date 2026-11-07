@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { attachmentHint, createRoutingRuntime, readOpenCodeKeys, requestTextOf, routingRequestTextOf } from './runtime.js';
 import { resolveEffectiveConfig } from './store.js';
 import { excerptHead, excerptHeadTail, turnsToHistory } from './history.js';
@@ -81,6 +81,12 @@ describe('requestTextOf', () => {
   it('keeps the command name when it has no arguments', () => {
     expect(requestTextOf({ name: 'review', text: '' })).toBe('/review');
     expect(requestTextOf({ name: 'review' })).toBe('/review');
+  });
+});
+
+describe('requestTextOf a form reply', () => {
+  it('is the values the user filled in', () => {
+    expect(requestTextOf({ answer: { q1: 'refactor the parser', q2: ['tests', 'docs'], q3: true } })).toBe('refactor the parser\ntests\ndocs\ntrue');
   });
 });
 
@@ -534,6 +540,29 @@ describe('readOpenCodeKeys', () => {
     const readAuth = () => { throw new Error('locked'); };
     expect(await readOpenCodeKeys({ readAuth, env })).toEqual({ zenKey: null, openrouterKey: 'or-env', vercelKey: 'gw-env' });
     expect(await readOpenCodeKeys({ readAuth: () => ({}), env: { OPENROUTER_API_KEY: '  ' } })).toEqual({ zenKey: null, openrouterKey: null, vercelKey: null });
+  });
+});
+
+describe('routeSend', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('switches a form reply onto the routed model and agent, judged on the answer', async () => {
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      const body = input instanceof Request ? await input.clone().text() : init?.body;
+      calls.push({ path: url.pathname, body: JSON.parse(body) });
+      return new Response(null, { status: 204 });
+    }));
+    const { runtime, jev } = makeRuntime({ answers: { category: { choice: 'hard', confidence: 0.97 } } });
+
+    await runtime.routeSend({ sessionId: 's1', directory: '/repo', body: { answer: { plan: 'rewrite the scheduler' } } });
+
+    expect(jev.ask.mock.calls[0][0].state.request).toBe('rewrite the scheduler');
+    expect(calls).toEqual([
+      { path: '/api/session/s1/model', body: { model: { providerID: 'openai', id: 'gpt-6-astra', variant: 'high' } } },
+      { path: '/api/session/s1/agent', body: { agent: 'plan' } },
+    ]);
   });
 });
 

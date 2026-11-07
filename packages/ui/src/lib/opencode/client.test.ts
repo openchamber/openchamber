@@ -522,6 +522,16 @@ describe("sendMessage", () => {
     expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } })
   })
 
+  test("a selection whose last switch outlives the runtime rejects, so no reply follows it", async () => {
+    responses.push(agentList("build"), noContent(), () => {
+      runtimeKey = "other"
+      return noContent()
+    })
+    await expect(
+      opencodeClient.applySendSelection("ses_1", { model: { id: "grok-4.7", providerID: "xai" }, agent: "build" }, null, "test"),
+    ).rejects.toThrow("runtime changed")
+  })
+
   test("refuses to send when the runtime changed underneath the caller", async () => {
     await expect(
       opencodeClient.sendMessage({ runtimeKey: "other", id: "ses_1", providerID: "openai", text: "x" }),

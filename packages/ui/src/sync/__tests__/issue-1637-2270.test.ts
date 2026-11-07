@@ -76,6 +76,8 @@ mock.module("@/stores/useConfigStore", () => ({
       hasEverConnected: true,
     }),
   },
+  selectCatalogLoadedForDirectory: () => false,
+  selectConfigAgentsForDirectory: () => [],
 }))
 
 mock.module("../input-store", () => ({
