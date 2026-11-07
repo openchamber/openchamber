@@ -108,7 +108,7 @@ import {
   setSessionParentResolver,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
-import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, settledPageKeys, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
+import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, markPagesSettled, settledPageKeys, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
 import { requestHostTurnStarts } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
@@ -174,6 +174,7 @@ useGlobalBlockingRequestsStore.subscribe((state, previous) => {
   if (state.bySession === previous.bySession) return
   const settled = settledPageKeys(previous.bySession, state.bySession)
   if (settled.length === 0) return
+  markPagesSettled(settled)
   const shown = new Set(toast.getToasts().map((entry) => entry.id))
   for (const key of settled) {
     if (shown.has(`page-${key}`)) toast.dismiss(`page-${key}`)

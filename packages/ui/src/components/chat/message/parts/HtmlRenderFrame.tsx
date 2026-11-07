@@ -14,6 +14,7 @@ import type { ToolPart } from '@/lib/opencode/model';
 import { renderedPage, type RenderedPageAsk } from '@/lib/opencode/tools';
 import { answerRenderedPage } from '@/lib/renderPageAnswer';
 import { openExternalUrl } from '@/lib/url';
+import { useIsPageSettled } from '@/sync/global-blocking-requests';
 import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { dispatchFrameScroll, dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
@@ -452,12 +453,13 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     const [sent, setSent] = React.useState<HtmlRenderSubmission | null>(null);
     const [submitting, setSubmitting] = React.useState(false);
     const [decline, sendDecline] = usePageDecline(part.sessionID, part.callID);
+    const settled = useIsPageSettled(part.sessionID, part.callID);
     const answerState = React.useMemo<HtmlRenderAnswerState>(() => {
         if (ask.kind === 'answered') return { waiting: false, answer: ask.data };
         if (sent) return { waiting: false, answer: sent.data };
         // A decline on its way takes the page out of waiting, so its own button cannot answer too.
-        return { waiting: ask.kind === 'waiting' && decline === 'idle', answer: null };
-    }, [ask, sent, decline]);
+        return { waiting: ask.kind === 'waiting' && decline === 'idle' && !settled, answer: null };
+    }, [ask, sent, decline, settled]);
     const handleSubmit = React.useCallback(async (submission: HtmlRenderSubmission) => {
         setSubmitting(true);
         try {
@@ -472,7 +474,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         }
     }, [part.callID, part.sessionID, t]);
     const answeredSummary = ask.kind === 'answered' ? ask.summary : sent?.summary;
-    const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined';
+    const waiting = ask.kind === 'waiting' && answeredSummary === undefined && decline !== 'declined' && !settled;
     // The page puts Decline beside its own last button; only a page without
     // one gets it under the page. Unknown until the page has loaded.
     const [declineInPage, setDeclineInPage] = React.useState<boolean | null>(null);

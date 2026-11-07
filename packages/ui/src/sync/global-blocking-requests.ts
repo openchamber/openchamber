@@ -46,6 +46,34 @@ const EMPTY: readonly never[] = [];
 type WaitingPageEvent = Extract<SyncEvent, { type: 'openchamber.page-waiting' | 'openchamber.page-settled' | 'session.deleted' }>;
 const pageSnapshotObservers = new Set<(event: WaitingPageEvent) => void>();
 
+/**
+ * Pages that stopped waiting while this client watched them, as
+ * `sessionID:pageID`, however it learned that: the end event, or the host's
+ * snapshot after that event fell into a gap of the control stream.
+ *
+ * A page that settles leaves its call running — `release` keeps the call open
+ * on purpose, so a second OpenCode on the same database is not woken into a
+ * turn the user is not in. The part therefore still reads as running, and the
+ * page would go on offering an answer that nothing is waiting for. This set is
+ * the one place that says otherwise.
+ */
+type SettledPagesState = { keys: ReadonlySet<string> };
+export const useSettledPagesStore = create<SettledPagesState>(() => ({ keys: new Set() }));
+
+export const markPagesSettled = (keys: readonly string[]): void => {
+  if (keys.length === 0) return;
+  useSettledPagesStore.setState((state) => {
+    const next = new Set(state.keys);
+    for (const key of keys) next.add(key);
+    return { keys: next };
+  });
+};
+
+/** Whether this page stopped waiting, so it must not be drawn as one that waits. */
+export const useIsPageSettled = (sessionId: string | null | undefined, pageId: string | null | undefined): boolean => (
+  useSettledPagesStore((state) => Boolean(sessionId && pageId && state.keys.has(`${sessionId}:${pageId}`)))
+);
+
 const recordWaitingPageEvent = (event: WaitingPageEvent): void => {
   for (const observer of pageSnapshotObservers) observer(event);
 };
@@ -81,6 +109,7 @@ export const settledPageKeys = (
 
 export const resetGlobalBlockingRequests = (): void => {
   pageSnapshotObservers.clear();
+  useSettledPagesStore.setState({ keys: new Set() });
   useGlobalBlockingRequestsStore.setState({ bySession: new Map() });
 };
 

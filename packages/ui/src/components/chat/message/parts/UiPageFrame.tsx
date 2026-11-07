@@ -10,6 +10,7 @@ import type { UiBlockHost } from '../../uiBlocks/UiBlock';
 import { useUiBlockComponent } from '../../uiBlocks/useUiBlockComponent';
 import { DeclinePageButton } from './DeclinePageButton';
 import { usePageDecline } from './usePageDecline';
+import { useIsPageSettled } from '@/sync/global-blocking-requests';
 import { PageAskStatus } from './PageAskStatus';
 
 /**
@@ -26,7 +27,8 @@ export function UiPageFrame({ part, source, ask }: { part: ToolPart; source: str
     const { sessionID, callID } = part;
     // Shown until the call completes with the decline OpenCode stores.
     const [decline, sendDecline] = usePageDecline(sessionID, callID);
-    const waiting = ask.kind === 'waiting' && sentSummary === null && decline !== 'declined';
+    const settled = useIsPageSettled(sessionID, callID);
+    const waiting = ask.kind === 'waiting' && sentSummary === null && decline !== 'declined' && !settled;
 
     const submit = React.useCallback(async (answer: UiBlockAnswer) => {
         const summary = pageAnswerSummary(answer.summary);
