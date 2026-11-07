@@ -240,6 +240,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       inputFields: []
     },
 
+    openchamber_usage: {
+      displayName: 'OpenChamber Usage',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
     openchamber_render: {
       displayName: 'OpenChamber Render',
       category: 'system',

@@ -259,6 +259,7 @@ describe('createParsedStatus', () => {
             expect(english(statusOf([call('openchamber_memory', { action: 'memory.save', parameters: { title: 'x' } })]).status)).toBe('saving to memory');
             expect(english(statusOf([call('openchamber', { action: 'session.create' })]).status)).toBe('starting a session');
             expect(english(statusOf([call('openchamber_notify', { title: 'Done' })]).status)).toBe('sending a notification');
+            expect(english(statusOf([call('openchamber_usage', { action: 'usage.read', parameters: {} })]).status)).toBe('checking usage limits');
         });
 
         test('fall back to the tool phrase for an action without its own', () => {
