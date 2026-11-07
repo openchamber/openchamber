@@ -76,20 +76,22 @@ final class ShareSheetE2ETests: XCTestCase {
     // MARK: - App side
 
     private func connectToServer() {
-        // The manual form starts collapsed because iOS supports QR pairing; the toggle is
-        // part of the page, so opening it is the same path a user takes.
-        let toggle = app.buttons["Connect by address"].firstMatch
-        let urlField = serverURLField()
+        // A saved connection from an earlier run auto-connects on launch. The connect screen's
+        // copy changes between releases, so the screen is recognised by the manual-entry tile
+        // rather than by a heading, and the tile is matched loosely because its label also
+        // carries the hint under it.
+        let manualTile = manualEntryTile()
 
-        // A saved connection from an earlier run auto-connects on launch, and the screen's
-        // copy differs between releases, so the form itself is the signal.
-        guard urlField.waitForExistence(timeout: 60) || toggle.exists else { return }
+        guard manualTile.waitForExistence(timeout: 60) || serverURLField().exists else { return }
 
-        // The collapsed row keeps its inputs in the DOM, so hittability — not existence —
-        // is what tells whether the form is open.
-        if !urlField.isHittable, toggle.waitForExistence(timeout: 60) {
-            toggle.tap()
+        // The form starts collapsed because iOS supports QR pairing; opening it is the path a
+        // user takes.
+        var urlField = serverURLField()
+        if !urlField.exists {
+            manualTile.tap()
+            urlField = serverURLField()
         }
+        XCTAssertTrue(urlField.waitForExistence(timeout: 60), "the manual form did not open:\n\(app.debugDescription)")
         let opened = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: urlField)
         XCTAssertEqual(XCTWaiter().wait(for: [opened], timeout: 30), .completed, "the manual form did not open")
 
@@ -98,11 +100,19 @@ final class ShareSheetE2ETests: XCTestCase {
         attachScreenshot(named: "0-url-entered")
         submitConnection()
 
-        // The form going away is the only signal that works whatever the app shows next.
+        // The tile going away means the page replaced the connection screen with the app.
         XCTAssertTrue(
-            waitUntilGone(urlField, timeout: 180),
+            waitUntilGone(manualTile, timeout: 180),
             "the app never left the connection screen:\n\(app.debugDescription)"
         )
+    }
+
+    /// The tile carries a hint under its title, so it is matched by the part of the label that
+    /// does not change, whichever element type the platform exposes it as.
+    private func manualEntryTile() -> XCUIElement {
+        let predicate = NSPredicate(format: "label CONTAINS[c] 'Connect by address'")
+        let text = app.staticTexts.matching(predicate).firstMatch
+        return text.exists ? text : app.buttons.matching(predicate).firstMatch
     }
 
     /// The label is a stack over the input, so expose either the labelled field or the only
@@ -119,8 +129,8 @@ final class ShareSheetE2ETests: XCTestCase {
         if app.keyboards.element.exists {
             app.typeText("\n")
         }
-        let urlField = serverURLField()
-        if waitUntilGone(urlField, timeout: 30) { return }
+        let tile = manualEntryTile()
+        if waitUntilGone(tile, timeout: 30) { return }
 
         let connect = app.buttons["Connect"].firstMatch
         if connect.waitForExistence(timeout: 5), connect.isHittable {
