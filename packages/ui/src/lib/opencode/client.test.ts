@@ -1308,3 +1308,32 @@ describe("a subagent transcript showing a message its parent stores", () => {
     expect(paths()).toHaveLength(2)
   })
 })
+
+describe("stopBackgroundShells", () => {
+  const shells = [
+    { shellID: "sh_1", shellDirectory: "/repo/app", command: "sleep 100" },
+    { shellID: "sh_2", shellDirectory: "/repo/app", command: "sleep 200" },
+  ] as const
+
+  test("tells the agent first, then removes the commands", async () => {
+    responses.push(json({ id: "syn_1" }), noContent(), noContent())
+    await opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "POST /api/session/ses_1/synthetic",
+      "DELETE /api/shell/sh_1",
+      "DELETE /api/shell/sh_2",
+    ])
+  })
+
+  // The kills would reach the new server: the note stays on the old one.
+  test("removes nothing when the runtime changes while the note is on its way", async () => {
+    responses.push(() => {
+      runtimeKey = "other"
+      return json({ id: "syn_1" })
+    })
+    await expect(
+      opencodeClient.stopBackgroundShells({ sessionID: "ses_1", sessionDirectory: "/repo/app", shells }),
+    ).rejects.toThrow("runtime changed")
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/synthetic"])
+  })
+})

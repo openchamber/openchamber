@@ -2033,13 +2033,17 @@ class OpencodeService {
    * are killed together only once the note is in, so their completions reach
    * the agent at about the same time. Throws when the note or any kill
    * fails; nothing is killed when the note could not be delivered, and a
-   * failed kill leaves the other commands stopped.
+   * failed kill leaves the other commands stopped. A runtime switch while
+   * the note is on its way also throws before any kill, since the kills
+   * would reach the other server: the note then stays posted on the old
+   * runtime and its commands keep running there.
    */
   async stopBackgroundShells(params: {
     sessionID: string
     sessionDirectory?: string | null
     shells: readonly [ShellToStop, ...ShellToStop[]]
   }): Promise<void> {
+    const ownsRuntime = captureRuntimeInstance()
     const note = shellCancellationNote(params.shells)
     await call("session.synthetic", () =>
       this.clientFor(params.sessionDirectory).session.synthetic({
@@ -2050,6 +2054,7 @@ class OpencodeService {
         resume: false,
       }),
     )
+    if (!ownsRuntime()) throw new Error("Commands were not stopped because the runtime changed.")
     const removals = await Promise.allSettled(params.shells.map((shell) =>
       call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID })),
     ))
