@@ -1198,6 +1198,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'Une règle de votre configuration OpenCode autorise ce plugin et prime sur ce commutateur. Supprimez cette règle pour désactiver le plugin ici.',
   'settings.plugins.switch.unavailable': 'Cette référence ne désigne aucun plugin qu\'OpenCode puisse reconnaître, il ne peut donc pas être désactivé ici.',
   'settings.plugins.switch.notAvailable': 'Ce commutateur ne s\'applique qu\'à l\'OpenCode lancé par OpenChamber et n\'est pas disponible pour le moment.',
+  'settings.plugins.switch.unreadable': 'OpenChamber ne peut pas lire sa liste de plugins désactivés, plugin-switches.json dans son dossier de données ; les plugins gardent donc leur dernier état. Corrigez ou supprimez ce fichier pour réutiliser les interrupteurs.',
   'settings.plugins.switch.toast.failed': 'Impossible de changer l\'état du plugin.',
   'settings.plugins.page.header.file': 'Fichier de plug-in',
   'settings.plugins.page.field.spec': 'Spécification',

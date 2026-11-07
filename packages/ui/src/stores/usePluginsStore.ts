@@ -18,7 +18,7 @@ export type PluginScope = 'user' | 'project';
 /** `control` is an OpenCode 2 entry such as `-name` or `*` that turns known plugins off or on. */
 export type PluginParsedKind = 'control' | 'npm' | 'path' | 'git';
 
-export type PluginSwitchState = 'on' | 'off' | 'unavailable' | 'overridden';
+export type PluginSwitchState = 'on' | 'off' | 'unavailable' | 'unreadable' | 'overridden';
 
 export interface PluginEntry {
   id: string;
@@ -31,7 +31,7 @@ export interface PluginEntry {
   sourcePath?: string;
   /** The `plugin:` resource an `integration.use` policy matches; OpenChamber's managed layer denies it. */
   policyResource?: string;
-  /** OpenChamber's switch state; unavailable when it cannot be read or applied here, overridden when a rule in the OpenCode config keeps the plugin loading. */
+  /** OpenChamber's switch state; unavailable when it cannot be applied here, unreadable when its store cannot be read, overridden when a rule in the OpenCode config keeps the plugin loading. */
   switchState?: PluginSwitchState;
   /** Host-resolved local target used only to filter duplicate discovery records. */
   resolvedPath?: string;
@@ -46,7 +46,7 @@ export interface PluginFile {
   absolutePath?: string;
   /** The `plugin:` resource an `integration.use` policy matches for this local plugin. */
   policyResource?: string;
-  /** OpenChamber's switch state; unavailable when it cannot be read or applied here, overridden when a rule in the OpenCode config keeps the plugin loading. */
+  /** OpenChamber's switch state; unavailable when it cannot be applied here, unreadable when its store cannot be read, overridden when a rule in the OpenCode config keeps the plugin loading. */
   switchState?: PluginSwitchState;
   /** Host-resolved local target used only to filter duplicate discovery records. */
   resolvedPath?: string;

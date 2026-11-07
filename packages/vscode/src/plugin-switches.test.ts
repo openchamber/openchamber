@@ -44,7 +44,7 @@ describe('plugin switch state', () => {
 
     setPluginSwitch(directory, 'plugin:opencode-wakatime', true);
     assert.equal(pluginSwitchState(readPluginSwitches(directory), 'plugin:opencode-wakatime', []), 'on');
-    assert.equal(pluginSwitchState({ ok: false, error: new Error('unreadable') }, 'plugin:opencode-wakatime', []), 'unavailable');
+    assert.equal(pluginSwitchState({ ok: false, error: new Error('unreadable') }, 'plugin:opencode-wakatime', []), 'unreadable');
   });
 });
 
@@ -95,7 +95,7 @@ describe('managed OpenCode layer', () => {
     });
   });
 
-  test('refuses to replace the published denials when the store cannot be read', () => {
+  test('keeps the published denials when the store cannot be read', () => {
     const directory = temporaryDirectory();
     setPluginSwitch(directory, 'plugin:opencode-wakatime', false);
     const env: NodeJS.ProcessEnv = {};
@@ -105,19 +105,18 @@ describe('managed OpenCode layer', () => {
 
     fs.writeFileSync(path.join(directory, 'plugin-switches.json'), '{not json', 'utf8');
 
-    assert.throws(() => applyPluginSwitchPolicies(env, directory, { userOwnsConfig: false }));
+    applyPluginSwitchPolicies(env, directory, { userOwnsConfig: false });
     assert.equal(fs.readFileSync(managedFile, 'utf8'), published);
   });
 
-  test('a fresh launch fails on an unreadable store instead of starting without denials', () => {
+  test('a fresh launch on an unreadable store starts without denials', () => {
     const directory = temporaryDirectory();
     fs.writeFileSync(path.join(directory, 'plugin-switches.json'), JSON.stringify({ disabled: 'nope' }), 'utf8');
 
     const env: NodeJS.ProcessEnv = {};
-    assert.throws(() => applyPluginSwitchPolicies(env, directory, { userOwnsConfig: false }));
-    assert.throws(() => applyPluginSwitchPolicies(env, directory, { userOwnsConfig: true }));
-    assert.equal(fs.existsSync(path.join(directory, 'opencode.managed.json')), false);
-    assert.equal(env.OPENCODE_CONFIG, undefined);
+    applyPluginSwitchPolicies(env, directory, { userOwnsConfig: false });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, 'opencode.managed.json'), 'utf8')), { policies: [] });
+    assert.equal(env.OPENCODE_CONFIG, path.join(directory, 'opencode.managed.json'));
   });
 
   test('fails a launch when denials cannot merge into OPENCODE_CONFIG_CONTENT, and leaves it alone without denials', () => {

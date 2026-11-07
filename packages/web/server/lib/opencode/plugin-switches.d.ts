@@ -2,7 +2,7 @@ export type PluginSwitchRead =
   | { ok: true; resources: string[] }
   | { ok: false; error: Error };
 
-export type PluginSwitchState = 'on' | 'off' | 'unavailable' | 'overridden';
+export type PluginSwitchState = 'on' | 'off' | 'unavailable' | 'unreadable' | 'overridden';
 
 export type PluginDenial = { action: 'integration.use'; resource: string; effect: 'deny' };
 

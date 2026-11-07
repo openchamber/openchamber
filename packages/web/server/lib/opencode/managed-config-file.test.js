@@ -401,37 +401,6 @@ describe('managed OpenCode config file', () => {
     });
   });
 
-  it('refuses a launch when the switched-off plugins cannot be established', async () => {
-    const { runtime, dataDir } = await createHarness({
-      settings: {},
-      readPluginDenials: () => { throw new Error('unreadable store'); },
-    });
-
-    await expect(runtime.buildManagedChildEnv()).rejects.toThrow('unreadable store');
-    await expect(fs.access(path.join(dataDir, MANAGED_CONFIG_FILE_NAME))).rejects.toThrow();
-  });
-
-  it('refuses a launch on the fallback path too', async () => {
-    const { runtime } = await createHarness({
-      settings: {},
-      env: { OPENCODE_CONFIG: '/home/user/opencode.json' },
-      readPluginDenials: () => { throw new Error('unreadable store'); },
-    });
-
-    await expect(runtime.buildManagedChildEnv()).rejects.toThrow('unreadable store');
-  });
-
-  it('keeps the published denials when a later rewrite cannot read them', async () => {
-    let readDenials = () => [DENIAL];
-    const { runtime, readConfigFile } = await createHarness({ settings: {}, readPluginDenials: () => readDenials() });
-    await runtime.refreshManagedConfigFile();
-
-    readDenials = () => { throw new Error('unreadable store'); };
-
-    await expect(runtime.refreshManagedConfigFile()).rejects.toThrow('unreadable store');
-    expect((await readConfigFile()).policies).toEqual([DENIAL]);
-  });
-
   it('appends the same denials to OPENCODE_CONFIG_CONTENT', async () => {
     const { runtime, titleDirectory, agentToolRuntime } = await createHarness({
       settings: {},

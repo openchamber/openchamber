@@ -2584,6 +2584,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': '你的 OpenCode 設定中有規則允許此外掛，且優先於此開關。刪除該規則後才能在這裡關閉外掛。',
   'settings.plugins.switch.unavailable': '這個識別碼不是 OpenCode 能比對的外掛，因此無法在這裡停用。',
   'settings.plugins.switch.notAvailable': '這個開關只適用於 OpenChamber 啟動的 OpenCode，目前無法使用。',
+  'settings.plugins.switch.unreadable': 'OpenChamber 無法讀取資料資料夾中已關閉外掛的清單 plugin-switches.json，因此外掛維持上一次的狀態。修正或刪除該檔案後即可再次使用開關。',
   'settings.plugins.switch.toast.failed': '無法變更外掛狀態。',
   'settings.plugins.page.header.file': '外掛檔案',
   'settings.plugins.registry.badge.network.tooltip': '無法連線到套件庫',

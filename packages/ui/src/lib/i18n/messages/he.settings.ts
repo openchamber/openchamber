@@ -1327,6 +1327,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'כלל בהגדרות OpenCode מתיר את התוסף הזה וגובר על המתג הזה. יש להסיר את הכלל כדי לכבות את התוסף כאן.',
   'settings.plugins.switch.unavailable': 'המזהה הזה אינו מציין תוסף ש-OpenCode מזהה, ולכן אי אפשר להשבית אותו מכאן.',
   'settings.plugins.switch.notAvailable': 'המתג הזה חל רק על OpenCode שמופעל על ידי OpenChamber ואינו זמין כרגע.',
+  'settings.plugins.switch.unreadable': 'OpenChamber לא מצליח לקרוא את רשימת התוספים המכובים, plugin-switches.json בתיקיית הנתונים, ולכן התוספים נשארים במצבם האחרון. תקנו או מחקו את הקובץ כדי להשתמש שוב במתגים.',
   'settings.plugins.switch.toast.failed': 'לא ניתן היה לשנות את מצב התוסף.',
   'settings.plugins.page.header.file': 'קובץ תוסף',
   'settings.plugins.page.field.spec': 'מפרט',

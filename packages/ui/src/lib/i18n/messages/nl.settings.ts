@@ -1328,6 +1328,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'Een regel in je OpenCode-configuratie staat deze plugin toe en gaat voor op deze schakelaar. Verwijder die regel om de plugin hier uit te schakelen.',
   'settings.plugins.switch.unavailable': 'Deze aanduiding noemt geen plugin die OpenCode kan herkennen, dus hier valt niets uit te schakelen.',
   'settings.plugins.switch.notAvailable': 'Deze schakelaar geldt alleen voor de OpenCode die OpenChamber start en is nu niet beschikbaar.',
+  'settings.plugins.switch.unreadable': 'OpenChamber kan zijn lijst met uitgeschakelde plugins, plugin-switches.json in de gegevensmap, niet lezen, dus de plugins houden hun laatste stand. Herstel of verwijder dat bestand om de schakelaars weer te gebruiken.',
   'settings.plugins.switch.toast.failed': 'De pluginstatus kon niet worden gewijzigd.',
   'settings.plugins.page.header.file': 'Pluginbestand',
   'settings.plugins.page.field.spec': 'Spec',

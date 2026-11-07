@@ -1295,6 +1295,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': '你的 OpenCode 配置中有规则允许此插件，且优先于此开关。删除该规则后才能在这里关闭插件。',
   'settings.plugins.switch.unavailable': '此标识符不是 OpenCode 能匹配的插件，因此无法在这里停用。',
   'settings.plugins.switch.notAvailable': '这个开关只适用于 OpenChamber 启动的 OpenCode，目前无法使用。',
+  'settings.plugins.switch.unreadable': 'OpenChamber 无法读取数据文件夹中已关闭插件的列表 plugin-switches.json，因此插件保持上一次的状态。修复或删除该文件后即可再次使用开关。',
   'settings.plugins.switch.toast.failed': '无法更改插件状态。',
   'settings.plugins.page.header.file': '插件文件',
   'settings.plugins.page.field.spec': '规格',

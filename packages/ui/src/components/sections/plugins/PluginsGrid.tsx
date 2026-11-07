@@ -184,7 +184,9 @@ export const PluginsGrid: React.FC<{
     // until it reads the new layer and is no rule the user could remove.
     const blocked = resource
       ? policy.hasRead
-        ? switchOff ? policy.isBlocked(resource) : policy.isBlockedByRule(resource)
+        // An unreadable store leaves OpenChamber's last denials in place, and
+        // only OpenCode's view tells whether this plugin is among them.
+        ? switchOff || item.switchState === 'unreadable' ? policy.isBlocked(resource) : policy.isBlockedByRule(resource)
         : switchOff
       : false;
     // The server sees the config files; what OpenCode reports also covers system
@@ -196,6 +198,7 @@ export const PluginsGrid: React.FC<{
       if (policy.status === 'error') return t('settings.plugins.status.unknown.description');
       if (!resource) return t('settings.plugins.switch.unavailable');
       if (item.switchState === 'unavailable') return t('settings.plugins.switch.notAvailable');
+      if (item.switchState === 'unreadable') return t('settings.plugins.switch.unreadable');
       if (overridden) return t('settings.plugins.switch.overriddenByConfig');
       if (policy.status === 'ready' && blocked && !switchOff) return t('settings.plugins.switch.blockedByConfig');
       return null;
@@ -207,7 +210,7 @@ export const PluginsGrid: React.FC<{
           {hint ? <SettingsInfoHint contentClassName="max-w-64">{hint}</SettingsInfoHint> : null}
           <Switch
             checked={overridden || (!blocked && !switchOff)}
-            disabled={pendingSwitchIds.has(item.id) || !resource || policy.status !== 'ready' || item.switchState === 'unavailable' || overridden || (blocked && !switchOff)}
+            disabled={pendingSwitchIds.has(item.id) || !resource || policy.status !== 'ready' || item.switchState === 'unavailable' || item.switchState === 'unreadable' || overridden || (blocked && !switchOff)}
             onCheckedChange={() => toggleSwitch(item.id, switchOff, setEnabled)}
             aria-label={`${name}: ${t('settings.plugins.switch.label')}`}
           />

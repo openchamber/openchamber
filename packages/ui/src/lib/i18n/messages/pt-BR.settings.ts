@@ -1295,6 +1295,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'Uma regra na sua configuração do OpenCode permite este plugin e tem prioridade sobre esta chave. Remova essa regra para desativar o plugin aqui.',
   'settings.plugins.switch.unavailable': 'Esta referência não nomeia um plugin que o OpenCode reconheça, então não dá para desativá-lo aqui.',
   'settings.plugins.switch.notAvailable': 'Este interruptor se aplica apenas ao OpenCode iniciado pelo OpenChamber e não está disponível agora.',
+  'settings.plugins.switch.unreadable': 'O OpenChamber não consegue ler sua lista de plugins desativados, plugin-switches.json na pasta de dados, então os plugins mantêm o último estado. Corrija ou exclua esse arquivo para usar os interruptores de novo.',
   'settings.plugins.switch.toast.failed': 'Não foi possível alterar o estado do plugin.',
   'settings.plugins.page.header.file': 'Arquivo de plugin',
   'settings.plugins.page.field.spec': 'Especificação',

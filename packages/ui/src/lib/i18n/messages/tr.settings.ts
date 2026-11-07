@@ -1300,6 +1300,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'OpenCode yapılandırmanızdaki bir kural bu eklentiye izin veriyor ve bu anahtardan önceliklidir. Eklentiyi burada kapatmak için o kuralı kaldırın.',
   'settings.plugins.switch.unavailable': 'Bu tanım OpenCode\'un eşleştirebileceği bir eklenti belirtmiyor, bu yüzden burada devre dışı bırakılamaz.',
   'settings.plugins.switch.notAvailable': 'Bu anahtar yalnızca OpenChamber\'ın başlattığı OpenCode için geçerlidir ve şu anda kullanılamıyor.',
+  'settings.plugins.switch.unreadable': 'OpenChamber, veri klasöründeki kapatılmış eklenti listesini (plugin-switches.json) okuyamıyor, bu yüzden eklentiler son durumlarını koruyor. Anahtarları yeniden kullanmak için bu dosyayı düzeltin veya silin.',
   'settings.plugins.switch.toast.failed': 'Eklenti durumu değiştirilemedi.',
   'settings.plugins.page.header.file': 'Eklenti dosyası',
   'settings.plugins.page.field.spec': 'Spec',

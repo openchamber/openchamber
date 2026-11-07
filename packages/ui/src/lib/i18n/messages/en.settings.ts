@@ -1327,6 +1327,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'A rule in your OpenCode config allows this plugin, and it wins over this switch. Remove that rule to switch the plugin off here.',
   'settings.plugins.switch.unavailable': 'This spec does not name a plugin OpenCode can match, so it cannot be switched off here.',
   'settings.plugins.switch.notAvailable': 'This switch applies only to the OpenCode that OpenChamber starts, and it is not available right now.',
+  'settings.plugins.switch.unreadable': 'OpenChamber can\'t read its list of switched-off plugins, plugin-switches.json in its data folder, so plugins keep the state they last had. Fix or delete that file to use the switches again.',
   'settings.plugins.switch.toast.failed': 'Could not change the plugin state.',
   'settings.plugins.page.header.file': 'Plugin file',
   'settings.plugins.page.field.spec': 'Spec',

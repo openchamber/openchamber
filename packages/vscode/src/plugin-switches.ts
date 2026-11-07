@@ -29,9 +29,9 @@ type PluginSwitchApplyOptions = {
  * the denials merge into `OPENCODE_CONFIG_CONTENT`, which the running child
  * only reads at launch.
  *
- * Throws when the denials cannot be established or merged, before anything is
- * written: a launch without them would load the plugins the user switched off,
- * and an empty file would turn them back on in the running child.
+ * An unreadable store keeps the last state it read (`plugin-switches.js`), so
+ * a broken file neither stops the launch nor turns switched-off plugins back
+ * on. Throws when the denials cannot merge into `OPENCODE_CONFIG_CONTENT`.
  */
 export const applyPluginSwitchPolicies = (
   env: NodeJS.ProcessEnv,

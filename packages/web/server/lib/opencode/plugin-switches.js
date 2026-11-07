@@ -110,16 +110,16 @@ export const isPluginDenialOverridden = (resource, configs) => {
 };
 
 /**
- * What a plugin row reports. `unavailable` when OpenChamber cannot read its own
+ * What a plugin row reports. `unreadable` when OpenChamber cannot read its own
  * state; `overridden` when a denial would do nothing here.
  *
  * @param {{ ok: true, resources: string[] } | { ok: false, error: Error }} read
  * @param {string} resource
  * @param {readonly unknown[]} configsAhead the configs loaded ahead of the denials
- * @returns {'on' | 'off' | 'unavailable' | 'overridden'}
+ * @returns {'on' | 'off' | 'unreadable' | 'overridden'}
  */
 export const pluginSwitchState = (read, resource, configsAhead) => {
-  if (!read.ok) return 'unavailable';
+  if (!read.ok) return 'unreadable';
   if (isPluginDenialOverridden(resource, configsAhead)) return 'overridden';
   return read.resources.includes(resource) ? 'off' : 'on';
 };
@@ -142,6 +142,26 @@ export const createPluginSwitchStore = ({ filePath }) => {
   /**
    * @returns {{ ok: true, resources: string[] } | { ok: false, error: Error }}
    */
+  // The last state read whole, kept beside the store: what a broken store
+  // falls back to, across restarts too.
+  const lastGoodPath = `${filePath}.last-good`;
+
+  const parse = (text) => {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      return { ok: false, error };
+    }
+    if (!isRecord(parsed) || !Array.isArray(parsed.disabled)) {
+      return { ok: false, error: new Error('plugin switch state is not a list of plugin resources') };
+    }
+    if (parsed.disabled.some((value) => !isPluginResource(value))) {
+      return { ok: false, error: new Error('plugin switch state contains a value that is not a plugin resource') };
+    }
+    return { ok: true, resources: Array.from(new Set(parsed.disabled)) };
+  };
+
   const read = () => {
     let text;
     try {
@@ -150,28 +170,22 @@ export const createPluginSwitchStore = ({ filePath }) => {
       if (error?.code === 'ENOENT') return { ok: true, resources: [] };
       return { ok: false, error };
     }
+    return parse(text);
+  };
 
-    let parsed;
+  const readLastGood = () => {
     try {
-      parsed = JSON.parse(text);
+      return parse(fs.readFileSync(lastGoodPath, 'utf8'));
     } catch (error) {
       return { ok: false, error };
     }
-
-    if (!isRecord(parsed) || !Array.isArray(parsed.disabled)) {
-      return { ok: false, error: new Error('plugin switch state is not a list of plugin resources') };
-    }
-    if (parsed.disabled.some((value) => !isPluginResource(value))) {
-      return { ok: false, error: new Error('plugin switch state contains a value that is not a plugin resource') };
-    }
-
-    return { ok: true, resources: Array.from(new Set(parsed.disabled)) };
   };
+
+  const serialize = (resources) => `${JSON.stringify({ version: FILE_VERSION, disabled: Array.from(new Set(resources)).sort() }, null, 2)}\n`;
 
   const write = (resources) => {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    const document = { version: FILE_VERSION, disabled: Array.from(new Set(resources)).sort() };
-    writeFileAtomic(filePath, `${JSON.stringify(document, null, 2)}\n`);
+    writeFileAtomic(filePath, serialize(resources));
   };
 
   /**
@@ -199,13 +213,33 @@ export const createPluginSwitchStore = ({ filePath }) => {
   };
 
   /**
-   * The denials for the managed config layer. An unreadable store throws: an
-   * empty list would load every plugin the user switched off.
+   * The denials for the managed config layer. Each whole read is copied beside
+   * the store; an unreadable store falls back to that copy, so a broken file
+   * neither stops OpenCode from starting nor turns switched-off plugins back
+   * on, and the page reports the store as unreadable until it is fixed.
    */
   const denials = () => {
-    const current = read();
-    if (!current.ok) {
-      throw new Error(`OpenChamber could not read the plugins switched off in ${filePath}: ${current.error?.message ?? current.error}`);
+    let current = read();
+    if (current.ok) {
+      const text = serialize(current.resources);
+      let saved = null;
+      try {
+        saved = fs.readFileSync(lastGoodPath, 'utf8');
+      } catch {
+        // No copy yet.
+      }
+      if (saved !== text) {
+        try {
+          fs.mkdirSync(path.dirname(lastGoodPath), { recursive: true });
+          writeFileAtomic(lastGoodPath, text);
+        } catch (error) {
+          console.warn(`[plugins] Could not keep a copy of the plugin switches at ${lastGoodPath}: ${error?.message ?? error}`);
+        }
+      }
+    } else {
+      const fallback = readLastGood();
+      console.warn(`[plugins] Could not read the plugins switched off in ${filePath}; ${fallback.ok ? `keeping the last state read, ${fallback.resources.length} switched off` : 'no earlier state to keep'}: ${current.error?.message ?? current.error}`);
+      current = fallback.ok ? fallback : { ok: true, resources: [] };
     }
     return current.resources.map((resource) => ({ action: 'integration.use', resource, effect: 'deny' }));
   };

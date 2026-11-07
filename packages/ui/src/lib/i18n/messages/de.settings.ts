@@ -1269,6 +1269,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'Eine Regel in deiner OpenCode-Konfiguration erlaubt dieses Plugin und hat Vorrang vor diesem Schalter. Entferne die Regel, um das Plugin hier auszuschalten.',
   'settings.plugins.switch.unavailable': 'Diese Angabe nennt kein Plugin, das OpenCode zuordnen kann, deshalb lässt es sich hier nicht abschalten.',
   'settings.plugins.switch.notAvailable': 'Dieser Schalter gilt nur für das von OpenChamber gestartete OpenCode und ist derzeit nicht verfügbar.',
+  'settings.plugins.switch.unreadable': 'OpenChamber kann seine Liste ausgeschalteter Plugins, plugin-switches.json im Datenordner, nicht lesen. Die Plugins behalten deshalb ihren letzten Zustand. Korrigiere oder lösche die Datei, um die Schalter wieder zu nutzen.',
   'settings.plugins.switch.toast.failed': 'Der Plugin-Status konnte nicht geändert werden.',
   'settings.plugins.page.header.file': 'Plugin-Datei',
   'settings.plugins.page.field.spec': 'Spezifikation',

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 
 import { createPluginSwitchStore, isPluginDenialOverridden, pluginPolicyResource, pluginSwitchState } from './plugin-switches.js';
 
@@ -69,13 +69,20 @@ describe('OpenChamber plugin switch store', () => {
     expect(() => store.set('leakshield', false)).toThrow('Invalid plugin resource');
   });
 
-  it('lists the denials for the managed layer and throws instead of an empty list', () => {
+  it('lists the denials for the managed layer and keeps the last whole read when the store breaks', () => {
     const store = createPluginSwitchStore({ filePath });
     store.set('plugin:leakshield', false);
     expect(store.denials()).toEqual([{ action: 'integration.use', resource: 'plugin:leakshield', effect: 'deny' }]);
 
     fs.writeFileSync(filePath, '{not json', 'utf8');
-    expect(() => store.denials()).toThrow(filePath);
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    // A store opened after a restart reads the same copy.
+    expect(createPluginSwitchStore({ filePath }).denials()).toEqual([{ action: 'integration.use', resource: 'plugin:leakshield', effect: 'deny' }]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(filePath));
+
+    fs.rmSync(`${filePath}.last-good`);
+    expect(store.denials()).toEqual([]);
+    warn.mockRestore();
   });
 });
 
@@ -124,7 +131,7 @@ describe('a config rule ahead of the switch denial', () => {
   it('reports unavailable before overridden, and overridden before the stored state', () => {
     const ahead = [{ policies: [statement('plugin.use', '*', 'allow')] }];
 
-    expect(pluginSwitchState({ ok: false, error: new Error('unreadable') }, 'plugin:leakshield', ahead)).toBe('unavailable');
+    expect(pluginSwitchState({ ok: false, error: new Error('unreadable') }, 'plugin:leakshield', ahead)).toBe('unreadable');
     expect(pluginSwitchState({ ok: true, resources: ['plugin:leakshield'] }, 'plugin:leakshield', ahead)).toBe('overridden');
     expect(pluginSwitchState({ ok: true, resources: ['plugin:leakshield'] }, 'plugin:leakshield', [])).toBe('off');
     expect(pluginSwitchState({ ok: true, resources: [] }, 'plugin:leakshield', [])).toBe('on');

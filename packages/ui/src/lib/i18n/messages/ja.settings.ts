@@ -1328,6 +1328,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'OpenCode の設定にあるルールがこのプラグインを許可しており、このスイッチより優先されます。ここでオフにするには、そのルールを削除してください。',
   'settings.plugins.switch.unavailable': 'この指定は OpenCode が照合できるプラグインを指していないため、ここでは無効にできません。',
   'settings.plugins.switch.notAvailable': 'このスイッチは OpenChamber が起動する OpenCode にのみ適用され、現在は使用できません。',
+  'settings.plugins.switch.unreadable': 'OpenChamber はデータフォルダーにある無効化したプラグインの一覧 plugin-switches.json を読み込めないため、プラグインは最後の状態のままです。スイッチを再び使うには、このファイルを修正するか削除してください。',
   'settings.plugins.switch.toast.failed': 'プラグインの状態を変更できませんでした。',
   'settings.plugins.page.header.file': 'Plugin ファイル',
   'settings.plugins.page.field.spec': '仕様',

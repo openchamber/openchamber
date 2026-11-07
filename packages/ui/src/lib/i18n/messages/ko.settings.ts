@@ -1295,6 +1295,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'OpenCode 설정의 규칙이 이 플러그인을 허용하며 이 스위치보다 우선합니다. 여기서 끄려면 그 규칙을 삭제하세요.',
   'settings.plugins.switch.unavailable': '이 지정은 OpenCode가 인식할 수 있는 플러그인을 가리키지 않아 여기서 끌 수 없습니다.',
   'settings.plugins.switch.notAvailable': '이 스위치는 OpenChamber가 시작한 OpenCode에만 적용되며 지금은 사용할 수 없습니다.',
+  'settings.plugins.switch.unreadable': 'OpenChamber가 데이터 폴더의 꺼진 플러그인 목록(plugin-switches.json)을 읽을 수 없어 플러그인은 마지막 상태를 유지합니다. 스위치를 다시 쓰려면 이 파일을 고치거나 삭제하세요.',
   'settings.plugins.switch.toast.failed': '플러그인 상태를 변경하지 못했습니다.',
   'settings.plugins.page.header.file': '플러그인 파일',
   'settings.plugins.page.field.spec': '명세',

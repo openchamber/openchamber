@@ -647,6 +647,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'Reguła w konfiguracji OpenCode zezwala na tę wtyczkę i ma pierwszeństwo przed tym przełącznikiem. Usuń tę regułę, aby wyłączyć wtyczkę tutaj.',
   'settings.plugins.switch.unavailable': 'Ten zapis nie wskazuje wtyczki, którą OpenCode rozpozna, więc nie można jej tu wyłączyć.',
   'settings.plugins.switch.notAvailable': 'Ten przełącznik dotyczy tylko OpenCode uruchomionego przez OpenChamber i nie jest teraz dostępny.',
+  'settings.plugins.switch.unreadable': 'OpenChamber nie może odczytać listy wyłączonych wtyczek, plugin-switches.json w folderze danych, więc wtyczki zachowują ostatni stan. Popraw lub usuń ten plik, aby znowu używać przełączników.',
   'settings.plugins.switch.toast.failed': 'Nie udało się zmienić stanu wtyczki.',
   'settings.plugins.page.header.file': 'Plik pluginu',
   'settings.plugins.page.field.spec': 'Specyfikacja',

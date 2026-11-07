@@ -63,7 +63,7 @@ const BUILTIN_IMAGE_PLUGIN = '-opencode.tool.image-generate';
  * @param {() => Promise<string[]>} [dependencies.listExtensionSkillDirectories] skill folders of active extensions
  * @param {() => Promise<string[]>} [dependencies.listExtensionPluginDirectories] OpenCode plugin folders of active extensions
  * @param {string} [dependencies.openchamberVersion] the running app, which the extension-writing skill pins its SDK to
- * @param {() => { action: string, resource: string, effect: string }[]} [dependencies.readPluginDenials] the plugins switched off in OpenChamber; throws when they cannot be established
+ * @param {() => { action: string, resource: string, effect: string }[]} [dependencies.readPluginDenials] the plugins switched off in OpenChamber
  */
 export const createManagedConfigRuntime = ({
   fsPromises,

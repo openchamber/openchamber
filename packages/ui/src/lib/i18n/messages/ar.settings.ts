@@ -1327,6 +1327,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'تسمح قاعدة في إعدادات OpenCode بهذا المكوّن الإضافي ولها الأولوية على هذا المفتاح. احذف تلك القاعدة لإيقاف المكوّن من هنا.',
   'settings.plugins.switch.unavailable': 'هذا المحدِّد لا يسمّي إضافة يستطيع OpenCode مطابقتها، لذا لا يمكن تعطيلها من هنا.',
   'settings.plugins.switch.notAvailable': 'هذا المفتاح ينطبق فقط على OpenCode الذي يشغّله OpenChamber وهو غير متاح الآن.',
+  'settings.plugins.switch.unreadable': 'لا يستطيع OpenChamber قراءة قائمة الإضافات المعطّلة، plugin-switches.json في مجلد بياناته، لذا تبقى الإضافات على آخر حالة لها. أصلح هذا الملف أو احذفه لاستخدام المفاتيح من جديد.',
   'settings.plugins.switch.toast.failed': 'تعذّر تغيير حالة الإضافة.',
   'settings.plugins.page.header.file': 'ملف مكوّن إضافي',
   'settings.plugins.page.field.spec': 'المواصفة',

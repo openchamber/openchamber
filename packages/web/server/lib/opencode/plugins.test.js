@@ -479,12 +479,12 @@ describe('opencode plugins data layer', () => {
     expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('on');
   });
 
-  test('reports every switch as unavailable when its state cannot be read', () => {
+  test('reports every switch as unreadable when its state cannot be read', () => {
     writeJson(userConfigPath, { plugins: ['leakshield'] });
     fs.writeFileSync(switchStorePath, '{not json', 'utf8');
     const id = plugins.encodePluginId('config', 'user:leakshield');
 
-    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('unavailable');
+    expect(plugins.listPluginEntries(projectDir, switchStore)[0].switchState).toBe('unreadable');
     expect(() => plugins.setPluginEntryEnabled(id, false, projectDir, switchStore)).toThrow();
     expect(readJson(userConfigPath).policies).toBeUndefined();
   });

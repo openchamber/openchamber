@@ -1295,6 +1295,7 @@ export const settingsDict = {
   'settings.plugins.switch.overriddenByConfig': 'Правило у вашій конфігурації OpenCode дозволяє цей плагін і має пріоритет над цим перемикачем. Видаліть це правило, щоб вимкнути плагін тут.',
   'settings.plugins.switch.unavailable': 'Цей запис не називає плагін, який OpenCode може зіставити, тому його не можна вимкнути тут.',
   'settings.plugins.switch.notAvailable': 'Цей перемикач діє лише для OpenCode, який запускає OpenChamber, і зараз недоступний.',
+  'settings.plugins.switch.unreadable': 'OpenChamber не може прочитати свій список вимкнених плагінів, plugin-switches.json у теці даних, тож плагіни лишаються в останньому стані. Виправте або видаліть цей файл, щоб знову користуватися перемикачами.',
   'settings.plugins.switch.toast.failed': 'Не вдалося змінити стан плагіна.',
   'settings.plugins.page.header.file': 'Файл плагіна',
   'settings.plugins.page.field.spec': 'Специфікація',
