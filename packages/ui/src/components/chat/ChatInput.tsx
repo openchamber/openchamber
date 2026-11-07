@@ -812,6 +812,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const selections = useSelectionStore.getState();
         selections.saveSessionModelSelection(btwComposerSessionId, next.providerID, next.modelID);
         if (agent) selections.saveAgentModelForSession(btwComposerSessionId, agent, next.providerID, next.modelID);
+        selections.pickSessionModel(btwComposerSessionId, next.providerID, next.modelID);
     };
     const cycleBtwThinkingVariant = (event: KeyboardEvent): boolean | void => {
         if (!isBtwKey(event) || !btwComposerSessionId) return false;

@@ -126,6 +126,8 @@ const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useSelectionStore } = await import('@/sync/selection-store');
 const { useInputStore } = await import('@/sync/input-store');
+const { useUIStore } = await import('@/stores/useUIStore');
+const { shortcutRegistry } = await import('@/lib/shortcuts');
 const { getSyncChildStores } = await import('@/sync/sync-refs');
 const { useMessageQueueStore, createMessageQueueTarget, getMessageQueueKey } = await import('@/stores/messageQueueStore');
 const { opencodeClient } = await import('@/lib/opencode/client');
@@ -417,6 +419,34 @@ const setupBtwCompaction = () => {
     request: { settings: {}, headers: {}, body: {} }, permissions: [],
   }] });
 };
+
+test('the BTW favorite-model shortcut leaves the pick a form reply applies', async () => {
+  const favorites = [{ providerID: 'btw-provider', modelID: 'btw-model' }, { providerID: 'btw-provider', modelID: 'next-model' }];
+  const previousFavorites = useUIStore.getState().favoriteModels;
+  const providers = [{
+    id: 'btw-provider', name: 'BTW', activation: 'enabled' as const, package: 'btw-provider',
+    models: favorites.map(({ providerID, modelID }) => ({
+      id: `${providerID}/${modelID}`, providerID, modelID, name: modelID, enabled: true, status: 'active' as const,
+      capabilities: { tools: true, input: ['text'], output: ['text'] },
+      variants: [], time: { released: 0 }, cost: [], limit: { context: 1, output: 1 },
+    })),
+  }];
+  try {
+    await submitInComposer('', undefined, () => {
+      setupBtwCompaction();
+      useUIStore.setState({ favoriteModels: favorites });
+      useConfigStore.setState({ providers });
+    }, () => {
+      expect(useSelectionStore.getState().getSessionModelPick('ses_btw')).toBeNull();
+      shortcutRegistry.get('cycle_favorite_model_forward')?.(new window.KeyboardEvent('keydown'));
+    });
+
+    expect(useSelectionStore.getState().getSessionModelPick('ses_btw')).toEqual({ providerId: 'btw-provider', modelId: 'next-model' });
+  } finally {
+    useUIStore.setState({ favoriteModels: previousFavorites });
+    useConfigStore.setState({ providers: [] });
+  }
+});
 
 for (const switchFails of [false, true]) {
   test(`BTW /compact keeps the main selection${switchFails ? ' and restores a failed command' : ''}`, async () => {

@@ -2,6 +2,7 @@ import { opencodeClient } from "@/lib/opencode/client"
 import { isSameModelRef, toModelRef, type ModelRef, type Session } from "@/lib/opencode/model"
 import { markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { captureRuntimeInstance } from "@/lib/runtime-switch"
+import { selectCatalogLoadedForDirectory, selectConfigAgentsForDirectory, useConfigStore } from "@/stores/useConfigStore"
 import { getAllSyncSessions, getDirectoryState } from "./sync-refs"
 
 type ResolvedSendSelection = {
@@ -46,4 +47,24 @@ export async function resolveSendSelection(
     model: modelChanged ? model : undefined,
     agent: agentChanged ? desired.agent : undefined,
   }
+}
+
+/**
+ * `resolveSendSelection`, plus the agent the client still has to check. The
+ * session can already be on an agent its folder lacks: set before the client
+ * checked it, or its file was removed since. When the folder's loaded catalog
+ * does not list it, the agent stays in the selection, so the client checks it
+ * against a fresh list before anything is switched.
+ */
+export async function resolveCheckedSendSelection(
+  sessionId: string,
+  directory: string | undefined,
+  desired: { providerID: string; modelID: string; variant?: string | null; agent?: string },
+): Promise<ResolvedSendSelection> {
+  const selection = await resolveSendSelection(sessionId, directory, desired)
+  if (selection.agent || !desired.agent || !directory) return selection
+  const config = useConfigStore.getState()
+  const listed = !selectCatalogLoadedForDirectory(config, "agents", directory)
+    || selectConfigAgentsForDirectory(config, directory).some((agent) => agent.id === desired.agent)
+  return listed ? selection : { ...selection, agent: desired.agent }
 }
