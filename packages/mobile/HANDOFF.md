@@ -110,6 +110,13 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   OpenChamberShareTests -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO`.
   The tests pass a temporary container instead of the App Group, because the test runner has no
   entitlement for it.
+- **Android device tests** — `SharedIntentReaderTest` runs on an emulator (`./gradlew
+  :app:connectedDebugAndroidTest`): the reader is handed intents shaped the way another app builds
+  one, and a real provider serves the `content://` URI — a display name, a declared size or none,
+  a MIME type and the bytes, from a file or a pipe. It covers text, text with a file, file order,
+  the eight-file cap, a 26 MB stream refused before it is stored, an empty file, and that the
+  package manager really lists the app for `SEND` and `SEND_MULTIPLE`. The fixture provider lives
+  in `app/src/debug` with a debug-only manifest entry, so no release APK carries it.
 - **Share-sheet end-to-end** — `OpenChamberShareUITests` drives the real panel (Photos → share →
   OpenChamber) and then asserts the app came forward and the draft carries an image attachment,
   with screenshots attached to the result bundle. It needs a server
