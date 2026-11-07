@@ -1327,6 +1327,21 @@ Other client and upstream timeouts, SSE watchdogs, and readiness deadlines
 remain unchanged. Web, Electron's server, hosted mobile, and Capacitor use this
 setting; VS Code's separate extension bridge does not.
 
+### Why the proxy strips browser request metadata and not an allowlist
+
+OpenCode 2.2.6 refuses `/api` requests that pair a cross-site or same-site
+`Sec-Fetch-Site` with an `Origin` outside its trust list, before authentication.
+The proxy is a server-to-server hop: the browser only talks to OpenChamber, and
+OpenChamber authenticates upstream with its own credentials, so `Origin`,
+`Referer` and `Sec-Fetch-*` carry no meaning there. `proxy-headers.js` drops
+them from `collectForwardProxyHeaders`, and the catch-all `http-proxy` path
+drops them from `proxyReq`; that covers both the Origin and the `navigate`
+branches of the guard. Passing `--cors` was rejected because it would have to
+name every client origin, including the packaged non-http schemes, on every
+managed and external server. Rewriting `Origin` to the upstream host was
+rejected because it would still leave `Sec-Fetch-Mode: navigate` refused.
+OpenChamber's own CORS and the upstream `Authorization` header are unchanged.
+
 ## Public exports (watcher.js)
 - `createOpenCodeWatcherRuntime(dependencies)`: creates global event watcher runtime backed by the shared upstream SSE reader.
 - Returned API:
