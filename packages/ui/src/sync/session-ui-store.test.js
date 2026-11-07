@@ -2147,6 +2147,83 @@ describe('routeMessage skill invocation', () => {
     expect(sendMessageCalls[0].context).toEqual([{ id: expect.stringMatching(/^msg_/), text: additionalParts[0].text, metadata: additionalParts[0].metadata }]);
   });
 
+  describe('a command with attached context in a session with a revert', () => {
+    const originalCommitRevert = opencodeClient.commitRevert;
+    const commitRevertCalls = [];
+    const part = () => createContextPart({
+      kind: 'code-comment',
+      source: 'file',
+      fileLabel: 'src/auth.ts',
+      startLine: 4,
+      endLine: 4,
+      language: 'ts',
+      code: 'auth();',
+      text: 'check this',
+    });
+    const seedSession = (session) => {
+      const childStores = new ChildStoreManager();
+      childStores.ensureChild('/skills/project', { bootstrap: false }).setState({ session: [session] });
+      setSyncRefs({}, childStores, '/skills/project');
+    };
+    const sendCommandWithContext = () => routeMessage({
+      sessionId: 'session-command',
+      directory: '/skills/project',
+      content: '/inspect auth flow',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [part()],
+    });
+
+    beforeEach(() => {
+      commitRevertCalls.length = 0;
+      opencodeClient.commitRevert = async (...args) => { commitRevertCalls.push(args); };
+      useCommandsStore.setState({
+        commandsByDirectory: { '/skills/project': [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }] },
+      });
+    });
+
+    afterEach(() => {
+      opencodeClient.commitRevert = originalCommitRevert;
+      setSyncRefs({}, new ChildStoreManager(), '');
+    });
+
+    test('hands sendCommand the commit of the staged revert, aimed at the session and its directory', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project', revert: { messageID: 'msg_boundary' } });
+
+      expect(await sendCommandWithContext()).toBe('command');
+
+      await sendCommandCalls[0].commitRevert();
+      expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+    });
+
+    test('reads the marker where the session lives when the send names another directory', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project', revert: { messageID: 'msg_boundary' } });
+      useCommandsStore.setState({
+        commandsByDirectory: { '/skills/other': [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }] },
+      });
+
+      await routeMessage({
+        sessionId: 'session-command',
+        directory: '/skills/other',
+        content: '/inspect auth flow',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+        additionalParts: [part()],
+      });
+
+      await sendCommandCalls[0].commitRevert();
+      expect(commitRevertCalls).toEqual([['session-command', '/skills/project']]);
+    });
+
+    test('hands over no commit when nothing is staged', async () => {
+      seedSession({ id: 'session-command', directory: '/skills/project' });
+
+      await sendCommandWithContext();
+
+      expect(sendCommandCalls[0].commitRevert).toBeUndefined();
+    });
+  });
+
   test('a command with a quoted selection still runs as a command', async () => {
     // Sending "/inspect auth flow" as a prompt would skip the template OpenCode
     // 2.x expands only on the command route. The selection travels as a

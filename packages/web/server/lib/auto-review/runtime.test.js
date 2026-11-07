@@ -51,7 +51,17 @@ const createOpenCode = () => {
     synthetic: [],
     seenIds: new Set(),
     failPrompts: 0,
+    // Revert boundaries staged per session; a commit deletes from there on.
+    reverts: {},
+    failSessionReads: 0,
+    failRevertCommits: 0,
     counter: 0,
+  };
+  const commitRevert = (sessionID) => {
+    const boundary = state.reverts[sessionID];
+    if (!boundary) return;
+    delete state.reverts[sessionID];
+    state.records[sessionID].splice(state.records[sessionID].findIndex((record) => record.id === boundary));
   };
   const runTurn = (sessionID) => {
     const scripted = state.replies[sessionID].shift();
@@ -76,6 +86,24 @@ const createOpenCode = () => {
     const method = init.method ?? 'GET';
     if (pathname === '/api/session/active') return json({ data: state.active });
     if (pathname === '/api/session' && method === 'GET') return json({ data: [], cursor: {} });
+    const sessionRecord = pathname.match(/^\/api\/session\/([^/]+)$/);
+    if (sessionRecord && method === 'GET') {
+      if (state.failSessionReads > 0) {
+        state.failSessionReads -= 1;
+        return json({ error: 'boom' }, 500);
+      }
+      const id = decodeURIComponent(sessionRecord[1]);
+      return json({ data: { id, revert: state.reverts[id] ? { messageID: state.reverts[id] } : null } });
+    }
+    const revertCommit = pathname.match(/^\/api\/session\/([^/]+)\/revert\/commit$/);
+    if (revertCommit && method === 'POST') {
+      if (state.failRevertCommits > 0) {
+        state.failRevertCommits -= 1;
+        return json({ error: 'boom' }, 500);
+      }
+      commitRevert(decodeURIComponent(revertCommit[1]));
+      return new Response(null, { status: 204 });
+    }
     const match = pathname.match(/^\/api\/session\/([^/]+)\/(message|prompt|synthetic)$/);
     if (!match) return json({ error: 'not found' }, 404);
     const sessionID = decodeURIComponent(match[1]);
@@ -93,6 +121,8 @@ const createOpenCode = () => {
       state.records[sessionID].push({ type: 'synthetic', id: body.id, text: body.text });
       return json({ data: { id: body.id } });
     }
+    // As OpenCode: a prompt commits a staged revert before it is admitted.
+    commitRevert(sessionID);
     state.prompts.push({ sessionID, ...body });
     state.records[sessionID].push({ type: 'user', id: body.id, text: body.text });
     runTurn(sessionID);
@@ -301,6 +331,87 @@ describe('createAutoReviewRuntime', () => {
     expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
     expect(openCode.state.prompts.map((prompt) => prompt.text)).toEqual(['Write a handoff.', 'Review this.\n\nThe handoff.']);
     expect(openCode.state.synthetic.filter((item) => item.text === 'Handoff rules.')).toHaveLength(1);
+  });
+
+  // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
+  describe('a revert staged on the session it sends to', () => {
+    const syntheticTexts = (openCode, sessionID) => openCode.state.records[sessionID]
+      .filter((record) => record.type === 'synthetic')
+      .map((record) => record.text);
+    const stageRevertOf = (openCode, sessionID) => {
+      openCode.state.records[sessionID].push({ type: 'user', id: 'msg_reverted', text: 'reverted' });
+      openCode.state.reverts[sessionID] = 'msg_reverted';
+    };
+
+    it('is committed before the handoff context goes into the reviewed session', async () => {
+      const { runtime, openCode } = await createRuntime();
+      stageRevertOf(openCode, ORIGINAL);
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      runtime.start();
+      await runtime.startRun(startInput());
+
+      expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
+      expect(syntheticTexts(openCode, ORIGINAL)).toEqual(['Handoff rules.']);
+      expect(openCode.state.records[ORIGINAL].map((record) => record.id)).not.toContain('msg_reverted');
+    });
+
+    it('is committed before the rules go into a reused review session', async () => {
+      const { runtime, openCode } = await createRuntime();
+      stageRevertOf(openCode, REVIEW);
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      openCode.state.replies[REVIEW].push(FINAL_MARKER_CLEAN);
+      runtime.start();
+      await runtime.startRun(startInput());
+
+      expect(await until(() => runOf(runtime)?.status === 'clean')).toBe(true);
+      expect(syntheticTexts(openCode, REVIEW)).toEqual(['Review rules.', LOOP_RULES]);
+    });
+
+    it.each([
+      { failure: 'read', arm: (state) => { state.failSessionReads = 1; } },
+      { failure: 'commit', arm: (state) => { state.failRevertCommits = 1; } },
+    ])('keeps the send pending with nothing admitted when the $failure fails', async ({ arm }) => {
+      const { runtime, openCode } = await createRuntime();
+      stageRevertOf(openCode, ORIGINAL);
+      arm(openCode.state);
+      let admittedDuringFailure = null;
+      const { fetchImpl } = openCode;
+      const original = fetchImpl.getMockImplementation();
+      fetchImpl.mockImplementation(async (url, init) => {
+        const response = await original(url, init);
+        if (response.status === 500) admittedDuringFailure = openCode.state.synthetic.length;
+        return response;
+      });
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      runtime.start();
+      await runtime.startRun(startInput());
+
+      expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
+      expect(admittedDuringFailure).toBe(0);
+      expect(syntheticTexts(openCode, ORIGINAL)).toEqual(['Handoff rules.']);
+    });
+
+    it('leaves the commit to the prompt when a send carries no context', async () => {
+      const { runtime, openCode } = await createRuntime();
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      runtime.start();
+      await runtime.startRun(startInput({ handoff: { text: 'Write a handoff.', instructions: '  ' } }));
+
+      expect(await until(() => openCode.state.prompts.length >= 1)).toBe(true);
+      const reads = openCode.fetchImpl.mock.calls.filter(([url]) => new URL(url).pathname === `/api/session/${ORIGINAL}`);
+      expect(reads).toEqual([]);
+    });
+
+    it('reads the session and commits nothing when no revert is staged', async () => {
+      const { runtime, openCode } = await createRuntime();
+      openCode.state.replies[ORIGINAL].push('The handoff.');
+      runtime.start();
+      await runtime.startRun(startInput());
+
+      expect(await until(() => openCode.state.prompts.length === 2)).toBe(true);
+      expect(syntheticTexts(openCode, ORIGINAL)).toEqual(['Handoff rules.']);
+      expect(openCode.fetchImpl.mock.calls.some(([url]) => String(url).endsWith('/revert/commit'))).toBe(false);
+    });
   });
 
   it('routes a session on Auto before each prompt, and a routing failure sends nothing', async () => {

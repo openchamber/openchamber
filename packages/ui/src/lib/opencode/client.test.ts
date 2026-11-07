@@ -615,6 +615,16 @@ describe("sendMessage", () => {
     ).rejects.toThrow("runtime changed")
     expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/synthetic"])
   })
+
+  // OpenCode's commit deletes everything admitted past the revert's boundary (#6244).
+  test("commits a staged revert once, before the first context message, and only when there is one", async () => {
+    responses.push(noContent(), json({ id: "syn_1" }), json({ id: "syn_2" }), json({ id: "msg_1" }), noContent(), json({ id: "syn_3" }), noContent(), json({ id: "msg_2" }))
+    const commitRevert = () => opencodeClient.commitRevert("ses_1")
+    await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "", context: [{ text: "a" }, { text: "b" }], commitRevert })
+    await opencodeClient.sendCommand({ id: "ses_1", command: "review", context: [{ text: "c" }], commitRevert })
+    await opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "plain", commitRevert })
+    expect(requests.map((r) => r.url.pathname.split("/").pop())).toEqual(["commit", "synthetic", "synthetic", "prompt", "commit", "synthetic", "command", "prompt"])
+  })
 })
 
 describe("sendMessage with inline skills", () => {
