@@ -1,5 +1,6 @@
 import React from 'react';
 import type { FormField } from '@opencode/client';
+import { InlineDictationButton } from '@/components/dictation/InlineDictationButton';
 import { useEmojiPicker } from '@/components/emoji/useEmojiPicker';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
@@ -28,9 +29,13 @@ interface AutoGrowTextareaProps {
     onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
+/** The form surfaces' own icon buttons (copy Markdown / copy JSON), so the mic matches them. The disabled step matches the answer box's `opacity-60`; the global focus rule already fills a focused button, so no ring. */
+const FORM_ICON_BUTTON_CLASS = 'rounded p-1 text-muted-foreground transition-colors hover:bg-interactive-hover/30 hover:text-foreground disabled:opacity-60 disabled:cursor-not-allowed';
+
 /**
  * Free-text answer box, sized to its content up to the cap in
- * `formTextareaSizing`.
+ * `formTextareaSizing`. The dictation mic sits in a trailing slot beside the
+ * box, so the transcript continues the answer instead of replacing it.
  */
 const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     value,
@@ -43,10 +48,27 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
     const emojiPicker = useEmojiPicker(textareaRef);
     const [localValue, setLocalValue] = React.useState(value);
+    // The mic parks its transcript callback in a ref that only an effect
+    // refreshes, so that callback reads one render stale. Mirror the committed
+    // value in a ref as well: `commit` and the resync below always write both
+    // together, so two transcripts landing before a re-render each append to
+    // what the box actually holds instead of the first one being dropped.
+    const valueRef = React.useRef(value);
 
     React.useEffect(() => {
         setLocalValue(value);
+        valueRef.current = value;
     }, [value]);
+
+    // One path for text landing in the box, typed or spoken: `commit` writes
+    // the local mirror, the transcript ref and the field's own
+    // `onValueChange` together, so a transcript reaches the answer through
+    // the same writer a keystroke does.
+    const commit = (next: string) => {
+        valueRef.current = next;
+        setLocalValue(next);
+        onValueChange(next);
+    };
 
     React.useLayoutEffect(() => {
         const textarea = textareaRef.current;
@@ -73,25 +95,35 @@ const AutoGrowTextarea = React.memo(function AutoGrowTextarea({
 
     return (
         <>
-            <textarea
-                ref={textareaRef}
-                value={localValue}
-                placeholder={placeholder}
-                disabled={disabled}
-                autoFocus={autoFocus}
-                style={{ height: FORM_CUSTOM_TEXTAREA_MIN_HEIGHT }}
-                onChange={(event) => {
-                    setLocalValue(event.target.value);
-                    onValueChange(event.target.value);
-                }}
-                onKeyDown={onKeyDown}
-                className={cn(
-                    'w-full resize-none rounded border border-edge-muted bg-background/50 px-2 py-1',
-                    'typography-meta text-foreground placeholder:text-muted-foreground',
-                    'focus:outline-none focus:border-edge',
-                    disabled ? 'opacity-60' : null,
-                )}
-            />
+            {/* One row for the box and its trailing accessory: with no mic
+                (dictation off or unsupported) the row holds only the textarea,
+                so nothing is reserved and the layout does not move. */}
+            <div className="flex items-end gap-1">
+                <textarea
+                    ref={textareaRef}
+                    value={localValue}
+                    placeholder={placeholder}
+                    disabled={disabled}
+                    autoFocus={autoFocus}
+                    style={{ height: FORM_CUSTOM_TEXTAREA_MIN_HEIGHT }}
+                    onChange={(event) => commit(event.target.value)}
+                    onKeyDown={onKeyDown}
+                    className={cn(
+                        'min-w-0 flex-1 resize-none rounded border border-edge-muted bg-background/50 px-2 py-1',
+                        'typography-meta text-foreground placeholder:text-muted-foreground',
+                        'focus:outline-none focus:border-edge',
+                        disabled ? 'opacity-60' : null,
+                    )}
+                />
+                <InlineDictationButton
+                    onTranscript={(transcript) =>
+                        commit(valueRef.current.trim() ? `${valueRef.current.trimEnd()} ${transcript}` : transcript)
+                    }
+                    disabled={disabled}
+                    buttonClassName={FORM_ICON_BUTTON_CLASS}
+                    iconClassName="h-3 w-3"
+                />
+            </div>
             {emojiPicker}
         </>
     );
