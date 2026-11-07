@@ -1013,7 +1013,9 @@ Pages the loader reads ask for finished tool results as shells
 (`lib/opencode/toolContentShells.ts`, server side
 `packages/web/server/lib/opencode/message-shells.js`): a completed or failed
 call keeps its status, time, input, metadata and error, and its result text is
-replaced by an `openchamberContentShell` marker in its metadata. The adapter
+replaced by an `openchamberContentShell` marker in its metadata; a result that
+was an OpenChamber tool envelope also leaves its `{ ok, action }` there, which
+the collapsed row names the call by (`toolContentShellEnvelope`). The adapter
 sends the request header only to a server that lists
 `api.message-part-shells.v1` among its `/api/version` capabilities, learned
 once per runtime when the sync provider starts; an older server on another

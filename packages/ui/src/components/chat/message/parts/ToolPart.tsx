@@ -97,14 +97,19 @@ import {
     subagentAgent,
     subagentDescription,
     isWriteTool,
+    isOpenChamberTool,
     normalizeToolName,
+    openChamberCallSummary,
     soleOpenChamberCall,
     toolDescription, type ToolDescription,
     toolInputPath,
     toolFileDiffs,
 } from '@/lib/opencode/tools';
+import { toolContentShellEnvelope } from '@/lib/opencode/toolContentShells';
 import { parseWebSearchOutput, webSearchProviderOf } from '@/lib/opencode/websearch';
 import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
+import { OpenChamberToolOutput } from './OpenChamberToolOutput';
+import { hasOpenChamberView, openChamberVerbKey, parseOpenChamberEnvelope } from './openChamberToolEnvelope';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
 import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
@@ -467,8 +472,12 @@ const describeTool = (described: ToolDescription | null, currentDirectory: strin
         case 'files':
             return t('chat.toolPart.filesCount', { count: described.count });
         case 'tools': {
+            // OpenChamber's own tools go by the names their rows carry. A
+            // script's calls don't say whether each action succeeded, so the
+            // verbs of a single row would claim too much here.
             const named = described.calls
-                .map(({ name, count }) => (count > 1 ? `${name} \u00d7${count}` : name))
+                .map(({ name, count }) => [isOpenChamberTool(name) ? getToolMetadata(name).displayName : name, count] as const)
+                .map(([name, count]) => (count > 1 ? `${name} \u00d7${count}` : name))
                 .join(', ');
             return described.overflow > 0
                 ? `${named}, ${t('chat.toolPart.moreToolCalls', { count: described.overflow })}`
@@ -480,6 +489,30 @@ const describeTool = (described: ToolDescription | null, currentDirectory: strin
 const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string, t: DescriptionTranslate): string => {
     const stateWithData = state as ToolStateWithMetadata;
     return describeTool(toolDescription(part.tool, stateWithData.input, stateWithData.metadata), currentDirectory, t);
+};
+
+/**
+ * What one of OpenChamber's own tools did, once it did it: "Remembered ·
+ * Uses bun" rather than "memory.save · Uses bun". The tool's name stays the
+ * row's title. A call still running, one that failed, or an action without a
+ * verb keeps the action's own name.
+ */
+const describeOpenChamberRow = (
+    part: ToolPartType,
+    input: ToolInput | undefined,
+    output: string | undefined,
+    translate: ReturnType<typeof useI18n>['t'],
+): string | null => {
+    if (part.state.status !== 'completed') return null;
+    const summary = openChamberCallSummary(part.tool, input);
+    // A history page leaves the result out until the row opens, and says
+    // which action it answered instead.
+    const envelope = parseOpenChamberEnvelope(output) ?? toolContentShellEnvelope(part);
+    // The envelope names the action the server ran, a bare `link` included.
+    const key = openChamberVerbKey(envelope?.action);
+    if (!summary || !key || envelope?.ok !== true) return null;
+    const verb = translate(key);
+    return summary.detail ? `${verb} \u00b7 ${summary.detail.slice(0, 120)}` : verb;
 };
 
 interface ToolScrollableSectionProps {
@@ -1073,6 +1106,23 @@ const DiffPreview: React.FC<{ diff: string; diffViewMode: DiffViewMode }> = ({ d
     );
 };
 
+/** Switches an OpenChamber tool's row between its own view and the plain answer. */
+const RawAnswerToggle: React.FC<{ label: string; onToggle: () => void }> = ({ label, onToggle }) => (
+    <Button
+        variant="ghost"
+        size="xs"
+        className="text-muted-foreground hover:text-foreground"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+        }}
+    >
+        <Icon name="code-box" className="size-3.5" />
+        {label}
+    </Button>
+);
+
 interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
@@ -1109,6 +1159,14 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         allowTextReplacement: isStreamingBash,
     });
     const outputString = isStreamingBash ? throttledOutputString : rawOutputString;
+    const isMobile = useUIStore((store) => store.isMobile);
+    // OpenChamber's own tools answer an envelope the chat can show in their
+    // own terms; the plain answer stays one click away.
+    const openChamberEnvelope = React.useMemo(
+        () => (state.status === 'completed' && openChamberCallSummary(part.tool, input) ? parseOpenChamberEnvelope(rawOutputString) : null),
+        [input, part.tool, rawOutputString, state.status],
+    );
+    const [showRawOpenChamberOutput, setShowRawOpenChamberOutput] = React.useState(false);
     const attachments = stateWithData.attachments;
     const diffContent = getToolFallbackDiff(metadata) ?? null;
     const diffEntries = React.useMemo(
@@ -1432,6 +1490,29 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         }
 
+        if (openChamberEnvelope && !showRawOpenChamberOutput) {
+            const showRaw = (
+                <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.show')} onToggle={() => setShowRawOpenChamberOutput(true)} />
+            );
+            if (!openChamberEnvelope.ok && openChamberEnvelope.errorMessage) {
+                return renderScrollableBlock(
+                    <div className="space-y-1.5">
+                        <div className="typography-meta whitespace-pre-wrap break-words" style={{ color: 'var(--status-error)' }}>
+                            {openChamberEnvelope.errorMessage}
+                        </div>
+                        <div className="-ms-2">{showRaw}</div>
+                    </div>
+                );
+            }
+            if (hasOpenChamberView(openChamberEnvelope)) {
+                return renderScrollableBlock(
+                    <div className="space-y-2">
+                        <OpenChamberToolOutput envelope={openChamberEnvelope} part={part} input={input} directory={currentDirectory} isMobile={isMobile} onShowPopup={onShowPopup} rawToggle={showRaw} />
+                    </div>
+                );
+            }
+        }
+
         if (hasStringOutput && outputString.trim()) {
             const output = (
                 <ToolScrollableTextOutput
@@ -1444,7 +1525,14 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
 
             return renderScrollableBlock(
-                output,
+                openChamberEnvelope && showRawOpenChamberOutput ? (
+                    <div className="space-y-2">
+                        <div className="-ms-2">
+                            <RawAnswerToggle label={t('chat.toolPart.openchamber.raw.hide')} onToggle={() => setShowRawOpenChamberOutput(false)} />
+                        </div>
+                        {output}
+                    </div>
+                ) : output,
                 {
                     maxHeightClass: isShellTool(part.tool) ? 'max-h-[46vh]' : undefined,
                     followKey: isStreamingBash ? outputString : undefined,
@@ -1739,8 +1827,9 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     const isMultiFileApplyPatch = isPatchTool(normalizedPartTool) && Array.isArray(metadata?.files) && metadata.files.length > 1;
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
-    const builtInDescription = getToolDescription(normalizedPart, state, currentDirectory, t);
     const stateOutput = typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
+    const builtInDescription = describeOpenChamberRow(normalizedPart, input, stateOutput, t)
+        ?? getToolDescription(normalizedPart, state, currentDirectory, t);
     const guestHeader = React.useMemo(
         () => (presentation ? renderGuestToolHeader(presentation, { input, output: stateOutput, metadata }) : null),
         [input, metadata, presentation, stateOutput],

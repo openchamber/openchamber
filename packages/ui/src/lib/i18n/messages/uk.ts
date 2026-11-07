@@ -26,6 +26,7 @@ import { heapSnapshotI18n } from './heap-snapshot.i18n';
 import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
+import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -212,6 +213,7 @@ export const dict: Record<I18nKey, string> = {
   ...consoleBudgetsI18n.uk,
   ...imageToolI18n.uk,
   ...usageToolI18n.uk,
+  ...openchamberToolOutputI18n.uk,
   ...agentStatusI18n.uk,
   ...snippetsI18n.uk,
   ...sidebarWorkI18n.uk,

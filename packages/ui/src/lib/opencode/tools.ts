@@ -169,6 +169,7 @@ const inputSchema = z
         selector: optionalText,
         taskId: optionalText,
         providerId: optionalText,
+        body: optionalText,
         link: z.object({ identifier: optionalText, title: optionalText }).optional().catch(undefined),
       })
       .optional()
@@ -550,6 +551,9 @@ const OPENCHAMBER_IMAGE_TOOL = "openchamber_image"
 /** The control, schedule, browser, memory, knowledge, notify, usage, render, image, secret and workflow tools OpenChamber gives a session. */
 const OPENCHAMBER_TOOLS = new Set(["openchamber", "openchamber_schedule", "openchamber_web", "openchamber_memory", "openchamber_knowledge", "openchamber_notify", "openchamber_usage", OPENCHAMBER_RENDER_TOOL, OPENCHAMBER_IMAGE_TOOL, OPENCHAMBER_SECRET_TOOL, OPENCHAMBER_WORKFLOW_TOOL])
 
+/** Whether a tool is one of OpenChamber's own. */
+export const isOpenChamberTool = (toolName: ToolName): boolean => OPENCHAMBER_TOOLS.has(normalizeToolName(toolName))
+
 // The result envelope the agent tool returns as text (`agent-tool/runtime.js`).
 const proposedWorkflowResultSchema = z.object({
   ok: z.literal(true),
@@ -672,11 +676,10 @@ export function openChamberToolCall(toolName: ToolName, input: JsonValue | undef
 }
 
 /**
- * The action an OpenChamber tool call ran and the one detail that tells calls
- * apart: what was linked, created, saved, opened, asked or read. Notifications have
- * no action, so their title stands alone.
+ * The one detail of an OpenChamber tool call that tells calls apart: what was
+ * linked, created, saved, opened, asked or read.
  */
-function describeOpenChamberTool(parsed: ParsedInput): ToolDescription | null {
+function openChamberDetail(parsed: ParsedInput): string | undefined {
   const parameters = parsed.parameters
   const link = parameters?.link
   const linked = link ? [link.identifier, link.title].filter(Boolean).join(" ") : undefined
@@ -691,9 +694,47 @@ function describeOpenChamberTool(parsed: ParsedInput): ToolDescription | null {
     || parameters?.prompt?.split("\n")[0]
     || parameters?.taskId
     || parameters?.providerId
+    || parameters?.body?.split("\n")[0]
     || parsed.title
-  const label = [parsed.action, detail].filter(Boolean).join(" · ")
+  return detail || undefined
+}
+
+/**
+ * The action an OpenChamber tool call ran and its detail. Notifications have
+ * no action, so their title stands alone.
+ */
+function describeOpenChamberTool(parsed: ParsedInput): ToolDescription | null {
+  const label = [parsed.action, openChamberDetail(parsed)].filter(Boolean).join(" · ")
   return label ? { kind: "text", value: label.slice(0, MAX_COMMAND_LENGTH) } : null
+}
+
+// A tool that names its own kind of action takes a bare one (`save` on the
+// memory tool), as the server does (`resolveAgentToolAction`).
+const ACTION_PREFIX_BY_TOOL = new Map<string, string>(Object.entries({
+  openchamber_memory: "memory",
+  openchamber_knowledge: "knowledge",
+  openchamber_schedule: "schedule",
+  openchamber_notify: "notify",
+  openchamber_usage: "usage",
+  openchamber_web: "browser",
+  openchamber_render: "render",
+  openchamber_image: "image",
+  openchamber_secret: "secret",
+  openchamber_workflow: "workflow",
+}))
+
+/**
+ * The full action an OpenChamber tool call ran (`memory.save`) and its detail,
+ * or `null` for any other tool. A notification without an action is `notify.send`.
+ */
+export function openChamberCallSummary(toolName: ToolName, input: ToolInput | undefined): { action: string | undefined; detail: string | undefined } | null {
+  const tool = normalizeToolName(toolName)
+  if (!OPENCHAMBER_TOOLS.has(tool)) return null
+  const parsed = readInput(input)
+  const prefix = ACTION_PREFIX_BY_TOOL.get(tool)
+  const raw = parsed.action ?? (tool === "openchamber_notify" ? "send" : undefined)
+  const action = raw && prefix && !raw.includes(".") ? `${prefix}.${raw}` : raw
+  return { action, detail: openChamberDetail(parsed) }
 }
 
 const text = (value: string | undefined): ToolDescription | null =>

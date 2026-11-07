@@ -60,6 +60,8 @@ const part: ToolPartData = {
         { tool: 'linear.list_issues', status: 'completed', input: { teamId: 'OPE' } },
         { tool: 'linear.list_issues', status: 'error', input: { teamId: 'OPE' } },
         { tool: 'linear.get_workspace', status: 'completed' },
+        { tool: 'openchamber_web', status: 'completed', input: { action: 'browser.open' } },
+        { tool: 'openchamber_web', status: 'completed', input: { action: 'browser.capture' } },
       ],
     },
     time: { start: 1, end: 2 },
@@ -121,7 +123,7 @@ test('a Code Mode call shows its script, the tools it called, and the truncation
     expect(container.querySelector('use[href="#oc-braces"]')).not.toBeNull();
 
     // The description names the called tools, deduplicated and counted.
-    expect(container.textContent).toContain('linear.list_issues \u00d72, linear.get_workspace');
+    expect(container.textContent).toContain('linear.list_issues \u00d72, linear.get_workspace, OpenChamber Web ×2');
 
     // The body lists every call with its input, and reports the truncated output.
     expect(container.textContent).toContain('Tool calls');
