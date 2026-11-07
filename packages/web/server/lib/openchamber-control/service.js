@@ -198,11 +198,27 @@ const patchScheduledTask = (existing, input) => {
     name = asNonEmptyString(input.name);
     if (!name) throw new OpenChamberControlError('name cannot be empty', 400);
   }
-  const replacesSchedule = ['daily', 'weekly', 'once', 'cron'].some((key) => asNonEmptyString(input[key]));
+  const selectors = ['daily', 'weekly', 'once', 'cron'].filter((key) => input[key] !== undefined);
+  if (selectors.length > 1 || (selectors.length === 1 && !asNonEmptyString(input[selectors[0]]))) {
+    throw new OpenChamberControlError('Provide exactly one nonempty daily, weekly, once, or cron selector', 400);
+  }
   const timezone = asNonEmptyString(input.timezone);
-  const schedule = replacesSchedule
+  let schedule = selectors.length === 1
     ? buildSchedule(input)
     : (timezone ? { ...existing.schedule, timezone } : existing.schedule);
+  if (input.time !== undefined) {
+    const time = asNonEmptyString(input.time);
+    if (!time || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      throw new OpenChamberControlError('time must be HH:mm', 400);
+    }
+    if (schedule.kind === 'once') {
+      schedule = { ...schedule, time };
+    } else if (schedule.kind === 'weekly' && schedule.times.length === 1) {
+      schedule = { ...schedule, times: [time] };
+    } else {
+      throw new OpenChamberControlError('time requires a once or single-time weekly schedule; provide an explicit schedule to replace other schedules', 400);
+    }
+  }
   return {
     id: existing.id,
     targetSessionId: input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId,
