@@ -231,7 +231,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status`에는 `contributes.sessionControl`이 필요하며, 사용자는 이를 별도 줄로 승인합니다. `sessions.lastReply`에는 `sessionControl: { content: true }`가 필요합니다. `setInstructions`에는 `contributes.instructions`가 필요하며, 에이전트가 읽는 내용을 폴더 하나에, 또는 `null`을 주면 모든 곳에 추가합니다.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.stop`에는 `contributes.sessionControl`이 필요하며, 사용자는 이를 별도 줄로 승인합니다. `sessions.lastReply`에는 `sessionControl: { content: true }`가 필요합니다. `sessions.send`로 보낸 메시지는 채팅에 입력한 메시지처럼 그 세션에서 에이전트가 기다리는 폼이나 페이지를 닫습니다.
+
+에이전트의 요청을 채팅 앱 같은 다른 곳으로 옮기려면 `answers: true`를 추가합니다. 사용자는 이를 한 줄 더 승인하며, 그러면 서비스가 어느 세션에서든 사용자 대신 응답할 수 있습니다. `permission-asked` 이벤트에는 `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })`(또는 에이전트가 읽는 `message`와 함께 `'deny'`)를, `event.question.kind`가 `form`인 `question-asked` 이벤트에는 `sessions.answerForm(sessionId, formId, values)`를 씁니다. 이벤트 내용에는 폼의 필드가 `key`와 선택지와 함께 나열됩니다. 값 대신 `null`을 주면 폼을 닫습니다. 허용은 그 요청 하나에만 적용됩니다.
+
+`setInstructions`에는 `contributes.instructions`가 필요하며, 에이전트가 읽는 내용을 폴더 하나에, 또는 `null`을 주면 모든 곳에 추가합니다.
 
 `emit`은 `host.onServiceEvent`를 통해 열려 있는 프레임에 전달되므로 패널이 폴링을 멈출 수 있습니다. 다시 보내는 일은 없으므로 나중에 열린 프레임은 먼저 현재 상태를 읽습니다. `readSettings`는 `secret` 필드를 포함한 통합 설정을 서비스에 주고, `needsConfiguration`은 확장 카드에 메시지를 표시합니다.
 

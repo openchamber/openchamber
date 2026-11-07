@@ -819,7 +819,10 @@ export const serviceProvides = (
  * `contributes.sessionControl.content`: the service receives what the agent
  * said or asked, not only that it did. `sessionControl` follows from
  * `contributes.sessionControl`: the service starts sessions and sends to them
- * with no window open. `instructions` follows from `contributes.instructions`:
+ * with no window open. `sessionAnswers` follows from
+ * `contributes.sessionControl.answers`: the service answers the agent's
+ * permission requests and forms in any session, for the user.
+ * `instructions` follows from `contributes.instructions`:
  * the service adds to what agents read. `skills` follows from
  * `contributes.skills`: the package's skills reach every agent.
  * `opencodePlugin` follows from `contributes.opencodePlugin`: the package's
@@ -827,7 +830,7 @@ export const serviceProvides = (
  * role of the same name: the service reads sessions, messages, projects and
  * live events from the OpenCode the host uses, and nothing else.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'instructions', 'skills', 'opencodePlugin', 'opencode'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'shells', 'conversation', 'service', 'network', 'filesystem', 'origins', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -866,9 +869,12 @@ export const isGuestFilesystemPattern = (value: string): boolean => {
 /**
  * The service acts on sessions by itself (`service-host.ts`). `content: true`
  * also lets it read the agent's answers, which asks for `transcript`.
+ * `answers: true` lets it answer the agent's permission requests and forms,
+ * which asks for `sessionAnswers`.
  */
 export type SessionControlContribution = {
   content?: true;
+  answers?: true;
 };
 
 /** `contributes.mentions`: the extension's rows in the composer's `@` menu, answered by its service. */
@@ -991,6 +997,7 @@ export const requestedGuestCapabilities = (
   if (contributes.origins && contributes.origins.length > 0) declared.add('origins');
   if (contributes.sessionEvents?.content || contributes.sessionControl?.content) declared.add('transcript');
   if (contributes.sessionControl) declared.add('sessionControl');
+  if (contributes.sessionControl?.answers) declared.add('sessionAnswers');
   if (contributes.instructions) declared.add('instructions');
   if (contributes.skills) declared.add('skills');
   if (contributes.opencodePlugin) declared.add('opencodePlugin');

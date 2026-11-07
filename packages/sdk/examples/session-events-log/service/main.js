@@ -98,7 +98,7 @@ var readSessionEventRequest = (body) => {
     return null;
   if (Object(event) !== event || event === undefined)
     return null;
-  const { id, type, at, session, project, linked, permission } = event;
+  const { id, type, at, session, project, linked, permission, question } = event;
   if (String(id) !== id || id.length === 0)
     return null;
   if (String(type) !== type || !isGuestSessionEventType(type))
@@ -132,6 +132,16 @@ var readSessionEventRequest = (body) => {
     if (String(permissionRequestId) !== permissionRequestId || permissionRequestId.length === 0)
       return null;
     request.event.permission = { requestId: permissionRequestId };
+  }
+  if (question !== undefined) {
+    if (Object(question) !== question)
+      return null;
+    const { kind, id: questionId } = question;
+    if (kind !== "form" && kind !== "page")
+      return null;
+    if (String(questionId) !== questionId || questionId.length === 0)
+      return null;
+    request.event.question = { kind, id: questionId };
   }
   if (content !== undefined) {
     if (Object(content) !== content || content.type !== type)

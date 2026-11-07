@@ -231,7 +231,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` et `sessions.status` nécessitent `contributes.sessionControl`, que l'utilisateur approuve sur une ligne à part. `sessions.lastReply` nécessite `sessionControl: { content: true }`. `setInstructions` nécessite `contributes.instructions` et complète ce que lisent les agents, dans un dossier ou, avec `null`, partout.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` et `sessions.stop` nécessitent `contributes.sessionControl`, que l'utilisateur approuve sur une ligne à part. `sessions.lastReply` nécessite `sessionControl: { content: true }`. Un message envoyé par `sessions.send` ferme un formulaire ou une page que l'agent attend dans cette session, comme un message tapé dans le chat.
+
+Pour porter les demandes de l'agent ailleurs, par exemple dans une app de messagerie, ajoutez `answers: true`. L'utilisateur l'approuve sur une ligne de plus, et le service peut alors répondre à sa place dans n'importe quelle session : `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (ou `'deny'` avec un `message` que l'agent lit) pour un événement `permission-asked`, et `sessions.answerForm(sessionId, formId, values)` pour un événement `question-asked` dont `event.question.kind` vaut `form`. Le contenu de l'événement liste les champs du formulaire avec leur `key` et leurs choix. `null` à la place des valeurs ferme le formulaire sans réponse. Une autorisation ne couvre que cette demande.
+
+`setInstructions` nécessite `contributes.instructions` et complète ce que lisent les agents, dans un dossier ou, avec `null`, partout.
 
 `emit` atteint vos frames ouvertes via `host.onServiceEvent`, ce qui évite à un panneau d'interroger le service en boucle. Rien n'est rejoué, donc une frame ouverte plus tard lit d'abord l'état actuel. `readSettings` donne au service les réglages de l'intégration, champs `secret` compris, et `needsConfiguration` affiche un message sur la carte de l'extension.
 

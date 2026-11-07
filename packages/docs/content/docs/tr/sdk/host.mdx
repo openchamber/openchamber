@@ -240,7 +240,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` ve `sessions.status` için `contributes.sessionControl` gerekir; kullanıcı bunu ayrı bir satır olarak onaylar. `sessions.lastReply` için `sessionControl: { content: true }` gerekir. `setInstructions` için `contributes.instructions` gerekir; bu çağrı ajanların okuduklarına tek bir klasörde ya da `null` ile her yerde ekleme yapar.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` ve `sessions.stop` için `contributes.sessionControl` gerekir; kullanıcı bunu ayrı bir satır olarak onaylar. `sessions.lastReply` için `sessionControl: { content: true }` gerekir. `sessions.send` ile gönderilen bir mesaj, sohbete yazılan bir mesaj gibi, ajanın o oturumda beklediği formu ya da sayfayı kapatır.
+
+Ajanın isteklerini başka bir yere, örneğin bir sohbet uygulamasına taşımak için `answers: true` ekleyin. Kullanıcı bunu bir satır daha olarak onaylar ve servis artık herhangi bir oturumda kullanıcı adına yanıt verebilir: bir `permission-asked` olayı için `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (ya da ajanın okuyacağı bir `message` ile `'deny'`), `event.question.kind` değeri `form` olan bir `question-asked` olayı için `sessions.answerForm(sessionId, formId, values)`. Olayın içeriği formun alanlarını `key` değerleri ve seçenekleriyle listeler. Değerler yerine `null` göndermek formu yanıtsız kapatır. Bir izin yalnızca o tek isteği kapsar.
+
+`setInstructions` için `contributes.instructions` gerekir; bu çağrı ajanların okuduklarına tek bir klasörde ya da `null` ile her yerde ekleme yapar.
 
 `emit`, `host.onServiceEvent` üzerinden açık frame'lerinize ulaşır, böylece panelin yoklama yapması gerekmez. Hiçbir şey yeniden gönderilmez, bu yüzden sonradan açılan bir frame önce güncel durumu okur. `readSettings`, servise `secret` alanları dahil entegrasyonun ayarlarını verir; `needsConfiguration` ise eklentinin kartında bir mesaj gösterir.
 

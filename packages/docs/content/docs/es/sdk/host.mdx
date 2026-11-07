@@ -231,7 +231,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` y `sessions.status` necesitan `contributes.sessionControl`, que el usuario aprueba como una línea propia. `sessions.lastReply` necesita `sessionControl: { content: true }`. `setInstructions` necesita `contributes.instructions` y añade contenido a lo que leen los agentes, en una carpeta o, con `null`, en todas partes.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` y `sessions.stop` necesitan `contributes.sessionControl`, que el usuario aprueba como una línea propia. `sessions.lastReply` necesita `sessionControl: { content: true }`. Un mensaje de `sessions.send` cierra un formulario o una página que el agente espera en esa sesión, igual que un mensaje escrito en el chat.
+
+Para llevar las solicitudes del agente a otro sitio, como una app de chat, añade `answers: true`. El usuario lo aprueba como una línea más, y entonces el servicio puede responder en nombre del usuario en cualquier sesión: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (o `'deny'` con un `message` que lee el agente) para un evento `permission-asked`, y `sessions.answerForm(sessionId, formId, values)` para un evento `question-asked` cuyo `event.question.kind` es `form`. El contenido del evento lista los campos del formulario con su `key` y sus opciones. `null` en lugar de valores descarta el formulario. Un permiso concedido cubre solo esa solicitud.
+
+`setInstructions` necesita `contributes.instructions` y añade contenido a lo que leen los agentes, en una carpeta o, con `null`, en todas partes.
 
 `emit` llega a tus frames abiertos mediante `host.onServiceEvent`, así un panel deja de hacer sondeos. Nada se reenvía, por lo que un frame que se abre más tarde lee primero el estado actual. `readSettings` da al servicio la configuración de la integración, incluidos los campos `secret`, y `needsConfiguration` muestra un mensaje en la tarjeta de la extensión.
 

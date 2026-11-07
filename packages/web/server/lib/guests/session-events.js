@@ -110,14 +110,38 @@ const linkedItemsOf = (metadata) => {
 
 const stringList = (value) => (Array.isArray(value) ? value.filter((entry) => typeof entry === 'string') : []);
 
+const FORM_FIELD_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'multiselect', 'external']);
+
+/**
+ * What a service needs to ask a field elsewhere and answer it (`GuestFormField`).
+ * A hidden field is the form's own: the answer route fills it from its default.
+ */
+const formFieldOf = (field) => {
+  const options = (Array.isArray(field.options) ? field.options : [])
+    .filter((option) => isText(option?.value))
+    .map((option) => ({ value: option.value, label: typeof option.label === 'string' ? option.label : option.value }));
+  const when = (Array.isArray(field.when) ? field.when : [])
+    .filter((clause) => isText(clause?.key) && (clause.op === 'eq' || clause.op === 'neq') && ['string', 'number', 'boolean'].includes(typeof clause.value))
+    .map((clause) => ({ key: clause.key, op: clause.op, value: clause.value }));
+  return {
+    key: field.key,
+    type: field.type,
+    title: typeof field.title === 'string' ? field.title : '',
+    description: typeof field.description === 'string' ? field.description : null,
+    required: field.required === true,
+    ...(options.length > 0 ? { options } : {}),
+    ...(field.type === 'multiselect' && field.custom === true ? { custom: true } : {}),
+    ...(when.length > 0 ? { when } : {}),
+  };
+};
+
 const formAskOf = (form) => ({
   kind: 'form',
   id: String(form.id),
   title: typeof form.title === 'string' ? form.title : '',
-  fields: (Array.isArray(form.fields) ? form.fields : []).map((field) => ({
-    title: typeof field?.title === 'string' ? field.title : '',
-    description: typeof field?.description === 'string' ? field.description : null,
-  })),
+  fields: (Array.isArray(form.fields) ? form.fields : [])
+    .filter((field) => isText(field?.key) && FORM_FIELD_TYPES.has(field.type) && field.hidden !== true)
+    .map(formFieldOf),
 });
 
 const parseJson = (text) => {
@@ -310,7 +334,7 @@ export const createExtensionSessionEvents = ({
    * request per subscriber; `content` is built once, only when a subscriber
    * holds `transcript`, from `contentOf(record)`.
    */
-  const announce = async ({ type, payload, directory, subscribers, permission, contentOf }) => {
+  const announce = async ({ type, payload, directory, subscribers, permission, question, contentOf }) => {
     if (stopped) return [];
     const sessionId = sessionIdOf(payload);
     const wantsContent = subscribers.some(holdsTranscript);
@@ -342,6 +366,7 @@ export const createExtensionSessionEvents = ({
       linked,
     };
     if (permission) event.permission = permission;
+    if (question) event.question = question;
     const content = wantsContent ? await contentOf(record) : null;
     if (stopped) return [];
     return subscribers.map((guest) => {
@@ -637,6 +662,7 @@ export const createExtensionSessionEvents = ({
       payload,
       directory,
       subscribers,
+      question: { kind: ask.kind, id: ask.id },
       contentOf: async (record) => ({ type: 'question-asked', sessionTitle: titleOf(record), ask }),
     });
   };

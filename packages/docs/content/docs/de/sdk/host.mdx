@@ -231,7 +231,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` und `sessions.status` brauchen `contributes.sessionControl`, das der Nutzer als eigene Zeile freigibt. `sessions.lastReply` braucht `sessionControl: { content: true }`. `setInstructions` braucht `contributes.instructions` und ergänzt, was Agenten lesen, in einem Ordner oder, mit `null`, überall.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` und `sessions.stop` brauchen `contributes.sessionControl`, das der Nutzer als eigene Zeile freigibt. `sessions.lastReply` braucht `sessionControl: { content: true }`. Eine Nachricht aus `sessions.send` schließt ein Formular oder eine Seite, auf die der Agent in dieser Sitzung wartet, genau wie eine im Chat getippte Nachricht.
+
+Um die Anfragen des Agenten woandershin zu bringen, etwa in eine Chat-App, füge `answers: true` hinzu. Der Nutzer gibt das als weitere Zeile frei, und der Dienst kann dann in jeder Sitzung im Namen des Nutzers antworten: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (oder `'deny'` mit einer `message`, die der Agent liest) auf ein `permission-asked`-Ereignis und `sessions.answerForm(sessionId, formId, values)` auf ein `question-asked`-Ereignis, dessen `event.question.kind` `form` ist. Der Inhalt des Ereignisses listet die Felder des Formulars mit ihrem `key` und den Auswahlmöglichkeiten. `null` statt Werten verwirft das Formular. Eine Freigabe gilt nur für diese eine Anfrage.
+
+`setInstructions` braucht `contributes.instructions` und ergänzt, was Agenten lesen, in einem Ordner oder, mit `null`, überall.
 
 `emit` erreicht deine offenen Frames über `host.onServiceEvent`, sodass ein Panel nicht mehr pollen muss. Nichts wird nachgeliefert, also liest ein später geöffneter Frame zuerst den aktuellen Zustand. `readSettings` gibt dem Dienst die Einstellungen der Integration einschließlich der `secret`-Felder, und `needsConfiguration` zeigt eine Meldung auf der Karte der Erweiterung.
 

@@ -231,7 +231,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` i `sessions.status` wymagają `contributes.sessionControl`, które użytkownik zatwierdza jako osobny wiersz. `sessions.lastReply` wymaga `sessionControl: { content: true }`. `setInstructions` wymaga `contributes.instructions` i uzupełnia to, co czytają agenci, w jednym folderze albo, z `null`, wszędzie.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` i `sessions.stop` wymagają `contributes.sessionControl`, które użytkownik zatwierdza jako osobny wiersz. `sessions.lastReply` wymaga `sessionControl: { content: true }`. Wiadomość z `sessions.send` zamyka formularz lub stronę, na które agent czeka w tej sesji, tak samo jak wiadomość wpisana w czacie.
+
+Aby przenosić żądania agenta gdzie indziej, na przykład do komunikatora, dodaj `answers: true`. Użytkownik zatwierdza to jako kolejny wiersz, a usługa może wtedy odpowiadać w imieniu użytkownika w dowolnej sesji: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (lub `'deny'` z `message`, którą czyta agent) na zdarzenie `permission-asked` oraz `sessions.answerForm(sessionId, formId, values)` na zdarzenie `question-asked`, którego `event.question.kind` to `form`. Treść zdarzenia wymienia pola formularza z ich `key` i opcjami wyboru. `null` zamiast wartości odrzuca formularz. Zgoda obejmuje tylko to jedno żądanie.
+
+`setInstructions` wymaga `contributes.instructions` i uzupełnia to, co czytają agenci, w jednym folderze albo, z `null`, wszędzie.
 
 `emit` dociera do Twoich otwartych ramek przez `host.onServiceEvent`, więc panel nie musi już odpytywać usługi. Nic nie jest wysyłane ponownie, dlatego ramka otwarta później najpierw odczytuje bieżący stan. `readSettings` daje usłudze ustawienia integracji razem z polami `secret`, a `needsConfiguration` pokazuje komunikat na karcie rozszerzenia.
 

@@ -1623,6 +1623,13 @@ describe('services that act on their own', () => {
     expect(requestedGuestCapabilities({ service: declared, sessionControl: {} })).toEqual(['service', 'sessionControl']);
     expect(requestedGuestCapabilities({ service: declared, sessionControl: { content: true }, instructions: true, skills: 'skills' }))
       .toEqual(['service', 'transcript', 'sessionControl', 'instructions', 'skills']);
+    expect(requestedGuestCapabilities({ service: declared, sessionControl: { answers: true } })).toEqual(['service', 'sessionControl', 'sessionAnswers']);
+  });
+
+  test('session control takes answers: true and nothing else', () => {
+    const running = { ...service, keepRunning: true };
+    expect(parse({ panel: pageless, service: running, sessionControl: { answers: true } }).ok).toBe(true);
+    expect(parse({ panel: pageless, service: running, sessionControl: { answers: false } })).toMatchObject({ ok: false, code: 'invalid-session-control' });
   });
 
   test('skills stay inside the package', () => {

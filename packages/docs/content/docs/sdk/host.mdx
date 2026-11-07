@@ -271,7 +271,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` and `sessions.status` need `contributes.sessionControl`, which the user approves as its own line. `sessions.lastReply` needs `sessionControl: { content: true }`. `setInstructions` needs `contributes.instructions` and adds to what agents read, in one folder or, with `null`, everywhere.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` and `sessions.stop` need `contributes.sessionControl`, which the user approves as its own line. `sessions.lastReply` needs `sessionControl: { content: true }`. A message from `sessions.send` closes a form or page the agent waits on in that session, as a message typed in the chat does.
+
+To carry the agent's requests somewhere else, such as a chat app, add `answers: true`. The user approves it as one more line, and the service can then answer for them in any session: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (or `'deny'` with a `message` the agent reads) for a `permission-asked` event, and `sessions.answerForm(sessionId, formId, values)` for a `question-asked` event whose `event.question.kind` is `form`. The event's content lists the form's fields with their `key` and choices. `null` instead of values dismisses the form. An allow covers that one request.
+
+`setInstructions` needs `contributes.instructions` and adds to what agents read, in one folder or, with `null`, everywhere.
 
 `emit` reaches your open frames through `host.onServiceEvent`, so a panel stops polling. Nothing replays, so a frame that opens later reads the current state first. `readSettings` gives the service the integration's settings, `secret` fields included, and `needsConfiguration` shows a message on the extension's card.
 

@@ -635,7 +635,7 @@ const contributesSchema = z.object({
   notifications: notificationsSchema.optional(),
   tracker: trackerSchema.optional(),
   quota: quotaSchema.optional(),
-  sessionControl: z.object({ content: z.literal(true).optional() }).strict().optional(),
+  sessionControl: z.object({ content: z.literal(true).optional(), answers: z.literal(true).optional() }).strict().optional(),
   instructions: z.literal(true).optional(),
   skills: z.string().trim().refine(isSafeAssetPath).optional(),
   // The value becomes a filesystem path OpenCode executes code from, so only a folder inside the package.
@@ -1005,7 +1005,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       : `contributes.sessionEvents is { events: [1 to ${GUEST_SESSION_EVENT_TYPES.length} distinct of ${GUEST_SESSION_EVENT_TYPES.map((type) => `"${type}"`).join(', ')}], content?: true }.`);
   }
   if (path === 'contributes.sessionControl' || path.startsWith('contributes.sessionControl.')) {
-    return fail('invalid-session-control', issue.code === 'custom' ? issue.message : 'contributes.sessionControl is { content?: true }.');
+    return fail('invalid-session-control', issue.code === 'custom' ? issue.message : 'contributes.sessionControl is { content?: true, answers?: true }.');
   }
   if (path === 'contributes.instructions') {
     return fail('invalid-instructions', issue.code === 'custom' ? issue.message : 'contributes.instructions is true.');

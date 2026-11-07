@@ -231,7 +231,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` e `sessions.status` precisam de `contributes.sessionControl`, que o usuário aprova como uma linha separada. `sessions.lastReply` precisa de `sessionControl: { content: true }`. `setInstructions` precisa de `contributes.instructions` e complementa o que os agentes leem, em uma pasta ou, com `null`, em todo lugar.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` e `sessions.stop` precisam de `contributes.sessionControl`, que o usuário aprova como uma linha separada. `sessions.lastReply` precisa de `sessionControl: { content: true }`. Uma mensagem de `sessions.send` fecha um formulário ou uma página que o agente espera nessa sessão, como faz uma mensagem digitada no chat.
+
+Para levar os pedidos do agente para outro lugar, como um app de chat, adicione `answers: true`. O usuário aprova isso como mais uma linha, e então o serviço pode responder em nome do usuário em qualquer sessão: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (ou `'deny'` com uma `message` que o agente lê) para um evento `permission-asked`, e `sessions.answerForm(sessionId, formId, values)` para um evento `question-asked` cujo `event.question.kind` é `form`. O conteúdo do evento lista os campos do formulário com sua `key` e suas opções. `null` no lugar dos valores dispensa o formulário. Uma permissão concedida vale só para aquele pedido.
+
+`setInstructions` precisa de `contributes.instructions` e complementa o que os agentes leem, em uma pasta ou, com `null`, em todo lugar.
 
 `emit` chega aos seus frames abertos por meio de `host.onServiceEvent`, então um painel para de fazer polling. Nada é reenviado, por isso um frame que abre depois lê primeiro o estado atual. `readSettings` dá ao serviço as configurações da integração, incluindo os campos `secret`, e `needsConfiguration` mostra uma mensagem no cartão da extensão.
 

@@ -50,6 +50,7 @@ Start from what the user wants, and combine rows. Most good extensions use two o
 | To work with no window open | `service` with `sessionControl` | The service starts sessions and reads replies |
 | To run on a clock | `service.schedule` | Wakes the service, which then goes back to sleep |
 | To react when the agent finishes or stops | `sessionEvents` | The service hears it with no window open |
+| To talk to the agent from a chat app | `sessionEvents` with `sessionControl.answers` | The service relays replies, permission requests and forms, and sends back the user's answers |
 | To get told outside the app | `service.provides: ["notifications"]` | Becomes a channel on the Notifications page |
 | To open a file type its own way | `fileEditors` | Your page opens those files in Files |
 | A place for long work, settings, history | `panel` or `page` | A rail tab or a full page, worth it only behind one of the points above |
@@ -161,7 +162,7 @@ http.createServer((req, res) => {
 - List programs it runs in `service.permissions.exec`, so the approval dialog names them.
 - It gets no keys from the user's environment. Secrets come from `readSettings()`.
 
-`host` gives: `sessions.start({ prompt, title, directory })`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.lastReply` (with `sessionControl`), `setInstructions(directory, text)`, `emit(topic, data)`, `readSettings()`, `needsConfiguration(message)`.
+`host` gives: `sessions.start({ prompt, title, directory })`, `sessions.send`, `sessions.retry`, `sessions.status`, `sessions.lastReply`, `sessions.stop` (with `sessionControl`), `sessions.answerPermission`, `sessions.answerForm` (with `sessionControl.answers`), `setInstructions(directory, text)`, `emit(topic, data)`, `readSettings()`, `needsConfiguration(message)`.
 
 Bundle with `--node`: the host runs the file directly and `node_modules` does not ship.
 
@@ -259,7 +260,7 @@ void host.answerBlock(option);
 "sessionEvents": { "events": ["turn-finished", "turn-failed"], "content": true }
 ```
 
-A clock posts to `SERVICE_SCHEDULE_PATH`; read it with `readServiceScheduleRequest`. Session events post to `SESSION_EVENTS_PATH`; read them with `readSessionEventRequest`, answer `{ "ok": true }` first, then do the work. Events cover every project, so filter on `event.project.directory`. Each scheduled session spends the user's tokens, so ship it switched off and let the user turn it on.
+A clock posts to `SERVICE_SCHEDULE_PATH`; read it with `readServiceScheduleRequest`. Session events post to `SESSION_EVENTS_PATH`; read them with `readSessionEventRequest`, answer `{ "ok": true }` first, then do the work. Events cover every project, so filter on `event.project.directory`. With `"sessionControl": { "answers": true }` the service answers for the user: `sessions.answerPermission(sessionId, event.permission.requestId, { decision: 'allow' })` (or `'deny'` with a `message`), and `sessions.answerForm(sessionId, event.question.id, values)` with values keyed by each field's `key` from the event content, or `null` to dismiss. A page cannot be answered; `sessions.send` closes it and any open form, as typing in the chat does. Each scheduled session spends the user's tokens, so ship it switched off and let the user turn it on.
 
 ### Settings and secrets
 

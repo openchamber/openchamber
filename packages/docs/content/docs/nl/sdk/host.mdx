@@ -255,7 +255,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` en `sessions.status` hebben `contributes.sessionControl` nodig, dat de gebruiker als eigen regel goedkeurt. `sessions.lastReply` heeft `sessionControl: { content: true }` nodig. `setInstructions` heeft `contributes.instructions` nodig en vult aan wat agents lezen, in één map of, met `null`, overal.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` en `sessions.stop` hebben `contributes.sessionControl` nodig, dat de gebruiker als eigen regel goedkeurt. `sessions.lastReply` heeft `sessionControl: { content: true }` nodig. Een bericht via `sessions.send` sluit een formulier of pagina waarop de agent in die sessie wacht, net als een bericht dat in de chat is getypt.
+
+Om de verzoeken van de agent ergens anders heen te brengen, zoals een chat-app, voegt u `answers: true` toe. De gebruiker keurt dat als nog een regel goed, en daarna kan de service in elke sessie namens de gebruiker antwoorden: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (of `'deny'` met een `message` die de agent leest) op een `permission-asked`-gebeurtenis, en `sessions.answerForm(sessionId, formId, values)` op een `question-asked`-gebeurtenis waarvan `event.question.kind` `form` is. De inhoud van de gebeurtenis somt de velden van het formulier op met hun `key` en keuzes. `null` in plaats van waarden sluit het formulier zonder antwoord. Een toestemming geldt alleen voor dat ene verzoek.
+
+`setInstructions` heeft `contributes.instructions` nodig en vult aan wat agents lezen, in één map of, met `null`, overal.
 
 `emit` bereikt uw open frames via `host.onServiceEvent`, zodat een paneel niet meer hoeft te pollen. Niets wordt opnieuw verstuurd, dus een frame dat later opent, leest eerst de huidige status. `readSettings` geeft de service de instellingen van de integratie, inclusief `secret`-velden, en `needsConfiguration` toont een bericht op de kaart van de extensie.
 

@@ -108,7 +108,7 @@ OpenChamber 会读取清单，并弹出一个对话框列出扩展所请求的�
 | `files` | 读写打开项目中的文件（使用相对路径的 `readFile`、`writeFile`、`listDir`、`stat`） |
 | `model` | 使用用户的 Small Model 进行一次性文本生成（`generate`），不在任何会话中 |
 
-另有十项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，声明了 `origins` 时加上 `origins`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)），`sessionEvents` 或 `sessionControl` 请求 `content` 时加上 `transcript`（见[会话事件](/sdk/host/#会话事件)），服务操作会话时加上 `sessionControl`（见[调用 OpenChamber](/sdk/host/#从服务调用-openchamber)），补充智能体读取的内容时加上 `instructions`，声明了 `contributes.skills` 时加上 `skills`。`contributes.skills` 是包内的一个技能文件夹，扩展开启期间这些技能会提供给每个智能体。声明了 `contributes.opencodePlugin` 时加上 `opencodePlugin`（见下文）。
+另有十一项会自动为你加上：声明了 `integration` 时加上 `network`，声明了 `service` 时加上 `service`，声明了 `filesystem` 模式时加上 `filesystem`，声明了 `origins` 时加上 `origins`，会话操作请求消息时加上 `conversation`（见[操作、命令和徽标](#操作命令和徽标)），`sessionEvents` 或 `sessionControl` 请求 `content` 时加上 `transcript`（见[会话事件](/sdk/host/#会话事件)），服务操作会话时加上 `sessionControl`（见[调用 OpenChamber](/sdk/host/#从服务调用-openchamber)），服务代用户回答智能体的权限请求和表单时加上 `sessionAnswers`（`sessionControl: { answers: true }`），补充智能体读取的内容时加上 `instructions`，声明了 `contributes.skills` 时加上 `skills`。`contributes.skills` 是包内的一个技能文件夹，扩展开启期间这些技能会提供给每个智能体。声明了 `contributes.opencodePlugin` 时加上 `opencodePlugin`（见下文）。
 
 用户在安装扩展时会看到完整列表一次，然后批准或移除扩展。如果新版本请求更多权限，对话框会再次出现。调用需要用户尚未批准的能力时，会以 `NOT_GRANTED` 失败。
 

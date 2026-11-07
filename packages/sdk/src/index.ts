@@ -155,6 +155,7 @@ export {
   readSessionEventRequest,
 } from './session-events.ts';
 export type {
+  GuestFormField,
   GuestPermissionAskedContent,
   GuestQuestionAskedContent,
   GuestSessionEventContent,
@@ -179,6 +180,7 @@ export {
   MENTION_TEXT_MAX,
   MENTION_TITLE_MAX,
   OPENCHAMBER_HOST_CALLBACK_URL_ENV,
+  SERVICE_ANSWER_MESSAGE_MAX,
   SERVICE_EVENT_DATA_MAX,
   SERVICE_EVENT_RATE_MAX,
   SERVICE_EVENT_TOPIC_MAX,
@@ -206,9 +208,12 @@ export type {
   MentionsResolveResult,
   MentionsSearchRequest,
   MentionsSearchResult,
+  ServiceAnswered,
+  ServiceFormValues,
   ServiceHost,
   ServiceHostCalls,
   ServiceHostMethod,
+  ServicePermissionAnswer,
   ServiceScheduleEntry,
   ServiceScheduleRequest,
   ServiceSessionReply,
@@ -216,6 +221,7 @@ export type {
   ServiceSessionStart,
   ServiceSessionStarted,
   ServiceSessionStatus,
+  ServiceSessionStopped,
 } from './service-host.ts';
 export type {
   GuestServiceProvides,

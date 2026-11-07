@@ -231,7 +231,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`, `sessions.send`, `sessions.retry` і `sessions.status` потребують `contributes.sessionControl`, який користувач схвалює окремим рядком. `sessions.lastReply` потребує `sessionControl: { content: true }`. `setInstructions` потребує `contributes.instructions` і доповнює те, що читають агенти, в одній теці або, з `null`, всюди.
+`sessions.start`, `sessions.send`, `sessions.retry`, `sessions.status` і `sessions.stop` потребують `contributes.sessionControl`, який користувач схвалює окремим рядком. `sessions.lastReply` потребує `sessionControl: { content: true }`. Повідомлення з `sessions.send` закриває форму чи сторінку, на яку агент чекає в цій сесії, так само як повідомлення, набране в чаті.
+
+Щоб переносити запити агента деінде, наприклад у чат-застосунок, додайте `answers: true`. Користувач схвалює це ще одним рядком, і тоді сервіс може відповідати за користувача в будь-якій сесії: `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })` (або `'deny'` з `message`, яке прочитає агент) на подію `permission-asked` і `sessions.answerForm(sessionId, formId, values)` на подію `question-asked`, у якої `event.question.kind` дорівнює `form`. Вміст події перелічує поля форми з їхніми `key` і варіантами вибору. `null` замість значень відхиляє форму. Дозвіл діє лише на цей один запит.
+
+`setInstructions` потребує `contributes.instructions` і доповнює те, що читають агенти, в одній теці або, з `null`, всюди.
 
 `emit` доходить до ваших відкритих фреймів через `host.onServiceEvent`, тож панелі не треба опитувати сервіс. Нічого не надсилається повторно, тому фрейм, який відкрився пізніше, спершу читає поточний стан. `readSettings` дає сервісу налаштування інтеграції разом із полями `secret`, а `needsConfiguration` показує повідомлення на картці розширення.
 

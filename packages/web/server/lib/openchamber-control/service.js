@@ -7,6 +7,7 @@ import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './action
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
+import { completeFormAnswer } from './form-answer.js';
 import { createImageGenerationAction } from './generate-image.js';
 import { createSecretRequests } from './secret-request.js';
 import { createWorkNamer } from '../openchamber-sessions/work-naming.js';
@@ -655,6 +656,83 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
+  // An extension's service acts on a session for the user (`../guests/service-host-api.js`):
+  // the stop button, a permission card, a form. Each goes to the instance of the
+  // session's own directory, since one sent elsewhere answers nothing and still succeeds.
+  const sessionClient = async (sessionID) => {
+    const directory = await resolveSessionDirectory(sessionID);
+    if (!directory) throw new OpenChamberControlError(`Session not found: ${sessionID}`, 404);
+    return getClient(directory);
+  };
+
+  const GONE_TAGS = new Set(['SessionNotFoundError', 'PermissionNotFoundError', 'FormNotFoundError', 'FormAlreadySettledError']);
+  const asAnswerError = (error) => {
+    if (GONE_TAGS.has(error?._tag)) return new OpenChamberControlError('This request is no longer waiting for an answer', 404);
+    if (error?._tag === 'FormInvalidAnswerError' || error?._tag === 'InvalidRequestError') {
+      return new OpenChamberControlError(`OpenCode refused the answer: ${error.message || error._tag}`, 400);
+    }
+    return asControlError(error, 'OpenCode did not take the answer');
+  };
+
+  const stopSession = async (sessionID) => {
+    const client = await sessionClient(sessionID);
+    try {
+      const result = await client.session.interrupt({ sessionID });
+      return result?.interrupted === true;
+    } catch (error) {
+      throw asAnswerError(error);
+    }
+  };
+
+  const answerPermission = async ({ sessionID, requestID, decision, message }) => {
+    const client = await sessionClient(sessionID);
+    try {
+      await client.permission.reply({ sessionID, requestID, decision, ...(message ? { message } : {}) });
+    } catch (error) {
+      throw asAnswerError(error);
+    }
+  };
+
+  /** `answer` replies; `null` dismisses the form, as the composer does when the user writes instead. */
+  const answerForm = async ({ sessionID, formID, answer, message }) => {
+    const client = await sessionClient(sessionID);
+    try {
+      if (!answer) {
+        await client.session.form.cancel({ sessionID, formID, ...(message ? { message } : {}) });
+        return;
+      }
+      const form = await client.session.form.get({ sessionID, formID });
+      await client.session.form.reply({ sessionID, formID, answer: completeFormAnswer(form?.fields, answer) });
+    } catch (error) {
+      throw asAnswerError(error);
+    }
+  };
+
+  /**
+   * A message the user writes while a form waits dismisses the form first, as
+   * the composer does: OpenCode holds a prompt until the form settles, so the
+   * message would otherwise wait behind a form nobody answers. The list comes
+   * from OpenCode, since this server's pending map is empty after a restart.
+   */
+  const dismissOpenForms = async (sessionID) => {
+    const client = await sessionClient(sessionID);
+    let forms;
+    try {
+      forms = await client.session.form.list({ sessionID });
+    } catch (error) {
+      throw asAnswerError(error);
+    }
+    for (const form of Array.isArray(forms) ? forms : []) {
+      if (!asNonEmptyString(form?.id) || (form.state && form.state.status !== 'pending')) continue;
+      try {
+        await client.session.form.cancel({ sessionID, formID: form.id });
+      } catch (error) {
+        // Answered meanwhile, elsewhere: nothing left to dismiss.
+        if (!GONE_TAGS.has(error?._tag)) throw asAnswerError(error);
+      }
+    }
+  };
+
   // Checked before anything is created or sent: a result nobody can deliver
   // must fail the call, not leave a dispatched session the agent waits on.
   const assertReturnResult = (action, input, parentSessionID) => {
@@ -1226,5 +1304,15 @@ export const createOpenChamberControlService = (dependencies) => {
     pageAnswers.release(sessionId);
     secretRequests.release(sessionId);
   };
-  return { execute, resolveSessionDirectory, answerPage: pageAnswers.answer, answerSecret: secretRequests.answer, releaseAnswerWaits };
+  return {
+    execute,
+    resolveSessionDirectory,
+    answerPage: pageAnswers.answer,
+    answerSecret: secretRequests.answer,
+    releaseAnswerWaits,
+    stopSession,
+    answerPermission,
+    answerForm,
+    dismissOpenForms,
+  };
 };

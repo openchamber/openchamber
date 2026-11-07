@@ -11,6 +11,7 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
  * - `transcript`: session content (the agent's answers, questions and
  *   permission requests) posted to that process, so it is gated with it;
  * - `sessionControl`: that process starting sessions and sending to them;
+ * - `sessionAnswers`: that process allowing what the agent asks to do;
  * - `instructions` and `skills`: text every agent reads, which can steer what
  *   it sends where;
  * - `opencodePlugin`: code that runs inside OpenCode itself, with every
@@ -25,7 +26,7 @@ import { readEnterprisePolicy } from '../enterprise-mode.js';
  * The list names repositories, not package ids: a package declares its own
  * id, so an id would let a user ship any code under an allowed name.
  */
-const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service', 'transcript', 'sessionControl', 'instructions', 'skills', 'opencodePlugin', 'opencode'];
+const ENTERPRISE_GATED_CAPABILITIES = ['network', 'origins', 'service', 'transcript', 'sessionControl', 'sessionAnswers', 'instructions', 'skills', 'opencodePlugin', 'opencode'];
 
 /** `host/path` of a clone URL (https or scp-style ssh), for comparing two spellings of one repository. */
 const repositoryKey = (value) => {

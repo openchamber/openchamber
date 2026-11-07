@@ -231,7 +231,11 @@ await host.setInstructions(directory, 'Deploys run through the release branch.')
 await host.emit('deploy-finished', { id: 42 });
 ```
 
-`sessions.start`、`sessions.send`、`sessions.retry`、`sessions.status` には `contributes.sessionControl` が必要で、ユーザーはこれを独立した行として承認します。`sessions.lastReply` には `sessionControl: { content: true }` が必要です。`setInstructions` には `contributes.instructions` が必要で、エージェントが読む内容に、1 つのフォルダー単位で、または `null` を渡してすべての場所に追加します。
+`sessions.start`、`sessions.send`、`sessions.retry`、`sessions.status`、`sessions.stop` には `contributes.sessionControl` が必要で、ユーザーはこれを独立した行として承認します。`sessions.lastReply` には `sessionControl: { content: true }` が必要です。`sessions.send` で送ったメッセージは、チャットに入力したメッセージと同じように、そのセッションでエージェントが待っているフォームやページを閉じます。
+
+エージェントのリクエストをチャットアプリなど別の場所へ運ぶには、`answers: true` を追加します。ユーザーはこれをもう 1 行として承認し、サービスはどのセッションでもユーザーの代わりに応答できるようになります。`permission-asked` イベントには `sessions.answerPermission(sessionId, requestId, { decision: 'allow' })`(またはエージェントが読む `message` を付けた `'deny'`)、`event.question.kind` が `form` の `question-asked` イベントには `sessions.answerForm(sessionId, formId, values)` を使います。イベントの内容には、フォームのフィールドが `key` と選択肢付きで並びます。値の代わりに `null` を渡すとフォームを閉じます。許可はその 1 件のリクエストだけに適用されます。
+
+`setInstructions` には `contributes.instructions` が必要で、エージェントが読む内容に、1 つのフォルダー単位で、または `null` を渡してすべての場所に追加します。
 
 `emit` は `host.onServiceEvent` を通じて開いているフレームに届くので、パネルはポーリングをやめられます。再送はないため、あとから開いたフレームは最初に現在の状態を読み取ります。`readSettings` はインテグレーションの設定を `secret` フィールドも含めてサービスに渡し、`needsConfiguration` は拡張機能のカードにメッセージを表示します。
 
