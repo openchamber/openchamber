@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { useChatTimelineScroll, type TimelineListHandle } from './useChatTimelineScroll';
 import { requestMessageFocus, releaseMessageFocusOutside } from '@/lib/router/messageFocus';
-import { dispatchPageWaiting } from '@/components/chat/lib/scroll/timelineScrollIntent';
+import { dispatchPageWaiting, dispatchTabStep } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import { isWaitingPageRevealPending, releaseWaitingPageRevealOutside, revealWaitingPage } from '@/sync/request-reveal';
 import { useUIStore } from '@/stores/useUIStore';
 import { KeepAlive } from '@/components/ui/KeepAlive';
@@ -17,6 +17,7 @@ let scroll: ReturnType<typeof useChatTimelineScroll>;
 let frames: Map<number, FrameRequestCallback>;
 let subscribers: Set<() => void>;
 let writes: number;
+let listOffsets: number[];
 let loads: number;
 let missing: number;
 let checkLinkedMessage: (() => Promise<'exists' | 'missing'>) | undefined;
@@ -46,7 +47,7 @@ function Harness() {
                     return () => { subscribers.delete(notify); };
                 },
             }),
-            scrollToEnd: () => { writes += 1; }, scrollToOffset: () => {}, scrollToIndex: () => {},
+            scrollToEnd: () => { writes += 1; }, scrollToOffset: ({ offset }) => { listOffsets.push(offset); }, scrollToIndex: () => {},
         };
         registerList(list);
         return () => registerList(null);
@@ -65,7 +66,7 @@ const frame = async () => {
 
 beforeEach(() => {
     dom = new Window({ url: 'https://app.test' });
-    frames = new Map(); subscribers = new Set(); writes = 0; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000; working = true;
+    frames = new Map(); subscribers = new Set(); writes = 0; listOffsets = []; loads = 0; missing = 0; checkLinkedMessage = undefined; contentLength = 2000; working = true;
     let nextFrame = 0;
     const request = (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; };
     const cancel = (id: number) => { frames.delete(id); };
@@ -336,6 +337,63 @@ test('leaves a reader who scrolled up away from a page waiting for an answer', a
     act(() => dispatchPageWaiting(block));
     await frame();
     expect(targets).toEqual([]);
+});
+
+describe('Next on a waiting form\'s Tabs', () => {
+    // The reader sits at the end, the bottom of a 700 px tab in a 500 px viewport.
+    const atEndOfTallTab = async () => {
+        await render('visible'); await frame();
+        node.scrollTop = 1500;
+        return waitingPage(1100);
+    };
+
+    test('brings the start of the next tab into view from the end of a tab taller than the screen', async () => {
+        const { block, targets } = await atEndOfTallTab();
+        act(() => dispatchTabStep(block));
+        await frame();
+        expect(targets).toEqual([1088]);
+        expect(listOffsets).toEqual([1500]);
+    });
+
+    test('moves a reader who scrolled up, or who turned auto-follow off', async () => {
+        useUIStore.getState().setStreamingAutoFollowEnabled(false);
+        try {
+            const { block, targets } = await atEndOfTallTab();
+            act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+            act(() => dispatchTabStep(block));
+            await frame();
+            expect(targets).toEqual([1088]);
+        } finally {
+            useUIStore.getState().setStreamingAutoFollowEnabled(true);
+        }
+    });
+
+    test('aims again as the list grows, until the reader scrolls', async () => {
+        const { block, targets } = await atEndOfTallTab();
+        act(() => dispatchTabStep(block));
+        await frame();
+        node.scrollTop = 1400;
+        act(() => scroll.onTimelineDataChange());
+        await frame();
+        expect(targets).toEqual([1088, 1088]);
+        act(() => { node.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 })); });
+        act(() => scroll.onTimelineDataChange());
+        await frame();
+        expect(targets.length).toBe(2);
+    });
+
+    test('a height report from the page keeps the aim on the tab', async () => {
+        const { block, targets } = await atEndOfTallTab();
+        act(() => dispatchPageWaiting(block));
+        await frame();
+        const tabs = document.createElement('div');
+        block.append(tabs);
+        Object.defineProperty(tabs, 'getBoundingClientRect', { value: () => ({ top: 1250 - node.scrollTop, bottom: 1800 - node.scrollTop }) });
+        act(() => dispatchTabStep(tabs));
+        act(() => dispatchPageWaiting(block));
+        await frame();
+        expect(targets.at(-1)).toBe(1238);
+    });
 });
 
 // The list reports a new total before it moves the viewport for rows above
