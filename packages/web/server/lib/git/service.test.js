@@ -2390,6 +2390,56 @@ describe('createWorktree', () => {
     }
   });
 
+  it('stops a setup command that never exits, and what it started, for a removal that cancels setup', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    const dataHome = createTempDir();
+    const heartbeat = path.join(dataHome, 'heartbeat');
+    process.env.XDG_DATA_HOME = dataHome;
+
+    try {
+      const repo = createTempDir();
+      runGit(repo, ['init', '-b', 'main']);
+      runGit(repo, ['config', 'user.email', 'test@example.com']);
+      runGit(repo, ['config', 'user.name', 'Test User']);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+      runGit(repo, ['add', 'README.md']);
+      runGit(repo, ['commit', '-m', 'Initial commit']);
+
+      const created = await createWorktree(repo, {
+        mode: 'new',
+        branchName: 'feature/endless-setup',
+        worktreeName: 'endless-setup',
+        returnAfterDirectoryCreated: true,
+        // The loop is a child of the shell, and writes into the checkout too.
+        startCommand: `bash -c 'while true; do echo beat >> "${heartbeat}"; echo beat > left-behind.txt; sleep 0.02; done' & wait`,
+      }, {
+        bootstrapStore: { write: vi.fn(async (_directory, state) => state), read: vi.fn(async () => null), remove: vi.fn(async () => true) },
+        hydrateCheckout: async () => ({ status: 'not-needed', submodules: [], lfs: [] }),
+      });
+
+      await expect.poll(() => fs.existsSync(heartbeat), { timeout: 5_000 }).toBe(true);
+
+      await removeWorktree(repo, { directory: created.path, deleteLocalBranch: true, cancelSetup: true }, {
+        bootstrapStore: { write: vi.fn(async (_directory, state) => state), read: vi.fn(async () => null), remove: vi.fn(async () => true) },
+      });
+
+      expect(fs.existsSync(created.path)).toBe(false);
+      expect(String(runGit(repo, ['branch', '--list', 'feature/endless-setup'])).trim()).toBe('');
+      const beats = fs.readFileSync(heartbeat, 'utf8');
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(fs.readFileSync(heartbeat, 'utf8')).toBe(beats);
+      expect(fs.existsSync(created.path)).toBe(false);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  });
+
   it('recovers from an unchanged stale index lock while populating a worktree', async () => {
     if (!canRunGit()) return;
 

@@ -19,13 +19,17 @@ import { OpenChamberControlError, asControlError } from '../openchamber-control/
  * wrote. A failure anywhere removes the worktree again and puts the carried
  * changes back where they were; when even that fails the stash is left in
  * place and the error names it, so nothing is lost.
+ *
+ * Setup commands that outlast their deadline stop the move before anything is
+ * stashed: one of them could overwrite a carried file after the stash, the only
+ * other copy, is gone. The worktree stays and the session stays where it was.
  */
 
 /**
  * @param {object} dependencies
  * @param {(directory: string, input: object, options: object) => Promise<{ name: string, branch: string, path: string }>} dependencies.createWorktree
  * @param {(directory: string, input: object, options: object) => Promise<unknown>} dependencies.removeWorktree
- * @param {(directory: string) => Promise<void>} dependencies.waitForWorktreeReady
+ * @param {(directory: string) => Promise<{ setupStillRunning: boolean }>} dependencies.waitForWorktreeReady
  * @param {(input: { sourceDirectory: string, worktreeRoot: string }) => Promise<{ directory: string, fallback: string | null }>} dependencies.resolveStartDirectory
  *   Where the session starts inside the new worktree: the project's OpenCode folder, else the root.
  * @param {(input: { directory: string, parentDirectory: string, parentRemoteName: string }) => Promise<unknown>} dependencies.hydrateCheckout
@@ -38,6 +42,8 @@ import { OpenChamberControlError, asControlError } from '../openchamber-control/
  * @param {(directory: string, options: { remote: 'local' }) => Promise<{ all: string[], defaultBranches: Record<string, string> }>} dependencies.getBranches
  * @param {(directory: string) => Promise<{ root: string }>} dependencies.resolvePrimaryWorktreeRoot
  * @param {(sessionId: string, directory: string) => Promise<void>} dependencies.moveSession
+ * @param {(sourceDirectory: string) => Promise<{ startCommand: string, untrustedSkipped: string[] }>} [dependencies.resolveWorktreeSetup]
+ *   The project's setup commands for the new worktree (`../projects/worktree-setup.js`); none without it.
  * @param {(message: string, error: unknown) => void} [dependencies.warn]
  */
 export const createSessionWorktreeMover = (dependencies) => {
@@ -56,6 +62,7 @@ export const createSessionWorktreeMover = (dependencies) => {
     getBranches,
     resolvePrimaryWorktreeRoot,
     moveSession,
+    resolveWorktreeSetup = async () => ({ startCommand: '', untrustedSkipped: [] }),
     warn = (message, error) => console.warn(message, error instanceof Error ? error.message : String(error)),
   } = dependencies;
 
@@ -130,6 +137,7 @@ export const createSessionWorktreeMover = (dependencies) => {
   const removeCreatedWorktree = (root, worktree, deleteLocalBranch) => removeWorktree(root, {
     directory: worktree.path,
     deleteLocalBranch,
+    cancelSetup: true,
   }, { bootstrapStore }).catch((error) => {
     warn(`Failed to remove worktree ${worktree.path} after a failed session move:`, error);
   });
@@ -179,6 +187,9 @@ export const createSessionWorktreeMover = (dependencies) => {
       worktreeInput = { mode: 'new', name, startRef };
       if (branchName) worktreeInput.branchName = branchName;
     }
+    // The setup runs inside the bootstrap, so the session moves into a worktree it already prepared.
+    const setup = await resolveWorktreeSetup(source);
+    if (setup.startCommand) worktreeInput.startCommand = setup.startCommand;
 
     let worktree;
     try {
@@ -192,13 +203,18 @@ export const createSessionWorktreeMover = (dependencies) => {
 
     let stash = null;
     let start = { directory: worktree.path, fallback: null };
+    let setupStillRunning = false;
     try {
-      await waitForWorktreeReady(worktree.path);
-      start = await resolveStartDirectory({ sourceDirectory: source, worktreeRoot: worktree.path });
-      if (paths.length > 0) stash = await carryChanges({ source, destination: worktree.path, sessionId, name, paths });
-      await moveSession(sessionId, start.directory);
+      ({ setupStillRunning } = await waitForWorktreeReady(worktree.path));
+      if (!setupStillRunning) {
+        start = await resolveStartDirectory({ sourceDirectory: source, worktreeRoot: worktree.path });
+        if (paths.length > 0) stash = await carryChanges({ source, destination: worktree.path, sessionId, name, paths });
+        await moveSession(sessionId, start.directory);
+      }
     } catch (error) {
-      await removeCreatedWorktree(root, worktree, ownsBranch);
+      // The removal first stops the setup commands and waits for the bootstrap,
+      // so the changes' way back does not depend on it.
+      const removal = removeCreatedWorktree(root, worktree, ownsBranch);
       const failure = asControlError(error, 'Failed to move the session into the worktree');
       const pending = stash ?? failure.stash ?? null;
       if (pending) {
@@ -211,7 +227,16 @@ export const createSessionWorktreeMover = (dependencies) => {
           );
         }
       }
+      await removal;
       throw failure;
+    }
+
+    if (setupStillRunning) {
+      throw new OpenChamberControlError(
+        `The project's setup commands are still running in ${worktree.path}, so session ${sessionId} stayed in ${source} and no files were carried`,
+        503,
+        { partial: true, partialAction: 'worktree-setup-running', directory: worktree.path },
+      );
     }
 
     if (stash) {
@@ -230,6 +255,7 @@ export const createSessionWorktreeMover = (dependencies) => {
       carried: paths,
     };
     if (start.fallback) result.startDirectoryFallback = start.fallback;
+    if (setup.untrustedSkipped.length > 0) result.untrustedSetupCommandsSkipped = setup.untrustedSkipped;
     return result;
   };
 

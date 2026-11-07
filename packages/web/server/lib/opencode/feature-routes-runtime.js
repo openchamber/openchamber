@@ -202,9 +202,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
    * the New worktree dialog makes: the server reads the change request with
    * the project's own account and creates the worktree through the Git
    * routes' contributor pipeline. `name` and `branchName` default to the
-   * change request's head branch.
+   * change request's head branch. `startCommand` holds the project's setup
+   * commands, as the dialog sends them; a contributor fork's worktree
+   * records them without running them (`../git/DOCUMENTATION.md`).
    */
-  const createChangeRequestWorktree = async ({ directory, number, name, branchName }) => {
+  const createChangeRequestWorktree = async ({ directory, number, name, branchName, startCommand }) => {
     if (!(gitWorktreeCreation?.createWorktree instanceof Function)
       || !(walkthroughBindingService?.resolveChangeRequestWorktreeSource instanceof Function)) {
       throw Object.assign(new Error('Worktrees from pull requests are unavailable'), {
@@ -213,12 +215,14 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     }
     const { headBranch, sourceRequest } = await walkthroughBindingService.resolveChangeRequestWorktreeSource({ directory, number });
     const branch = branchName || headBranch;
-    return gitWorktreeCreation.createWorktree(directory, {
+    const input = {
       mode: 'existing',
       branchName: branch,
       worktreeName: name || branch,
       changeRequestSource: sourceRequest,
-    });
+    };
+    if (startCommand) input.startCommand = startCommand;
+    return gitWorktreeCreation.createWorktree(directory, input);
   };
 
   const registerRoutes = async (app, routeDependencies) => {
