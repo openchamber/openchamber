@@ -4,8 +4,10 @@ import {
   applyGlobalBlockingRequestEvents,
   applyWaitingPageEvent,
   resetGlobalBlockingRequests,
+  markPagesSettled,
   readHostBlockingRequestsSnapshot,
   settledPageKeys,
+  useSettledPagesStore,
   useGlobalBlockingRequestsStore,
   type BlockingFormRequest,
   type BlockingPermissionRequest,
@@ -140,5 +142,30 @@ describe('global blocking requests index', () => {
     expect(bySession().get('s2')?.permissions.map((p) => p.id)).toEqual(['p2']);
     await readHostBlockingRequestsSnapshot(hostSnapshot({}), () => '/other');
     expect(bySession().has('s2')).toBe(true);
+  });
+});
+
+describe('settled pages', () => {
+  test('remembers a page the server stopped waiting for, and keeps what it already knew', () => {
+    markPagesSettled(['s1:call_1']);
+    markPagesSettled(['s2:call_2']);
+
+    expect([...useSettledPagesStore.getState().keys].sort()).toEqual(['s1:call_1', 's2:call_2']);
+  });
+
+  test('an empty settle list leaves the store untouched', () => {
+    markPagesSettled(['s1:call_1']);
+    const before = useSettledPagesStore.getState();
+
+    markPagesSettled([]);
+
+    expect(useSettledPagesStore.getState()).toBe(before);
+  });
+
+  test('a reset forgets every settled page', () => {
+    markPagesSettled(['s1:call_1']);
+    resetGlobalBlockingRequests();
+
+    expect(useSettledPagesStore.getState().keys.size).toBe(0);
   });
 });
