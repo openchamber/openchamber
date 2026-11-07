@@ -113,8 +113,9 @@ interface SettingsViewProps {
   isWindowed?: boolean;
   /** Restrict top-level settings navigation to a specific product surface. */
   visiblePageSlugs?: SettingsPageSlug[];
-  /** Lets a native shell hand its hardware back button to the mobile stages:
-      the handler steps one level up and reports whether it consumed the press. */
+  /** Lets the mobile shell hand its back button to the mobile stages: the
+      handler steps one level up and reports whether it consumed the press. The
+      shell then owns Back, so the stages write no history of their own. */
   registerBackHandler?: (handler: (() => boolean) | null) => void;
   initialMobileStage?: MobileStage;
 }
@@ -208,11 +209,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const [, refreshNewSettings] = React.useReducer((revision: number) => revision + 1, 0);
   const [mobileStage, setMobileStage] = React.useState<MobileStage>(initialMobileStage);
-  // Seed with the mount-time slug when opening at the nav stage: the slug
-  // persists across opens, and the deep-link auto-jump below must react only
-  // to slug CHANGES after mount — not re-enter the previously visited page
-  // every time settings reopen.
-  const autoNavSlugRef = React.useRef<string | null>(initialMobileStage === 'nav' ? settingsSlug : null);
+  // Seed with the mount-time slug: the slug persists across opens, and the
+  // deep-link auto-jump below must react only to slug CHANGES after mount, not
+  // re-enter the previously visited page when settings reopen or when back
+  // reaches the nav stage from a page settings opened on.
+  const autoNavSlugRef = React.useRef<string>(settingsSlug);
 
   // No starter page on desktop: 'home' (fresh state) resolves to General.
   // settingsPage persists in the UI store, so subsequent opens restore the
@@ -758,7 +759,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     : t('settings.view.actions.closeSettings');
 
   const pushMobileSplitDetailHistory = React.useCallback((slug: SettingsPageSlug) => {
-    if (runtimeCtx.isVSCode) {
+    if (runtimeCtx.isVSCode || registerBackHandler) {
       return;
     }
 
@@ -775,7 +776,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       '',
       window.location.href,
     );
-  }, [runtimeCtx.isVSCode]);
+  }, [registerBackHandler, runtimeCtx.isVSCode]);
 
   const handleMobilePageSidebarItemSelect = React.useCallback(() => {
     shouldFocusMobilePageContentRef.current = true;
@@ -832,7 +833,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [handleBack, isMobile, mobileStage, registerBackHandler]);
 
   React.useEffect(() => {
-    if (!isMobile || runtimeCtx.isVSCode) {
+    if (!isMobile || runtimeCtx.isVSCode || registerBackHandler) {
       return;
     }
 
@@ -854,7 +855,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [isMobile, runtimeCtx.isVSCode, settingsSlug]);
+  }, [isMobile, registerBackHandler, runtimeCtx.isVSCode, settingsSlug]);
 
   const renderSettingsNav = () => {
     const hasSearchQuery = settingsSearchQuery.trim().length > 0;
