@@ -65,11 +65,11 @@
                     # A tag can carry stale hashes: OpenCode's bot refreshes
                     # nix/hashes.json on dev after the release, and v2.2.5 and
                     # v2.2.6 both changed dependencies after the last refresh.
-                    # Keyed by tag, so a bump falls back to upstream's. A system
-                    # missing here also falls back to upstream's.
+                    # Keyed by tag, so a bump falls back to upstream's.
                     hash =
                       {
                         "v2.2.6" = {
+                          "x86_64-linux" = "sha256-s8XswivimwgzG0wMleHee5zliDKd+UC84eAvBvzr6cI=";
                           "aarch64-linux" = "sha256-5NbIY40rdIfcXcGIiVkx5km31Mj0zodCuZfEjaiCIyw=";
                           "aarch64-darwin" = "sha256-KKBjcy7DhWMxNR+hGWkpp90D60YIFCfjRFQuiPYymAY=";
                         };
