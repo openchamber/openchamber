@@ -241,6 +241,7 @@ const serverSessionResponseSchema = z.object({
     session: serverSessionSchema,
 });
 
+const serverEnqueueResponseSchema = serverSessionResponseSchema.extend({ itemId: z.string() });
 const serverTakeResponseSchema = serverSessionResponseSchema.extend({ item: serverItemSchema });
 const serverTakeAllResponseSchema = serverSessionResponseSchema.extend({ items: z.array(serverItemSchema) });
 
@@ -535,6 +536,11 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
             (set, get) => {
                 let hydration: { runtimeKey: string; promise: Promise<void> } | null = null;
                 let resyncRequested = false;
+                // The server names a queued message only once it has stored it. Until then
+                // the row carries the id made up here, so taking, removing or reordering
+                // that row waits for the server's answer and uses the server's id.
+                const pendingServerIds = new Map<string, Promise<string | null>>();
+                const toServerItemId = async (messageId: string) => (await pendingServerIds.get(messageId)) ?? messageId;
                 const applyServerSession = (session: ServerQueueSession, revision: number, expectedRuntimeKey: string, owner = '') => {
                     if (expectedRuntimeKey !== getRuntimeKey()) return;
                     if (queueOwnerOf(session.directory) !== owner) return;
@@ -676,10 +682,12 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         const historyIdentity = createInputHistoryIdentity(target.runtimeKey, target.directory, target.sessionId);
                         const historySubmission = createInputHistorySubmission(message.content, message.attachments ?? []);
                         try {
-                            const result = await requestJson(serverSessionResponseSchema, `${sessionPath(target.sessionId)}/items`, toOwner(target, jsonInit('POST', {
+                            const request = requestJson(serverEnqueueResponseSchema, `${sessionPath(target.sessionId)}/items`, toOwner(target, jsonInit('POST', {
                                 directory: target.directory,
                                 item: toServerItemInput(message, message.sendConfig),
                             })));
+                            pendingServerIds.set(id, request.then((result) => result.itemId, () => null));
+                            const result = await request;
                             // The optimistic entry is replaced by the server's copy of the queue.
                             set((state) => removeMessageLocally(state, key, id));
                             applyServerSession(result.session, result.revision, target.runtimeKey, queueOwnerOf(target.directory));
@@ -689,15 +697,29 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         } catch (error) {
                             set((state) => removeMessageLocally(state, key, id));
                             throw error;
+                        } finally {
+                            pendingServerIds.delete(id);
                         }
                     },
 
                     removeFromQueue: (target, messageId) => {
                         const key = getMessageQueueKey(target);
                         set((state) => removeMessageLocally(state, key, messageId));
-                        if (isServerOwnedMessageQueue()) {
-                            void serverMutation(target, `${sessionPath(target.sessionId)}/items/${encodeURIComponent(messageId)}`, jsonInit('DELETE'));
+                        if (!isServerOwnedMessageQueue()) return;
+                        const removeOnServer = (itemId: string) => {
+                            void serverMutation(target, `${sessionPath(target.sessionId)}/items/${encodeURIComponent(itemId)}`, jsonInit('DELETE'));
+                        };
+                        const pending = pendingServerIds.get(messageId);
+                        if (!pending) {
+                            removeOnServer(messageId);
+                            return;
                         }
+                        void pending.then((itemId) => {
+                            if (itemId === null) return;
+                            // The server's answer has just put the message back under its own id.
+                            set((state) => removeMessageLocally(state, key, itemId));
+                            removeOnServer(itemId);
+                        });
                     },
 
                     reorderQueue: (target, fromId, toId) => {
@@ -720,8 +742,9 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             },
                         }));
                         if (isServerOwnedMessageQueue()) {
-                            const itemIds = newQueue.map((message) => message.id);
-                            void serverMutation(target, `${sessionPath(target.sessionId)}/order`, jsonInit('PUT', { itemIds }));
+                            void Promise.all(newQueue.map((message) => toServerItemId(message.id))).then((itemIds) => (
+                                serverMutation(target, `${sessionPath(target.sessionId)}/order`, jsonInit('PUT', { itemIds }))
+                            ));
                         }
                     },
 
@@ -736,9 +759,10 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             try {
                                 const owner = queueOwnerOf(target.directory);
                                 if (messageId) {
+                                    const itemId = await toServerItemId(messageId);
                                     const result = await requestJson(
                                         serverTakeResponseSchema,
-                                        `${sessionPath(target.sessionId)}/items/${encodeURIComponent(messageId)}/take`,
+                                        `${sessionPath(target.sessionId)}/items/${encodeURIComponent(itemId)}/take`,
                                         toOwner(target, jsonInit('POST')),
                                     );
                                     applyServerSession(result.session, result.revision, target.runtimeKey, owner);

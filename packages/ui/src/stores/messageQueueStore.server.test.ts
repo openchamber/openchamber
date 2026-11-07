@@ -40,6 +40,7 @@ type ServerReply = {
   revision: number
   session?: ServerSession
   sessions?: ServerSession[]
+  itemId?: string
   item?: ServerItem
   items?: ServerItem[]
 }
@@ -282,7 +283,7 @@ describe("server-owned message queue", () => {
   })
 
   test("addToQueue shows the message at once and settles on the server's copy", async () => {
-    respond = () => json({ revision: 5, session: session([serverItem("srv-1", "hi @reviewer", { agentMention: "reviewer" })]) })
+    respond = () => json({ revision: 5, session: session([serverItem("srv-1", "hi @reviewer", { agentMention: "reviewer" })]), itemId: "srv-1" })
     const pending = useMessageQueueStore.getState().addToQueue(target, {
       content: "hi @reviewer",
       text: "hi",
@@ -315,7 +316,7 @@ describe("server-owned message queue", () => {
   test("accepted queue history survives automatic delivery and manual take without recapture", async () => {
     const historyTarget = { runtimeKey: 'runtime-a', directory: '/repo', sessionId: 'history-accepted' };
     const item = serverItem('history-item', 'original prompt');
-    respond = () => json({ revision: 100, session: { ...session([item]), sessionId: historyTarget.sessionId } });
+    respond = () => json({ revision: 100, session: { ...session([item]), sessionId: historyTarget.sessionId }, itemId: item.id });
     const pending = useMessageQueueStore.getState().addToQueue(historyTarget, {
       content: item.content,
       attachments: [{ ...attachment, dataUrl: 'file:///repo/note.txt' }],
@@ -338,7 +339,7 @@ describe("server-owned message queue", () => {
     const historyTarget = { runtimeKey: 'runtime-a', directory: '/original', sessionId: 'history-runtime-switch' };
     respond = () => {
       activeRuntimeKey = 'runtime-b';
-      return json({ revision: 110, session: { ...session([]), sessionId: historyTarget.sessionId, directory: historyTarget.directory } });
+      return json({ revision: 110, session: { ...session([]), sessionId: historyTarget.sessionId, directory: historyTarget.directory }, itemId: 'srv-1' });
     };
     await useMessageQueueStore.getState().addToQueue(historyTarget, {
       content: 'for original runtime', sendConfig: { providerID: 'p', modelID: 'm' },
@@ -361,7 +362,7 @@ describe("server-owned message queue", () => {
       { kind: "context" as const, text: "issue body", metadata: issueMetadata },
       { kind: "synthetic" as const, text: "conflict payload" },
     ]
-    respond = () => json({ revision: 6, session: session([serverItem("srv-1", "with context")]) })
+    respond = () => json({ revision: 6, session: session([serverItem("srv-1", "with context")]), itemId: "srv-1" })
     await useMessageQueueStore.getState().addToQueue(target, {
       content: "with context",
       context,
@@ -380,7 +381,7 @@ describe("server-owned message queue", () => {
 
   test("a message queued as a goal keeps its goal on the server, in the projection, and on take", async () => {
     const goal = { objective: "the whole plan", tokenBudget: 5000 }
-    respond = () => json({ revision: 9, session: session([serverItem("srv-1", "Implement this plan", { goal })]) })
+    respond = () => json({ revision: 9, session: session([serverItem("srv-1", "Implement this plan", { goal })]), itemId: "srv-1" })
     await useMessageQueueStore.getState().addToQueue(target, {
       content: "Implement this plan",
       sendConfig: { providerID: "p", modelID: "m" },
@@ -516,8 +517,50 @@ describe("server-owned message queue", () => {
     useMessageQueueStore.setState({ queuedMessages: { [key]: [{ id: "q1", content: "a", text: "a", createdAt: 1 }, { id: "q2", content: "b", text: "b", createdAt: 2 }] } })
     respond = () => json({ revision: 12, session: session([serverItem("q2", "b"), serverItem("q1", "a")]) })
     useMessageQueueStore.getState().reorderQueue(target, "q2", "q1")
-    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(calls[0]).toEqual({ method: "PUT", path: "/api/message-queue/sessions/session-1/order", body: { itemIds: ["q2", "q1"] }, directory: "/repo" })
+  })
+
+  // The row is on screen before the server has stored the message and named it. On a slow
+  // connection the user can press its buttons in that window.
+  const queueWithSlowServer = () => {
+    const enqueue = deferredResponse()
+    respond = (call) => (call.method === "POST" && call.path.endsWith("/items") ? enqueue.promise : json({ revision: 1, session: session([]) }))
+    const queued = useMessageQueueStore.getState().addToQueue(target, { content: "just queued", sendConfig: { providerID: "p", modelID: "m" } })
+    const localId = useMessageQueueStore.getState().queuedMessages[key]?.[0]?.id ?? ""
+    const accept = async () => {
+      enqueue.resolve(json({ revision: 2, session: session([serverItem("srv-1", "just queued")]), itemId: "srv-1" }))
+      await queued
+    }
+    return { localId, accept }
+  }
+
+  test("taking a message the server has not named yet waits for the server's id", async () => {
+    const { localId, accept } = queueWithSlowServer()
+    const taking = useMessageQueueStore.getState().takeForSend(target, localId)
+    respond = () => json({ revision: 3, session: session([]), item: serverItem("srv-1", "just queued") })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(calls.map((call) => call.path)).toEqual(["/api/message-queue/sessions/session-1/items"])
+
+    await accept()
+    const [taken] = await taking
+    expect(calls[1]?.path).toBe("/api/message-queue/sessions/session-1/items/srv-1/take")
+    expect(taken?.content).toBe("just queued")
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
+  })
+
+  test("removing a message the server has not named yet removes it on the server too", async () => {
+    const { localId, accept } = queueWithSlowServer()
+    useMessageQueueStore.getState().removeFromQueue(target, localId)
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
+    respond = () => json({ revision: 3, session: session([]) })
+
+    await accept()
+    // The server's copy of the queue, still listing the message, does not bring the row back.
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(calls[1]).toEqual({ method: "DELETE", path: "/api/message-queue/sessions/session-1/items/srv-1", body: undefined, directory: "/repo" })
+    expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
   })
 })
 
@@ -536,7 +579,7 @@ describe("a session in an isolated space", () => {
   })
 
   test("its queue requests go to the space, and the space's answer settles the projection", async () => {
-    respond = () => json({ revision: 1, session: spaceSession([serverItem("s1", "later")]) })
+    respond = () => json({ revision: 1, session: spaceSession([serverItem("s1", "later")]), itemId: "s1" })
     await useMessageQueueStore.getState().addToQueue(spaceTarget, { content: "later", sendConfig: { providerID: "p", modelID: "m" } })
     useMessageQueueStore.getState().removeFromQueue(spaceTarget, "s1")
     await Promise.resolve()
