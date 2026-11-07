@@ -76,7 +76,8 @@ afterEach(() => {
  * `content[]`, `model`, `finish`, `tokens`), `{ location, data }` envelopes,
  * `/api/session/active` for busy state, and the three continuation calls.
  */
-const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, sessionRead = async () => {} }) => {
+// Without `jobs` it is an OpenCode before 2.2.6, which has no job list.
+const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus = 200, shells = [], shellStatus = 200, jobs, sessionRead = async () => {} }) => {
   const calls = [];
   const json = (data, status = 200) => new Response(JSON.stringify({ location: { directory: '/repo' }, data }), {
     status,
@@ -97,6 +98,10 @@ const v2OpenCode = ({ messages, active = {}, childPages = [[]], childrenStatus =
       return json({ data, cursor: next }, childrenStatus);
     }
     if (url.pathname === '/api/shell') return json(shells, shellStatus);
+    if (url.pathname === '/api/experimental/job') {
+      if (jobs === undefined) return new Response(null, { status: 404 });
+      return Response.json({ data: typeof jobs === 'function' ? jobs() : jobs });
+    }
     if (url.pathname.endsWith('/message')) return json({ data: [...messages].reverse(), cursor: null });
     if (url.pathname === `/api/session/${SESSION_ID}`) {
       await sessionRead();
@@ -719,6 +724,87 @@ describe('session goal and background commands', () => {
     await runTick(runtime);
     expect(generate).not.toHaveBeenCalled();
     expect(seam.persistSessionGoal).not.toHaveBeenCalled();
+  });
+});
+
+describe('session goal and the job list of OpenCode 2.2.6+', () => {
+  const userRecord = { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Run the tests', time: { created: 5 } };
+  const job = (kind, startedAt, sessionID = SESSION_ID) => ({
+    id: `job_${kind}_${startedAt}`, kind, sessionID, status: 'running', time: { started: startedAt }, command: 'bun test',
+  });
+
+  it('waits for a command a subagent started this round, which the folder list missed', async () => {
+    quiet();
+    let jobs = [job('shell', 7, 'ses_child')];
+    const server = v2OpenCode({ messages: [userRecord, assistantRecord()], jobs: () => jobs });
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 5 });
+
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+    await vi.waitFor(() => expect(server.calls.filter((call) => call.path === '/api/experimental/job').length).toBeGreaterThan(1));
+    expect(generate).not.toHaveBeenCalled();
+    expect(server.calls.find((call) => call.path === '/api/experimental/job')?.query).toEqual({
+      sessionID: SESSION_ID, descendants: 'true', status: 'running',
+    });
+
+    jobs = [];
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    expect(server.calls.some((call) => call.path === '/api/shell')).toBe(false);
+  });
+
+  it.each(['shell', 'subagent', 'image'])('reads the jobs again after the messages, so a %s of the turn just read is covered', async (kind) => {
+    quiet();
+    let reads = 0;
+    // Empty when the tick starts; the job shows up by the time the reply is read.
+    const jobs = () => (reads++ === 0 ? [] : [job(kind, 7)]);
+    v2OpenCode({ messages: [userRecord, assistantRecord()], jobs });
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn();
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 1_000 });
+
+    await runTick(runtime);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('still waits for a running child session that is no OpenCode job, such as a workflow agent', async () => {
+    quiet();
+    v2OpenCode({
+      messages: [userRecord, assistantRecord()],
+      jobs: [],
+      active: { ses_workflow: { type: 'running' } },
+      childPages: [[{ id: 'ses_workflow', parentID: SESSION_ID }]],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn();
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 1_000 });
+
+    await runTick(runtime);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it.each(['subagent', 'image'])('waits while a background %s runs', async (kind) => {
+    quiet();
+    v2OpenCode({ messages: [userRecord, assistantRecord()], jobs: [job(kind, Date.now())] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn();
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }), recheckMs: 1_000 });
+
+    await runTick(runtime);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('does not wait for a command from an earlier round', async () => {
+    quiet();
+    v2OpenCode({ messages: [userRecord, assistantRecord()], jobs: [job('shell', 2)] });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
+    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+
+    await runTick(runtime);
+    expect(generate).toHaveBeenCalledTimes(1);
   });
 });
 

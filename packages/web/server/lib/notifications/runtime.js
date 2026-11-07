@@ -61,10 +61,17 @@ export const createNotificationTriggerRuntime = (deps) => {
 
   // A parent goes idle while a background subagent still works; OpenCode then
   // hands the result back and the parent runs again. That first idle is a
-  // pause, so it announces nothing. When the check cannot be made, the idle is
-  // announced as before: a missed "ready" is worse than an early one.
+  // pause, so it announces nothing. OpenCode 2.2.6+ also lists background
+  // subagents deeper in the tree and background images; shell commands do not
+  // hold the announcement, since a dev server never ends. Running direct
+  // children are asked for in any case: OpenChamber's own child sessions
+  // (workflow agents) are no OpenCode jobs, and a space reaches only session
+  // routes. When the check cannot be made, the idle is announced as before: a
+  // missed "ready" is worse than an early one.
   const isPausedForSubagents = async (sessionId, spaceId) => {
     const activityProbe = spaceId ? createSessionActivityProbe({ ...sourceFor(spaceId), timeoutMs: 2000 }) : hostActivityProbe;
+    const backgroundJobs = await activityProbe.fetchRunningBackgroundJobs(sessionId);
+    if (backgroundJobs?.some((job) => job.kind !== 'shell')) return true;
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return false;
     return (await activityProbe.hasWorkingChildren(sessionId, statuses)) === true;

@@ -106,9 +106,13 @@ before touching the filesystem). Rationale: metadata rides every
      goal's only pending work; an abort during an in-flight read lets the tick
      reach its own abort check and pause the goal;
    - authoritative live-activity check after the quiet window: re-read
-     `/api/session/active`, bail if the parent resumed; then list the
-      parent's subagent sessions through `GET /api/session?parentID=` (cursor
-      paged) and bail while any of them is active. The loop rechecks after
+     `/api/session/active`, bail if the parent resumed; then read OpenCode's
+      job list (2.2.6+) for the whole subagent tree and bail while a
+      background subagent or image runs; then list the parent's child
+      sessions through `GET /api/session?parentID=` (cursor paged) and bail
+      while any of them is active, since child sessions OpenChamber starts
+      itself (workflow agents) are no OpenCode jobs and an older OpenCode has
+      no job list. The loop rechecks after
       another quiet window so a missed parent idle event cannot strand the
       goal when the child finishes. A status or children fetch failure is
       unknown, not empty, so it skips the audit and retries after another quiet
@@ -125,9 +129,13 @@ before touching the filesystem). Rationale: metadata rides every
      plumbing roles are dropped from the view;
    - quiescence check via the message tail (trailing user message or
      unfinished assistant reply → bail; the next idle transition re-arms);
-   - background commands: `shell.list` for the session's directory (the
-     header-scoped read in `../opencode/session-activity.js`; that location is
-     already running). A command the session started in this round, at or
+   - background commands: the shells in the job list, read again after the
+     messages so a command of the turn just read is listed; it includes the
+     commands the session's subagents started. An OpenCode without the job
+     list is asked `shell.list` for the session's directory (the header-scoped
+     read in `../opencode/session-activity.js`; that location is already
+     running), which sees only the session's own commands. A command started
+     in this round, at or
      after its newest non-synthetic user message (the goal's start when none
      is in the window), holds the audit: OpenCode wakes the session with the
      result, and auditing earlier reads "waiting for the tests" as unfinished
