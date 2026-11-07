@@ -8,7 +8,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 /**
  * Where a surface outside the chat column files what it hands the composer: a
  * comment (inline draft) or an image (attachment). The composer publishes its
- * own address, so a `/btw` fork takes them along with the input it owns.
+ * own address.
  * `directory` is the caller's own notion of the project, used only while no
  * composer is mounted to publish one.
  */

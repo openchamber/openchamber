@@ -149,6 +149,7 @@ const LOCAL_ACTION_COMMANDS = new Set([
     'handoff-review',
     'compact',
     'fork',
+    'btw',
 ]);
 
 /**
@@ -194,7 +195,7 @@ export function planLocalSlashCommand(
         };
     }
 
-    if (command.name === 'btw' || findMagicPromptCommand(command.name)) {
+    if (findMagicPromptCommand(command.name)) {
         return {
             command,
             kind: 'prompt',

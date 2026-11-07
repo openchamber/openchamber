@@ -74,7 +74,7 @@ const execute = (intent: NavigationIntent): boolean => {
       return true;
 
     case 'session':
-      // The opener resolves a directory the link omits and opens a `/btw` fork
+      // The opener resolves a directory the link omits and opens a legacy `/btw` fork
       // as the parent session that holds its panel.
       void openSession(intent.sessionId, { directory: intent.directory ?? null, messageId: intent.messageId ?? null });
       return true;

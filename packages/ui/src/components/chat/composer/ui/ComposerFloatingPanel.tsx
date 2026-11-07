@@ -13,7 +13,7 @@ interface ComposerFloatingPanelProps {
     maxHeight?: number;
 }
 
-/** Shared dock for the mutually exclusive BTW, permission, and form panels. */
+/** Shared dock for the mutually exclusive permission and form panels. */
 /** Panels mounted per chat column, so the marker survives an overlap. */
 const mountedPanels = new WeakMap<HTMLElement, number>();
 

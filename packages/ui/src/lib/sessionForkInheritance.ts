@@ -10,16 +10,16 @@ import { getSessionGoal } from '@/lib/sessionGoalMetadata';
  * goal already arrives with it. Two things still need repair:
  *
  * - Links that belong to the source, not to its content: the source's active
- *   btw fork (`btwSessionID`), its review session (`reviewSessionID`), and a
- *   btw marker when the source itself is a btw side thread. A fork that kept
- *   them would open the source's btw panel, delete the source's btw fork with
- *   itself, or hide from the sidebar as a btw thread. A scheduled run's marker
+ *   legacy btw fork (`btwSessionID`), its review session (`reviewSessionID`), and a
+ *   btw marker when the source itself is a legacy btw side thread. A fork that
+ *   kept them would delete the source's old fork with itself, or hide from the
+ *   sidebar as a btw thread. A scheduled run's marker
  *   goes too: the fork is the user's own work and belongs in In work.
  * - A file-backed goal objective: the text lives in a server file keyed by the
  *   session id, so the fork has no file of its own until one is copied.
  *
- * `/btw` forks do not go through here: they replace the inherited namespace
- * with their own marker (see `withBtwSessionMarker`).
+ * Legacy `/btw` forks were replaced with their own marker when they were
+ * created; new side questions never create a session.
  */
 
 const MetadataRecordSchema = z.record(z.string(), z.json());

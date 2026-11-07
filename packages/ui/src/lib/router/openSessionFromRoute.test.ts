@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 
-import { useBtwStore } from '@/stores/useBtwStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getRememberedSessionDirectory, useSessionUIStore } from '@/sync/session-ui-store';
@@ -75,7 +74,6 @@ describe('openSessionFromRoute', () => {
       hasLoaded: true,
       status: 'ready',
     });
-    useBtwStore.setState({ byParent: {} });
   });
 
   test('selects the routed session once the global list knows its directory', async () => {
@@ -133,19 +131,17 @@ describe('openSessionFromRoute', () => {
 
   // A /btw fork is a side transcript inside its parent's panel: opening it by
   // id (a completion notification, a push, a toast) must land on the parent.
-  test('opens a /btw fork as its parent and expands the parent panel', async () => {
+  test('opens a legacy /btw fork as its parent', async () => {
     useSessions([
       buildSession(BTW_PARENT_ID, PROJECT_DIR),
       buildBtwFork(BTW_PARENT_ID, PROJECT_DIR),
     ]);
-    useBtwStore.getState().setPanelState(BTW_PARENT_ID, { collapsed: true });
     useSessionUIStore.getState().setCurrentSession(SESSION_ID, OTHER_DIR);
 
     await openSessionFromRoute(BTW_FORK_ID);
 
     expect(useSessionUIStore.getState().currentSessionId).toBe(BTW_PARENT_ID);
     expect(useSessionUIStore.getState().currentSessionDirectory).toBe(PROJECT_DIR);
-    expect(useBtwStore.getState().byParent[BTW_PARENT_ID]?.collapsed).toBe(false);
   });
 
   // A cold launch from a notification may not have the fork record yet: the
@@ -166,7 +162,6 @@ describe('openSessionFromRoute', () => {
 
     expect(useSessionUIStore.getState().currentSessionId).toBe(BTW_PARENT_ID);
     expect(useSessionUIStore.getState().currentSessionDirectory).toBe(PROJECT_DIR);
-    expect(useBtwStore.getState().byParent[BTW_PARENT_ID]?.collapsed).toBe(false);
   });
 
   test('opens a fork as itself when its parent is gone', async () => {
@@ -190,7 +185,6 @@ describe('openSessionFromRoute', () => {
     openSessionFromToast(BTW_FORK_ID, PROJECT_DIR);
 
     expect(useSessionUIStore.getState().currentSessionId).toBe(BTW_PARENT_ID);
-    expect(useBtwStore.getState().byParent[BTW_PARENT_ID]?.collapsed).toBe(false);
   });
 
   // A message link names one message inside the transcript that holds it. For
@@ -205,7 +199,6 @@ describe('openSessionFromRoute', () => {
 
     expect(useSessionUIStore.getState().currentSessionId).toBe(BTW_FORK_ID);
     expect(useSessionUIStore.getState().currentSessionDirectory).toBe(PROJECT_DIR);
-    expect(useBtwStore.getState().byParent[BTW_PARENT_ID]).toBeUndefined();
   });
 
   // A desktop notification carries the directory of the session it names, so

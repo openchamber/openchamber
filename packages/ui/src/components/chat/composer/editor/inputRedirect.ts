@@ -29,7 +29,7 @@ const INTERACTIVE_SELECTOR = [
 const FLOATING_LAYER_SELECTOR = [
     '[role="dialog"]', '[role="alertdialog"]', '[role="menu"]',
     '[data-slot="select-content"][data-open]', '[data-settings-view="true"]',
-    '[data-btw-composer="true"]',
+    '[data-btw-dialog="true"]',
 ].join(',');
 
 // Chromium fires the PRIMARY paste right after the button release, and the

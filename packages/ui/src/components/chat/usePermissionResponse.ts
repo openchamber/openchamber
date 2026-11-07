@@ -69,7 +69,7 @@ export const usePermissionResponse = (
       setHasResponded(true);
       onResponse?.(response);
     } catch (error) {
-      console.error('[PermissionCard] Failed to respond to permission:', error);
+      console.error('[PermissionResponse] Failed to respond to permission:', error);
     } finally {
       setIsResponding(false);
     }
@@ -83,6 +83,7 @@ export const usePermissionResponse = (
     const card = { id: permission.id, column };
     activePermissionCards.push(card);
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof Element && event.target.closest('[data-btw-dialog="true"]')) return;
       const target = columnOfEvent(event);
       let owner: typeof card | undefined;
       for (const entry of activePermissionCards) {

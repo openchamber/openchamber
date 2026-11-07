@@ -158,22 +158,3 @@ export const WebSearchConsentDock: React.FC<{ form: FormRequest; consent: WebSea
         </ComposerFloatingPanel>
     );
 };
-
-/** Inline variant for the BTW sheet, which renders forms as cards. */
-export const WebSearchConsentCard: React.FC<{ form: FormRequest; consent: WebSearchConsent }> = ({ form, consent }) => {
-    const { t } = useI18n();
-    const { pending, answer, dismiss } = useConsentReply(form, consent);
-    return (
-        <div className="group w-full pt-0 pb-2">
-            <div className="chat-column">
-                <div className="-mt-1 rounded-xl border border-edge-muted bg-muted/10">
-                    <div className="flex items-center gap-2 border-b border-edge-muted px-3 py-1.5">
-                        <Icon name="global" className="size-3.5 text-primary" />
-                        <span className="typography-meta font-medium text-foreground">{consentTitle(consent, t)}</span>
-                    </div>
-                    <ConsentBody consent={consent} pending={pending} onAnswer={(value) => void answer(value)} onDismiss={() => void dismiss()} />
-                </div>
-            </div>
-        </div>
-    );
-};

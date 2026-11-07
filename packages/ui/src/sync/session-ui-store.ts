@@ -392,7 +392,7 @@ type SendMessageOptions = {
   queuedGoal?: QueuedMessageGoal | null
   /**
    * A person sent this from a composer: after a successful prompt, remember
-   * the level it actually carried for that model. Background, BTW and queued
+   * the level it actually carried for that model. Background and queued
    * delivery leave this unset and never overwrite the remembered level.
    */
   recordEffort?: boolean
@@ -1146,9 +1146,9 @@ const createSessionWithDraftLifecycle = async (
  * apart, and recording it raw clears a real "Default". The live selection can
  * tell them apart, because its `override` keeps `null` for "Default" — but only
  * while it still describes the agent and model being sent to, and only for a
- * send from the main chat, whose composer that selection is: a `/btw` fork or
- * a chat pinned in the side panel keeps its own level on the same agent and
- * model. Otherwise the send's own value is all there is to go on.
+ * send from the main chat, whose composer that selection is: a chat pinned in
+ * the side panel keeps its own level on the same agent and model. Otherwise
+ * the send's own value is all there is to go on.
  */
 const resolveVariantToRecord = (
   sendsFromMainChat: boolean,

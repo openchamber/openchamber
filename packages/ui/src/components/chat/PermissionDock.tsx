@@ -24,8 +24,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
  * with the current one solid, so a batch of requests raised together reads
  * as one panel to walk through rather than a stack of cards. The dock
  * answers one request at a time; once it is answered the next one takes
- * its place. The BTW sheet keeps the inline `PermissionCard` for its child
- * session's requests.
+ * its place. `PermissionRequestContent` renders the request.
  */
 
 interface PermissionDockProps {

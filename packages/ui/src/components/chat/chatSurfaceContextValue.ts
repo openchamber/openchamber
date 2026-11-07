@@ -2,7 +2,7 @@ import React from 'react';
 
 /**
  * 'mini-chat' is the browser-panel side chat (compact, no fork/plan actions).
- * 'peek' is a read-only glance surface (the /btw panel): messages render with
+ * 'peek' is a read-only glance surface: messages render with
  * no per-message controls at all — no user action row, no assistant action
  * buttons, no turn footer.
  */

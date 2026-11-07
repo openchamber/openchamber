@@ -416,7 +416,7 @@ const ChatViewport = React.memo(({
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
 
             {/* Tail spacer. With a floating composer it reserves the band the
-                composer covers, plus any panel docked above it (queue, BTW),
+                composer covers, plus any panel docked above it (queue),
                 so the end of the transcript stays readable above them; the
                 extra gap is the breathing room between the last row and the
                 top edge of whatever floats. Both heights come from CSS
@@ -993,12 +993,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const isTimelineDialogOpen = pinned ? pinnedTimelineDialogOpen : globalTimelineDialogOpen;
     const setTimelineDialogOpen = pinned ? setPinnedTimelineDialogOpen : setGlobalTimelineDialogOpen;
     const columnRootRef = React.useRef<HTMLDivElement | null>(null);
+    const columnOwnerId = React.useId();
     const pinnedColumnActions = React.useMemo<ChatColumnActions | null>(() => (pinned ? {
         pinned: true,
+        ownerId: columnOwnerId,
         openSession: (sessionId, directory) => setPinnedSelection({ sessionId, directory }),
         openTimelineDialog: () => setPinnedTimelineDialogOpen(true),
         focusInput: () => columnRootRef.current?.querySelector<HTMLElement>(CHAT_INPUT_EDITOR_SELECTOR)?.focus(),
-    } : null), [pinned]);
+    } : null), [columnOwnerId, pinned]);
     const inheritedColumnActions = useChatColumnActions();
     const columnActions = pinnedColumnActions ?? inheritedColumnActions;
 

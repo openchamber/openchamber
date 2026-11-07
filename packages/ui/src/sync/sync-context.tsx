@@ -61,7 +61,6 @@ import { shouldConsumeBulkArchiveEcho } from "./bulk-archive-echo"
 import { applyForkedSession, noteForkedSessionPatched } from "./forked-session"
 import { LOCATION_SCOPED_FORM_SESSION_ID } from "./location-scoped-forms"
 import { useUIStore } from "@/stores/useUIStore"
-import { useBtwStore } from "@/stores/useBtwStore"
 import { selectNewChildSessions } from "./child-session-discovery"
 import { syncDebug } from "./debug"
 import { normalizePath } from "@/lib/pathNormalization"
@@ -2184,7 +2183,6 @@ export function handleEvent(
       },
       {
         isKnown: (sessionID) => useGlobalSessionsStore.getState().entityById.has(sessionID),
-        isCreatingLocally: (parentID) => useBtwStore.getState().byParent[parentID]?.creating === true,
         getSession: (sessionID, sessionDirectory) => opencodeClient.getSession(sessionID, sessionDirectory),
         isCurrent: () => expectedRuntimeKey === getRuntimeKey(),
         apply: (info) => handleEvent(

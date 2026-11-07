@@ -66,7 +66,7 @@ import {
     findLatestUserModelChoice,
     shouldPreserveManualModelOverride,
 } from '@/lib/messages/userModelChoice';
-import type { BtwSelection } from '@/stores/useBtwStore';
+import type { ComposerSelection } from './composerSelection';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 import { effortMemoryKey, rememberEffort, resolveEffortChoice, resolveEffortForModelSelection } from '@/lib/modelEfforts';
 
@@ -371,19 +371,19 @@ type ModelControlsProps = {
     agentOnly?: boolean;
     /**
      * Picker effort changes become the model's remembered level. Off for a
-     * BTW fork, whose own effort must not change the main chat's default.
+     * controlled selection, whose effort must not change the main chat's default.
      */
     rememberVariantPicks?: boolean;
 } & (
     | { selection?: never; sessionId?: never; modelSelectorOpen?: never; onModelSelectorOpenChange?: never }
     | {
-        selection: BtwSelection;
-        /** The session an agent pick is saved for: a chat pinned in the side panel, or a BTW fork. */
+        selection: ComposerSelection;
+        /** The session an agent pick is saved for: a chat pinned in the side panel. */
         sessionId: string | null;
         /**
          * The model picker's open state, owned by a composer that answers the
-         * model and effort shortcuts for this selection (BTW). The tooltips
-         * then name those shortcuts.
+         * model and effort shortcuts for this selection. The tooltips then
+         * name those shortcuts.
          */
         modelSelectorOpen?: boolean;
         onModelSelectorOpenChange?: (open: boolean) => void;
@@ -409,7 +409,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 }) => {
     const { t } = useI18n();
     const { focusInput: focusColumnInput } = useChatColumnActions();
-    // A controlled picker (a chat pinned in the side panel, a BTW fork) lists
+    // A controlled picker (a chat pinned in the side panel) lists
     // the catalog of its own session's folder, which can be another one than
     // the main chat's active folder. The main chat keeps the active catalog.
     const columnDirectory = useChatSessionSelection().directory;
@@ -559,7 +559,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const { favoriteModelsList, recentModelsList } = useModelLists(catalogDirectory);
     // Auto routing: the server resolves `openchamber/auto` into a real model per
     // send. Offered only while the server says it can honour it, in the main
-    // composer and in controlled selections (BTW) alike.
+    // composer and in controlled selections alike.
     const autoReady = useRoutingStore(selectAutoReady);
     const autoEntry = React.useMemo<ModelPickerEntry | null>(() => (autoReady
         ? { providerID: AUTO_PROVIDER_ID, modelID: AUTO_MODEL_ID, model: { id: AUTO_MODEL_ID, name: t('chat.modelControls.autoModel') } }
@@ -1529,7 +1529,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             // An effort is remembered per agent and model, so an agent this
             // session has not run yet has none for the current model. Carry
             // the level the composer is on, including an explicit Default;
-            // without it a BTW fork loses the effort it copied from the main
+            // without it a controlled selection loses the effort it copied from the main
             // chat the moment its agent changes.
             if (
                 currentProviderId && currentModelId && selection.variant !== undefined

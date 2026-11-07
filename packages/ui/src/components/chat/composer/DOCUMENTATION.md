@@ -26,15 +26,13 @@ animation. Do not restore separate draft and session composer branches:
 remounting the editor loses focus and interrupts the transition. Keep the
 existing mobile fixed-position rules unchanged.
 
-`ComposerFloatingPanel` is the shared frame for `BtwPanel`, `PermissionDock`
-and `FormDock`. They mount inside the composer form, outside both the
+`ComposerFloatingPanel` is the shared frame for `PermissionDock` and
+`FormDock`. They mount inside the composer form, outside both the
 full editor and collapsed mobile pill, with one absolute `bottom-full`
 anchor, input-column width, gap, and glass surface. Appearing, disappearing,
 or collapsing a panel does not resize the transcript or composer.
-One panel shows at a time, in this order: an expanded BTW (its sheet or
-its unsent draft), a permission, a form, then a collapsed BTW strip. A collapsed BTW gives the
-composer back to the parent session, so the parent's own request takes the
-dock and the strip returns once it is answered (`btwHoldsDock`).
+A permission and a form share the dock; the permission wins while it is open
+and the form returns once it has an answer.
 The frame also owns the header row through its `header` and `compact` props;
 callers supply controls and content, not their own header padding.
 
@@ -48,8 +46,7 @@ typing; panels keep the standard 140/100ms. Text-field lists
 list itself, since they are fixed-position. The fade stays on the glass element itself, since an ancestor
 with opacity below 1 is a backdrop root and the blur would go flat mid-fade.
 Exit needs `AnimatePresence` around the conditional popup, so each dock keys
-its panel there (BTW keys each stage, forms key the form id); switching panels
-cross-fades. The frame's clearance cleanup leaves the variable alone while
+its panel there (form docks key the form id); switching panels cross-fades. The frame's clearance cleanup leaves the variable alone while
 another panel is still mounted, because the outgoing panel unmounts after the
 incoming one has written its own height.
 
@@ -60,8 +57,7 @@ as answers change, an `external` field is an information step, Enter in a
 text box moves to the next step and Cmd/Ctrl+Enter submits. Submit is
 enabled only once every question is answered; a submit with a required
 question still open jumps to it. It shows the
-oldest pending form and counts the rest in its header. The BTW sheet keeps
-the inline `FormCard` for its child session's forms; both render a field
+oldest pending form and counts the rest in its header. It renders fields
 through `FormFieldControl`.
 
 On a phone the dock's body is clamped to the room above the keyboard
@@ -100,9 +96,9 @@ screen) from the start, and an unacknowledged link counts as missing.
 An MCP elicitation is a form OpenCode files under the session id `global`
 (`LOCATION_SCOPED_FORM_SESSION_ID` in `sync/location-scoped-forms.ts`): it belongs to the
 directory, not to a turn. `useScopedBlockingForms` appends the directory's
-`global` forms after the session subtree's own, so the dock (and the BTW
-sheet's inline card) offer it from every session of that directory, and the
-reply resolves its directory from the store that holds the form.
+`global` forms after the session subtree's own, so the dock and the inline
+card offer it from every session of that directory, and the reply resolves
+its directory from the store that holds the form.
 
 `PermissionDock` is the agent's permission requests for the composer's
 session, its subagents' included, in the same frame: one dot per pending
@@ -112,10 +108,8 @@ Alt+Enter, Alt+Shift+Enter and Alt+Backspace answer the current request.
 Always allow and its shortcut exist only when the request carries `save`
 patterns: OpenCode remembers nothing from an "always" without them, so the
 question tool's request offers Deny and Allow once. A
-pending permission hides the form dock and the suggestion.
-The BTW sheet keeps the inline `PermissionCard` for its child session's
-requests; both render the request through `PermissionRequestContent` and
-`PermissionActions`.
+pending permission hides the form dock and the suggestion. It renders through
+`PermissionRequestContent` and `PermissionActions`.
 
 A read-only chat (a subagent session, an archived space) mounts no composer,
 so `ChatContainer` mounts `PermissionDock` and `FormDock` itself above the
@@ -136,9 +130,9 @@ so one wait shows one line, and appears only once the creation has taken
 review loop and, once it ends, its result until dismissed, a dispute unfolding in place (`AutoReviewStrip`), the pull request the agent waits on with Stop watching (`PullRequestWatchStrip`), background commands, a staged revert
 (`RevertedMessagesStrip`), the queue (`QueuedMessagesStrip`),
 the "looks done" hint or the review offer, the suggestion
-(`SessionSuggestionChip`). BTW hides all of them. A pending form, a nonempty
-queue, composer content and a new-session draft hide the suggestion; a
-new-session draft also hides the queue.
+(`SessionSuggestionChip`). A pending form, a nonempty queue, composer content
+and a new-session draft hide the suggestion; a new-session draft also hides
+the queue.
 
 While a session's first send is pending (`pendingDraftSends` in
 `session-ui-store`, from Enter in the draft until the request that starts the
@@ -217,8 +211,7 @@ collapse into a count that expands in place, collapsed again on a session
 switch, and the count row carries Stop all. Stop all sends one call per owning
 session, so each agent gets one note for all of its commands and their
 completions arrive together; a stopping row stays disabled until OpenCode
-reports its command ended, and a failed call makes its commands stoppable again. It shows whether the session runs or idles, and hides in BTW and
-new-session drafts. The elapsed text is a leaf on the shared one-second
+reports its command ended, and a failed call makes its commands stoppable again. It shows whether the session runs or idles, and hides in new-session drafts. The elapsed text is a leaf on the shared one-second
 ticker, and the tree is compared as a string, so neither the tick nor
 session-list updates re-render the composer. Images the session and its
 subagents generate in the background (`sync/background-images.ts`) join the
@@ -321,14 +314,13 @@ rule only targets their other children. A `:has()` over the box was
 re-evaluated for every descendant on each editor mutation.
 
 Typing re-renders `ChatInput` and its editor, nothing else. The children that
-do not depend on the draft text (footer, autocomplete popups, docks, BTW
+do not depend on the draft text (footer, autocomplete popups, docks,
 panel, draft target selectors and preset chips) are memoized, and the props
 `ChatInput` passes them keep their identity while the user types: callbacks
 read the text through `messageRef` or `useStableHandler`, derived objects are
-memoized, and `useBtwPanelState` and `useMobileComposerShell` return stable
-objects. `useBtwPanelState` reads the parent and fork sessions as primitives,
-and `useChatSearchDirectory` reads only the session's directory, so a
-streaming turn's `session.updated` events do not re-render the composer. The
+memoized, and `useMobileComposerShell` returns stable objects.
+`useChatSearchDirectory` reads only the session's directory, so a streaming
+turn's `session.updated` events do not re-render the composer. The
 editor is memoized and every handler `ChatInput` passes it is a
 `useStableHandler`, so it renders only when what it shows changes.
 `__tests__/ChatInput.keystroke.test.tsx` counts the renders per keystroke and
@@ -755,17 +747,16 @@ command can leave the queue untouched and delivery can take only part of it.
   `linkedReferenceDrafts.ts` keyed by `chatDraftIdentity`. One `ChatInput` stays
   mounted across a session switch, so component-level chips followed the next
   session and were linked there (#5706); a draft's chips must outlive the
-  composer showing another draft. A pinned column and an expanded `/btw` panel
-  take no handoff: neither is the main draft, and a chip written there would be
-   stranded. The entry waits for the main composer. Picker confirmation captures
+  composer showing another draft. A pinned column takes no handoff: it is not
+  the main draft, and a chip written there would be stranded. The entry waits
+  for the main composer. Picker confirmation captures
    its draft identity before loading context. New Worktree likewise captures its
    opened draft before the read; an unnamed draft never takes a handoff.
    Draft handoffs use the runtime and stable `workDraftId`, so reopening a saved
    draft can receive context that finished loading after navigation away.
    A failed first send that created its session moves the draft's chips into
    that session for retry, merging chips attached while the request ran.
-   Guest attaches are rejected in expanded `/btw`, and pending guest items wait
-   for the normal composer before being consumed. A draft's first send with a
+   Pending guest items wait for the normal composer before being consumed. A draft's first send with a
   tracker item attached posts that tracker's session-started
   status (`lib/trackers/sessionStatus.ts`), for a tracker whose descriptor
   offers `sessionComments`. Tracker chips are `tracker-item` references keyed
@@ -787,8 +778,8 @@ command can leave the queue untouched and delivery can take only part of it.
   differ from its frontmatter name) and sends them in the prompt's `skills`
   field. OpenCode then loads each skill's content into that user message. It
   rides the prompt's delivery, so a new-session draft (after the session is
-  created), a steer while the agent works and a `/btw` fork all activate the
-  skill with their own message, never mid-turn. The separate
+  created) and a steer while the agent works activate the skill with their own
+  message, never mid-turn. The separate
   `session.skill` route is deliberately not used: it appends a skill message
   immediately, outside the inbox, so while a turn runs it would land inside
   that turn ahead of the message that asked for it. The skill message it
@@ -819,13 +810,13 @@ command can leave the queue untouched and delivery can take only part of it.
   name as their badge, and the language highlights them as known `/tokens`.
 - Local slash commands are planned by `submit/slashCommands.ts` before any
   attached context is consumed. Commands that act on session or UI state
-  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`, `/fork`) take
+  (`/undo`, `/redo`, `/compact`, `/timeline`, `/handoff-review`, `/fork`, `/btw`) take
   only their command text and leave comments, files, and linked context attached;
    magic prompt commands send that
   context with the prompt they produce. Their text comes from one read of
   the Magic Prompts that apply in the directory the send lands in, chosen
-  when the send starts: the `/btw` fork, the session, else the new-session
-  draft; a new chat has no folder yet and reads the global prompts. A failed
+  when the send starts: the session, else the new-session draft; a new chat
+  has no folder yet and reads the global prompts. A failed
   read sends nothing and restores the input. Session actions are planned only when
   a session exists, so typing one into a new-session draft stays on the normal
   send path. A local command is never queued as text: queueing runs it
@@ -835,9 +826,7 @@ command can leave the queue untouched and delivery can take only part of it.
   the command, a failed send puts the text into the fork's composer. `/compact`
   switches the session to its main-chat model and reasoning effort selection
   first when either differs from the session record, then compacts; a failed
-  switch compacts nothing and restores the command. An open BTW keeps its own
-  model and effort separate: `/compact` still uses the main session's selection.
-  An Auto pick leaves the
+  switch compacts nothing and restores the command. An Auto pick leaves the
   session as it is, because compaction carries no prompt for the router to
   resolve from. A failed prompt command restores everything it consumed: text,
   confirmed mentions, files, comment drafts, and pending synthetic context.
@@ -863,19 +852,11 @@ command can leave the queue untouched and delivery can take only part of it.
   them after loading that identity's draft. Selection alone is not enough:
   the deferred chat column can still show the source composer. Ordinary
   pending text insertions go through `state/usePendingComposerText.ts`.
-  Column-addressed insertions go to its visible composer, including an expanded
-  BTW. A revert is session-addressed and waits until that session owns the
-  composer, even in a pinned column with an expanded BTW. Its text waits in a
-  separate session-keyed mailbox so later quotes and plugin insertions leave
-  it intact. On return, the restore is applied before any column insertion.
-  A `btw-pending:` identity holds text only in the hook's memory while the
-  fork is being created. Collapse and navigation save that text in memory;
-  failure recovery restores it there without writing the placeholder to storage.
-  Successful creation moves the text to the real fork and empties the pending
-  slot. Explicit discard clears it through the draft-deletion notification, so
-  the next BTW for the same parent starts empty. Persisted placeholder drafts
-  from older builds are ignored.
-  The hook also selects the attachment draft before paint. `input-store.ts`
+  Column-addressed insertions go to its visible composer. A revert is
+  session-addressed and waits until that session owns the composer. Its text
+  waits in a separate session-keyed mailbox so later quotes and plugin
+  insertions leave it intact. On return, the restore is applied before any
+  column insertion. The hook also selects the attachment draft before paint. `input-store.ts`
   owns its in-memory files and scoped send recovery, documented in
   `packages/ui/src/sync/DOCUMENTATION.md`.
 - `state/useDictationOrigin.ts` — a dictation belongs to the draft that was on
@@ -1099,7 +1080,7 @@ Prompt recall has two owners on purpose.
 Prompt history search uses the same history values as Arrow recall. The runtime
 shortcut registers once and routes to the focused normal composer through its
 form owner. Search state stays local to the panel. A runtime, draft, history
-scope, mode, or BTW transition hides the panel before it can select another
+scope, mode, or draft transition hides the panel before it can select another
 composer's history. Picking a result validates the displayed value against the
 current history entry, restores its draft-scoped attachments, and puts the
 caret at the end of CodeMirror's normalized document.
@@ -1124,66 +1105,40 @@ session bucket, which adds attachments and keeps prompts a revert hid from the
 timeline. A prompt present in both collapses to the persisted entry. Global
 scope reads the persisted runtime bucket only.
 
-## BTW composer
+## `/btw` side question
 
-An empty `/btw` opens an unsent draft. `/btw <question>` opens BTW and sends
-that question immediately after its own draft and model selection are active.
-**By the way…** opens an unsent draft with Quote-formatted selection text.
-The first send creates the fork; Enter follows the user's preference. Pending
-text, references and selections then move to the fork's draft identity and
-session, and the unsent panel's own key is cleared, so the next `/btw` in that
-parent opens on Plan and the main composer's model again. Normal and BTW
-drafts remain independent, including in memory when persistence is disabled.
+An empty `/btw` opens a dialog with a question field; `/btw <question>` starts
+the question immediately. **By the way…** opens the same dialog with the
+selection in quote format. The dialog calls `opencodeClient.generateSessionText`,
+OpenCode's `session.generate`, and never creates a session, draft identity,
+selection or metadata. The side question uses the parent session's current
+model and agent. It shows a spinner while it runs, then renders the answer as
+markdown with a copy action. Close, Escape, or the backdrop dismisses it and
+aborts its own `AbortController`; nothing about it is written to the chat or
+saved for a reload.
 
-Both modes reuse `ComposerEditor` and `ModelControls`; BTW transitions put the
-caret at the end. BTW copies its chat's model/effort once, including explicit
-Default (in a chat pinned in the side panel, that chat's, never the main
-chat's), and uses `plan` or the first selectable agent. From then on the fork
-keeps its own effort, also on the main chat's agent and model. The agent
-control is in the composer from the first question on, so a side question can
-run on another agent without collapsing the panel; the pick is saved for the
-fork's session, and the main chat keeps its own agent. Its controlled model
-path only writes BTW selections. The model, effort and cycle-favorite-model
-shortcuts act on the BTW selection its chips show: the model shortcut toggles
-the BTW model picker, whose open state `ChatInput` owns for that reason; the
-effort shortcut steps the BTW model's level the way the main one steps
-(`nextThinkingVariant`) and the favorite shortcuts step the BTW model, each
-saved as the BTW picker saves it. The app-wide handlers decline while BTW is
-open, so the parent's model and effort never move, and an open overlay stops
-all of them. As with permission keys, a key pressed in a chat pinned in the
-side panel acts only on that chat's BTW, and a key pressed anywhere else only
-on the main chat's. The agent shortcut stays off in BTW. Files attach as in the normal composer
-(picker, paste, drop) and live in the BTW draft identity's attachment slot,
-so they never mix with the main draft's files; the attach control offers
-only local files. Goals, expansion, shell, linked context (issues, PRs,
-guests) and file/agent mention autocomplete are unavailable. Auto-accept is
-applied before the first send.
-On mobile, the model, effort and agent controls take the main composer's
-bottom row below the footer, drawn the same way, and open the same bottom
-sheets; the footer holds the files-only attach, auto-accept and send/stop
-controls.
+One request per parent is active. A second `/btw` while it runs is ignored,
+because the dialog is already on screen. Attachments stay in the composer: the
+native endpoint accepts only a prompt. When the parent chat raises a permission
+or form while the dialog is open, the dialog says the chat is waiting so the
+user can close it and answer.
 
-Escape closes menus first. Otherwise it returns to normal: an unsent BTW is
-discarded with its text, references, selections and panel; a creating or real
-fork is only collapsed. Neither exit sends, aborts, or deletes a server session,
-nor consumes the main draft's files, queue, or linked context. Pending snippet
-expansion belongs to the unsent panel. Discarding that panel invalidates the
-send, and a runtime change prevents fork creation and stale UI recovery.
+### Why the dialog runs a transient generation instead of a forked session
 
-The unsent panel shows "Ask your question" until fork creation starts.
-Existing panels hide titles. Promotion retains the existing internal title, without
-transcript fetching or Small Model generation.
+A fork copies the transcript, needs admission and cleanup, and becomes a
+durable session the user has to manage. `session.generate` reads the settled
+prefix of the parent's context on the server, answers once without tools, and
+returns text without writing a message. The server owns the snapshot; the
+client never builds context from the live store. The request has its own abort
+signal, so dismissing it cannot touch the main turn.
 
-### Why a controlled agent pick carries the effort to the new agent
+### Why `/btw` keeps the composer draft
 
-An effort is stored per session, agent and model, so an agent the fork has not
-run yet has none for the model it is on. Left to inherit, as the main
-composer's agent switch does, the level `/btw` copied from the main chat would
-vanish the first time the user changes the agent, which is the move the agent
-control exists for. `handleAgentChange` therefore writes the current level for
-the newly picked agent when that agent has no level of its own for this model,
-and an unchosen level still stays unchosen so nothing latches an explicit
-Default the user never picked.
+The side question is not a new chat. Clearing the composer draft, moving its
+attachments, or saving per-session selections would leave state behind for a
+request that is intentionally transient. The question field lives in the
+dialog, and the composer's text, attachments and linked context stay where
+they are.
 
 ## Pinned composer
 
@@ -1193,13 +1148,12 @@ one app-wide composer state is split per column:
 
 - **Model, agent and effort.** The app-wide current model belongs to the main
   chat. A pinned composer sends with `usePinnedComposerSelection`: what was
-  picked in it, saved for its session in the selection store the way the BTW
-  composer saves its picks, otherwise the session record's model, variant and
-  agent. Its picker is `ModelControls` in controlled mode, where the agent
+  picked in it, saved for its session in the selection store, otherwise the
+  session record's model, variant and agent. Its picker is `ModelControls` in controlled mode, where the agent
   pick is saved for the picker's own session and never changes the main
-  chat's agent. As in BTW, the pick carries the effort the composer shows to
-  the new agent when the session has none saved for that agent and model, so
-  switching the agent keeps the level on screen. A controlled picker lists the models and
+  chat's agent. The pick carries the effort the composer shows to the new
+  agent when the session has none saved for that agent and model, so switching
+  the agent keeps the level on screen. A controlled picker lists the models and
   agents of its column's session folder (loading that catalog when it has not
   loaded), since a pinned chat can live in another folder than the main one. "Run in parallel" is offered only in the main
   chat. Picker changes record the chosen level for that model in the profile
@@ -1215,18 +1169,16 @@ one app-wide composer state is split per column:
   landing in the main chat until the user works in the pinned one.
 - **Composer address.** The composer publishes one address for the surfaces
   outside its column (`input-store`'s `composerAddress`, one layout effect in
-  `ChatInput`): the inline-draft target and the attachment slot, both of which
-  move to the `/btw` fork while that fork owns the input. `hooks/useComposerAddress`
-  reads it for comments on files, diffs, plans, terminals, PRs and pages, and for
+  `ChatInput`): the inline-draft target and the attachment slot.
+  `hooks/useComposerAddress` reads it for comments on files, diffs, plans, terminals, PRs and pages, and for
   the image or screenshot those comments carry. A comment filed under any other
   session key has no composer to render it, and an attachment filed elsewhere is
   a hidden file.
 - **Pending text and context.** `setPendingInputText` and
   `setPendingSyntheticParts` take a target. Null is the main composer, which is
   the chat on screen and what every surface acting on it writes to (quotes,
-  plugins, git dialogs, file selections, todo sends); a `/btw` fork, being that
-  same composer, takes those while it is expanded and the parent takes them once
-  it is collapsed. A session id addresses the composer showing that session,
+  plugins, git dialogs, file selections, todo sends). A session id addresses
+  the composer showing that session,
   which is what text quoted inside a pinned chat and a reverted message's prompt
   use; text addressed to a session no composer shows waits until one does. The
   main chat's composer also waits until its deferred column shows the live
@@ -1249,8 +1201,8 @@ one app-wide composer state is split per column:
   composer is the pinned chat's when the user last clicked or focused into
   that column and it is still on screen, the main chat's otherwise. Input
   stays where it is when its target takes text or is a button, link, tab,
-  list or menu item, while a dialog, menu, open select, settings or the BTW
-  composer is on screen, during IME composition, and while text is selected, because typing
+  list or menu item, while a dialog, menu, open select or settings is on
+  screen, during IME composition, and while text is selected, because typing
   over a selection starts a comment on it. The window-focus refocus skips a
   focused field, terminal, editor or embedded page and keeps a selection.
   `useKeyboardShortcuts` calls it after the shortcut dispatcher, so a
@@ -1411,7 +1363,7 @@ runs it. On a new-session draft it turns the composer
 into parallel mode; elsewhere it opens a new draft in that mode with the typed
 text. The command palette and "Start new multi-run from this
 answer" reach the same mode through `useUIStore.requestParallelComposer`, which
-`useParallelComposer` consumes once. Mobile and BTW never enter it.
+`useParallelComposer` consumes once. Mobile never enters it.
 
 The state lives in `parallel/useParallelComposer.ts`, local to `ChatInput`.
 The editor stays the one `ComposerEditor` and always shows the active variant's
@@ -1462,7 +1414,7 @@ found only when their text appears once in the message.
 A quote taken inside a page the agent showed (`openchamber_render`) has `page: { partId }` in its anchor: its text stream is the page's body, measured and re-found inside the page's frame. The layer does not paint those marks; it publishes them, asks for reveals and hears clicks through `message/pageQuoteBridge.ts` (see `message/parts/DOCUMENTATION.md`).
 
 The selection menu's thumbs-up attaches a normal `chat-quote` draft to the
-column's published comment scope, including an expanded BTW composer. Its
+column's published comment scope. Its
 comment uses the trimmed `selectionApprovalText` setting, falling back to
 `Sounds good`. Existing drafts, attachments and linked references stay in place;
 the user sends them together through the normal Send action. The shortcut
@@ -1478,15 +1430,14 @@ comment into a sibling. Desktop keeps its floating input in the menu and files
 that attach into the same published scope.
 
 `comment/mobileCommentDraft.ts` owns the lifecycle. The scope (runtime,
-directory, session) comes from the visible composer's inline-draft target,
-including an expanded or pending BTW composer. A collapsed BTW uses the main
-composer's target. The hook publishes that scope before paint, on every
+directory, session) comes from the visible composer's inline-draft target. The
+hook publishes that scope before paint, on every
 platform; the selection menu supplies only the quote and reads it back through
 `getScope()`, while a quote's text goes to the column's own address, which the
 composer on screen takes. Desktop's floating input lives
 outside the composer, so it reads the live scope at attach and the comment
-lands in the composer on screen then, including a fork that a `/btw` opened
-over the parent session. Without a published scope the comment is dropped and a
+lands in the composer on screen then. Without a published scope the comment is
+dropped and a
 quote falls back to this column's own rule (a pinned chat's session, the main
 mailbox otherwise). A mobile comment captures the scope when it opens, and
 that capture is the only

@@ -92,7 +92,6 @@ describe("input-store attachments", () => {
       pendingInputMode: "replace",
       pendingSyntheticParts: null,
       pendingGuestIssue: null,
-      pendingBtwComposerRequest: null,
       activeEditorFile: null,
       attachmentDraftKey: null,
       attachmentDrafts: new Map(),
@@ -577,30 +576,6 @@ describe("input-store guest attach", () => {
     useInputStore.getState().setPendingGuestIssue(pull)
     expect(useInputStore.getState().pendingGuestIssue).toEqual(pull)
     expect(useInputStore.getState().consumePendingGuestIssue()).toEqual(pull)
-  })
-})
-
-describe("input-store BTW composer requests", () => {
-  test("keeps the request scoped to its parent without changing the normal composer", () => {
-    useInputStore.setState({
-      pendingInputText: "normal draft",
-      pendingInputMode: "replace",
-      pendingBtwComposerRequest: null,
-      attachedFiles: [],
-    })
-    useInputStore.getState().requestBtwComposer({
-      parentSessionId: "parent-1",
-      text: "> selected text",
-    })
-
-    expect(useInputStore.getState().consumePendingBtwComposerRequest("parent-2")).toBeNull()
-    expect(useInputStore.getState().pendingInputText).toBe("normal draft")
-    expect(useInputStore.getState().consumePendingBtwComposerRequest("parent-1")).toEqual({
-      parentSessionId: "parent-1",
-      text: "> selected text",
-    })
-    expect(useInputStore.getState().consumePendingBtwComposerRequest("parent-1")).toBeNull()
-    expect(useInputStore.getState().pendingInputText).toBe("normal draft")
   })
 })
 

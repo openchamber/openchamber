@@ -131,26 +131,25 @@ The VS Code queue gate and its live inputs are documented in
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
 | `attachment-files.ts` | Attachment picker allowlists, MIME/content validation, structured-text sanitization, and HEIC conversion | Local chat attachments across shared UI runtimes |
 | `document-attachments.ts` | Bounded Office/OpenDocument extraction, document text serialization, embedded-image extraction, and positional citations | DOCX, PPTX, XLSX, ODT, ODP, and ODS chat attachments |
-| `input-store.ts` | Draft input state, attached files, synthetic parts, pending guest attach, destination-scoped fork replay handoff, the address the composer publishes (inline drafts and attachments) | Attachments and fork replay target runtime + directory + session; the published address is the composer's own session or `/btw` fork; other pending input is app UI state |
+| `input-store.ts` | Draft input state, attached files, synthetic parts, pending guest attach, destination-scoped fork replay handoff, the address the composer publishes (inline drafts and attachments) | Attachments and fork replay target runtime + directory + session; the published address is the composer's own session; other pending input is app UI state |
 | `selection-store.ts` | Model/agent/variant selections | App UI state |
 | `voice-store.ts` | Voice state | App UI state |
 
 Pending text keeps column insertions and session-keyed restores in separate
 mailboxes, so a quote or plugin insertion cannot overwrite a waiting revert.
-A pinned
-column and its expanded BTW share the column address; only the composer showing
-the restored session may consume session-addressed text. Attachment appends to
-named slots preserve other in-flight appends; replacement, clearing and owner
-switches retain their read-cancellation behavior.
+Only the composer showing the restored session may consume session-addressed
+text. Attachment appends to named slots preserve other in-flight appends;
+replacement, clearing and owner switches retain their read-cancellation
+behavior.
 
 ### Why restores have a session-keyed mailbox
 
-A parent revert can wait while BTW owns the composer and receives more text.
-A single pending-text slot lost the restore on the next insertion. Each session
-keeps its latest restore until its composer consumes it; a failed revert rolls
-back only that session's entry. An annotation captures the published inline and
-attachment address together at attach time and keeps both through screenshot
-preparation, including when the callback was saved before a BTW transition.
+A parent revert can wait while another column owns the composer and receives
+more text. A single pending-text slot lost the restore on the next insertion.
+Each session keeps its latest restore until its composer consumes it; a failed
+revert rolls back only that session's entry. An annotation captures the
+published inline and attachment address together at attach time and keeps both
+through screenshot preparation.
 
 Local chat attachments are normalized by `attachment-files.ts` before entering `input-store.ts`. PNG, JPEG, GIF, WebP, and PDF retain their media type; HEIC/HEIF is converted to JPEG; recognized text/code formats and unknown files whose first 4 KB are text are sent as `text/plain`; binary files outside the supported media types are rejected. Jupyter notebooks become readable markdown with non-text outputs omitted. HAR credentials, cookies, and sensitive URL parameters are redacted, while request/response body text is omitted. SVG and Draw.io files are attached as source text, not executable/rendered content. Browser and VS Code pickers expose the same allowlist, while drag-and-drop may still accept an unknown extension after content inspection. Large plain-text clipboard pastes can become in-memory `text/plain` attachments named `pasted-context-N.txt` through the composer paste path; they use the same normalization and send pipeline as manually attached `.txt` files.
 
@@ -346,19 +345,23 @@ OpenCode's commit also deletes every inbox item admitted after the boundary. Con
 
 ## Forking after an answer
 
-`/fork`, the fork action on an answer, and `/btw` keep the answer in the fork. OpenCode's fork `before` leaves out the record it names, so `transcriptCutAfterMessage` in `transcript-cut.ts` names the next turn boundary, the first record after the answer that starts something new, such as a prompt, a compaction, a background command's result or a workflow report. Without one, ordinary forks copy the whole transcript; `/btw` looks for the boundary on the server first. A locally visible cut may not be persisted yet. All three paths retry a 404 once with the same cut and captured runtime, then propagate the error so the user can try again.
-
-### Why `/btw` asks the server before copying a whole transcript, and retries never widen a cut
-
-The next prompt can reach the server before the first fork request or between attempts, while this window still shows an idle transcript. An omitted `before` would copy that prompt and its unfinished response into the fork. So when the local transcript has no boundary after the answer, `/btw` reads the server's tail back to the answer and takes the boundary from there. Comparing only the newest record would not do: the server's newest record after a finished turn is the `idle` record, which this window never has. Only when the server also has no boundary does `/btw` omit `before`. Keeping a cut on retry preserves the selected history even when the main chat advances.
-
-The current API has no inclusive upper bound at an answer, so a prompt landing between that read and the fork is still copied. Refusing `/btw` on every idle session to close that gap would break its most common use.
-
-A failed read, an answer the server does not list, and a parent with no completed answer each fail before creating a fork and clear the creating flag so the user can retry. No parent messages are changed.
+`/fork` and the fork action on an answer keep the answer in the fork.
+OpenCode's fork `before` leaves out the record it names, so
+`transcriptCutAfterMessage` in `transcript-cut.ts` names the next turn boundary,
+the first record after the answer that starts something new, such as a prompt,
+a compaction, a background command's result or a workflow report. Without one,
+the fork copies the whole transcript. A locally visible cut may not be
+persisted yet, so the path retries a 404 once with the same cut and captured
+runtime, then propagates the error so the user can try again. The retry never
+widens the cut.
 
 ### Why the next turn boundary and not the next record
 
-The records between an answer and that boundary belong to the answer's turn. One of them is the `idle` record that OpenCode writes when a turn ends. The store gets that record only from a transcript read, never from a live event. A cut at the next record would leave it out of a fork made after a reload and keep it in a fork made from the live transcript.
+The records between an answer and that boundary belong to the answer's turn.
+One of them is the `idle` record that OpenCode writes when a turn ends. The
+store gets that record only from a transcript read, never from a live event. A
+cut at the next record would leave it out of a fork made after a reload and
+keep it in a fork made from the live transcript.
 
 ## An interruption whose reason is `shutdown`
 
@@ -485,8 +488,8 @@ the same 150-session persistence bound as the existing selections. Old payloads
 without effort entries remain valid; malformed effort entries grant no authority.
 Session deletion clears these entries. A send saves the effort it carried for
 its session; only a send from the main chat reads the main composer's live
-selection, to tell an explicit Default from no choice, so a `/btw` fork or a
-pinned chat on the main chat's agent and model keeps its own effort. A saved effort choice precedes older
+selection, to tell an explicit Default from no choice, so a pinned chat on the
+main chat's agent and model keeps its own effort. A saved effort choice precedes older
 message history so a reload cannot undo a saved picker change. While a live model
 pick is pending, it and its effort win over external switches. Otherwise the
 session record can switch to another model and effort. The store also
@@ -523,9 +526,8 @@ preparation. The composer captures that revision with the message selection;
 completion can record it only in the same runtime instance, so switching away
 and back also supersedes the send's write. A session's own saved pick
 stays above the remembered value; without one, a level configured for the
-model, then the remembered level, then Default applies. A BTW fork reads the
-map but never writes it; queued delivery, scheduled tasks and other background
-sends never write it either. A level is only ever read back for the same
+model, then the remembered level, then Default applies. Queued delivery,
+scheduled tasks and other background sends never write it. A level is only ever read back for the same
 `provider/model`. The server's tool-facing session routes and the new-session
 send dialogs read the same profile map; they never write it.
 Agent and model switch events stamp the session's `time.updated`, as OpenCode's
@@ -787,8 +789,8 @@ with sessions in work turned off (`sessionWorkEnabled`) the block keeps
 nothing. An archived session is never in the block, so open work left in its
 metadata does not keep it, and Settings disables the opt-in for that target. Pins keep their sessions either way; `inWorkKeepsSessions` is the one
 rule the Settings preview, the candidate list and the recheck before each
-request share. Parents with an attached `/btw` conversation also stay,
-because the canonical archive/delete actions remove that temporary fork.
+request share. Parents with an attached legacy `/btw` fork also stay, because the
+canonical archive/delete actions remove that old fork.
 Sessions outside the selected scope remain protected. Because
 OpenCode cascades deletion, every ancestor of a retained session is protected
 too. Eligible deletions run children first and recheck current selection,
@@ -1038,8 +1040,7 @@ reads remain session-strict). A chat can show a session in another directory's
 store than the session's own (a deep link without a directory, or a worktree
 beside the main checkout), so the row's store is the one that must hold the
 message and receive the result. A row finds that store through
-`useChatTranscriptDirectory`: its column's directory, or the fork's directory
-in a `/btw` transcript, which renders inside the parent's column. Both checks
+`useChatTranscriptDirectory`: its column's directory. Both checks
 keep an evicted store or a removed message from being recreated, and a message
 outside the displayed transcript is never requested.
 
@@ -1216,7 +1217,7 @@ Examples of global-store updates performed in `session-actions.ts`:
 
 ### Blocking-request (form/permission) reply routing
 
-A form reply resumes the turn, so `replyToForm` first puts the session on its composer's selection through `applySendSelection`, the guarded entry the sends use (#6053). The main chat's session uses the app-wide composer. Any other session uses only what is held for it: its unsent model and agent picks and its saved effort, so a pinned chat or a `/btw` fork keeps its own selection, and a child session answered from its parent has nothing to apply and keeps what a workflow bound it to. A location-scoped form has no session to switch. A failed switch or an unavailable agent leaves the answer unsent and the form pending. Auto reaches the session as the sentinel, and the server routes the reply itself (`packages/web/server/lib/routing/DOCUMENTATION.md`). The reply captures the runtime instance before its first wait and rechecks it after the switches, so a switch away, even with a return, stops the answer; a late result from an old runtime touches no local form.
+A form reply resumes the turn, so `replyToForm` first puts the session on its composer's selection through `applySendSelection`, the guarded entry the sends use (#6053). The main chat's session uses the app-wide composer. Any other session uses only what is held for it: its unsent model and agent picks and its saved effort, so a pinned chat keeps its own selection, and a child session answered from its parent has nothing to apply and keeps what a workflow bound it to. A location-scoped form has no session to switch. A failed switch or an unavailable agent leaves the answer unsent and the form pending. Auto reaches the session as the sentinel, and the server routes the reply itself (`packages/web/server/lib/routing/DOCUMENTATION.md`). The reply captures the runtime instance before its first wait and rechecks it after the switches, so a switch away, even with a return, stops the answer; a late result from an old runtime touches no local form.
 
 `replyToForm`, `cancelForm`, `respondToPermission`, and `dismissPermission` route the reply through `resolveDirectoryForBlockingRequest`. The directory chosen decides which OpenCode instance resolves the pending request, so it must be the **session record's own server-confirmed directory** (ownership), never the containing child-store key (containment): a project store legitimately holds its worktree sessions, and a reply addressed to the parent instance makes the server answer `FormNotFoundError` while the form stays pending in the worktree instance — the session is then stuck on the running form tool with no recovery. When a form reply/cancel comes back not-found, the stale request is removed locally and a `settled-running-tool` tail materialization is enqueued so the trailing tool part converges to the server's actual state instead of leaving the UI on "asking question" forever. A permission reply/reject that comes back not-found only removes the request locally.
 
@@ -1563,7 +1564,7 @@ the end first, and the reader is moved only if the message arrives and they
 have neither scrolled nor sent in the meantime. Mobile skips that search because it
 loads history only on an explicit tap.
 
-Session-only navigation and `/btw` parent resolution belong to the
+Session-only navigation and legacy `/btw` parent resolution belong to the
 [router](../lib/router/DOCUMENTATION.md). Its `openSession` registers the opener
 a toast uses, so the session store keeps no dependency on the router.
 

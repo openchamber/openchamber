@@ -68,7 +68,6 @@ describe('pending composer references', () => {
 describe('composer handoff target', () => {
     const base = {
         columnPinned: false,
-        btwActive: false,
         currentSessionId: 'session-a',
         draftOpen: false,
         workDraftId: null,
@@ -90,10 +89,6 @@ describe('composer handoff target', () => {
 
     test('a pinned composer takes nothing', () => {
         expect(resolveComposerReferenceHandoffTarget({ ...base, columnPinned: true })).toBeNull();
-    });
-
-    test('an expanded /btw panel takes nothing, even with a session', () => {
-        expect(resolveComposerReferenceHandoffTarget({ ...base, btwActive: true })).toBeNull();
     });
 
     test('no session and no draft takes nothing', () => {

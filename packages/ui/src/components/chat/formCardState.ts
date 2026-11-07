@@ -1,5 +1,5 @@
 /**
- * Pure form logic behind `FormCard`.
+ * Pure form logic behind the composer form dock.
  *
  * OpenCode v2 replaced the old multi-question prompt with a typed form: one
  * request carries a title and an ordered list of fields, and the reply is a

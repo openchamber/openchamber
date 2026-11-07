@@ -8,7 +8,6 @@ import { navigateFromNotification } from '@/lib/router/notificationNavigation';
 import { applyVSCodeSessionNavigation, vscodeSessionNavigationSchema } from '@/apps/vscodeSessionNavigation';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useBtwStore } from '@/stores/useBtwStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -48,7 +47,6 @@ beforeEach(() => {
     activeSessions: [session('previous'), parent, fork], archivedSessions: [],
     entityById: new Map(), hasLoaded: true, status: 'ready',
   });
-  useBtwStore.setState({ byParent: {} });
   // Happy DOM reloads documents on Back instead of emitting same-document popstate.
   // Keep native URL writes and model only the history traversal for this test.
   entries = [window.location.href];
@@ -108,7 +106,6 @@ test('Back to an old fork URL normalizes it to the selected parent', async () =>
   await back();
   expect(useSessionUIStore.getState().currentSessionId).toBe('parent');
   expect(window.location.search).toBe('?session=parent');
-  expect(useBtwStore.getState().byParent.parent?.collapsed).toBe(false);
 });
 
 test('repeated Back to a fork message link preserves its transcript and message target', async () => {
@@ -120,7 +117,6 @@ test('repeated Back to a fork message link preserves its transcript and message 
     await back();
     expect(useSessionUIStore.getState().currentSessionId).toBe('fork');
     expect(window.location.search).toBe('?session=fork&message=msg');
-    expect(useBtwStore.getState().byParent.parent).toBeUndefined();
     await act(async () => openSession('previous'));
   }
 });
@@ -141,7 +137,6 @@ test('a PWA notification normalizes the fork URL and preserves one-step Back', a
   expect(useSessionUIStore.getState().currentSessionId).toBe('parent');
   expect(window.location.search).toBe('?session=parent');
   expect(entries.length).toBe(length + 1);
-  expect(useBtwStore.getState().byParent.parent?.collapsed).toBe(false);
   await back();
   expect(useSessionUIStore.getState().currentSessionId).toBe('previous');
   expect(window.location.search).toBe('?session=previous');
@@ -188,15 +183,13 @@ for (const source of ['initial route', 'PWA notification']) {
   });
 }
 
-test('the VS Code notification command selects the parent, expands its panel and opens chat', async () => {
+test('the VS Code notification command selects the parent and opens chat', async () => {
   let view: unknown;
   window.addEventListener('openchamber:navigate', (event) => { view = (event as CustomEvent).detail; });
-  useBtwStore.getState().setPanelState('parent', { collapsed: true });
   applyVSCodeSessionNavigation(vscodeSessionNavigationSchema.parse({ sessionId: ' fork ' }));
   await Promise.resolve();
   await Promise.resolve();
   expect(useSessionUIStore.getState().currentSessionId).toBe('parent');
-  expect(useBtwStore.getState().byParent.parent?.collapsed).toBe(false);
   expect(view).toEqual({ view: 'chat' });
   expect(vscodeSessionNavigationSchema.safeParse({ sessionId: ' ' }).success).toBe(false);
   expect(vscodeSessionNavigationSchema.safeParse(null).success).toBe(false);

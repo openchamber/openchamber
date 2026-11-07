@@ -18,6 +18,10 @@ to the shared UI domain model. Sync owns transcript membership and store writes.
   first message 404. Other errors stop the walk and propagate unchanged.
 - A runtime switch during a successful read also discards that response. Sync
   independently checks runtime identity and transcript membership before writing.
+- `generateSessionText` is the `/btw` transport: it sends the session id and
+  prompt to `session.generate`, forwards the caller's abort signal, and returns
+  the text. It must never send a model, agent, message history or attachments;
+  the server reads the settled context snapshot and writes nothing.
 - A send that switches the session's agent first reads the folder's agent list.
   Sync also passes the agent when the session already sits on one the folder's
   loaded catalog lacks, so that session gets the same check.

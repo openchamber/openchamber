@@ -6,7 +6,6 @@ import { pathToFileURL } from 'node:url';
 import { Window } from 'happy-dom';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
-import type { ModelSelection, Session } from '@/lib/opencode/model';
 import { createProjectIdFromPath } from '@/lib/projectId';
 
 /**
@@ -84,13 +83,11 @@ const responseFor = (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname.endsWith('/location')) {
     return Response.json(location);
   }
-  const sessionId = url.pathname.match(/\/session\/(ses_feature|ses_btw)$/)?.[1];
+  const sessionId = url.pathname.match(/\/session\/(ses_feature)$/)?.[1];
   if (sessionId) return Response.json({ data: {
     id: sessionId, projectID: 'project', location: { directory: WORKTREE }, title: sessionId,
     time: { created: 1, updated: 1 }, cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    metadata: { openchamber: sessionId === 'ses_btw'
-      ? { kind: 'btw', originalSessionID: 'ses_feature' } : { btwSessionID: 'ses_btw' } },
   } });
   if (url.pathname.endsWith('/session')) return Response.json({ data: [] });
   return Response.json({ location, data: [], cursor: {} });
@@ -126,12 +123,11 @@ const { useConfigStore } = await import('@/stores/useConfigStore');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useSelectionStore } = await import('@/sync/selection-store');
 const { useInputStore } = await import('@/sync/input-store');
-const { useUIStore } = await import('@/stores/useUIStore');
-const { shortcutRegistry } = await import('@/lib/shortcuts');
 const { getSyncChildStores } = await import('@/sync/sync-refs');
 const { useMessageQueueStore, createMessageQueueTarget, getMessageQueueKey } = await import('@/stores/messageQueueStore');
 const { opencodeClient } = await import('@/lib/opencode/client');
 const { useProjectsStore } = await import('@/stores/useProjectsStore');
+const { useBtwStore } = await import('@/stores/useBtwStore');
 const { OpenCode } = await import('@opencode/client');
 const { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } = await import('@/lib/runtime-switch');
 
@@ -152,6 +148,7 @@ beforeEach(() => {
   promptReads = [];
   promptsStatus = 200;
   sent = [];
+  useBtwStore.setState({ byParent: {} });
   useMessageQueueStore.setState({ queuedMessages: {}, sendingIds: {} });
   useDirectoryStore.setState({ currentDirectory: WORKTREE });
   useSessionUIStore.setState({
@@ -238,6 +235,14 @@ const submitInComposer = async (text: string, options?: { attachment: AttachedFi
     container.remove();
   }
 };
+
+test('/btw opens the side-question composer without sending a chat message', async () => {
+  const remaining = await submitInComposer('/btw');
+
+  expect(useBtwStore.getState().byParent['ses_feature']?.status).toBe('compose');
+  expect(remaining).toBe('');
+  expect(sent).toEqual([]);
+});
 
 test("sends the command with the prompts that apply in the session's directory", async () => {
   await submitInComposer('/workspace-review');
@@ -394,88 +399,3 @@ test('a new chat, which has no folder yet, reads the global prompts', async () =
 test('a project draft reads the prompts of the folder it opens in', async () => {
   expect(await promptDirectoryForDraft({ target: 'project', directoryOverride: '/repo' })).toBe('/repo');
 });
-
-const setupBtwCompaction = () => {
-  const parent: Session = {
-    id: 'ses_feature', projectID: 'project', directory: WORKTREE, title: 'Main',
-    model: { providerID: 'provider', id: 'old-model', variant: 'medium' },
-    metadata: { openchamber: { btwSessionID: 'ses_btw' } },
-    time: { created: 1, updated: 1 }, cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  };
-  getSyncChildStores().ensureChild(WORKTREE, { bootstrap: false }).setState({
-    session: [parent, {
-      ...parent, id: 'ses_btw', title: 'BTW',
-      model: { providerID: 'btw-provider', id: 'btw-model', variant: 'low' },
-      metadata: { openchamber: { kind: 'btw', originalSessionID: parent.id } },
-    }],
-  });
-  const selection = useSelectionStore.getState();
-  selection.saveSessionAgentSelection('ses_btw', 'plan');
-  selection.saveSessionModelSelection('ses_btw', 'btw-provider', 'btw-model');
-  selection.saveAgentModelVariantForSession('ses_btw', 'plan', 'btw-provider', 'btw-model', 'low');
-  useConfigStore.setState({ currentVariant: 'high', agents: [{
-    id: 'plan', name: 'plan', displayName: 'Plan', mode: 'primary', hidden: false,
-    request: { settings: {}, headers: {}, body: {} }, permissions: [],
-  }] });
-};
-
-test('the BTW favorite-model shortcut leaves the pick a form reply applies', async () => {
-  const favorites = [{ providerID: 'btw-provider', modelID: 'btw-model' }, { providerID: 'btw-provider', modelID: 'next-model' }];
-  const previousFavorites = useUIStore.getState().favoriteModels;
-  const providers = [{
-    id: 'btw-provider', name: 'BTW', activation: 'enabled' as const, package: 'btw-provider',
-    models: favorites.map(({ providerID, modelID }) => ({
-      id: `${providerID}/${modelID}`, providerID, modelID, name: modelID, enabled: true, status: 'active' as const,
-      capabilities: { tools: true, input: ['text'], output: ['text'] },
-      variants: [], time: { released: 0 }, cost: [], limit: { context: 1, output: 1 },
-    })),
-  }];
-  try {
-    await submitInComposer('', undefined, () => {
-      setupBtwCompaction();
-      useUIStore.setState({ favoriteModels: favorites });
-      useConfigStore.setState({ providers });
-    }, () => {
-      expect(useSelectionStore.getState().getSessionModelPick('ses_btw')).toBeNull();
-      shortcutRegistry.get('cycle_favorite_model_forward')?.(new window.KeyboardEvent('keydown'));
-    });
-
-    expect(useSelectionStore.getState().getSessionModelPick('ses_btw')).toEqual({ providerId: 'btw-provider', modelId: 'next-model' });
-  } finally {
-    useUIStore.setState({ favoriteModels: previousFavorites });
-    useConfigStore.setState({ providers: [] });
-  }
-});
-
-for (const switchFails of [false, true]) {
-  test(`BTW /compact keeps the main selection${switchFails ? ' and restores a failed command' : ''}`, async () => {
-    const calls: { method: string; id: string; model?: ModelSelection; directory?: string | null }[] = [];
-    const switchSpy = spyOn(opencodeClient, 'switchSessionModel').mockImplementation(async (id, model, directory) => {
-      calls.push({ method: 'switch', id, model, directory });
-      if (switchFails) throw new Error('switch refused');
-    });
-    const compactSpy = spyOn(opencodeClient, 'compactSession').mockImplementation(async (id, directory) => {
-      calls.push({ method: 'compact', id, directory });
-    });
-    const file = new File(['context'], 'context.txt', { type: 'text/plain' });
-    const attachment = { id: 'compact-context', file, filename: file.name, size: file.size,
-      dataUrl: 'data:text/plain;base64,Y29udGV4dA==', mimeType: file.type, source: 'local' as const };
-    try {
-      const remaining = await submitInComposer('/compact', undefined, setupBtwCompaction, () => {
-        expect(useInputStore.getState().composerAddress?.attachments?.sessionId).toBe('ses_btw');
-        useInputStore.getState().setAttachedFiles([attachment]);
-      });
-      expect(calls).toEqual([
-        { method: 'switch', id: 'ses_feature', model: { providerID: 'provider', id: 'model', variant: 'high' }, directory: WORKTREE },
-        ...(switchFails ? [] : [{ method: 'compact', id: 'ses_feature', directory: WORKTREE }]),
-      ]);
-      expect(remaining).toBe(switchFails ? '/compact' : '');
-      expect(useInputStore.getState().attachedFiles).toEqual([attachment]);
-      expect(sent).toEqual([]);
-    } finally {
-      switchSpy.mockRestore();
-      compactSpy.mockRestore();
-    }
-  });
-}

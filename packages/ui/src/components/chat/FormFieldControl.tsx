@@ -15,7 +15,7 @@ import { type FormValues, isAnswerableField, toFiniteNumber, valueOf } from './f
  * One form field as the user answers it: label, description, and the control
  * for its type (options as radios or checkboxes with an "Other" free-text
  * entry, a text box, a number box, a yes/no checkbox, or an external link).
- * Shared by the inline card (the BTW sheet) and the composer dock, so both
+ * Shared by the inline card and the composer dock, so both
  * answer a field the same way.
  */
 

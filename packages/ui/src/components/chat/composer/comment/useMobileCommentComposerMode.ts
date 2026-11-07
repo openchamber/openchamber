@@ -47,7 +47,7 @@ export function useMobileCommentComposerMode(options: MobileCommentModeOptions):
     );
     // Publish the committed composer's target before a selection-menu tap can
     // file anything. The menu must not derive a second target from the parent:
-    // an expanded `/btw` fork retargets the composer while the column keeps
+    // a draft transition retargets the composer while the column keeps
     // showing the parent session. Mobile's shell captures this scope when a
     // comment opens; desktop's floating input writes its draft into it.
     React.useLayoutEffect(() => {

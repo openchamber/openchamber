@@ -536,9 +536,6 @@ const countsLinkedReference = (predicate: string): boolean =>
     LINKED_REFERENCE_KINDS.some((kind) => predicate.includes(kind))
     || linkedReferenceValues().some((name) => predicate.includes(name));
 
-/** The condition the builder strips linked references with, read from the builder call itself. */
-const builderStripGuard = gateExpression(/references: (\w+) \? \[\] : linkedReferences/, 'the builder strip on linked references');
-
 describe('the composer send gate counts what the submission builder counts', () => {
     // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,
     // Vite worker URLs and every runtime store. The gate is guarded at the source, the way
@@ -564,8 +561,6 @@ describe('the composer send gate counts what the submission builder counts', () 
 
         for (const gate of gates) {
             expect(countsLinkedReference(gate)).toBe(true);
-            // The builder drops the linked context in that mode, so the gate must too.
-            expect(gate).toContain(builderStripGuard);
         }
     });
 

@@ -21,19 +21,18 @@ const sameComposerReferenceTarget = (a: ComposerReferenceHandoff, b: ComposerRef
 };
 
 /**
- * Where this composer can take a handoff. A pinned column and an expanded
- * `/btw` panel are not the main draft: a chip attached there would be written
- * to an identity nothing renders, so the handoff waits for the main composer.
+ * Where this composer can take a handoff. A pinned column is not the main
+ * draft: a chip attached there would be written to an identity nothing
+ * renders, so the handoff waits for the main composer.
  */
 export const resolveComposerReferenceHandoffTarget = (input: {
     columnPinned: boolean;
-    btwActive: boolean;
     currentSessionId: string | null;
     draftOpen: boolean;
     workDraftId: string | null;
     runtimeKey: string;
 }): ComposerReferenceHandoff | null => {
-    if (input.columnPinned || input.btwActive) return null;
+    if (input.columnPinned) return null;
     if (input.currentSessionId) return { kind: 'session', sessionId: input.currentSessionId };
     if (!input.draftOpen || !input.workDraftId) return null;
     return { kind: 'draft', workDraftId: input.workDraftId, runtimeKey: input.runtimeKey };

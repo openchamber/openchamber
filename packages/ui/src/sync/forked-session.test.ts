@@ -17,7 +17,6 @@ const deps = (overrides: Partial<ForkedSessionDeps> = {}) => {
   const reads: Array<[string, string | undefined]> = []
   const value: ForkedSessionDeps = {
     isKnown: () => false,
-    isCreatingLocally: () => false,
     getSession: async (sessionID, directory) => {
       reads.push([sessionID, directory])
       return fork
@@ -55,13 +54,6 @@ describe("applyForkedSession", () => {
   test("drops the read after a runtime switch", async () => {
     const d = deps({ isCurrent: () => false })
     await applyForkedSession(event, d.value)
-    expect(d.applied).toEqual([])
-  })
-
-  test("leaves a fork this client is creating through /btw to that flow", async () => {
-    const d = deps({ isCreatingLocally: (parentID) => parentID === "ses_parent" })
-    await applyForkedSession(event, d.value)
-    expect(d.reads).toEqual([])
     expect(d.applied).toEqual([])
   })
 

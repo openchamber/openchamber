@@ -181,7 +181,7 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
       const sessionDirectory = (sessions.find((entry) => entry.id === sessionId) as { directory?: string | null } | undefined)?.directory?.trim();
       const directory = sessionDirectory || parsed.data.directory || null;
       void sync.ensureSessionRenderable(sessionId);
-      // Same resolver as the main window: a `/btw` fork opens as its parent,
+      // Same resolver as the main window: a legacy `/btw` fork opens as its parent,
       // with that parent's panel showing.
       void openSession(sessionId, { directory, messageId: messageId || null });
       sessionBootstrappedRef.current = true;

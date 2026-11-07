@@ -187,11 +187,6 @@ export type SyntheticContextPart = {
   metadata?: ContextPartMetadata
 }
 
-type PendingBtwComposerRequest = {
-  parentSessionId: string
-  text: string
-}
-
 export type VSCodeActiveEditorFile = {
   filePath: string
   fileName: string
@@ -246,22 +241,20 @@ export type InputState = {
   pendingDraftSubmit: { draftId: number; text: string } | null
   /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
-  pendingBtwComposerRequest: PendingBtwComposerRequest | null
   attachedFiles: AttachedFile[]
   attachmentDraftKey: string | null
   attachmentDrafts: Map<string, AttachedFile[]>
   /**
    * Where the main chat's composer files what other surfaces hand it: inline
    * drafts (comments on files, diffs, plans, terminals, PRs, pages) and
-   * attachments (a comment's pasted image, an annotation's screenshot). A
-   * `/btw` fork moves the whole address with the composer. Null while no
-   * composer is mounted to publish it.
+   * attachments (a comment's pasted image, an annotation's screenshot). Null
+   * while no composer is mounted to publish it.
    */
   composerAddress: ComposerAddress | null
   setComposerAddress: (address: ComposerAddress | null) => void
   selectAttachmentDraft: (target: ChatDraftIdentity | null) => void
   restoreAttachedFiles: (files: AttachedFile[], target: ChatDraftIdentity | null) => void
-  /** Moves one draft's files onto another draft's, as when `/btw` takes over the typed prompt. */
+  /** Moves one draft's files onto another draft's, as when a fork takes over the typed prompt. */
   moveAttachedFiles: (from: ChatDraftIdentity | null, to: ChatDraftIdentity | null) => void
   activeEditorFile: VSCodeActiveEditorFile | null
 
@@ -274,8 +267,6 @@ export type InputState = {
   consumePendingDraftSubmit: (draftId: number | null) => string | null
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
-  requestBtwComposer: (request: PendingBtwComposerRequest) => void
-  consumePendingBtwComposerRequest: (parentSessionId: string | null) => PendingBtwComposerRequest | null
   setPendingSyntheticParts: (parts: SyntheticContextPart[] | null, target?: string | null) => void
   consumePendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
   getPendingSyntheticParts: (target?: string | null) => SyntheticContextPart[] | null
@@ -320,7 +311,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pendingPresetSubmit: null,
   pendingDraftSubmit: null,
   pendingGuestIssue: null,
-  pendingBtwComposerRequest: null,
   attachedFiles: [],
   attachmentDraftKey: null,
   attachmentDrafts: new Map(),
@@ -401,15 +391,6 @@ export const useInputStore = create<InputState>()((set, get) => ({
     if (pendingGuestIssue === null) return null
     set({ pendingGuestIssue: null })
     return pendingGuestIssue
-  },
-
-  requestBtwComposer: (request) => set({ pendingBtwComposerRequest: request }),
-
-  consumePendingBtwComposerRequest: (parentSessionId) => {
-    const request = get().pendingBtwComposerRequest
-    if (!request || request.parentSessionId !== parentSessionId) return null
-    set({ pendingBtwComposerRequest: null })
-    return request
   },
 
   setPendingSyntheticParts: (parts, target = null) => {

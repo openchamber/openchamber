@@ -12,7 +12,7 @@
  *
  * Two addresses are taken here, and nothing else. The column's own (`null` for
  * the main chat, its session id for a pinned chat) is what surfaces acting on
- * the chat on screen write — a `/btw` fork, being that same composer, takes
+ * the chat on screen write. A composer showing that session takes
  * them while it is expanded and the parent takes them once it is collapsed.
  * The session this composer shows is what a session-scoped restore writes (a
  * reverted message's prompt), so the fork takes its own and the parent's waits

@@ -1,7 +1,6 @@
 import type { Session } from '@/lib/opencode/model';
 import { getBtwOriginalSessionID } from '@/lib/sessionBtwMetadata';
 import { ensureGlobalSessionsLoaded, resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useBtwStore } from '@/stores/useBtwStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { setSessionOpener } from '@/sync/session-navigation';
 import { requestMessageFocus } from './messageFocus';
@@ -22,7 +21,6 @@ export type SessionOpenOptions = {
 type SessionOpenTarget = {
   sessionId: string;
   directory: string | null;
-  btwParentId: string | null;
 };
 
 const btwParentOf = (session: Session | undefined): string | null => {
@@ -31,10 +29,10 @@ const btwParentOf = (session: Session | undefined): string | null => {
 };
 
 /**
- * A `/btw` fork is a side transcript inside its parent's panel, not a session
- * of its own: no list shows it, so opening it by id strands the reader in a
- * transcript with no way back. Resolve it to its parent when that parent still
- * exists; a deleted parent leaves only the fork to open.
+ * A legacy `/btw` fork is hidden from every session list, so opening it by id
+ * strands the reader in a transcript with no way back. Resolve it to its
+ * parent when that parent still exists; a deleted parent leaves only the fork
+ * to open. New side questions never create a session.
  */
 const targetFor = (
   session: Session | undefined,
@@ -44,8 +42,8 @@ const targetFor = (
   const parentId = btwParentOf(session);
   const directory = session ? resolveGlobalSessionDirectory(session) : null;
   return parentId && parentExists(parentId)
-    ? { sessionId: parentId, directory, btwParentId: parentId }
-    : { sessionId: fallbackId, directory, btwParentId: null };
+    ? { sessionId: parentId, directory }
+    : { sessionId: fallbackId, directory };
 };
 
 const selectTarget = (target: SessionOpenTarget, directoryHint: string | null): void => {
@@ -54,9 +52,6 @@ const selectTarget = (target: SessionOpenTarget, directoryHint: string | null): 
   const directoryChanged = directory !== null && directory !== state.currentSessionDirectory;
   if (state.currentSessionId !== target.sessionId || directoryChanged) {
     state.setCurrentSession(target.sessionId, directory);
-  }
-  if (target.btwParentId) {
-    useBtwStore.getState().setPanelState(target.btwParentId, { collapsed: false });
   }
 };
 
@@ -81,7 +76,7 @@ export async function openSession(sessionId: string, options: SessionOpenOptions
 
   const initialStore = useGlobalSessionsStore.getState();
   const initialTarget = messageId
-    ? { sessionId: requestedId, directory: null, btwParentId: null }
+    ? { sessionId: requestedId, directory: null }
     : targetFor(initialStore.entityById.get(requestedId), requestedId, (parentId) => initialStore.entityById.has(parentId));
   selectTarget(initialTarget, options.directory?.trim() || null);
 
@@ -99,7 +94,7 @@ export async function openSession(sessionId: string, options: SessionOpenOptions
   if (!session) return;
 
   const target = messageId
-    ? { sessionId: requestedId, directory: resolveGlobalSessionDirectory(session), btwParentId: null }
+    ? { sessionId: requestedId, directory: resolveGlobalSessionDirectory(session) }
     : targetFor(session, requestedId, (parentId) => sessions.some((entry) => entry.id === parentId));
   if (target.sessionId !== latest.currentSessionId) {
     redirecting = true;

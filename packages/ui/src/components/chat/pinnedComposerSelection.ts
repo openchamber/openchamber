@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Session } from '@/lib/opencode/model';
-import type { BtwSelection } from '@/stores/useBtwStore';
+import type { ComposerSelection } from './composerSelection';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSession } from '@/sync/sync-context';
 
@@ -15,7 +15,7 @@ export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVa
     savedModel: { providerId: string; modelId: string } | null;
     savedVariant: string | null | undefined;
     record: Pick<Session, 'agent' | 'model'> | undefined;
-}): BtwSelection => {
+}): ComposerSelection => {
     const recordModel = record?.model?.providerID && record.model.id
         ? { providerId: record.model.providerID, modelId: record.model.id }
         : null;
@@ -30,14 +30,14 @@ export const resolvePinnedComposerSelection = ({ savedAgent, savedModel, savedVa
  * The model, agent and effort a pinned column's composer (a chat open in the
  * side panel) sends with. The app-wide current model belongs to the main
  * chat, so a pinned composer keeps its own: what was picked in it, saved for
- * its session the way the `/btw` composer saves its picks, and otherwise what
- * the session record names. Null outside a pinned column.
+ * its session, and otherwise what the session record names. Null outside a
+ * pinned column.
  */
 export const usePinnedComposerSelection = ({ enabled, sessionId, directory }: {
     enabled: boolean;
     sessionId: string | null;
     directory: string | null;
-}): BtwSelection | null => {
+}): ComposerSelection | null => {
     const key = enabled ? sessionId : null;
     const record = useSession(key ?? undefined, directory ?? undefined);
     const savedAgent = useSelectionStore((state) => (key ? state.sessionAgentSelections.get(key) ?? null : null));

@@ -87,7 +87,11 @@ describe('planLocalSlashCommand', () => {
             kind: 'prompt',
             attachedContext: 'send',
         });
-        expect(planLocalSlashCommand('/btw why?', 'normal', true, true)?.kind).toBe('prompt');
+        expect(planLocalSlashCommand('/btw why?', 'normal', true, true)).toEqual({
+            command: { name: 'btw', argument: 'why?' },
+            kind: 'action',
+            attachedContext: 'retain',
+        });
     });
 
     test('session actions stay on the normal send path for a new-session draft', () => {

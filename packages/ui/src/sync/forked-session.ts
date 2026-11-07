@@ -8,17 +8,15 @@ import type { Session } from "@/lib/opencode/model"
  * `session.created`, so it lands through the same path as any new session.
  *
  * The forking client already inserted the record from the fork response, so a
- * session this client knows is left alone. A fork this client is creating
- * itself (`/btw`, which marks the fork only after it exists) is left to that
- * flow. A failed read applies nothing; the next list read picks the fork up.
+ * session this client knows is left alone. A failed read applies nothing; the
+ * next list read picks the fork up.
  *
- * A patch for the fork can land while its record is being read (the `/btw`
+ * A patch for the fork can land while its record is being read (the local
  * marker does), and the global router drops patches for sessions it hasn't
  * seen, so the read record would be stale. Such a fork is read once more.
  */
 export type ForkedSessionDeps = {
   isKnown: (sessionID: string) => boolean
-  isCreatingLocally: (parentID: string) => boolean
   getSession: (sessionID: string, directory: string | undefined) => Promise<Session>
   isCurrent: () => boolean
   apply: (info: Session) => void
@@ -34,7 +32,7 @@ export async function applyForkedSession(
   event: { sessionID: string; parentID: string; directory: string | undefined },
   deps: ForkedSessionDeps,
 ): Promise<void> {
-  if (deps.isKnown(event.sessionID) || deps.isCreatingLocally(event.parentID)) return
+  if (deps.isKnown(event.sessionID)) return
   let info: Session
   try {
     patchedDuringRead.set(event.sessionID, false)

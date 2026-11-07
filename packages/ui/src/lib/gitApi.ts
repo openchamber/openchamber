@@ -696,7 +696,7 @@ const runStructuredGenerationInActiveSession = async ({
   const assistantText = await opencodeClient.generateSessionText(
     generationSession.sessionId,
     prompt,
-    trimmedDirectory.length > 0 ? trimmedDirectory : undefined,
+    trimmedDirectory.length > 0 ? { directory: trimmedDirectory } : undefined,
   );
 
   const parsedOutput = extractJsonObject(assistantText);

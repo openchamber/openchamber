@@ -94,7 +94,6 @@ const { useConfigStore } = await import('@/stores/useConfigStore');
 const { EditorView } = await import('@codemirror/view');
 const { openSessionDraft } = await import('@/components/session/sidebar/works/openSessionDraft');
 const { useInputStore } = await import('@/sync/input-store');
-const { useBtwStore } = await import('@/stores/useBtwStore');
 const { createChatDraftIdentity } = await import('@/lib/chatDraftPersistence');
 const { getRuntimeKey } = await import('@/lib/runtime-switch');
 const { readLinkedReferences, useLinkedReferenceDrafts } = await import('../composer/linkedReferenceDrafts');
@@ -132,7 +131,6 @@ const withComposer = async (run: (container: HTMLElement) => Promise<void>, pinn
   useProjectsStore.setState({ projects: [{ id: 'project', path: DIRECTORY }] });
   useSessionUIStore.setState({ newSessionDraft: { ...useSessionUIStore.getState().newSessionDraft, open: false } });
   selectSession('session-a');
-  useBtwStore.setState({ byParent: {} });
   useInputStore.setState({ pendingGuestIssue: null });
   useLinkedReferenceDrafts.setState({ drafts: new Map() });
   usePendingComposerReferences.setState({ pending: [] });
@@ -146,7 +144,7 @@ const withComposer = async (run: (container: HTMLElement) => Promise<void>, pinn
           <ChatInput />
           {pinnedSessionId ? (
             <ChatColumnSessionContext.Provider value={{ sessionId: pinnedSessionId, directory: DIRECTORY }}>
-              <ChatColumnActionsContext.Provider value={{ pinned: true, openSession: () => {}, openTimelineDialog: () => {}, focusInput: () => {} }}>
+              <ChatColumnActionsContext.Provider value={{ pinned: true, ownerId: 'pinned', openSession: () => {}, openTimelineDialog: () => {}, focusInput: () => {} }}>
                 <ChatInput />
               </ChatColumnActionsContext.Provider>
             </ChatColumnSessionContext.Provider>
@@ -183,37 +181,6 @@ test('picker confirmation keeps its source draft when context resolves after A t
     expect(readLinkedReferences(identity('session-b'))).toEqual([]);
     expect(container.textContent).not.toContain(issue.title);
     await act(async () => selectSession('session-a'));
-    expect(container.textContent).toContain(issue.title);
-  });
-});
-
-test('a pending guest waits through expanded btw and appears on the parent after collapse', async () => {
-  await withComposer(async (container) => {
-    await act(async () => useBtwStore.getState().setPanelState('session-a', { pending: true }));
-    expect(container.querySelector('[data-btw-composer="true"]')).not.toBeNull();
-    const guest = { providerId: 'extension', id: 'EXT-7', title: 'Deferred guest', url: 'https://example.com/7' };
-    await act(async () => useInputStore.getState().setPendingGuestIssue(guest));
-    expect(useInputStore.getState().pendingGuestIssue).toEqual(guest);
-    expect(useLinkedReferenceDrafts.getState().drafts.size).toBe(0);
-    await act(async () => useBtwStore.getState().setPanelState('session-a', { collapsed: true }));
-    expect(useInputStore.getState().pendingGuestIssue).toBeNull();
-    expect(readLinkedReferences(identity('session-a'))).toMatchObject([{ kind: 'guest', id: 'EXT-7' }]);
-    expect(useLinkedReferenceDrafts.getState().drafts.size).toBe(1);
-    expect(container.textContent).toContain(guest.title);
-  });
-});
-
-test('a session handoff waits for the parent while btw owns the composer', async () => {
-  await withComposer(async (container) => {
-    await act(async () => useBtwStore.getState().setPanelState('session-a', { pending: true }));
-    await act(async () => usePendingComposerReferences.getState().push([{
-      kind: 'repository-issue', provider: 'github', number: 7, title: issue.title, url: issue.url, contextText: 'Context',
-    }], { kind: 'session', sessionId: 'session-a' }));
-    expect(usePendingComposerReferences.getState().pending).toHaveLength(1);
-    expect(useLinkedReferenceDrafts.getState().drafts.size).toBe(0);
-    await act(async () => useBtwStore.getState().setPanelState('session-a', { collapsed: true }));
-    expect(usePendingComposerReferences.getState().pending).toHaveLength(0);
-    expect(readLinkedReferences(identity('session-a'))).toMatchObject([{ kind: 'repository-issue', number: 7 }]);
     expect(container.textContent).toContain(issue.title);
   });
 });

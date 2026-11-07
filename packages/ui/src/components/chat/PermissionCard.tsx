@@ -14,9 +14,8 @@ import { permissionFilePreviewsSchema } from './permissionFilePreviews';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo, type ShortcutActionId } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
 import { toolFileDiffs } from '@/lib/opencode/tools';
-import { getPermissionToolPresentation, getToolDisplayName } from './permissionToolPresentation';
+import { getToolDisplayName } from './permissionToolPresentation';
 import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission, type PermissionTarget } from './permissionSummary';
-import { usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
 
 const PERMISSION_BASH_CUSTOM_STYLE: React.CSSProperties = {
   margin: 0,
@@ -47,11 +46,6 @@ const PERMISSION_JSON_CUSTOM_STYLE: React.CSSProperties = {
   background: 'color-mix(in srgb, var(--muted) 30%, transparent)',
   borderRadius: '0.25rem',
 };
-
-interface PermissionCardProps {
-  permission: PermissionRequest;
-  onResponse?: (response: 'once' | 'always' | 'reject') => void;
-}
 
 const SAFETY_KIND_LABEL_KEYS = new Map<string, I18nKey>([
   ['read_only', 'routing.safetyKind.readOnly'],
@@ -447,50 +441,6 @@ export const PermissionActions: React.FC<{
           <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
         </div>
       )}
-    </div>
-  );
-};
-
-/** The inline card the BTW sheet shows for its child session's requests. */
-export const PermissionCard: React.FC<PermissionCardProps> = ({ permission, onResponse }) => {
-  const { t } = useI18n();
-  const { isResponding, hasResponded, respond } = usePermissionResponse(permission, onResponse);
-  const isFromSubagent = usePermissionFromSubagent(permission);
-  const tool = getPermissionToolPresentation(permission);
-
-  if (hasResponded) {
-    return null;
-  }
-
-  return (
-    <div className="group w-full pt-0 pb-2">
-      <div className="chat-column">
-        <div className="-mt-1 border border-edge-muted rounded-xl bg-muted/10">
-          <div className="px-2 py-1.5 border-b border-edge-muted bg-muted/5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Icon name="question" className="h-3.5 w-3.5 text-[var(--status-warning)]" />
-                <span className="typography-meta font-medium text-muted-foreground">
-                  {t('chat.permissionCard.title')}
-                </span>
-                {isFromSubagent ? (
-                  <span className="typography-micro text-muted-foreground px-1.5 py-0.5 rounded bg-foreground/5">
-                    {t('chat.questionCard.fromSubagent')}
-                  </span>
-                ) : null}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {tool.icon}
-                <span className="typography-meta text-muted-foreground font-medium">{tool.name}</span>
-              </div>
-            </div>
-          </div>
-
-          <PermissionRequestContent permission={permission} />
-
-          <PermissionActions permission={permission} isResponding={isResponding} onRespond={(response) => void respond(response)} variant="inline" />
-        </div>
-      </div>
     </div>
   );
 };

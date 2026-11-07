@@ -36,20 +36,8 @@ export const useChatSessionSelection = (): ChatColumnSession => {
   );
 };
 
-/**
- * The store directory of a transcript nested in a column that renders from
- * another store: a `/btw` fork sits in its parent's column and reads its
- * records from the fork's directory. Everything else in that transcript still
- * acts on the column's session, so this stays apart from the column context.
- */
-export const ChatTranscriptDirectoryContext = React.createContext<string | null>(null);
-
 /** The directory of the store the transcript around this component renders from. */
-export const useChatTranscriptDirectory = (): string | null => {
-  const nested = React.useContext(ChatTranscriptDirectoryContext);
-  const { directory } = useChatSessionSelection();
-  return nested ?? directory;
-};
+export const useChatTranscriptDirectory = (): string | null => useChatSessionSelection().directory;
 
 /**
  * What a column does on behalf of the chat inside it. The app's main chat
@@ -59,6 +47,8 @@ export const useChatTranscriptDirectory = (): string | null => {
  */
 export type ChatColumnActions = {
   pinned: boolean;
+  /** Stable identity of the composer column, so transient dialogs open once. */
+  ownerId: string;
   openSession: (sessionId: string, directory: string | null) => void;
   openTimelineDialog: () => void;
   /** Focuses this column's composer, never another chat's. */
@@ -67,6 +57,7 @@ export type ChatColumnActions = {
 
 const MAIN_COLUMN_ACTIONS: ChatColumnActions = {
   pinned: false,
+  ownerId: 'main',
   openSession: (sessionId, directory) => useSessionUIStore.getState().setCurrentSession(sessionId, directory),
   openTimelineDialog: () => useUIStore.getState().setTimelineDialogOpen(true),
   focusInput: focusChatInput,

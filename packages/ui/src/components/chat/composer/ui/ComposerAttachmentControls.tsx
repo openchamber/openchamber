@@ -45,11 +45,6 @@ type ComposerAttachmentControlsProps = {
     onOpenMobileSheet?: () => void;
     attachGuests?: readonly GuestAttachItem[];
     onOpenGuestAttach?: (guestId: string) => void;
-    /**
-     * Only offer local files. The `/btw` composer takes files but none of the
-     * linked context (issues, PRs, guests), which stays with the main draft.
-     */
-    filesOnly?: boolean;
 };
 
 export const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
@@ -65,14 +60,13 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         onOpenSettings,
         attachGuests,
         onOpenGuestAttach,
-        filesOnly = false,
     } = props;
     const repositoryDescriptor = useSourceControlProvider(repositoryProvider);
 
     return (
         <div className="flex items-center gap-x-1.5">
             <div className="relative inline-flex">
-                {props.onOpenMobileSheet && !filesOnly ? (
+                {props.onOpenMobileSheet ? (
                     <button
                         type="button"
                         className={footerIconButtonClass}
@@ -92,7 +86,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                     >
                         <Icon name="add-circle" className={cn(iconSizeClass, 'text-current')} />
                     </button>
-                ) : isVSCode || filesOnly ? (
+                ) : isVSCode ? (
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <button
@@ -194,7 +188,6 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     && prev.onMenuOpenChange === next.onMenuOpenChange
     && prev.onOpenMobileSheet === next.onOpenMobileSheet
     && prev.onOpenGuestAttach === next.onOpenGuestAttach
-    && prev.filesOnly === next.filesOnly
     // The project's host is known only once its binding loads, so the link
     // item must follow it rather than keep the GitHub default it first drew.
     && prev.repositoryProvider === next.repositoryProvider

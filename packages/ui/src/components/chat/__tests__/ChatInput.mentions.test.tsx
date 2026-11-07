@@ -206,7 +206,7 @@ const mountComposer = async (run: (composer: Composer) => Promise<void>, options
       <RuntimeAPIContext.Provider value={runtimeAPIs}><ThemeSystemProvider><I18nProvider>
         <SyncProvider sdk={sdk} directory={DIRECTORY}>
           <ChatColumnSessionContext.Provider value={options?.pinned || options?.column ? { sessionId, directory: DIRECTORY } : null}>
-            <ChatColumnActionsContext.Provider value={{ pinned: Boolean(options?.pinned), openSession: () => {}, openTimelineDialog: () => {}, focusInput: () => {} }}>
+            <ChatColumnActionsContext.Provider value={{ pinned: Boolean(options?.pinned), ownerId: 'main', openSession: () => {}, openTimelineDialog: () => {}, focusInput: () => {} }}>
               <ChatInput />
             </ChatColumnActionsContext.Provider>
           </ChatColumnSessionContext.Provider>

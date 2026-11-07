@@ -9,8 +9,8 @@ export function hasOpenDropdown(root: ParentNode = document): boolean {
   return Boolean(root.querySelector(OPEN_DROPDOWN_SELECTOR));
 }
 
-export function hasActiveBtwComposer(root: ParentNode = document): boolean {
-  return Boolean(root.querySelector('[data-btw-composer="true"]'));
+export function hasActiveBtwDialog(root: ParentNode = document): boolean {
+  return Boolean(root.querySelector('[data-btw-dialog="true"]'));
 }
 
 export function shouldStopDropdownImeEscape(

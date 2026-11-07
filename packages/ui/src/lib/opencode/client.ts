@@ -1877,9 +1877,16 @@ class OpencodeService {
   }
 
   /** Transient text generated from the session's context; never enters history. */
-  async generateSessionText(sessionId: string, prompt: string, directory?: string | null): Promise<string> {
+  async generateSessionText(
+    sessionId: string,
+    prompt: string,
+    options?: { directory?: string | null; signal?: AbortSignal },
+  ): Promise<string> {
     const result = await call("session.generate", () =>
-      this.clientFor(directory).session.generate({ sessionID: sessionId, prompt }),
+      this.clientFor(options?.directory).session.generate(
+        { sessionID: sessionId, prompt },
+        options?.signal ? { signal: options.signal } : undefined,
+      ),
     )
     return result.text
   }

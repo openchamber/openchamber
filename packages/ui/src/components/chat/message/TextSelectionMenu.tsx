@@ -1,5 +1,6 @@
 import React from 'react';
 import { createChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { openBtwComposer } from '@/lib/btw';
 import { createPortal, flushSync } from 'react-dom';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChatColumnActions, useChatSessionSelection } from '../chatColumnSession';
@@ -176,11 +177,10 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   const isMenuVisibleRef = React.useRef(false);
   const activeAddToChatCleanupRef = React.useRef<(() => void) | null>(null);
   const currentSessionId = useChatSessionSelection().sessionId;
-  const { focusInput: focusColumnInput, pinned: columnPinned } = useChatColumnActions();
+  const { focusInput: focusColumnInput, pinned: columnPinned, ownerId: composerOwnerId } = useChatColumnActions();
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const addContextDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const setPendingInputText = useInputStore((state) => state.setPendingInputText);
-  const requestBtwComposer = useInputStore((state) => state.requestBtwComposer);
   const isMobile = useUIStore((state) => state.isMobile);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const projects = useProjectsStore((state) => state.projects);
@@ -262,7 +262,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     }
   }, [hideMenu, isMobile, mobileCommentActive]);
 
-  // The boundary is the scroller holding the message (the chat, or the btw
+  // The boundary is the scroller holding the message (the chat, or the
   // panel body), not the message itself: bounding by the message pushed the
   // menu onto selections in its first lines (#3596).
   const getDesktopPosition = React.useCallback((rect: DOMRect) => {
@@ -654,16 +654,15 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
   const handleAskOpenChamber = React.useCallback(() => {
     if (!currentSessionId || !selectedTextMarkdown) return;
-    requestBtwComposer({
-      parentSessionId: currentSessionId,
-      text: wrapMarkdownSelectionForChat(selectedTextMarkdown),
-    });
+    openBtwComposer(
+      currentSessionId,
+      `${composerOwnerId}:${currentSessionId}`,
+      effectiveDirectory ?? currentSessionDirectory ?? null,
+      wrapMarkdownSelectionForChat(selectedTextMarkdown),
+    );
     hideMenu();
     window.getSelection()?.removeAllRanges();
-    queueMicrotask(() => {
-      focusColumnInput();
-    });
-  }, [currentSessionId, focusColumnInput, hideMenu, requestBtwComposer, selectedTextMarkdown]);
+  }, [composerOwnerId, currentSessionDirectory, effectiveDirectory, currentSessionId, hideMenu, selectedTextMarkdown]);
 
   // The selection is read word for word: the reader picked exactly what to
   // hear. While a reading of this message plays the same button stops it, so
@@ -734,7 +733,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
   // Mobile: no floating input here. The quote is handed to this column's
   // composer, which swaps its input for the comment shell. The scope is
-  // captured from the visible composer, including BTW. Switching its target
+  // captured from the visible composer. Switching its target
   // closes the comment instead of re-targeting. The menu keeps the quoted range
   // highlighted until the comment ends.
   // flushSync mounts and focuses the comment editor while the tap's call

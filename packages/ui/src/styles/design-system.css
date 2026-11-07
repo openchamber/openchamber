@@ -840,7 +840,7 @@ html[data-glass-redraw-guard] body::before {
 
 /* The recap hint lies under the latest answer's footer, over the band the
    transcript keeps above the composer (MessageBody). A panel docked there
-   (queue, suggestion, BTW) takes that band, so the hint hides while any panel
+   (queue, suggestion) takes that band, so the hint hides while any panel
    is mounted. See ComposerFloatingPanel. */
 [data-composer-bound][data-floating-panel] .oc-recap-hint {
   opacity: 0;

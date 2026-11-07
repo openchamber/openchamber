@@ -18,9 +18,9 @@ window focus, acknowledgement deadlines, and document-navigation fallback.
   an old page without a listener, and an expired request cannot claim acceptance.
 - Acceptance does not wait for network-backed session resolution. The existing
   session-link owner resolves the directory and guards against later selection.
-- Session-only `/btw` links open the existing parent and expand its panel. Cold
-  resolution replaces the intermediate fork history entry; notification routing
-  and Back/Forward normalize the URL to the selected parent. Message links keep
+- Legacy session-only `/btw` links open the existing parent. Cold resolution
+  replaces the intermediate fork history entry; notification routing and
+  Back/Forward normalize the URL to the selected parent. Message links keep
   their named transcript, and a missing parent leaves the fork accessible.
 - Back/Forward during route loading retains the latest requested route. Only
   its completed application may normalize the current history entry.
@@ -34,13 +34,14 @@ window focus, acknowledgement deadlines, and document-navigation fallback.
 
 ## Decisions
 
-### Why a `/btw` fork opens its parent
+### Why a legacy `/btw` fork opens its parent
 
-A fork is hidden from session lists and rendered inside its parent's panel.
-Opening it alone strands the reader outside that panel. Session-only routes,
-notifications, toasts, desktop session events in both windows, and native deep
-links therefore use `openSession` to resolve the parent and expand its panel.
-Message links retain the fork because their message lives in that transcript.
+An old fork is hidden from session lists. Opening it alone strands the reader
+in a transcript with no way back. Session-only routes, notifications, toasts,
+desktop session events in both windows, and native deep links therefore use
+`openSession` to resolve the parent. New side questions never create a
+session. Message links retain the fork because their message lives in that
+transcript.
 
 ### Why acknowledged app navigation and not unconditional document navigation
 

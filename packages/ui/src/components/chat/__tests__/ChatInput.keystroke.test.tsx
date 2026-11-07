@@ -323,7 +323,6 @@ const TEXT_INDEPENDENT_CHILDREN = [
   'ComposerAutocompletePopupsView',
   'PermissionDockView',
   'FormDockView',
-  'BtwPanelView',
   'DraftTargetSelectorsView',
   'DraftPresetChipsView',
   'ReviewFlowDialogView',

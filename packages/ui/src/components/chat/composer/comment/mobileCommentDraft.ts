@@ -81,7 +81,7 @@ export const isSameMobileCommentScope = (a: MobileCommentScope, b: MobileComment
 export interface MobileCommentDraftController {
     getState(): MobileCommentDraft;
     subscribe(listener: () => void): () => void;
-    /** The mounted composer publishes its target, including pending BTW drafts. */
+    /** The mounted composer publishes its target. */
     setScope(scope: MobileCommentScope | null): void;
     /** That target as published: where a comment or quote taken here has to land. */
     getScope(): MobileCommentScope | null;
