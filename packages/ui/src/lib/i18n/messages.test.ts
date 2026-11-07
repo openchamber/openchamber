@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { dict as enDict } from './messages/en';
+import { getCustomizableShortcutActions } from '@/lib/shortcuts';
 import { dict as esDict } from './messages/es';
 import { dict as deDict } from './messages/de';
 import { dict as frDict } from './messages/fr';
@@ -122,6 +123,13 @@ describe('i18n dictionaries', () => {
       }
     }
   });
+  test('every customizable shortcut has an English label', () => {
+    const missing = getCustomizableShortcutActions()
+      .map((action) => action.settingsLabelKey)
+      .filter((key) => !(key in enDict));
+    expect(missing).toEqual([]);
+  });
+
   test('all locales stay in key parity with english', () => {
     const englishKeys = Object.keys(enDict).sort();
 

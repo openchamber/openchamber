@@ -20,6 +20,7 @@ export type { ShortcutHandler } from './registry';
 export {
   getCustomizableShortcutActions,
   getShortcutBindingConflicts,
+  getEffectiveShortcutBinding,
   getEffectiveShortcutCombo,
   getEffectiveShortcutPrefix,
   getNativeMenuShortcutCombos,
@@ -27,6 +28,7 @@ export {
   isShortcutAvailable,
   isSingleChordShortcut,
   SHORTCUT_SCHEMA,
+  shortcutMatchesRecordedCombo,
 } from './schema';
 export type {
   CustomizableShortcutAction,

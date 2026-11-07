@@ -311,6 +311,76 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label',
     },
+    {
+      id: 'collapse_sessions_all',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.collapse_sessions_all.label',
+    },
+    {
+      id: 'expand_sessions_all',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.expand_sessions_all.label',
+    },
+    {
+      id: 'toggle_chats_section',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_chats_section.label',
+    },
+    {
+      id: 'toggle_pinned_section',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_pinned_section.label',
+    },
+    {
+      id: 'toggle_work_section',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_work_section.label',
+    },
+    {
+      id: 'toggle_detailed_rows',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_detailed_rows.label',
+    },
+    {
+      id: 'toggle_list_grouping',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_list_grouping.label',
+    },
+    {
+      id: 'toggle_project_display',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_project_display.label',
+    },
+    {
+      id: 'cycle_project_sort',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.cycle_project_sort.label',
+    },
+    {
+      id: 'toggle_selection_mode',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey:
+        'settings.openchamber.keyboardShortcuts.action.toggle_selection_mode.label',
+    },
   ],
   navigation: [
     {
@@ -397,6 +467,90 @@ const SHORTCUT_GROUPS = {
       defaultBinding: 'mod+k c',
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_theme.label',
+    },
+    {
+      id: 'open_archive',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_archive.label',
+    },
+    {
+      id: 'open_notes',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_notes.label',
+    },
+    {
+      id: 'open_todos',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_todos.label',
+    },
+    {
+      id: 'show_context_usage',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.show_context_usage.label',
+    },
+    {
+      id: 'open_overview',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_overview.label',
+    },
+    {
+      id: 'show_opencode_status',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.show_opencode_status.label',
+    },
+    {
+      id: 'open_new_worktree_dialog',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_new_worktree_dialog.label',
+    },
+    {
+      id: 'add_project',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.add_project.label',
+    },
+    {
+      id: 'reload_ui',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.reload_ui.label',
+    },
+    {
+      id: 'restart_opencode',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.restart_opencode.label',
+    },
+    {
+      id: 'pin_current_session',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.pin_current_session.label',
+    },
+    {
+      id: 'copy_current_session_id',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.copy_current_session_id.label',
+    },
+    {
+      id: 'toggle_work_current_session',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_work_current_session.label',
+    },
+    {
+      id: 'open_multi_run',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.open_multi_run.label',
     },
     {
       id: 'new_window',
