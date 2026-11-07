@@ -1118,6 +1118,59 @@ describe.runIf(canRunGit())('diffs for status paths that are not plain files', (
 // ---------------------------------------------------------------------------
 
 describe('getStatus', () => {
+  it('names a rename\'s source path, and only both paths read as a rename diff', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'old-name.txt'), 'alpha\nbeta\n');
+    runGit(repo, ['add', 'old-name.txt']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    runGit(repo, ['mv', 'old-name.txt', 'new-name.txt']);
+
+    const status = await getStatus(repo);
+    expect(status.files).toEqual([
+      { path: 'new-name.txt', index: 'R', working_dir: ' ', previousPath: 'old-name.txt' },
+    ]);
+
+    // The destination alone reads as a new file; naming both sides reads as a rename.
+    expect(await getDiff(repo, { path: 'new-name.txt', staged: true })).toContain('new file mode');
+    const patch = await getDiff(repo, { path: 'new-name.txt', staged: true, previousPath: 'old-name.txt' });
+    expect(patch).toContain('rename from old-name.txt');
+    expect(patch).toContain('rename to new-name.txt');
+
+    const fileDiff = await getFileDiff(repo, { path: 'new-name.txt', previousPath: 'old-name.txt' });
+    expect(fileDiff.original).toBe('alpha\nbeta\n');
+    expect(fileDiff.modified).toBe('alpha\nbeta\n');
+  });
+
+  it('keeps the old side of a staged rename that was edited in the working tree', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    const before = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01]);
+    const after = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x02]);
+    fs.writeFileSync(path.join(repo, 'logo.png'), before);
+    runGit(repo, ['add', 'logo.png']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    runGit(repo, ['mv', 'logo.png', 'logo-mark.png']);
+    fs.writeFileSync(path.join(repo, 'logo-mark.png'), after);
+
+    const status = await getStatus(repo);
+    expect(status.files).toEqual([
+      { path: 'logo-mark.png', index: 'R', working_dir: 'M', previousPath: 'logo.png' },
+    ]);
+
+    const fileDiff = await getFileDiff(repo, { path: 'logo-mark.png', previousPath: 'logo.png' });
+    expect(fileDiff.original).toBe(`data:image/png;base64,${before.toString('base64')}`);
+    expect(fileDiff.modified).toBe(`data:image/png;base64,${after.toString('base64')}`);
+  });
+
   it('handles repositories without upstream tracking', async () => {
     if (!canRunGit()) return;
 

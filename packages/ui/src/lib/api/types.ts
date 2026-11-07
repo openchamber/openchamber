@@ -211,6 +211,8 @@ interface GitStatusFile {
   path: string;
   index: string;
   working_dir: string;
+  /** Set on a rename: the path this file came from. */
+  previousPath?: string;
 }
 
 export interface GitMergeInProgress {
@@ -306,6 +308,8 @@ export interface GetGitDiffOptions {
   path: string;
   staged?: boolean;
   contextLines?: number;
+  /** A rename's source path. */
+  previousPath?: string;
 }
 
 export interface GetGitDiffsOptions {
@@ -334,6 +338,8 @@ export interface GetGitRangeDiffOptions {
   path?: string;
   contextLines?: number;
   includeWorkingTree?: boolean;
+  /** A rename's source path. */
+  previousPath?: string;
 }
 
 export interface GetGitRangeFilesOptions {
@@ -346,6 +352,8 @@ export interface GetGitRangeFilesOptions {
 export interface GitRangeFileEntry {
   path: string;
   status: string;
+  /** A rename's source path. */
+  previousPath?: string;
   /**
    * Working-tree listings only: changes exactly when this file's patch can
    * change (merge base moved, or the file was written). Absent elsewhere.
@@ -369,6 +377,8 @@ export interface GitFileDiffResponse {
 export interface GetGitFileDiffOptions {
   path: string;
   staged?: boolean;
+  /** A rename's source path. */
+  previousPath?: string;
 }
 
 export interface GitBranchDetails {

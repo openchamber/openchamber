@@ -789,7 +789,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       setDiffLoadError('Diff is unavailable on this runtime');
       return;
     }
-    void git.getGitFileDiff(currentDirectory, { path: route.path, staged: route.staged || undefined })
+    const previousPath = changeEntries.find((entry) => entry.path === route.path)?.previousPath;
+    void git.getGitFileDiff(currentDirectory, { path: route.path, staged: route.staged || undefined, previousPath })
       .then((response) => {
         if (cancelled) return;
         setDiff(currentDirectory, cacheKey, {
@@ -816,7 +817,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, diffRetryNonce, fetchStatus, getDiff, git, route, setDiff, visible]);
+  }, [changeEntries, currentDirectory, diffRetryNonce, fetchStatus, getDiff, git, route, setDiff, visible]);
 
   const handleSyncAction = async (action: Exclude<SyncAction, null>, remote?: GitRemote, forceChoose = false) => {
     if (!currentDirectory) return;
@@ -1228,6 +1229,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return (
       <MobileDiffDetail
         path={route.path}
+        previousPath={selectedFileEntry?.previousPath}
         diff={selectedDiff}
         staged={route.staged}
         fileExists={Boolean(selectedFileEntry)}
@@ -1634,6 +1636,7 @@ const MobileCleanState: React.FC = () => {
 
 const MobileDiffDetail: React.FC<{
   path: string;
+  previousPath?: string;
   subtitle?: string;
   diff: MobileDiffData | null;
   staged?: boolean;
@@ -1647,7 +1650,7 @@ const MobileDiffDetail: React.FC<{
   contextLoading?: boolean;
   /** The comparison this file comes from, for comments; absent for uncommitted changes. */
   commentOrigin?: DiffCommentOrigin;
-}> = ({ path, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
+}> = ({ path, previousPath, subtitle, diff, staged = false, fileExists, unavailableReason = null, error = null, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading, commentOrigin }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
   const wholeFileComment = useWholeFileComment({ fileLabel: path, origin: commentOrigin });
@@ -1656,6 +1659,7 @@ const MobileDiffDetail: React.FC<{
   const lastSlash = trimmedPath.lastIndexOf('/');
   const fileName = trimmedPath.slice(lastSlash + 1);
   const folder = lastSlash > 0 ? trimmedPath.slice(0, lastSlash) : null;
+  const location = previousPath ? `${previousPath} → ${folder ?? fileName}` : folder;
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
@@ -1669,11 +1673,11 @@ const MobileDiffDetail: React.FC<{
           <Icon name="arrow-left" className="size-5" />
         </button>
         {/* The file reads first and whole; where it lives and what it is compared in follow. */}
-        <div className="min-w-0 flex-1 px-1" title={path}>
+        <div className="min-w-0 flex-1 px-1" title={previousPath ? `${previousPath} → ${path}` : path}>
           <h2 dir="ltr" className={cn('oc-ui-start-align truncate', MOBILE_HEADER_TITLE_CLASS)}>{fileName}</h2>
           <p className="flex min-w-0 items-baseline gap-1.5 typography-micro text-muted-foreground">
-            {folder ? <span dir="ltr" className="oc-ui-start-align min-w-0 truncate">{folder}</span> : null}
-            {folder && subtitle ? <span aria-hidden className="shrink-0 opacity-60">·</span> : null}
+            {location ? <span dir="ltr" className="oc-ui-start-align min-w-0 truncate">{location}</span> : null}
+            {location && subtitle ? <span aria-hidden className="shrink-0 opacity-60">·</span> : null}
             {subtitle ? <span className="min-w-0 max-w-full shrink-0 truncate">{subtitle}</span> : null}
           </p>
         </div>
@@ -1766,7 +1770,7 @@ const MobileDiffDetail: React.FC<{
   );
 };
 
-type ComparisonFileListItem = { path: string; status: string; insertions: number; deletions: number };
+type ComparisonFileListItem = { path: string; status: string; insertions: number; deletions: number; previousPath?: string };
 
 const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSelect: (path: string) => void }> = ({ files, onSelect }) => {
   const { t } = useI18n();
@@ -1788,7 +1792,7 @@ const MobileComparisonFileList: React.FC<{ files: ComparisonFileListItem[]; onSe
             >
               <span className="w-4 shrink-0 text-center typography-micro font-semibold uppercase" style={{ color: statusColor }} aria-label={statusLabel}>{file.status}</span>
               <FileTypeIcon filePath={file.path} className="size-3.5 shrink-0" />
-              <ChangedPathLabel path={file.path} nameFirst className="flex-1 typography-ui-label" />
+              <ChangedPathLabel path={file.path} from={file.previousPath} nameFirst className="flex-1 typography-ui-label" />
               {(file.insertions > 0 || file.deletions > 0) && <ChangeStats insertions={file.insertions} deletions={file.deletions} hideZero />}
             </button>
           </li>;

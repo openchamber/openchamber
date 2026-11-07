@@ -1883,6 +1883,7 @@ export const dict = {
   'diffView.change.new': 'Nieuw bestand',
   'diffView.change.deleted': 'Verwijderd bestand',
   'diffView.change.renamed': 'Hernoemd bestand',
+  'diffView.change.renamedFrom': 'Hernoemd van {from} — inhoud ongewijzigd',
   'diffView.change.copied': 'Gekopieerd bestand',
   'diffView.change.modified': 'Gewijzigd bestand',
   'diffView.change.conflicted': 'Bestand met conflicten',

@@ -1807,6 +1807,7 @@ export const dict = {
   'diffView.change.new': 'ملف جديد',
   'diffView.change.deleted': 'ملف محذوف',
   'diffView.change.renamed': 'ملف أُعيدت تسميته',
+  'diffView.change.renamedFrom': 'أُعيدت تسميته من {from} — المحتوى دون تغيير',
   'diffView.change.copied': 'ملف منسوخ',
   'diffView.change.modified': 'ملف معدّل',
   'diffView.change.conflicted': 'ملف به تعارض',
