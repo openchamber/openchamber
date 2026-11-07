@@ -114,6 +114,7 @@ import {
 import {
   buildLinuxInstalledApps,
   buildLinuxOpenSpecs,
+  runLinuxSpecChain,
   fetchLinuxAppIcons,
   filterLinuxInstalledApps,
   readLinuxDesktopEntries,
@@ -3952,52 +3953,6 @@ const buildPlatformInstalledApps = async (apps) => {
   return buildInstalledApps(apps);
 };
 
-const spawnDetachedLinux = (program, args) => new Promise((resolve, reject) => {
-  const child = spawn(program, args, {
-    detached: true,
-    stdio: 'ignore',
-  });
-  let settled = false;
-  const finish = (callback, value) => {
-    if (settled) return;
-    settled = true;
-    callback(value);
-  };
-  child.once('error', (error) => finish(reject, error));
-  child.once('spawn', () => {
-    child.unref();
-    finish(resolve);
-  });
-});
-
-const runLinuxSpecChain = async (specs, appName) => {
-  if (!Array.isArray(specs) || specs.length === 0) {
-    throw new Error(`Failed to open in ${appName}: no launch candidates`);
-  }
-
-  const failures = [];
-  for (const spec of specs) {
-    if (spec.kind === 'default') {
-      if (spec.targetKind === 'file') {
-        shell.showItemInFolder(spec.targetPath);
-        return;
-      }
-      const errorMessage = await shell.openPath(spec.targetPath);
-      if (!errorMessage) return;
-      failures.push(`default opener: ${errorMessage}`);
-      continue;
-    }
-
-    try {
-      await spawnDetachedLinux(spec.program, spec.args);
-      return;
-    } catch (error) {
-      failures.push(`${spec.program}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  throw new Error(`Failed to open in ${appName}: ${failures.join('; ')}`);
-};
-
 const parseSshConfigImports = () => {
   const sshConfigPath = path.join(os.homedir(), '.ssh', 'config');
   if (!fs.existsSync(sshConfigPath)) return [];
@@ -4918,7 +4873,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           appName,
           targetKind: 'project',
           entries,
-        }), appName);
+        }), appName, { shell });
         return null;
       }
       if (process.platform !== 'darwin') {
@@ -4953,7 +4908,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
           appName,
           targetKind: 'file',
           entries,
-        }), appName);
+        }), appName, { shell });
         return null;
       }
       if (process.platform !== 'darwin') {

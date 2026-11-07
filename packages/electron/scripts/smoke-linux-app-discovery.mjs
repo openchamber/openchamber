@@ -188,17 +188,27 @@ try {
   assert(specs[0].program === '/opt/Visual Studio Code/code', 'desktop entry opener should use parsed program');
   assert(specs[0].args.includes('/tmp/My Project'), 'desktop entry opener should include target');
 
-  const terminalFileSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project/file.txt', appId: 'ghostty', appName: 'Ghostty', targetKind: 'file', entries, env });
+  const terminalBin = path.join(tempRoot, 'terminal-bin');
+  await fs.mkdir(terminalBin, { recursive: true });
+  const terminalRunMarker = path.join(tempRoot, 'xdg-terminal-exec-ran');
+  // Leaves a marker on any run: building the candidates must not run the binary.
+  await fs.writeFile(path.join(terminalBin, 'xdg-terminal-exec'), `#!/bin/sh\n: > '${terminalRunMarker}'\n`, { mode: 0o755 });
+  const defaultTerminalEnv = { ...env, PATH: terminalBin };
+
+  const terminalFileSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project/file.txt', appId: 'ghostty', appName: 'Ghostty', targetKind: 'file', entries, env: defaultTerminalEnv });
   assert(terminalFileSpecs[0]?.program === 'ghostty', 'terminal desktop entry should be preferred when present');
   assert(terminalFileSpecs[0]?.args.join('|') === '--working-directory=/tmp/My Project|--open-uri=/tmp/My Project', `terminal file target should use dirname, got ${terminalFileSpecs[0]?.args.join('|')}`);
   assert(terminalFileSpecs[1]?.program === 'xdg-terminal-exec', 'terminal specs should include xdg-terminal-exec fallback after desktop entry');
-  assert(terminalFileSpecs[1]?.args.join('|') === '--dir=/tmp/My Project', `terminal fallback should use file dirname, got ${terminalFileSpecs[1]?.args.join('|')}`);
+  assert(terminalFileSpecs[1]?.args.join('|') === '--dir=/tmp/My Project', `terminal fallback should use the --dir= form with the file dirname, got ${terminalFileSpecs[1]?.args.join('|')}`);
 
-  const fallbackTerminalSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'terminal', appName: 'Terminal', targetKind: 'project', entries, env });
+  const fallbackTerminalSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'terminal', appName: 'Terminal', targetKind: 'project', entries, env: defaultTerminalEnv });
   assert(fallbackTerminalSpecs.length >= 1, 'missing terminal desktop entry should include xdg-terminal-exec fallback');
   assert(fallbackTerminalSpecs[0]?.program === 'xdg-terminal-exec', 'missing terminal entry should use xdg-terminal-exec first');
-  assert(fallbackTerminalSpecs[0]?.args.join('|') === '--dir=/tmp/My Project', `xdg-terminal-exec fallback should keep working directory args, got ${fallbackTerminalSpecs[0]?.args.join('|')}`);
+  assert(fallbackTerminalSpecs[0]?.args.join('|') === '--dir=/tmp/My Project', `xdg-terminal-exec fallback should use the --dir= form, got ${fallbackTerminalSpecs[0]?.args.join('|')}`);
   assert(!fallbackTerminalSpecs.some((spec) => (spec.args || []).some((arg) => arg.includes('helper-script'))), 'non-terminal entry using a terminal launcher must not be launched for the generic terminal appId');
+
+  const terminalWithoutXdgSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'terminal', appName: 'Terminal', targetKind: 'project', entries, env });
+  assert(terminalWithoutXdgSpecs.length === 0, `without xdg-terminal-exec and a terminal entry nothing can take the directory, got ${terminalWithoutXdgSpecs.map((spec) => spec.program).join('|')}`);
 
   const ptyxisEntry = parseDesktopEntry([
     '[Desktop Entry]',
@@ -216,9 +226,23 @@ try {
     entries: [ptyxisEntry, ...entries],
     env,
   });
+  assert(terminalEmulatorSpecs.length === 1, `only the ptyxis entry can take the directory, got ${terminalEmulatorSpecs.map((spec) => spec.program).join('|')}`);
   assert(terminalEmulatorSpecs[0]?.program === 'ptyxis', `terminal emulator entry should be preferred, got ${terminalEmulatorSpecs[0]?.program}`);
   assert(terminalEmulatorSpecs[0]?.args.join('|') === '--working-directory=/tmp/My Project', `ptyxis should receive working directory, got ${terminalEmulatorSpecs[0]?.args.join('|')}`);
   assert(!terminalEmulatorSpecs.some((spec) => (spec.args || []).some((arg) => arg.includes('helper-script'))), 'non-terminal entry using a terminal launcher must not be launched when a real terminal emulator entry exists');
+
+  const defaultTerminalFirstSpecs = buildLinuxOpenSpecs({
+    targetPath: '/tmp/My Project',
+    appId: 'terminal',
+    appName: 'Terminal',
+    targetKind: 'project',
+    entries: [ptyxisEntry, ...entries],
+    env: defaultTerminalEnv,
+  });
+  assert(defaultTerminalFirstSpecs[0]?.program === 'xdg-terminal-exec', `the system default terminal should come first, got ${defaultTerminalFirstSpecs[0]?.program}`);
+  assert(defaultTerminalFirstSpecs[0]?.args.join('|') === '--dir=/tmp/My Project', `the system default terminal should get the directory, got ${defaultTerminalFirstSpecs[0]?.args.join('|')}`);
+  assert(defaultTerminalFirstSpecs[1]?.program === 'ptyxis', `the terminal entry should stay as the next candidate, got ${defaultTerminalFirstSpecs[1]?.program}`);
+  assert(!await fs.stat(terminalRunMarker).catch(() => null), 'building terminal candidates must not run xdg-terminal-exec');
 
   const defaultSpecs = buildLinuxOpenSpecs({ targetPath: '/tmp/My Project', appId: 'finder', appName: 'Finder', targetKind: 'project', entries, env });
   assert(defaultSpecs[0].kind === 'default', 'finder maps to safe default Linux opener spec');
@@ -237,7 +261,9 @@ try {
     specs,
     terminalFileSpecs,
     fallbackTerminalSpecs,
+    terminalWithoutXdgSpecs,
     terminalEmulatorSpecs,
+    defaultTerminalFirstSpecs,
     defaultSpecs,
   }, null, 2));
 } finally {
