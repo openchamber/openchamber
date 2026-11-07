@@ -22,14 +22,14 @@ type Plugin = {
 const example = new URL('../examples/opencode-plugin/', import.meta.url);
 
 describe('the opencode-plugin example', () => {
-  test('its manifest names the plugin folder, whose package.json names the built entry', async () => {
+  test('its manifest names the plugin folder, with the built entry at its root', async () => {
     const manifest = parseManifestJson(await readFile(new URL('package.json', example), 'utf8'));
     expect(manifest.ok).toBe(true);
     if (!manifest.ok) return;
     expect(manifest.manifest.contributes.opencodePlugin).toBe('plugin');
     // SAFETY: the file is the example's own checked-in package.json; the assertion below checks the two fields read.
-    const plugin = JSON.parse(await readFile(new URL('plugin/package.json', example), 'utf8')) as { main?: string; type?: string };
-    expect(plugin).toMatchObject({ type: 'module', main: 'index.js' });
+    const plugin = JSON.parse(await readFile(new URL('plugin/package.json', example), 'utf8')) as { type?: string };
+    expect(plugin).toMatchObject({ type: 'module' });
     // OpenCode imports the entry from a folder where nothing is installed.
     expect(await readFile(new URL('plugin/index.js', example), 'utf8')).not.toMatch(/^\s*import\s/m);
   });
