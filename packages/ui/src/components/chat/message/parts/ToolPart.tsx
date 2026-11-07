@@ -2286,8 +2286,8 @@ const ShellToolPartContent: React.FC<ToolPartProps> = (props) => {
     }, [liveOutput, props.part]);
 
     // Stopped through the background (see `foregroundShellStop.ts`). The
-    // index's `background` flag is not checked: after a reload it reads true
-    // for a command this call still waits for.
+    // index's `background` flag is not checked: a list read sets it for a
+    // command this call may still wait for.
     const stop = React.useCallback(() => {
         if (!running) return;
         stopForegroundShell({

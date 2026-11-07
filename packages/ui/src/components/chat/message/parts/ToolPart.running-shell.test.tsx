@@ -185,7 +185,7 @@ const clickStop = async (container: HTMLElement) => {
   await act(async () => { button.click(); });
 };
 
-test('a shell call the turn waits for stops through the background, after a reload too', async () => {
+test('a shell call the turn waits for stops through the background, also when a list read marked its command as background', async () => {
   const { call, settledInBackground, backgroundPart } = stoppable('sh_stop');
   const background = spyOn(opencodeClient, 'backgroundSessionWork').mockResolvedValue(undefined);
   const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
