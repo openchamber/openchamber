@@ -174,6 +174,19 @@ export const OPENCHAMBER_SECRET_ACTIONS = Object.freeze(
 );
 
 /**
+ * Usage is its own tool: reading provider quotas is a distinct intent from
+ * the others, it is off until the user turns it on, and each read asks every
+ * configured provider, so it has to disappear completely when off.
+ */
+export const OPENCHAMBER_USAGE_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'usage.read', title: 'Read usage limits', description: 'Usage windows, percentages and resets of every configured provider, as Settings > Usage shows them; providerId reads one' },
+]);
+
+export const OPENCHAMBER_USAGE_ACTIONS = Object.freeze(
+  OPENCHAMBER_USAGE_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+/**
  * Workflows are their own tool: fanning a large task out to many agents is a
  * distinct intent with its own scripting guidance, and the tool is off until
  * the user turns it on, so it has to disappear completely.
@@ -230,6 +243,7 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_render: OPENCHAMBER_RENDER_ACTIONS,
   openchamber_image: OPENCHAMBER_IMAGE_ACTIONS,
   openchamber_secret: OPENCHAMBER_SECRET_ACTIONS,
+  openchamber_usage: OPENCHAMBER_USAGE_ACTIONS,
   openchamber_workflow: OPENCHAMBER_WORKFLOW_ACTIONS,
   [WORKFLOW_ANSWER_TOOL]: OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 });
@@ -283,6 +297,7 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_RENDER_ACTIONS,
   ...OPENCHAMBER_IMAGE_ACTIONS,
   ...OPENCHAMBER_SECRET_ACTIONS,
+  ...OPENCHAMBER_USAGE_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ACTIONS,
   ...OPENCHAMBER_WORKFLOW_ANSWER_ACTIONS,
 ]);
