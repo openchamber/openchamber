@@ -842,3 +842,14 @@ On mobile the header button uploads into the folder currently on screen. A singl
 names are never replaced silently: they collect into a replace-confirmation
 dialog, which is dropped when the workspace or runtime changes. The feature is
 present only when the runtime exposes `files.uploadFile`.
+
+A failed upload names itself and its cause instead of collapsing into one
+generic line: `uploadFailureOf` reads the `FilesystemError` the files API threw
+and keeps the file name beside the reason, so the toast says which file was too
+large (with the server's own `maxBytes` limit), which folder refused the write,
+which folder fell outside the project, or which folder is gone. The cause comes
+from the server's `reason`; a status alone is never read as one, so a 403 from
+anything else (a proxy, for one) reports the unnamed cause. A batch reports
+three rows and counts the rest. A file rejected before any request (an illegal
+name, or the runtime changing mid-upload) has no server reason and reports the
+unnamed cause.
