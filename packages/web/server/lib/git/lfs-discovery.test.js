@@ -270,6 +270,28 @@ describe('incremental LFS file discovery', () => {
     expect(result.attributePaths).toHaveLength(LFS_DISCOVERY_LIMITS.maxPublicRecords);
   });
 
+  it('keeps a pattern-attributed LFS checkout bounded and derives its SSH hydration endpoint', async () => {
+    const files = Array.from({ length: 1_500 }, (_, index) => ({
+      path: `assets/model-${index}.glb`,
+      content: pointer().replace(OID, index.toString(16).padStart(64, '0')),
+    }));
+    files.push({ path: 'docs/notes.txt', content: 'ordinary' });
+    const fixture = scanFixture(files, {
+      attribute: (file) => file.endsWith('.glb') ? 'lfs' : 'unspecified',
+    });
+    const scan = await fixture.run();
+    expect(scan.pointerSamples).toHaveLength(LFS_DISCOVERY_LIMITS.maxPointerSamples);
+    expect(Buffer.byteLength(scan.attributesOutput)).toBeLessThanOrEqual(LFS_DISCOVERY_LIMITS.maxAttributesBytes);
+    const result = discoverLfs(input({ ...scan, gitRemoteUrl: 'git@github.com:GaryBer/anna.git' }));
+    expect(result.needed).toBe(true);
+    expect(result.attributePaths).toHaveLength(LFS_DISCOVERY_LIMITS.maxPublicRecords);
+    expect(result.endpoint).toMatchObject({
+      status: 'resolved',
+      source: 'git-remote',
+      candidate: { endpoint: 'https://github.com/GaryBer/anna.git/info/lfs' },
+    });
+  });
+
   it('validates every pointer, including those past the kept samples', async () => {
     const files = Array.from({ length: 1_500 }, (_, index) => ({ path: `file-${index}`, content: pointer() }));
     files.push({ path: 'late-broken', content: pointer().replace('size 42', 'size forty-two') });
@@ -337,6 +359,33 @@ describe('Git LFS discovery', () => {
       remoteLfsUrls: [{ remote: 'origin', url: 'https://remote.example.net/repository' }],
     }));
     expect(withoutCommitted.endpoint).toMatchObject({ candidate: { endpoint: 'https://local.example.net/repository' } });
+  });
+
+  it.each([
+    ['git@github.com:GaryBer/anna.git', 'https://github.com/GaryBer/anna.git/info/lfs'],
+    ['ssh://git@github.com/GaryBer/anna.git', 'https://github.com/GaryBer/anna.git/info/lfs'],
+    ['ssh://git@github.com:2222/GaryBer/anna.git', 'https://github.com/GaryBer/anna.git/info/lfs'],
+    ['git@example.com:repository', 'https://example.com/repository.git/info/lfs'],
+    ['ssh://git@example.com/group/repository', 'https://example.com/group/repository.git/info/lfs'],
+    ['ssh://git@example.com/group/re%23po.git', 'https://example.com/group/re%23po.git/info/lfs'],
+    ['ssh://git@example.com/group/%252e%252e/evil.git', 'https://example.com/group/%252e%252e/evil.git/info/lfs'],
+  ])('derives the HTTPS LFS endpoint Git LFS uses for SSH remote %s', (gitRemoteUrl, expected) => {
+    const result = discoverLfs(input({ gitRemoteUrl }));
+    expect(result.endpoint).toMatchObject({
+      status: 'resolved',
+      source: 'git-remote',
+      candidate: { kind: 'https', endpoint: expected },
+    });
+  });
+
+  it('keeps an explicit HTTPS LFS endpoint ahead of the SSH-derived one', () => {
+    const result = discoverLfs(input({
+      gitRemoteUrl: 'git@github.com:GaryBer/anna.git',
+      lfsConfigOutput: configOutput([['lfs.url', 'https://lfs.example.net/storage']]),
+    }));
+    expect(result.endpoint).toMatchObject({
+      status: 'resolved', source: 'lfsconfig', candidate: { endpoint: 'https://lfs.example.net/storage' },
+    });
   });
 
   it('supports an HTTPS LFS endpoint with an SSH Git remote and exposes cross-host facts', () => {

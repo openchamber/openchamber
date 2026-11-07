@@ -2423,6 +2423,78 @@ process.exit(safe ? 0 : 1);
     expect(setupValue.credentialResolver.resolve).not.toHaveBeenCalled();
   });
 
+  describe('LFS checkout with an SSH parent and no explicit endpoint', () => {
+    const SSH_PARENT = 'git@example.com:owner/repository.git';
+    const LFS_ENDPOINT = 'https://example.com/owner/repository.git/info/lfs';
+    const LFS_PUBLIC_ENDPOINT = { displayUrl: LFS_ENDPOINT, fingerprint: fingerprintRemoteUrl(LFS_ENDPOINT) };
+    const LFS_POINTER = `version https://git-lfs.github.com/spec/v1\noid sha256:${'d'.repeat(64)}\nsize 12\n`;
+    const setupCheckout = (validateGitAuxiliaryContext) => setup({
+      mode: 'system',
+      transport: 'ssh',
+      validateGitAuxiliaryContext,
+      spawnResponder: ({ args }) => {
+        const command = args.join(' ');
+        if (args.includes('ls-files')) return { code: 0, stdout: 'asset.bin\0' };
+        if (args.includes('check-attr')) return { code: 0, stdout: 'asset.bin\0filter\0lfs\0' };
+        if (args.includes('--batch-check')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(LFS_POINTER)}\n` };
+        if (args.includes('--batch')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(LFS_POINTER)}\n${LFS_POINTER}\n` };
+        if (command.includes('lfs version')) return { code: 0, stdout: 'git-lfs/3.0' };
+        if (command.includes('HEAD:.lfsconfig') || command.includes('HEAD:.gitmodules') || command.includes('config --includes')) return { code: 1 };
+        return { code: 0 };
+      },
+    });
+    const lfsTransfers = (calls) => calls.filter((call) => call.args.includes('lfs') && !call.args.includes('version'));
+    const hydrate = ({ service }) => service.hydrateBoundCheckout({
+      directory: '/repository', parentRemoteName: 'publish',
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 2, configRevision: 'config_one' },
+    });
+
+    it('inspects the derived HTTPS endpoint', async () => {
+      const setupValue = setupCheckout();
+
+      const result = await setupValue.service.inspectCheckoutHydration({
+        directory: '/repository', parentEndpoint: SSH_PARENT, parentRemoteName: 'publish',
+      });
+
+      expect(result).toEqual({
+        headSha: SHA,
+        requirements: [{ kind: 'lfs', path: '.', endpoint: LFS_PUBLIC_ENDPOINT }],
+      });
+      expect(lfsTransfers(setupValue.calls)).toEqual([]);
+    });
+
+    it('transfers an authorized checkout through exactly that endpoint', async () => {
+      const validateGitAuxiliaryContext = vi.fn(async ({ rawEndpoint }) => ({
+        endpoint: rawEndpoint, endpointFingerprint: fingerprintRemoteUrl(rawEndpoint),
+        transportMode: 'system', transportRevision: 'transport_one',
+      }));
+      const setupValue = setupCheckout(validateGitAuxiliaryContext);
+
+      const result = await hydrate(setupValue);
+
+      expect(result).toMatchObject({ status: 'succeeded', lfs: [{ path: '.', status: 'succeeded', endpoint: LFS_PUBLIC_ENDPOINT }] });
+      expect(validateGitAuxiliaryContext).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'lfs', rawEndpoint: LFS_ENDPOINT, parentRemote: 'publish',
+      }));
+      expect(lfsTransfers(setupValue.calls).map((call) => call.args.slice(call.args.indexOf(`lfs.url=${LFS_ENDPOINT}`) + 1)))
+        .toEqual([['lfs', 'fetch', 'publish', 'HEAD'], ['lfs', 'checkout']]);
+    });
+
+    it('starts no transfer without an auxiliary grant', async () => {
+      const setupValue = setupCheckout(vi.fn(async () => {
+        throw Object.assign(new Error('Missing grant'), { code: 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED' });
+      }));
+
+      const result = await hydrate(setupValue);
+
+      expect(result).toMatchObject({
+        status: 'authorization-required',
+        lfs: [{ path: '.', status: 'authorization-required', endpoint: LFS_PUBLIC_ENDPOINT }],
+      });
+      expect(lfsTransfers(setupValue.calls)).toEqual([]);
+    });
+  });
+
   it('rejects a symlinked submodule parent without starting auxiliary transport', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-submodule-symlink-'));
     temporaryDirectories.push(root);
