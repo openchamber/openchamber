@@ -4,6 +4,7 @@ import {
   applyForwardProxyResponseHeaders,
   collectForwardProxyHeaders,
   shouldForwardProxyResponseHeader,
+  stripBrowserRequestMetadataHeaders,
 } from './proxy-headers.js';
 
 describe('OpenCode proxy header handling', () => {
@@ -37,6 +38,42 @@ describe('OpenCode proxy header handling', () => {
     expect(headers['authorization']).toBeUndefined();
     expect(headers.Authorization).toBeUndefined();
     expect(headers.accept).toBe('application/json');
+  });
+
+  it('drops browser origin and fetch metadata from forwarded request headers', () => {
+    const headers = collectForwardProxyHeaders({
+      accept: 'application/json',
+      origin: 'openchamber-ui://app',
+      referer: 'openchamber-ui://app/index.html',
+      'sec-fetch-site': 'cross-site',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-user': '?1',
+      'x-opencode-directory': '/repo',
+    });
+
+    expect(headers).toEqual({
+      accept: 'application/json',
+      'x-opencode-directory': '/repo',
+    });
+  });
+
+  it('strips browser origin and fetch metadata from an outgoing proxy request', () => {
+    const removed = [];
+    stripBrowserRequestMetadataHeaders({
+      removeHeader(name) {
+        removed.push(name);
+      },
+    });
+
+    expect(new Set(removed)).toEqual(new Set([
+      'origin',
+      'referer',
+      'sec-fetch-site',
+      'sec-fetch-mode',
+      'sec-fetch-dest',
+      'sec-fetch-user',
+    ]));
   });
 
   it('drops content-encoding from forwarded response headers', () => {
