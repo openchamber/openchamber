@@ -80,14 +80,39 @@ describe('createDirectoryQueryCanonicalizer', () => {
 });
 
 describe('normalizeForwardedDirectoryHeaders', () => {
-  it('decodes marked directory headers before forwarding to OpenCode', () => {
+  it.each(['/Users/example/project', '/repo/café', '/repo/\u00FF'])('decodes HTTP-safe marked directory headers for %s', (directory) => {
     const headers = normalizeForwardedDirectoryHeaders({
-      'x-opencode-directory': encodeURIComponent('/Users/example/project'),
+      'x-opencode-directory': encodeURIComponent(directory),
       'x-opencode-directory-encoding': 'uri',
     });
 
     expect(headers).toEqual({
-      'x-opencode-directory': '/Users/example/project',
+      'x-opencode-directory': directory,
+    });
+  });
+
+  it.each(['C:/测试项目', '/repo/😀', '/repo/\u0100', '/repo/\r\nvalue', '/repo/\u007F'])('preserves encoded headers that Node cannot forward decoded for %j', (directory) => {
+    const encoded = encodeURIComponent(directory);
+    const headers = normalizeForwardedDirectoryHeaders({
+      'x-opencode-directory': encoded,
+      'x-opencode-directory-encoding': 'uri',
+    });
+
+    expect(headers).toEqual({
+      'x-opencode-directory': encoded,
+      'x-opencode-directory-encoding': 'uri',
+    });
+    expect(() => http.validateHeaderValue('x-opencode-directory', headers['x-opencode-directory'])).not.toThrow();
+  });
+
+  it('preserves malformed directory values and removes their marker for the raw fallback', () => {
+    const headers = normalizeForwardedDirectoryHeaders({
+      'x-opencode-directory': '/repo/%E6%ZZ',
+      'x-opencode-directory-encoding': 'uri',
+    });
+
+    expect(headers).toEqual({
+      'x-opencode-directory': '/repo/%E6%ZZ',
     });
   });
 

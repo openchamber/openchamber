@@ -1131,6 +1131,10 @@ failing closed there would close every folder.
 This server gate covers web, Electron, hosted mobile, and Capacitor connections.
 The VS Code extension owns its separate Git and proxy implementation.
 
+### Why directory normalization preserves unsafe header values
+
+Marked directory headers decode before worktree and folder-trust checks only when Node's `http.validateHeaderValue` accepts the result. Values Node cannot carry stay encoded with their `uri` marker for OpenCode, while the guards read the decoded folder separately. Malformed escapes keep their raw value and lose the marker, matching the existing fallback and allowing trust checks for literal-percent folder names. The generic proxy must not decode again or remove a retained marker.
+
 ### Why a failed checkout stays closed to OpenCode
 
 Forwarding every request for a failed checkout was weighed and rejected: the
