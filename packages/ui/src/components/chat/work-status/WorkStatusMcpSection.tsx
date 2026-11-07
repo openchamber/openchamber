@@ -20,7 +20,7 @@ type Props = {
 const MCP_STATUS_MAX_AGE_MS = 60_000;
 
 /**
- * MCP servers with their on/off switches, reusing the dropdown's own action.
+ * MCP servers with their on/off switches, reusing the store's own action.
  */
 export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: selectedDirectory }) => {
   const touch = React.useContext(WorkStatusTouchContext);
@@ -35,11 +35,11 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
   const isConnected = useConfigStore((state) => state.isConnected);
   const [busyServer, setBusyServer] = React.useState<string | null>(null);
 
-  // The panel must not depend on the header dropdown having been mounted or
-  // opened to know its MCP servers. Silent and background-gated, so it cannot
-  // compete with chat bootstrap traffic for sockets. The section remounts on
-  // every session switch, so it only asks for a status that is missing or
-  // older than a minute; connect/disconnect/auth refresh on their own.
+  // The panel loads its own MCP status rather than depending on another
+  // surface having been opened. Silent and background-gated, so it cannot
+  // compete with chat bootstrap traffic for sockets. It asks again when its
+  // directory changes, and then only for a status that is missing or older
+  // than a minute; connect/disconnect/auth refresh on their own.
   // `isConnected` is a dependency, not a gate: MCP status is cached by
   // directory alone and dropped on an instance switch, and two instances can
   // hold the same project path — so the switch itself has to trigger the ask.
@@ -69,8 +69,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: se
     if (!directory) return;
     // Switching on a server that is waiting for sign-in cannot connect: it only
     // repeats the attempt that produced `needs_auth`. Authorization is the real
-    // action, and the dropdown already routes the same switch that way — the
-    // two surfaces must not disagree about what this control does.
+    // action, and the panel cannot start it; the row says where to sign in.
     const status = (mcpStatus ?? {})[name]?.status.status;
     if (next && status === 'needs_auth') {
       reportNeedsAuth();

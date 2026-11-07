@@ -230,6 +230,8 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // unblurred, for the whole fade and frosted only at the end. The glass
         // layer fades itself; the edge fades with it.
         width: WORK_STATUS_PANEL_WIDTH,
+        // The overlay can sit in a VS Code sidebar narrower than the card.
+        maxWidth: overlay ? 'calc(100% - 1.5rem)' : undefined,
         opacity: overlay || interactive ? 1 : 0,
         transform: overlay ? (visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)') : undefined,
         // The overlay sits at the chat's end corner: top right, or top left in RTL.
