@@ -113,16 +113,28 @@ from the schema rather than leaving them visible. The plugin is injected only
 when OpenChamber launches and owns the OpenCode process, and not at all when
 both settings are `false`.
 
-- Every tool is registered with `options: { codemode: false }`, so it is a
-  direct tool in the model's tool list. OpenCode 2 otherwise puts plugin tools
-  behind its Code Mode `execute` tool, where the model sees only a
-  size-limited catalog; with a few large MCP servers ours dropped out of it and
-  agents concluded the tool did not exist. `agentToolsCodeMode: true` (the
-  "Run through Code Mode" checkbox in the same section, off by default) flips
-  all of them to `codemode: true`, except `openchamber_render`: the chat draws
-  a page from that tool's own call (its input and stored result), and inside
-  an `execute` script the call is only an entry in `execute`'s list, so the
-  page never showed.
+- `openchamber`, `openchamber_schedule`, `openchamber_web`,
+  `openchamber_memory`, `openchamber_knowledge` and `openchamber_notify` are
+  registered with `codemode: true`, behind OpenCode's Code Mode `execute`
+  tool; there is no setting for it. On `scripts/tool-use-bench` with three
+  models this cut the first request of a session by about 30% with the same or
+  better use of the tools, and one provider's tool-call streaming stalled on
+  their direct schemas. `openchamber_render`, `openchamber_secret`,
+  `openchamber_image`, `openchamber_workflow` and
+  `openchamber_workflow_answer` stay direct (`codemode: false`): the chat
+  draws a page, a secret card, images or a run card from the tool's own call,
+  and inside an `execute` script that call is only an entry in `execute`'s
+  list.
+- Behind Code Mode each tool also registers a namespace of its own name with
+  a one-line description (`CODE_MODE_CATALOG_LINES`). The catalog always
+  lists namespaces with their descriptions but tools only within a small
+  budget, and with large MCP servers connected ours showed as bare rows such
+  as `openchamber_web (1 tool, none shown)`; agents asked to open a page in the
+  browser panel fetched it instead and said they had no browser
+  (`scripts/tool-use-bench`). Names and paths stay as they are: agents call
+  `tools.openchamber(...)` straight from the session guidance, and both a
+  control tool renamed into a shared namespace and one with the other tools
+  nested under it made them stop calling it.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly

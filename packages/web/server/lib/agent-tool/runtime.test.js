@@ -45,15 +45,20 @@ const prepareManagedEnv = async (runtime, options) => {
 
 /** Loads the generated plugin and returns the tools it registers, by name. */
 // `hooks` collects the session hooks the plugin registers, by name, and
-// `removed` the ids of OpenCode's own tools it takes away.
-const loadTools = async (dataDir, tag, hooks = {}, removed = []) => {
+// `removed` the ids of OpenCode's own tools it takes away, `namespaces` the
+// namespaces it registers.
+const loadTools = async (dataDir, tag, hooks = {}, removed = [], namespaces = []) => {
   const entrypoint = path.join(pluginDirectoryFor(dataDir), 'index.js');
   const pluginModule = await import(`${pathToFileURL(entrypoint).href}?${tag}=${Date.now()}`);
   const registered = {};
   await pluginModule.default.setup({
     tool: {
       transform: (edit) => {
-        edit({ add: (tool) => { registered[tool.name] = tool; }, remove: (id) => { removed.push(id); } });
+        edit({
+          add: (tool) => { registered[tool.name] = tool; },
+          remove: (id) => { removed.push(id); },
+          namespace: (namespace) => { namespaces.push(namespace); },
+        });
       },
     },
     session: {
@@ -662,7 +667,7 @@ describe('managed agent tool runtime', () => {
 
   it('exposes image generation as its own tool only when switched on, never behind Code Mode', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeImage: true, codeMode: true });
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeImage: true });
     const tool = await loadTools(dataDir, 'image');
 
     expect(Object.keys(tool)).toEqual(['openchamber', 'openchamber_image']);
@@ -691,7 +696,7 @@ describe('managed agent tool runtime', () => {
 
   it('exposes secret as its own direct tool whose every call waits for the user', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeSecret: true, codeMode: true });
+    await prepareManagedEnv(runtime, { includeControl: false, includeWeb: false, includeMemory: false, includeSecret: true });
     const hooks = {};
     const tools = await loadTools(dataDir, 'secret', hooks);
 
@@ -839,21 +844,27 @@ describe('managed agent tool runtime', () => {
     }
   });
 
-  it('registers every tool as a direct tool unless Code Mode is asked for, and the render tool always direct', async () => {
+  it('puts the control, schedule, browser, memory, knowledge and notify tools behind Code Mode, and the render tool direct', async () => {
     const { runtime, dataDir } = await createRuntime();
-    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true });
-    const direct = await loadTools(dataDir, 'direct');
-    for (const tool of Object.values(direct)) {
-      expect(tool.options).toEqual({ codemode: false });
-    }
-
-    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: true, includeMemory: true, includeNotify: true, includeRender: true, codeMode: true });
-    const { openchamber_render: render, ...behindExecute } = await loadTools(dataDir, 'codemode');
-    expect(Object.keys(behindExecute).length).toBeGreaterThan(0);
+    await prepareManagedEnv(runtime, { includeControl: true, includeSchedule: true, includeWeb: true, includeMemory: true, includeKnowledge: true, includeNotify: true, includeRender: true });
+    const namespaces = [];
+    const { openchamber_render: render, ...behindExecute } = await loadTools(dataDir, 'codemode', {}, [], namespaces);
+    const names = ['openchamber', 'openchamber_knowledge', 'openchamber_memory', 'openchamber_notify', 'openchamber_schedule', 'openchamber_web'];
+    expect(Object.keys(behindExecute).sort()).toEqual(names);
     for (const tool of Object.values(behindExecute)) {
       expect(tool.options).toEqual({ codemode: true });
     }
     expect(render.options).toEqual({ codemode: false });
+    // Names stay as they are; each tool gets a namespace of its own name, so
+    // its catalog row says what it is even when the catalog lists none of it.
+    expect(namespaces.map((namespace) => namespace.name).sort()).toEqual(names);
+    expect(namespaces.find((namespace) => namespace.name === 'openchamber_web').description).toContain('browser panel');
+
+    // A tool switched off takes its namespace along.
+    await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false, includeRender: true });
+    const fewer = [];
+    await loadTools(dataDir, 'fewer', {}, [], fewer);
+    expect(fewer.map((namespace) => namespace.name)).toEqual(['openchamber']);
   });
 
   it('refuses to inject a plugin with no tools in it', async () => {

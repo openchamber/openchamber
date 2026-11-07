@@ -1200,10 +1200,6 @@ const sessionKnowledgeRuntime = createSessionKnowledgeRuntime({
     // Declared further down; only ever called after startup.
     return isWorkflowToolEnabled();
   },
-  areAgentToolsInCodeMode: async () => {
-    const settings = await readSettingsFromDiskMigrated().catch(() => null);
-    return settings?.agentToolsCodeMode === true;
-  },
   readSessionMetadata: readStoredSessionMetadata,
   // Pins are read from and written to OpenChamber's own store.
   persistSessionMetadata: (sessionID, directory, patch) => persistSessionMetadataPatch(sessionID, patch, { directory }),

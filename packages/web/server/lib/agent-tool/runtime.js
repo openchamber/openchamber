@@ -581,10 +581,6 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
   return String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
-      // OpenCode 2 puts a plugin tool behind its Code Mode execute tool
-      // unless told otherwise. There the model sees only a size-limited
-      // catalog, and with a few large MCP servers ours dropped out of it, so
-      // agents concluded the tool did not exist. Direct is the default.
       options: { codemode: ${codeMode ? 'true' : 'false'} },
       input: {
         type: "object",
@@ -669,6 +665,38 @@ ${answers ? answerWaitSetup(answers.waitsWhen) : ''}
 };
 
 /**
+ * The control, schedule, browser, memory, knowledge and notify tools always
+ * sit behind OpenCode's Code Mode `execute` tool. Measured on
+ * scripts/tool-use-bench with three models, that cut the first request of a
+ * session by about 30% with the same or better use of the tools, and one
+ * provider's tool-call streaming stalled on their direct schemas. The tools
+ * whose call the chat draws (render, secret, image, workflow) stay direct.
+ *
+ * Behind Code Mode the catalog lists every namespace with its description, but
+ * a tool only while its budget lasts, and with large MCP servers connected each
+ * of ours showed as a bare row such as `openchamber_web (1 tool, none shown)`.
+ * Agents asked to open a page in the browser panel then fetched it and said
+ * they had no browser (scripts/tool-use-bench). So each Code Mode tool gets a
+ * namespace of its own name, which OpenCode lets share the tool's path, and
+ * the catalog row carries this line.
+ *
+ * Names and paths stay as they are: agents call `tools.openchamber(...)`
+ * straight from the session guidance, and both a renamed control tool and one
+ * with a namespace of other tools under it made them stop calling it.
+ */
+// A use the session guidance does not state lives here, where it is always
+// seen, and not only in the tool description the agent reads once it has
+// already picked the tool.
+const CODE_MODE_CATALOG_LINES = {
+  openchamber: 'OpenChamber projects, sessions and worktrees: dispatch a session, link a PR, list models, move this session into a worktree (it can help when the checkout looks busy; ask unless the request already calls for separate work)',
+  openchamber_schedule: 'Scheduled tasks: prompts OpenChamber runs on a schedule',
+  openchamber_web: "OpenChamber's browser panel, to check your work by looking at it: open a page, read it, click and type",
+  openchamber_memory: 'Memory that persists across sessions',
+  openchamber_knowledge: "The project's notes, todos and plans. Add a todo when asked or when you stop with work left",
+  openchamber_notify: 'Notify the user outside the chat: when long work finishes and they have likely stepped away, when you are blocked on them, or when they asked to be told',
+};
+
+/**
  * OpenCode's own tools that duplicate the control tool, removed while it is on
  * so the agent has one way to do each thing. Effective names: namespace, then
  * tool. `worktree_create` makes a detached copy of the current commit and leaves
@@ -680,8 +708,13 @@ ${answers ? answerWaitSetup(answers.waitsWhen) : ''}
  */
 const OPENCODE_TOOLS_REPLACED_BY_CONTROL = ['opencode_worktree_create', 'opencode_models'];
 
-const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow, codeMode }) => {
+const createPluginSource = ({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow }) => {
   const entries = [];
+  const included = { openchamber: includeControl, openchamber_schedule: includeSchedule, openchamber_web: includeWeb, openchamber_memory: includeMemory, openchamber_knowledge: includeKnowledge, openchamber_notify: includeNotify };
+  for (const [name, description] of Object.entries(CODE_MODE_CATALOG_LINES)) {
+    if (included[name]) entries.push(`    tools.namespace(${JSON.stringify({ name, description })})
+`);
+  }
   if (includeControl) {
     entries.push(`    for (const id of ${JSON.stringify(OPENCODE_TOOLS_REPLACED_BY_CONTROL)}) tools.remove(id)
 `);
@@ -692,7 +725,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: CONTROL_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
       parameters: CONTROL_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeSchedule) {
@@ -701,7 +734,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: SCHEDULE_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_SCHEDULE_ACTION_DEFINITIONS,
       parameters: SCHEDULE_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeWeb) {
@@ -710,7 +743,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: WEB_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS,
       parameters: WEB_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeMemory) {
@@ -719,7 +752,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: MEMORY_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
       parameters: MEMORY_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeKnowledge) {
@@ -728,7 +761,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: KNOWLEDGE_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
       parameters: KNOWLEDGE_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeNotify) {
@@ -737,7 +770,7 @@ const createPluginSource = ({ includeControl, includeSchedule, includeWeb, inclu
       description: NOTIFY_TOOL_DESCRIPTION,
       definitions: OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
       parameters: NOTIFY_PARAMETER_PROPERTIES,
-      codeMode,
+      codeMode: true,
     }));
   }
   if (includeRender) {
@@ -869,13 +902,13 @@ export const createAgentToolRuntime = (dependencies) => {
    * change while it runs, so the source on disk always matches the settings —
    * the running OpenCode reloads the directory it already has configured.
    */
-  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeImage = false, includeSecret = false, includeWorkflow = false, codeMode = false } = {}) => {
+  const materializePlugin = async ({ includeControl = true, includeSchedule = false, includeWeb = true, includeMemory = true, includeKnowledge = false, includeNotify = false, includeRender = false, includeImage = false, includeSecret = false, includeWorkflow = false } = {}) => {
     if (!includeControl && !includeSchedule && !includeWeb && !includeMemory && !includeKnowledge && !includeNotify && !includeRender && !includeImage && !includeSecret && !includeWorkflow) {
       throw new Error('At least one OpenChamber managed tool must be enabled to inject the plugin');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
     await fsPromises.writeFile(pluginManifestPath, PLUGIN_PACKAGE_JSON, { mode: 0o600 });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow, codeMode }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeSchedule, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, includeImage, includeSecret, includeWorkflow }), { mode: 0o600 });
     return pluginDirectory;
   };
 

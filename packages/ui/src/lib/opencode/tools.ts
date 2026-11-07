@@ -332,6 +332,22 @@ export function lastExecuteToolCall(metadata: Metadata | undefined): { tool: str
   return undefined
 }
 
+/**
+ * The one OpenChamber tool call an `execute` script made, or `undefined` when
+ * it made none, several, or called anything else. Most of OpenChamber's tools
+ * sit behind Code Mode (`agent-tool/runtime.js`), and a script almost always
+ * makes exactly this one call; the chat then shows the row as that tool's own,
+ * with its action, detail and icon.
+ */
+export function soleOpenChamberCall(metadata: Metadata | undefined): { tool: string; input: { [key: string]: JsonValue } } | undefined {
+  const calls = executeRawCallSchema.parse(metadata ?? {}).toolCalls ?? []
+  if (calls.length !== 1 || !calls[0]?.tool) return undefined
+  const { tool, input } = calls[0]
+  const call = openChamberToolCall(tool, input)
+  if (!call) return undefined
+  return { tool: call.tool, input: input && typeof input === "object" && !Array.isArray(input) ? input : {} }
+}
+
 /** `JSON.stringify` that answers `undefined` for anything it cannot serialize. */
 function stringifyOrUndefined(value: ExecuteToolCallInput): string | undefined {
   if (value === undefined || value === null) return undefined

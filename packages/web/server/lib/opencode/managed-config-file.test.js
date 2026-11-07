@@ -235,7 +235,6 @@ describe('managed OpenCode config file', () => {
       includeImage: false,
       includeSecret: false,
       includeWorkflow: false,
-      codeMode: false,
     });
   });
 
@@ -303,29 +302,6 @@ describe('managed OpenCode config file', () => {
       includeImage: false,
       includeSecret: false,
       includeWorkflow: false,
-      codeMode: false,
-    });
-  });
-
-  it('puts the tools behind Code Mode only when the user asks for it', async () => {
-    const { runtime, agentToolRuntime } = await createHarness({
-      settings: { agentToolsCodeMode: true },
-    });
-
-    await runtime.buildManagedChildEnv();
-
-    expect(agentToolRuntime.materializePlugin).toHaveBeenCalledWith({
-      includeControl: true,
-      includeSchedule: true,
-      includeWeb: true,
-      includeMemory: false,
-      includeKnowledge: true,
-      includeNotify: false,
-      includeRender: true,
-      includeImage: false,
-      includeSecret: true,
-      includeWorkflow: false,
-      codeMode: true,
     });
   });
 

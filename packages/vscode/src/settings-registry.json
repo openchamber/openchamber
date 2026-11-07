@@ -189,9 +189,6 @@
     "agentSecretToolEnabled": {
       "scope": "instance"
     },
-    "agentToolsCodeMode": {
-      "scope": "instance"
-    },
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },

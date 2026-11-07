@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { DIRECT_TOOLS_GUIDANCE, KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime } from './runtime.js';
+import { KNOWLEDGE_ENTRY_KEYS, RENDER_PAGE_GUIDANCE, REPLY_COMMAND_GUIDANCE, SECRET_REQUEST_GUIDANCE, SESSION_LINK_GUIDANCE, WORK_NAME_GUIDANCE, WORKFLOW_GUIDANCE, buildKnowledgeEntries, createSessionKnowledgeRuntime, directToolsGuidance } from './runtime.js';
 import { UI_BLOCKS_GUIDANCE } from './ui-blocks-guidance.js';
 
 const DIRECTORY = '/work/project';
@@ -40,7 +40,7 @@ const createRuntime = (overrides = {}) => {
   };
   for (const key of [
     'readSessionMetadata', 'persistSessionMetadata', 'isAgentMemoryEnabled', 'isSessionLinkingAvailable',
-    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'areAgentToolsInCodeMode', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable',
+    'isPageRenderingAvailable', 'isSecretRequestAvailable', 'isWorkflowAvailable', 'readCheckoutBranch', 'readPlaceholderBranch', 'instructionEntries', 'isWorkNamingAvailable',
   ]) {
     if (key in overrides) dependencies[key] = overrides[key];
   }
@@ -203,7 +203,7 @@ describe('when to link', () => {
     });
     const entries = await entriesFor(runtime, NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${SESSION_LINK_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(SESSION_LINK_GUIDANCE);
     expect(entries[PINNED]).toBe('');
     expect(entries[MEMORY]).toBe('');
   });
@@ -244,7 +244,7 @@ describe('when to draw a page', () => {
   test('is told in a session whose agent has the render tool', async () => {
     const entries = await entriesFor(createRuntime({ ...bare, isPageRenderingAvailable: async () => true }), NO_PINS);
 
-    expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${REPLY_COMMAND_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(entries[GUIDANCE]).toBe(`${UI_BLOCKS_GUIDANCE}\n\n${RENDER_PAGE_GUIDANCE}\n\n${REPLY_COMMAND_GUIDANCE}\n\n${directToolsGuidance(['openchamber_render'])}`);
     expect(entries[GUIDANCE]).toContain('Not for a few numbers');
     expect(entries[GUIDANCE]).toContain('root = Stack([...])');
   });
@@ -265,7 +265,7 @@ describe('when to ask for a secret', () => {
 
   test('is told only in a session whose agent has the secret tool', async () => {
     const withTool = await entriesFor(createRuntime({ ...bare, isSecretRequestAvailable: async () => true }), NO_PINS);
-    expect(withTool[GUIDANCE]).toBe(`${SECRET_REQUEST_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(withTool[GUIDANCE]).toBe(`${SECRET_REQUEST_GUIDANCE}\n\n${directToolsGuidance(['openchamber_secret'])}`);
 
     const without = await entriesFor(createRuntime({ ...bare, isSecretRequestAvailable: async () => { throw new Error('settings unreadable'); } }), NO_PINS);
     expect(without[GUIDANCE]).toBe('');
@@ -280,7 +280,7 @@ describe('when to offer a workflow', () => {
 
   test('is told only in a session whose agent has the workflow tool', async () => {
     const withTool = await entriesFor(createRuntime({ ...bare, isWorkflowAvailable: async () => true }), NO_PINS);
-    expect(withTool[GUIDANCE]).toBe(`${WORKFLOW_GUIDANCE}\n\n${DIRECT_TOOLS_GUIDANCE}`);
+    expect(withTool[GUIDANCE]).toBe(`${WORKFLOW_GUIDANCE}\n\n${directToolsGuidance(['openchamber_workflow'])}`);
     expect(withTool[GUIDANCE]).toContain('never start one unasked');
 
     const without = await entriesFor(createRuntime({ ...bare, isWorkflowAvailable: async () => { throw new Error('settings unreadable'); } }), NO_PINS);
@@ -289,11 +289,12 @@ describe('when to offer a workflow', () => {
 });
 
 describe('where the managed tools are called', () => {
-  test('says they are direct tools, and not when they run through Code Mode', async () => {
-    const direct = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true }));
-    expect(direct[GUIDANCE]).toContain('never call them from inside a Code Mode execute script');
-    const codeMode = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true, areAgentToolsInCodeMode: async () => true }));
-    expect(codeMode[GUIDANCE]).not.toContain(DIRECT_TOOLS_GUIDANCE);
+  test('names the direct tools the session has, and none for tools behind Code Mode', async () => {
+    const control = await entriesFor(createRuntime({ isSessionLinkingAvailable: async () => true }));
+    expect(control[GUIDANCE]).not.toContain('direct tool');
+    const all = await entriesFor(createRuntime({ isPageRenderingAvailable: async () => true, isSecretRequestAvailable: async () => true, isWorkflowAvailable: async () => true }));
+    expect(all[GUIDANCE]).toContain('openchamber_render, openchamber_secret, openchamber_workflow are direct tool calls: never call them from inside a Code Mode execute script');
+    expect(directToolsGuidance(['openchamber_render'])).toBe('openchamber_render is a direct tool call: never call it from inside a Code Mode execute script, where it does not exist.');
   });
 });
 
