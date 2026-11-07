@@ -189,6 +189,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     const fontSize = useUIStore(state => state.fontSize);
     const setFontSize = useUIStore(state => state.setFontSize);
+    const chatFontSize = useUIStore(state => state.chatFontSize);
+    const setChatFontSize = useUIStore(state => state.setChatFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
     const setTerminalFontSize = useUIStore(state => state.setTerminalFontSize);
     const editorFontSize = useUIStore(state => state.editorFontSize);
@@ -920,6 +922,37 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 disabled={fontSize === 100}
                                                 className={SETTINGS_ICON_BUTTON_CLASS}
                                                 aria-label={t('settings.openchamber.visual.actions.resetFontSizeAria')}
+                                                title={t('settings.common.actions.reset')}
+                                            >
+                                                <Icon name="restart" className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    </SettingsStackedField>
+                                )}
+                                {shouldShow('fontSize') && !isMobile && (
+                                    <SettingsStackedField
+                                        label={t('settings.openchamber.visual.field.chatFontSize')}
+                                        settingsItem="appearance.chat-font-size"
+                                        controlClassName="w-full"
+                                    >
+                                        <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+                                            <NumberInput
+                                                value={chatFontSize}
+                                                onValueChange={setChatFontSize}
+                                                min={50}
+                                                max={200}
+                                                step={5}
+                                                className={SETTINGS_NUMBER_INPUT_CLASS}
+                                                aria-label={t('settings.openchamber.visual.field.chatFontSizePercentageAria')}
+                                            />
+                                            <span className={SETTINGS_NUMBER_UNIT_CLASS}>%</span>
+                                            <Button size="sm"
+                                                type="button"
+                                                variant="ghost"
+                                                onClick={() => setChatFontSize(100)}
+                                                disabled={chatFontSize === 100}
+                                                className={SETTINGS_ICON_BUTTON_CLASS}
+                                                aria-label={t('settings.openchamber.visual.actions.resetChatFontSizeAria')}
                                                 title={t('settings.common.actions.reset')}
                                             >
                                                 <Icon name="restart" className="h-3.5 w-3.5" />

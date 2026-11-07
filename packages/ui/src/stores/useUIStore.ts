@@ -1061,6 +1061,8 @@ interface UIStore {
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
   fontSize: number;
+  /** Chat text size in percent of the interface size, so the chat can grow without the sidebar. */
+  chatFontSize: number;
   // Global draft welcome starters; null = unset (use the default built-in set).
   globalDraftStarters: DraftStarterRef[] | null;
   draftStartersVisible: boolean;
@@ -1382,6 +1384,7 @@ interface UIStore {
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
   setMessageLimit: (value: number) => void;
   setFontSize: (size: number) => void;
+  setChatFontSize: (size: number) => void;
   setGlobalDraftStarters: (refs: DraftStarterRef[]) => void;
   setDraftStartersVisible: (value: boolean) => void;
   setTerminalFontSize: (size: number) => void;
@@ -1648,6 +1651,7 @@ export const useUIStore = create<UIStore>()(
         autoDeleteLastRunAt: null,
         messageLimit: 200,
         fontSize: 100,
+        chatFontSize: 100,
         globalDraftStarters: null,
         terminalFontSize: 14,
         terminalShell: 'auto',
@@ -2841,6 +2845,10 @@ export const useUIStore = create<UIStore>()(
           get().applyTypography();
         },
 
+        setChatFontSize: (size) => {
+          set({ chatFontSize: Math.max(50, Math.min(200, Math.round(size))) });
+        },
+
         setGlobalDraftStarters: (refs) => {
           set({ globalDraftStarters: refs });
         },
@@ -3915,6 +3923,7 @@ export const useUIStore = create<UIStore>()(
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
           messageLimit: state.messageLimit,
           fontSize: state.fontSize,
+          chatFontSize: state.chatFontSize,
           globalDraftStarters: state.globalDraftStarters,
           terminalFontSize: state.terminalFontSize,
           terminalShell: state.terminalShell,
