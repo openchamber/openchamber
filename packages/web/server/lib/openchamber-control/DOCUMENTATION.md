@@ -274,7 +274,12 @@ other.
   `partialAction: worktree-setup-running` with the worktree's `directory`, stops
   before stashing anything and leaves the session and its files where they
   were: a setup command could overwrite a carried file once the stash, the only
-  other copy, is dropped. A move that goes ahead applies its `carry` files after
+  other copy, is dropped. The same move again, from the same session with the
+  same worktree input, moves into that worktree once its setup finished, while
+  the folder is still a worktree of the repository. The mover keeps the
+  worktrees it left this way in memory, so after a restart a retry makes a new
+  one, as the first call would. A failed retry leaves that worktree in place,
+  since another session may have entered it meanwhile. A move that goes ahead applies its `carry` files after
   the setup, so a carried dependency change needs the install run again. A
   failing command is logged and does not fail the bootstrap, as on every
   creation path. A move that fails after the worktree exists stops the setup

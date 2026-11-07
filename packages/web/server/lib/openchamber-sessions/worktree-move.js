@@ -22,7 +22,10 @@ import { OpenChamberControlError, asControlError } from '../openchamber-control/
  *
  * Setup commands that outlast their deadline stop the move before anything is
  * stashed: one of them could overwrite a carried file after the stash, the only
- * other copy, is gone. The worktree stays and the session stays where it was.
+ * other copy, is gone. The worktree stays and the session stays where it was;
+ * the same call again, from the same session with the same worktree input,
+ * moves into that worktree once its setup finished instead of making another
+ * one. A worktree the retry did not create is never removed by its rollback.
  */
 
 /**
@@ -84,6 +87,12 @@ export const createSessionWorktreeMover = (dependencies) => {
     }
     return 'HEAD';
   };
+
+  // Worktrees a move made and left while their setup still ran, keyed by the
+  // session, its checkout and the whole worktree input, so only the same call
+  // moves into them. In memory: after a restart a retry makes a new worktree,
+  // as the first call would.
+  const waitingWorktrees = new Map();
 
   const findStash = async (directory, predicate) => (await listStashes(directory)).find(predicate) ?? null;
 
@@ -192,13 +201,24 @@ export const createSessionWorktreeMover = (dependencies) => {
     if (setup.startCommand) worktreeInput.startCommand = setup.startCommand;
 
     let worktree;
-    try {
-      worktree = await createWorktree(root, worktreeInput, {
-        bootstrapStore,
-        hydrateCheckout: ({ directory, parentRemoteName }) => hydrateCheckout({ directory, parentDirectory: root, parentRemoteName }),
-      });
-    } catch (error) {
-      throw asControlError(error, 'Failed to create the worktree');
+    const waitingKey = JSON.stringify([sessionId, source, root, worktreeInput]);
+    const waiting = waitingWorktrees.get(waitingKey);
+    waitingWorktrees.delete(waitingKey);
+    // Kept only while the folder is still a worktree of this repository; the
+    // user may have removed it, or put another one there, meanwhile.
+    const retained = waiting && await resolvePrimaryWorktreeRoot(waiting.worktree.path)
+      .then((found) => found?.root === root, () => false);
+    if (retained) {
+      ({ worktree, ownsBranch } = waiting);
+    } else {
+      try {
+        worktree = await createWorktree(root, worktreeInput, {
+          bootstrapStore,
+          hydrateCheckout: ({ directory, parentRemoteName }) => hydrateCheckout({ directory, parentDirectory: root, parentRemoteName }),
+        });
+      } catch (error) {
+        throw asControlError(error, 'Failed to create the worktree');
+      }
     }
 
     let stash = null;
@@ -214,7 +234,8 @@ export const createSessionWorktreeMover = (dependencies) => {
     } catch (error) {
       // The removal first stops the setup commands and waits for the bootstrap,
       // so the changes' way back does not depend on it.
-      const removal = removeCreatedWorktree(root, worktree, ownsBranch);
+      // A retry into a worktree another session may have entered since leaves it in place.
+      const removal = retained ? Promise.resolve() : removeCreatedWorktree(root, worktree, ownsBranch);
       const failure = asControlError(error, 'Failed to move the session into the worktree');
       const pending = stash ?? failure.stash ?? null;
       if (pending) {
@@ -232,8 +253,9 @@ export const createSessionWorktreeMover = (dependencies) => {
     }
 
     if (setupStillRunning) {
+      waitingWorktrees.set(waitingKey, { worktree, ownsBranch });
       throw new OpenChamberControlError(
-        `The project's setup commands are still running in ${worktree.path}, so session ${sessionId} stayed in ${source} and no files were carried`,
+        `The project's setup commands are still running in ${worktree.path}, so session ${sessionId} stayed in ${source} and no files were carried. Call session.moveToWorktree again with the same worktree to move in once they finish`,
         503,
         { partial: true, partialAction: 'worktree-setup-running', directory: worktree.path },
       );

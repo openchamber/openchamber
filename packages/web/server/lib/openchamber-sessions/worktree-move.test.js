@@ -44,7 +44,7 @@ const createMover = ({ changes = true, applyFails = false, moveFails = false, re
       if (removeFails) throw new Error('worktree is locked');
       await removal?.promise;
     }),
-    waitForWorktreeReady: vi.fn(async (directory) => { calls.push(['waitForWorktreeReady', directory]); return { setupStillRunning }; }),
+    waitForWorktreeReady: vi.fn(async (directory) => { calls.push(['waitForWorktreeReady', directory]); return { setupStillRunning: setupStillRunning instanceof Function ? setupStillRunning() : setupStillRunning }; }),
     // `start` is the project's folder inside the worktree, where the session starts.
     resolveStartDirectory: vi.fn(async ({ sourceDirectory, worktreeRoot }) => {
       calls.push(['resolveStartDirectory', sourceDirectory, worktreeRoot]);
@@ -292,6 +292,37 @@ describe('moving a session into a new worktree', () => {
 
     expect(calls.map(([step]) => step)).toEqual(['createWorktree', 'hydrateCheckout', 'waitForWorktreeReady']);
     expect(stashes).toEqual([]);
+  });
+
+  it('moves into the worktree it left once its setup finished, instead of making another', async () => {
+    let setupRunning = true;
+    const { mover, calls } = createMover({ setupStillRunning: () => setupRunning });
+
+    await expect(mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login', carry: ['src/a.ts'] })).rejects.toMatchObject({ statusCode: 503 });
+    setupRunning = false;
+    const moved = await mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login', carry: ['src/a.ts'] });
+
+    expect(moved.directory).toBe(WORKTREE.path);
+    expect(calls.filter(([step]) => step === 'createWorktree')).toHaveLength(1);
+    expect(calls.some(([step]) => step === 'removeWorktree')).toBe(false);
+  });
+
+  it('keeps a held-back worktree for the same call only, and a failed retry leaves it in place', async () => {
+    let setupRunning = true;
+    const { mover, calls } = createMover({ setupStillRunning: () => setupRunning });
+    const failingMover = createMover({ setupStillRunning: () => setupRunning, moveFails: true });
+
+    await expect(mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' })).rejects.toMatchObject({ statusCode: 503 });
+    setupRunning = false;
+    await mover.move({ sessionId: 'ses_2', directory: SOURCE, name: 'fix-login' });
+    expect(calls.filter(([step]) => step === 'createWorktree')).toHaveLength(2);
+
+    setupRunning = true;
+    await expect(failingMover.mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' })).rejects.toMatchObject({ statusCode: 503 });
+    setupRunning = false;
+    await expect(failingMover.mover.move({ sessionId: 'ses_1', directory: SOURCE, name: 'fix-login' })).rejects.toThrow('session not found');
+    expect(failingMover.calls.filter(([step]) => step === 'createWorktree')).toHaveLength(1);
+    expect(failingMover.calls.some(([step]) => step === 'removeWorktree')).toBe(false);
   });
 
   it('keeps the stash and names it when the changes cannot be put back either', async () => {
