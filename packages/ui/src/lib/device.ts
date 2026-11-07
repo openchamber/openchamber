@@ -1,7 +1,7 @@
 import React from 'react';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isCapacitorApp, isIPadApp } from '@/lib/platform';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { isMobileSurfaceRuntime, TABLET_LAYOUT_MIN_SHORT_SIDE_PX } from '@/lib/runtimeSurface';
 
 type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
@@ -368,15 +368,6 @@ export function useOrientation(): Orientation {
   return orientation;
 }
 
-/**
- * Smallest viewport side that earns the tablet layout, following Android's
- * long-standing `sw600dp` size class. The SHORT side is what makes this a size
- * question rather than a device question: a phone reports ~360-430 whichever
- * way it is held, a 7"+ tablet or an unfolded book foldable reports ~600+, and
- * a foldable folded shut drops back under it. So a fold is just a resize, and
- * nothing here has to know what a foldable is.
- */
-const TABLET_LAYOUT_MIN_SHORT_SIDE_PX = 600;
 /**
  * Width below which the workspace cannot become a side panel: the sessions
  * sidebar (~320) plus the panel (~380) plus a chat column that is still worth
