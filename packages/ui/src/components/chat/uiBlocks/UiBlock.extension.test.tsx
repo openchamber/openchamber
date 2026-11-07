@@ -182,6 +182,18 @@ describe('an answer from an extension frame', () => {
     expect(attempts).toBe(2);
   });
 
+  test('a failed answer says so while the frame can answer again', async () => {
+    chart.answers = true;
+    const fail = async () => { throw new Error('offline'); };
+    await draw({ kind: 'reply', answered: null, submit: fail });
+    await act(async () => { await expect(answer('Yes')).rejects.toThrow('did not reach'); });
+    expect(container.textContent).toContain('Not sent. Try again.');
+    await draw({ kind: 'reply', answered: null, submit: fail }, 'root = Stack([chart, field])\nchart = DeskChart("Sales")\nfield = Input("name", "Name")');
+    await act(async () => { await expect(answer('Yes')).rejects.toThrow('did not reach'); });
+    expect(container.textContent).toContain('Not sent. Try again.');
+    chart.answers = false;
+  });
+
   test('in a reply it answers for the whole block, and a card nobody answered stays skipped', async () => {
     const sent: Array<{ picks: unknown[]; skipped: string[] }> = [];
     const source = 'root = Stack([chart, c])\nchart = DeskChart("Sales")\nc = Card("Ship", [Button("Go", "primary", "ship")])';

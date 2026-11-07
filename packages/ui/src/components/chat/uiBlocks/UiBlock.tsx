@@ -1785,7 +1785,9 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
           {actions ? <fieldset disabled={disabled} className="contents">{actions}</fieldset> : null}
         </div>
       ) : null}
-      {replyForm ? (
+      {/* The button is the reply's whole answer, so once sent it goes away
+          and the Sent line stays alone. */}
+      {replyForm && !sent ? (
         <div className="mt-2">
           <UiButton type="button" className="w-fit" disabled={disabled || (!hasValue && !(frameName && trimmedNote))} onClick={() => sendReply(chosen)}>
             {t('chat.uiBlock.send')}
@@ -1801,7 +1803,8 @@ export function UiBlock({ source, complete, host = noHost, onNotDrawn, actions }
       {/* A block that sends keeps one line for what happened, so the reply does not jump. */}
       {replyForm || ((decisions.length > 0 || frameName) && host.kind === 'reply' && (host.submit || sent)) ? (
         <div className="mt-1 flex min-h-6 items-center gap-2 typography-meta text-muted-foreground" aria-live="polite" data-export-ignore>
-          {failed ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
+          {/* Cleared fields leave a form nothing to retry; a press or a frame can always try again. */}
+          {failed && (!replyForm || hasValue || frameName) ? <span className="text-[var(--status-error)]">{t('chat.uiBlock.sendFailed')}</span>
             : sent ? <span>{t('chat.uiBlock.sent')}</span>
               : chosen.size > 0 && decisions.length > 1
                 ? <span>{t('chat.uiBlock.chosenCount', { count: chosen.size, total: decisions.length })}</span>

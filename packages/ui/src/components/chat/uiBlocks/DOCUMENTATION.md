@@ -13,6 +13,7 @@ An assistant reply can carry fenced `openui-lang` blocks. This module owns the c
 - Fields and Buttons act only once a block is finished and has somewhere to answer: an assistant reply that has settled, or a page whose call still waits. Anywhere else they show disabled.
 - A page takes one answer: a press answers the waiting call at once, and the block freezes.
 - In a reply a press only chooses. A decision is the buttons of one card whose title no other card in the block shares, named by the title; elsewhere, the buttons that share a `value` (buttons without one make one more). Each decision takes one answer: a button, the card's note alone, or both. Once every decision has one, or the user presses "Send chosen", the answers go to the agent in one piece and the block freezes. An answered card without fields folds to one line with its answer and a way to change it before sending; the fold and the notes come back after a reload.
+- A reply block with fields and no Button has no press to send them, so it gets the "Send" button a waiting form gets and the same Sent / Not sent line. It stays disabled until a field has a value and is gone after the send. After a failed send, clearing every field leaves it disabled and hides only the "Not sent" line, which returns with a value; a block with a frame that answers keeps the line. A block with any Button sends through its buttons alone, so it gets no second one.
 - A primary button is the agent's pick and is tinted until its decision has an answer; then only the chosen button is, with a check.
 - `@openuidev/lang-core` is a dependency of this private package only, bundled at build time. It never goes into `packages/web`'s dependencies.
 
@@ -72,7 +73,7 @@ A form an agent waits on (`openchamber_render` with `ui` and `awaitAnswer`) show
 
 For the same reason a waiting form with no Button gets a "Send" button after the note. Only a press answers a page, and an agent that wrote two Choices and no Button left the user with a form that could not be sent while the agent waited on it.
 
-A reply's block with fields and no Button gets the same "Send": with no Button it has no decision, so nothing would ever send its fields, and the user was left picking options that went nowhere. It stays disabled until a field has a value, since an empty answer would start an agent turn with nothing in it.
+A reply's block with fields and no Button gets the same "Send": with no Button it has no decision, so nothing would ever send its fields, and the user was left picking options that went nowhere. An empty answer would start an agent turn with nothing in it and freeze the block, so the button needs a value. It leaves after the send because a block read back after a reload would otherwise show a dead control beside Sent. The failure line needs something to retry: with the fields cleared, "Not sent. Try again." would point at a disabled button.
 
 In a reply each decision card takes its own note. Its toggle is an icon at the end of the card's buttons, so a card is no taller until the user wants a note; the note opens above the buttons, and "Answer with the note only" takes the icon's place at once, disabled until the note has text, so the row does not shift while typing. A note alone answers the card: the user can say "not like this, ask the author first" without picking an option that does not fit.
 

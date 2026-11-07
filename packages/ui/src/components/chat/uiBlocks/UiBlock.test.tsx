@@ -11,7 +11,8 @@ Object.assign(globalThis, { window: browser, document: browser.document, navigat
   localStorage: browser.localStorage, sessionStorage: browser.sessionStorage, HTMLElement: browser.HTMLElement,
   Element: browser.Element, Node: browser.Node, Text: browser.Text, SVGElement: browser.SVGElement,
   customElements: browser.customElements, MutationObserver: browser.MutationObserver, DOMParser: browser.DOMParser, CustomEvent: browser.CustomEvent,
-  ResizeObserver: browser.ResizeObserver, IntersectionObserver: browser.IntersectionObserver });
+  ResizeObserver: browser.ResizeObserver, IntersectionObserver: browser.IntersectionObserver,
+  requestAnimationFrame: browser.requestAnimationFrame, cancelAnimationFrame: browser.cancelAnimationFrame });
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true });
 const { UiBlock } = await import('./UiBlock');
 const { onTabStep } = await import('../lib/scroll/timelineScrollIntent');
@@ -28,16 +29,25 @@ afterAll(async () => { await act(() => root.unmount()); browser.happyDOM.abort()
 
 // SAFETY: UiBlock reads only `currentTheme` from the theme system.
 const themeSystem = { currentTheme: getDefaultTheme(false) } as React.ContextType<typeof ThemeSystemContext>;
-// Each draw mounts a fresh block, so no answer carries over. Without submit it draws as in a reply.
-let draws = 0;
-const draw = (source: string, submit?: (answer: Answer) => Promise<void>) => act(() => root.render(
-  <I18nProvider>
-    <ThemeSystemContext.Provider value={themeSystem}>
-      <UiBlock key={draws++} source={source} complete host={submit ? { kind: 'page', submit, answered: null } : undefined} />
-    </ThemeSystemContext.Provider>
-  </I18nProvider>,
-));
+// A key per draw: a reused instance would keep the previous block's sent state.
+let drawn = 0;
+const render = (source: string, blockHost: React.ComponentProps<typeof UiBlock>['host']) => {
+  const key = ++drawn;
+  return act(() => root.render(
+    <I18nProvider>
+      <ThemeSystemContext.Provider value={themeSystem}>
+        <UiBlock key={key} source={source} complete host={blockHost} />
+      </ThemeSystemContext.Provider>
+    </I18nProvider>,
+  ));
+};
+// Without submit it draws as in a reply.
+const draw = (source: string, submit?: (answer: Answer) => Promise<void>) => render(source, submit ? { kind: 'page', submit, answered: null } : undefined);
+type ReplySubmit = NonNullable<Extract<React.ComponentProps<typeof UiBlock>['host'], { kind: 'reply' }>['submit']>;
+const drawReply = (source: string, submit: ReplySubmit) => render(source, { kind: 'reply', submit, answered: null });
 const buttons = () => [...host.querySelectorAll('button')].map((button) => button.textContent);
+const option = (label: string) => [...host.querySelectorAll('span')].find((element) => element.textContent === label);
+const send = () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Send');
 const press = async (label: string) => {
   const button = [...host.querySelectorAll('button')].find((candidate) => candidate.textContent === label);
   if (!button) throw new Error(`Expected a ${label} button, got ${buttons().join(', ')}`);
@@ -152,7 +162,7 @@ test('the host\'s controls stay under the block on every tab', async () => {
   await act(() => root.render(
     <I18nProvider>
       <ThemeSystemContext.Provider value={themeSystem}>
-        <UiBlock key={draws++} source={tabbedForm} complete host={{ kind: 'page', submit: async () => {}, answered: null }} actions={<button type="button">Decline</button>} />
+        <UiBlock key={++drawn} source={tabbedForm} complete host={{ kind: 'page', submit: async () => {}, answered: null }} actions={<button type="button">Decline</button>} />
       </ThemeSystemContext.Provider>
     </I18nProvider>,
   ));
@@ -178,9 +188,101 @@ test('tabs in a reply, or on a page nobody answers, step only through their stri
   await act(() => root.render(
     <I18nProvider>
       <ThemeSystemContext.Provider value={themeSystem}>
-        <UiBlock key={draws++} source={tabbedForm} complete host={{ kind: 'page', submit: null, answered: null }} />
+        <UiBlock key={++drawn} source={tabbedForm} complete host={{ kind: 'page', submit: null, answered: null }} />
       </ThemeSystemContext.Provider>
     </I18nProvider>,
   ));
   expect(buttons()).not.toContain('Next');
+});
+
+test("a reply's form without buttons gets one that sends its fields", async () => {
+  const answers: Parameters<ReplySubmit>[] = [];
+  await drawReply('root = Stack([scope])\nscope = Choice("scope", ["API", "Links"], "Scope")', async (...answer) => { answers.push(answer); });
+  const pick = option('API');
+  if (!pick) throw new Error(`Expected an option, got ${buttons().join(', ')}`);
+  await act(async () => pick.click());
+  const press = send();
+  if (!press) throw new Error(`Expected a Send button, got ${buttons().join(', ')}`);
+  await act(async () => press.click());
+  expect(answers).toHaveLength(1);
+  expect(answers[0][0].values).toEqual({ scope: 'API' });
+  expect(answers[0][0].picks).toEqual([]);
+  expect(host.textContent).toContain('Sent');
+  expect(buttons()).not.toContain('Send');
+});
+
+test("a reply's form with its own button gets no second one", async () => {
+  await drawReply('root = Stack([scope, go])\nscope = Choice("scope", ["API"])\ngo = Button("Go")', async () => {});
+  expect(buttons()).toContain('Go');
+  expect(buttons()).not.toContain('Send');
+});
+
+test("a reply's block without fields or buttons gets no Send", async () => {
+  await drawReply('root = Stack([badge])\nbadge = Badge("status")', async () => {});
+  expect(buttons()).not.toContain('Send');
+});
+
+test("a reply's field-only form offers Send once a field has a value", async () => {
+  await drawReply('root = Stack([scope])\nscope = Choice("scope", ["API", "Links"])', async () => {});
+  expect(send()?.disabled).toBe(true);
+  const pick = option('API');
+  if (!pick) throw new Error(`Expected an option, got ${buttons().join(', ')}`);
+  await act(async () => pick.click());
+  expect(send()?.disabled).toBe(false);
+});
+
+test("an answered reply's field-only form shows Sent and no Send", async () => {
+  await render('root = Stack([scope])\nscope = Choice("scope", ["API"])', {
+    kind: 'reply', submit: null, answered: { picks: [], values: { scope: 'API' }, skipped: [] },
+  });
+  expect(host.textContent).toContain('Sent');
+  expect(buttons()).not.toContain('Send');
+});
+
+test("a reply's Send can be tried again after a failed send", async () => {
+  const attempts: number[] = [];
+  await drawReply('root = Stack([scope])\nscope = Choice("scope", ["API"])', async () => {
+    attempts.push(attempts.length);
+    if (attempts.length === 1) throw new Error('The server did not answer');
+  });
+  const pick = option('API');
+  if (!pick) throw new Error(`Expected an option, got ${buttons().join(', ')}`);
+  await act(async () => pick.click());
+  const first = send();
+  if (!first) throw new Error(`Expected a Send button, got ${buttons().join(', ')}`);
+  await act(async () => first.click());
+  expect(host.textContent).toContain('Not sent. Try again.');
+  expect(send()?.disabled).toBe(false);
+  const second = send();
+  if (!second) throw new Error(`Expected a Send button to retry, got ${buttons().join(', ')}`);
+  await act(async () => second.click());
+  expect(attempts).toHaveLength(2);
+  expect(host.textContent).toContain('Sent');
+});
+
+test("a reply's failed send stops asking to retry once its fields are empty", async () => {
+  await drawReply('root = Stack([scope])\nscope = Choice("scope", ["API", "Links"], "Scope", true)', async () => {
+    throw new Error('The server did not answer');
+  });
+  const pick = option('API');
+  if (!pick) throw new Error(`Expected an option, got ${buttons().join(', ')}`);
+  await act(async () => pick.click());
+  const first = send();
+  if (!first) throw new Error(`Expected a Send button, got ${buttons().join(', ')}`);
+  await act(async () => first.click());
+  expect(host.textContent).toContain('Not sent. Try again.');
+  await act(async () => pick.click());
+  expect(send()?.disabled).toBe(true);
+  expect(host.textContent).not.toContain('Not sent. Try again.');
+});
+
+test("a reply's decision keeps its failure line after the choice is cleared, since a press retries", async () => {
+  await drawReply('root = Stack([go])\ngo = Button("Go")', async () => {
+    throw new Error('The server did not answer');
+  });
+  const go = () => [...host.querySelectorAll('button')].find((button) => button.textContent === 'Go');
+  await act(async () => go()?.click());
+  expect(host.textContent).toContain('Not sent. Try again.');
+  await act(async () => go()?.click());
+  expect(host.textContent).toContain('Not sent. Try again.');
 });
