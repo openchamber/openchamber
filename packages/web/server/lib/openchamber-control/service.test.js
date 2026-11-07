@@ -289,6 +289,98 @@ describe('OpenChamber control service', () => {
     }));
   });
 
+  it('creates an isolated task and refuses isolation with an existing session', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task }));
+
+    const created = await service.execute('schedule.create', {
+      name: 'Isolated', prompt: 'Run isolated', daily: '09:00', model: 'provider/model',
+      runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false,
+    }, '/repo');
+    expect(created.task).toMatchObject({ runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false });
+
+    await expect(service.execute('schedule.create', {
+      name: 'Bad', prompt: 'x', daily: '09:00', model: 'provider/model', targetSessionId: 'ses_target', runInWorktree: true,
+    }, '/repo')).rejects.toThrow('not compatible with an existing session');
+
+    await expect(service.execute('schedule.create', {
+      name: 'Bad', prompt: 'x', daily: '09:00', model: 'provider/model', targetSessionId: 'ses_target', baseBranch: 'main',
+    }, '/repo')).rejects.toThrow('not compatible with an existing session');
+  });
+
+  it('updates isolation fields in place and clears the base branch on an empty value', async () => {
+    const { service, scheduledTaskService } = createService();
+    const existing = {
+      id: 'task-1', name: 'Nightly', enabled: true,
+      schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+      execution: { prompt: 'Old', providerID: 'a', modelID: 'm' },
+      state: { lastRunAt: 5, lastStatus: 'success' },
+    };
+    scheduledTaskService.list.mockResolvedValue([existing]);
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: false }));
+
+    await service.execute('schedule.update', { taskId: 'task-1', runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false }, '/repo');
+    expect(scheduledTaskService.upsert.mock.calls[0][1]).toMatchObject({ runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false });
+
+    const isolated = { ...existing, runInWorktree: true, baseBranch: 'develop', cleanupWorktree: false };
+    scheduledTaskService.list.mockResolvedValue([isolated]);
+    await service.execute('schedule.update', { taskId: 'task-1', baseBranch: '' }, '/repo');
+    const cleared = scheduledTaskService.upsert.mock.calls[1][1];
+    // Only the named field changes: the store merges the untouched isolation choices.
+    expect(cleared).not.toHaveProperty('runInWorktree');
+    expect(cleared).not.toHaveProperty('cleanupWorktree');
+    expect(cleared.baseBranch).toBeNull();
+
+    scheduledTaskService.list.mockResolvedValue([{ ...existing, targetSessionId: 'ses_1' }]);
+    await expect(service.execute('schedule.update', { taskId: 'task-1', baseBranch: 'main' }, '/repo'))
+      .rejects.toThrow('not compatible with an existing session');
+  });
+
+  it.each([
+    ['runInWorktree', 'true', 'runInWorktree must be a boolean'],
+    ['runInWorktree', null, 'runInWorktree must be a boolean'],
+    ['cleanupWorktree', 'false', 'cleanupWorktree must be a boolean'],
+    ['cleanupWorktree', 0, 'cleanupWorktree must be a boolean'],
+    ['baseBranch', 42, 'baseBranch must be a branch name'],
+    ['baseBranch', '   ', 'baseBranch must be a branch name'],
+  ])('refuses %s %j on create and update without writing', async (field, value, message) => {
+    const { service, scheduledTaskService } = createService();
+    const existing = {
+      id: 'task-1', name: 'Nightly', enabled: true, baseBranch: 'develop', runInWorktree: true,
+      schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+      execution: { prompt: 'Old', providerID: 'a', modelID: 'm' },
+    };
+    scheduledTaskService.list.mockResolvedValue([existing]);
+
+    await expect(service.execute('schedule.create', {
+      name: 'Bad', prompt: 'x', daily: '09:00', model: 'provider/model', [field]: value,
+    }, '/repo')).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+    await expect(service.execute('schedule.update', { taskId: 'task-1', [field]: value }, '/repo'))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+
+    expect(scheduledTaskService.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps a stored base branch unless the update names it', async () => {
+    const { service, scheduledTaskService } = createService();
+    const existing = {
+      id: 'task-1', name: 'Nightly', enabled: true, baseBranch: 'develop', runInWorktree: true,
+      schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+      execution: { prompt: 'Old', providerID: 'a', modelID: 'm' },
+    };
+    scheduledTaskService.list.mockResolvedValue([existing]);
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: false }));
+
+    await service.execute('schedule.update', { taskId: 'task-1', prompt: 'New' }, '/repo');
+    await service.execute('schedule.update', { taskId: 'task-1', baseBranch: null }, '/repo');
+    await service.execute('schedule.update', { taskId: 'task-1', baseBranch: ' release ' }, '/repo');
+
+    const [omitted, cleared, replaced] = scheduledTaskService.upsert.mock.calls.map(([, task]) => task);
+    expect(omitted).not.toHaveProperty('baseBranch');
+    expect(cleared.baseBranch).toBeNull();
+    expect(replaced.baseBranch).toBe('release');
+  });
+
   it('updates a scheduled task in place, changing only the named fields', async () => {
     const { service, scheduledTaskService } = createService();
     const existing = {

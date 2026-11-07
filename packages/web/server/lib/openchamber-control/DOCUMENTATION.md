@@ -50,6 +50,15 @@ other.
   Only the model the call names is checked, so an update that names no model
   validates nothing. This server runs for web, Electron, hosted mobile and
   Capacitor clients; the VS Code extension does not run it.
+  `schedule.create` and `schedule.update` also accept the isolation fields
+  `runInWorktree`, `baseBranch` and `cleanupWorktree`, the same choices the
+  editor stores for a git project's task. All three are refused together with
+  an existing-session target, because that session's own directory wins and
+  the fields would otherwise be stored and ignored. `runInWorktree` and
+  `cleanupWorktree` must be booleans, and `baseBranch` a nonempty string, or
+  empty or null on update to clear the stored branch. Anything else is a 400
+  before upsert, because the CLI HTTP route forwards raw JSON and a wrong type
+  would turn isolation off or erase the branch.
 - `project-knowledge.js` runs the `knowledge.*` actions of the
   `openchamber_knowledge` agent tool (`list`, `save`, `delete`, `show`;
   `kind` names note, todo or plan) against
