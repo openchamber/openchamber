@@ -1811,6 +1811,7 @@ export const settingsDict = {
   'settings.mcp.page.actions.clearAuth': 'Yetkilendirmeyi Temizle',
   'settings.mcp.page.actions.test': 'Test et',
   'settings.mcp.page.actions.testConnection': 'Bağlantıyı Test Et',
+  'settings.mcp.page.actions.signIn': 'Oturum aç',
   'settings.mcp.page.actions.signInAgain': 'Tekrar oturum aç',
   'settings.mcp.page.actions.working': 'Çalışıyor...',
   'settings.mcp.page.actions.starting': 'Başlatılıyor...',

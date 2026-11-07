@@ -207,9 +207,14 @@ with `oauth` methods, so signing in is the same connect / status /
 complete flow the Providers page runs. `mcp/McpOAuthSignIn.tsx` looks the
 integration up by server name in the server's directory (the registration is
 per Location) and mounts the shared `providers/ProviderOAuthMethods.tsx`
-with that directory. While the server reports `needs_auth`, the status card
-shows its sign-in row; once the credential is stored, the page connects the
-server again, which is what moves it out of `needs_auth` or `failed`.
+with that directory. It renders nothing until the integration shows up; a
+caller with nothing else on screen passes `onUnavailable` to hear when the
+lookup gives up. While the server reports `needs_auth`, the status card
+shows its sign-in row, whose button reads "Sign in" so it is not confused with
+the header's Connect, which only retries the connection. Once the credential
+is stored, the page connects the server again, which is what moves it out of
+`needs_auth` or `failed`. The Work status panel's MCP rows start the same
+sign-in from their Sign in pill (`chat/work-status/DOCUMENTATION.md`).
 
 The detail page looks up the integration for a failed server or a configured
 remote server with `oauth !== false`. An absent `oauth` field is included:
