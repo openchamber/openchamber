@@ -68,7 +68,7 @@ dependencies {
     // The share intake reads real content:// URIs, so it is tested on a device, not in a shadow.
     androidTestImplementation 'androidx.test.ext:junit:1.3.0'
     androidTestImplementation 'androidx.test:runner:1.7.0'
-    androidTestImplementation 'androidx.test:rules:1.7.0'
+    androidTestImplementation 'androidx.test:core:1.7.0'
 }
 
 apply from: 'capacitor.build.gradle'

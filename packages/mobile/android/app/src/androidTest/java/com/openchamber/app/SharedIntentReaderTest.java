@@ -13,11 +13,9 @@ import android.net.Uri;
 import android.util.Base64;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.rule.provider.ProviderTestRule;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -30,22 +28,39 @@ import org.junit.runner.RunWith;
 @RunWith(AndroidJUnit4.class)
 public class SharedIntentReaderTest {
 
-    @Rule
-    public ProviderTestRule provider = new ProviderTestRule.Builder(TestFilesProvider.class, TestFilesProvider.AUTHORITY)
-        .build();
-
     private ContentResolver resolver;
     private final byte[] photoBytes = new byte[] { (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
 
     @Before
     public void setUp() {
-        resolver = provider.getResolver();
+        resolver = InstrumentationRegistry.getInstrumentation().getTargetContext().getContentResolver();
         TestFilesProvider.clear();
         SharedPayloadStore.take();
     }
 
     private static Intent send(String action) {
         return new Intent(action).addCategory(Intent.CATEGORY_DEFAULT);
+    }
+
+    private static String describe(SharedPayloadStore.SharedPayload payload) {
+        StringBuilder text = new StringBuilder("rejected[");
+        for (SharedPayloadStore.Rejection rejection : payload.rejected) {
+            text.append(rejection.name).append('=').append(rejection.reason).append(' ');
+        }
+        return text.append("]").toString();
+    }
+
+    /** The provider first: if this fails, the reader is not what is broken. */
+    @Test
+    public void theProviderServesAByteForByteCopy() throws Exception {
+        Uri uri = TestFilesProvider.addFile("IMG_0002.JPG", "image/jpeg", photoBytes);
+
+        byte[] served = new byte[photoBytes.length];
+        int read = resolver.openInputStream(uri).read(served);
+
+        assertEquals(photoBytes.length, read);
+        assertArrayEquals(photoBytes, served);
+        assertEquals("image/jpeg", resolver.getType(uri));
     }
 
     @Test
@@ -76,7 +91,7 @@ public class SharedIntentReaderTest {
 
         assertNotNull(payload);
         assertNull(payload.text);
-        assertEquals(1, payload.files.size());
+        assertEquals(describe(payload), 1, payload.files.size());
         assertEquals("IMG_0002.JPG", payload.files.get(0).name);
         assertEquals("image/jpeg", payload.files.get(0).mimeType);
         assertArrayEquals(photoBytes, Base64.decode(payload.files.get(0).data, Base64.NO_WRAP));
