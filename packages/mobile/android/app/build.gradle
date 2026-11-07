@@ -63,6 +63,7 @@ dependencies {
     // plugin (firebaseMessagingVersion in variables.gradle), not a new library.
     implementation "com.google.firebase:firebase-messaging:$firebaseMessagingVersion"
     implementation "androidx.core:core:$androidxCoreVersion"
+    testImplementation 'junit:junit:4.13.2'
 }
 
 apply from: 'capacitor.build.gradle'
