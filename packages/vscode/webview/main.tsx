@@ -5,6 +5,7 @@ import { fetchLastAssistantMessageText } from './notificationMessage';
 import { findMessagePageItem } from '@openchamber/ui/lib/opencode/messagePaging';
 import { BridgeRequestError, onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
+import { quotaGiftResetBridgePayload } from './quotaGiftResetRequest';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
@@ -1294,11 +1295,7 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     const providerId = decodeURIComponent(quotaGiftResetMatch[1]);
     try {
       const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:quota:giftReset:use', {
-        providerId,
-        recordId: body.recordId,
-        resetType: body.resetType,
-      });
+      const data = await sendBridgeMessage('api:quota:giftReset:use', quotaGiftResetBridgePayload(providerId, body));
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
