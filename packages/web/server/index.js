@@ -68,6 +68,7 @@ import { createSettingsNormalizationRuntime } from './lib/opencode/settings-norm
 import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
 import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
 import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
+import { createPluginSwitchStore } from './lib/opencode/plugin-switches.js';
 import { parseServeCliOptions } from './lib/opencode/cli-options.js';
 import {
   isRequestAuthorized,
@@ -402,6 +403,9 @@ const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZen
 
 const OPENCHAMBER_DATA_DIR = OPENCHAMBER_USER_CONFIG_ROOT;
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
+// OpenChamber's own plugin switches. They never touch the user's OpenCode
+// config: the managed child reads them from the config layer OpenChamber owns.
+const pluginSwitchStore = createPluginSwitchStore({ filePath: path.join(OPENCHAMBER_DATA_DIR, 'plugin-switches.json') });
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const APNS_TOKENS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'apns-tokens.json');
 const openCodeTrust = createOpenCodeTrust({
@@ -1683,6 +1687,15 @@ const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
   trackers: trackerRegistry,
   trackerSessionStatus,
+  pluginSwitchStore,
+  isPluginSwitchAvailable: () => !isExternalOpenCode && !ENV_SKIP_OPENCODE_START,
+  // Declared below. A user who sets OPENCODE_CONFIG owns that file, so the
+  // managed runtime answers `updated: false` and the switch needs a restart.
+  refreshPluginSwitches: async () => (
+    managedConfigRuntime
+      ? managedConfigRuntime.refreshManagedConfigFile()
+      : { updated: false, reason: 'no-managed-opencode' }
+  ),
 });
 const bootstrapRuntime = createBootstrapRuntime({
   createUiAuth,
@@ -2431,6 +2444,7 @@ async function main(options = {}) {
     listExtensionSkillDirectories: guestAgentContext.skillDirectories,
     listExtensionPluginDirectories: guestAgentContext.pluginDirectories,
     openchamberVersion: OPENCHAMBER_VERSION,
+    readPluginDenials: () => pluginSwitchStore.denials(),
   });
   // A policy that changes while the app runs: the managed file lists what the
   // catalog now refuses until it is rewritten, and every card re-reads the catalog.

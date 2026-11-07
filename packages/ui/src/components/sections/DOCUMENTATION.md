@@ -308,6 +308,58 @@ project policies (global wins) before turning a skill off. Writing where the
 skill lives covers the common case with one control, and turning it back on
 clears the skill's exact deny wherever it is, so no file keeps a stale rule.
 
+### Switching a plugin off
+
+The Plugins list is the only place a plugin is switched on or off; the detail
+page carries no control. The switch records the entry's `plugin:` resource in
+OpenChamber's own store, and the config layer of the OpenCode OpenChamber starts
+denies it there. The user's OpenCode config is not written, so the TUI and any
+external server keep loading the plugin. A switched-off plugin reports what
+OpenCode reports for any plugin that does not load: `Not loaded` on the card's
+status pill. The pill keeps that wording, and the card never adds a "Disabled"
+pill, because the switch beside it already says who turned it off.
+
+The switch belongs to OpenChamber and covers every project of the OpenCode it
+starts, while web and VS Code each keep their own. The page description says
+that plainly, because a project-scope card suggests otherwise.
+
+When a deny the user wrote themselves blocks the entry, the switch is disabled
+and the detail page says under the status banner that a rule in the config
+blocks it. The switch also stays disabled until the policy read succeeds, and
+while it is failing, because a denied plugin and an enabled one look the same
+before the config is read. A runtime OpenChamber did not start, or a store it
+cannot read, reports `unavailable`: the switch stays disabled and says the switch
+applies only to the OpenCode OpenChamber starts. VS Code renders the same switch
+through its bridge; an external OpenCode server (`openchamber.apiUrl`) reports
+every row as unavailable because the extension applies a switch only to the
+OpenCode it starts.
+
+An allow that OpenCode ranks above the denial makes the denial do nothing, so the
+row shows the plugin as on, with the switch disabled and the reason beside it.
+The server reports this as `overridden` from the config files it reads and
+refuses the change. The grid also treats a stored off as overridden when a real
+allow statement decides the plugin in `/api/config`, which is the only view of
+system and Console policies. The absence of a deny proves nothing there: OpenCode
+applies a rewritten managed file a moment after the write, and the
+`OPENCODE_CONFIG_CONTENT` path only at the next launch.
+
+The same delay keeps OpenChamber's own deny in `/api/config` after a plugin is
+switched back on. A row switched on ignores an exact deny from that layer
+(`opencode.managed.json`, or the pathless `OPENCODE_CONFIG_CONTENT` document),
+so the page never tells the user to remove a rule that is ours. `config.updated`
+and `plugin.updated` re-read the policies with the plugin list, which also
+carries a switch flipped in another client.
+
+Every disabled reason sits in a `SettingsInfoHint` beside the switch. A disabled
+switch takes no tap and a native title never shows on touch.
+
+### Why the switch layer is told apart by its document
+
+The page could remember which plugins it just switched on, but that memory is
+gone after a reload, and the `OPENCODE_CONFIG_CONTENT` deny lasts until the next
+launch. The document a statement came from is in every read. The cost is that a
+user's exact deny written into `OPENCODE_CONFIG_CONTENT` by hand reads as ours.
+
 ## Skills catalog list
 
 The catalog page lists one source, or every source's search matches, in

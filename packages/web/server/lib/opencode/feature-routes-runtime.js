@@ -70,6 +70,8 @@ import {
   createPluginEntry,
   updatePluginEntry,
   deletePluginEntry,
+  setPluginEntryEnabled,
+  setPluginFileEnabled,
   listPluginDirFiles,
   readPluginDirFile,
   writePluginDirFile,
@@ -112,6 +114,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     clientReloadDelayMs,
     trackers,
     trackerSessionStatus,
+    pluginSwitchStore,
+    isPluginSwitchAvailable,
+    refreshPluginSwitches,
   } = dependencies;
   const gitRuntimeIdentity = Object.freeze({
     id: `server_${crypto.randomUUID()}`,
@@ -428,6 +433,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       createPluginEntry,
       updatePluginEntry,
       deletePluginEntry,
+      setPluginEntryEnabled,
+      setPluginFileEnabled,
       listPluginDirFiles,
       readPluginDirFile,
       writePluginDirFile,
@@ -438,6 +445,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       parseNpmSpec,
       parsePathSpec,
       isExactSemver,
+      pluginSwitchStore,
+      isPluginSwitchAvailable,
+      refreshPluginSwitches,
     });
 
     const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');

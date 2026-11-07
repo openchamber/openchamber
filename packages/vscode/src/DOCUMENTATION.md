@@ -124,6 +124,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).
   - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
+  - Plugin lists carry `policyResource` and `switchState`, and `PUT /api/config/plugins/{entry,file}/:id/enabled` writes the extension's switch store and refreshes the managed OpenCode config layer. See *Plugin switches* below.
    - Plugin lists omit project configs already represented at user scope; global/custom aliases retain custom precedence for relative targets. Local declarations expose `resolvedPath`. File-only discovery records keep the original `absolutePath` for runtime status and a canonical `resolvedPath` for display deduplication, so symlink aliases still match OpenCode's reports. The shared grid hides only redundant package cards, so VS Code's editable file cards remain visible even when declared in config. Discovery capabilities and mutation rules are unchanged.
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
   - `writeConfig` and the agent/command markdown writer replace their file atomically through `writeFileAtomic` from `packages/web/server/lib/opencode/atomic-write.js`, the same function the web server uses, so OpenCode's watcher never reads a partial file.
@@ -409,6 +410,34 @@ command lookup that reaches the global files reports the same error.
 No files are migrated. The behavior GET bridge response includes the effective
 `path` for both existing and missing AGENTS.md files; shared Settings uses it
 in the warning.
+
+### Plugin switches
+
+The Plugins page's on/off switches exist in VS Code too. The extension keeps
+its state in `<extension global storage>/plugin-switches.json`, separate from
+the web server's data-dir store, so each OpenChamber runtime applies only its
+own switches to the OpenCode it starts. The rule that maps a spec to the
+`plugin:` resource OpenCode matches, and the check for an allow that beats the
+denial, are the web server's `plugin-switches.js`, so both surfaces decide alike.
+`plugin-switches.ts` holds what is the extension's own: its store location and
+its managed layer.
+
+The bridge exposes `PUT /api/config/plugins/entry/:id/enabled` and
+`/file/:id/enabled`, and the list payload carries `policyResource` and
+`switchState` so the shared UI can render the same switch. Before spawning the
+managed `opencode serve`, `opencode.ts` writes `opencode.managed.json` in the
+extension storage and passes it as `OPENCODE_CONFIG` in the child's environment
+only; the user's own config and `process.env.OPENCODE_CONFIG` are untouched.
+When the user already owns `OPENCODE_CONFIG`, the denials merge into
+`OPENCODE_CONFIG_CONTENT` and the route reports `requiresManualRestart`, since
+the running child only reads that value at launch. A rewrite that fails after the
+store write also answers saved with `requiresManualRestart`. An unreadable store
+leaves the managed file as it was and fails a fresh launch, because starting
+without the denials would load the plugins the user switched off. A rule that
+beats the denial reports `overridden` and refuses the change with
+`SWITCH_OVERRIDDEN`. An external OpenCode server (`openchamber.apiUrl`) owns
+neither the process nor its config layer, so every row reports the switch as
+unavailable and a change is refused with `SWITCH_UNAVAILABLE`.
 
 ## OpenCode 2 config shapes
 

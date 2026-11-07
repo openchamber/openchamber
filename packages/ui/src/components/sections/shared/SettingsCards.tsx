@@ -75,6 +75,8 @@ interface SettingsCardProps {
   actions?: readonly SettingsCardAction[];
   /** Accessible name for the ⋯ button. */
   actionsLabel?: string;
+  /** A control that belongs to the item itself, such as an on/off switch. Rendered beside the card as a sibling so it is never nested in the card button. */
+  control?: React.ReactNode;
 }
 
 const ActionLabel: React.FC<{ action: SettingsCardAction }> = ({ action }) => (
@@ -84,8 +86,9 @@ const ActionLabel: React.FC<{ action: SettingsCardAction }> = ({ action }) => (
   </>
 );
 
-export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitle, description, badges, footer, muted, onOpen, actions, actionsLabel }) => {
+export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitle, description, badges, footer, muted, onOpen, actions, actionsLabel, control }) => {
   const hasActions = (actions?.length ?? 0) > 0;
+  const hasControl = control != null;
   const body = (
     <>
       <div className="flex items-start justify-between gap-2">
@@ -103,7 +106,7 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
           <div className="mt-1 line-clamp-2 typography-micro text-muted-foreground">{description}</div>
         ) : null}
       </div>
-      <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', hasActions && 'pe-8')}>
+      <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', hasControl ? 'pe-24' : hasActions && 'pe-8')}>
         {footer}
         {onOpen && !hasActions ? (
           <Icon
@@ -131,46 +134,53 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
     <div className={cn(CARD_CLASS, 'oc-tile h-full')}>{body}</div>
   );
 
-  if (!hasActions || !actions) return card;
+  if (!hasActions && !hasControl) return card;
 
-  // The ⋯ button sits over the card as a sibling of the card button, never
-  // inside it, so the two stay separate controls.
+  // The ⋯ button and the item's own control sit over the card as siblings of
+  // the card button, never inside it, so they stay separate controls.
   return (
     <ContextMenu>
       <ContextMenuTrigger render={<div className="group relative" />}>
         {card}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute bottom-3 inset-e-3 h-7 w-7 text-muted-foreground opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 data-[state=open]:opacity-100"
-              aria-label={actionsLabel}
-              title={actionsLabel}
-            >
-              <Icon name="more" className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-fit min-w-32">
-            {actions.map((action) => (
-              <DropdownMenuItem key={action.label} variant={action.destructive ? 'destructive' : 'default'} onClick={action.onSelect}>
-                <ActionLabel action={action} />
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="absolute bottom-3 inset-e-3 flex items-center gap-1">
+          {hasActions && actions ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 data-[state=open]:opacity-100"
+                  aria-label={actionsLabel}
+                  title={actionsLabel}
+                >
+                  <Icon name="more" className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-fit min-w-32">
+                {actions.map((action) => (
+                  <DropdownMenuItem key={action.label} variant={action.destructive ? 'destructive' : 'default'} onClick={action.onSelect}>
+                    <ActionLabel action={action} />
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {control}
+        </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-fit min-w-32">
-        {actions.map((action) => (
-          <ContextMenuItem
-            key={action.label}
-            className={cn(action.destructive && 'text-destructive focus:text-destructive')}
-            onClick={action.onSelect}
-          >
-            <ActionLabel action={action} />
-          </ContextMenuItem>
-        ))}
-      </ContextMenuContent>
+      {hasActions && actions ? (
+        <ContextMenuContent className="w-fit min-w-32">
+          {actions.map((action) => (
+            <ContextMenuItem
+              key={action.label}
+              className={cn(action.destructive && 'text-destructive focus:text-destructive')}
+              onClick={action.onSelect}
+            >
+              <ActionLabel action={action} />
+            </ContextMenuItem>
+          ))}
+        </ContextMenuContent>
+      ) : null}
     </ContextMenu>
   );
 };

@@ -43,8 +43,9 @@ OpenCode 2 loads the user config, then `OPENCODE_CONFIG`, then project `opencode
 - `packages/web/server/lib/opencode/startup-pipeline-runtime.js`: server startup tail orchestration runtime for terminal/proxy/static/start-listen flow.
 - `packages/web/server/lib/opencode/startup-performance.js`: opt-in startup phase diagnostics with fixed labels and numeric metadata allowlists.
 - `packages/web/server/lib/agent-tool/runtime.js`: managed OpenCode custom-tool materialization, environment injection, same-machine authentication (loopback, or the bound address for a concrete bind), and fixed CLI action dispatch.
-- `packages/web/server/lib/opencode/managed-plugin-config.js`: the `OPENCODE_CONFIG_CONTENT` merge used only on the fallback path, when the user's own environment owns `OPENCODE_CONFIG`.
-- `packages/web/server/lib/opencode/managed-config-file.js`: the managed OpenCode config layer — materializes the enabled OpenChamber plugins (agent tools, the limit failover reporter from `../limit-failover/` while a fallback model or an account switch is set, and the session title prompt, always) and publishes them in a file OpenCode watches.
+- `packages/web/server/lib/opencode/managed-plugin-config.js`: the `OPENCODE_CONFIG_CONTENT` merge used only on the fallback path, when the user's own environment owns `OPENCODE_CONFIG`; it appends managed plugin directories, plugin-switch policies and permission rules.
+- `packages/web/server/lib/opencode/managed-config-file.js`: the managed OpenCode config layer — materializes the enabled OpenChamber plugins (agent tools, the limit failover reporter from `../limit-failover/` while a fallback model or an account switch is set, and the session title prompt, always), writes the plugin-switch denials into `policies`, and publishes them in a file OpenCode watches.
+- `packages/web/server/lib/opencode/plugin-switches.js`: OpenChamber's own record of the plugins switched off in its UI, stored under `<data-dir>/plugin-switches.json` and applied only to the managed OpenCode child.
 - `packages/web/server/lib/opencode/session-title-plugin.js`: the plugin that gives OpenCode's hidden `title` agent OpenChamber's title style and names a session started with attached context alone from that context. See "Session title prompt" below.
 - `packages/web/server/lib/opencode/instance-dir.js`: this server's own folder under `<data-dir>/run/instances/<pid>/` for the files its managed OpenCode reads, and removal of folders left by servers that are gone.
 
@@ -702,6 +703,67 @@ a local path, or a control entry. Anything else is refused with `UNLOADABLE_SPEC
 answers as 400 with `code`, and the add dialog shows under the field. An
 existing entry keeps its spec when only its options change, so a config that
 already holds an unloadable spec stays editable.
+
+#### Switching a plugin off
+
+The switch is OpenChamber's, not OpenCode's: it keeps its state in
+`<data-dir>/plugin-switches.json` and never writes a new switch into the user's
+config. The managed OpenCode OpenChamber starts reads the denials from its own
+config layer, so a plain `opencode` process, the TUI or an external server is
+unaffected.
+
+The resource is what OpenCode's plugin loader checks: for a package or Git entry
+the spec up to its last `@` (`leakshield`, `@acme/plugin`,
+`git+ssh://git@github.com/acme/plugin.git#plugin`), and the absolute path for a
+local plugin file or package directory. The managed layer carries:
+
+```jsonc
+{ "policies": [{ "action": "integration.use", "resource": "plugin:leakshield", "effect": "deny" }] }
+```
+
+OpenCode drops a denied plugin however it was configured, so the entry and its
+options stay where the user put them while the plugin does not load in
+OpenChamber. The switch is OpenChamber-wide: the store keys only by resource, so
+switching off a project-scope entry denies that plugin in every project the
+managed OpenCode serves, and the page says so. A `file://` spec is matched by OpenCode as the path it
+names, so the deny carries that path; any other `file:` spelling names nothing
+OpenCode loads and gets no switch. Statements require OpenCode 2.0.29 or newer,
+where `policies` is a top-level key.
+
+The switch reads and writes the store, not a config file, so a rule the user
+wrote is never removed; when one already denies the entry the page shows the
+switch as blocked. A runtime OpenChamber did not start (`isExternalOpenCode`,
+`OPENCODE_SKIP_START`) has no managed layer to apply the switch, so the plugin
+routes report `unavailable` and refuse a change with `SWITCH_UNAVAILABLE`. When
+the user owns `OPENCODE_CONFIG`, the managed runtime can only merge the policies
+into `OPENCODE_CONFIG_CONTENT`, which the child reads at launch; the route answers
+`requiresManualRestart`, and so does a rewrite that fails after the store write,
+because the store is the durable state.
+
+An unreadable store reports every switch `unavailable`, and `denials()` throws.
+A rewrite then keeps the managed file as it was, and a fresh managed launch fails
+with the store's path. Starting anyway would load every plugin the user switched
+off, and they would learn it from the plugin running.
+
+OpenCode decides by the earliest-loaded config with a matching statement, so a
+`plugin.use` allow that loads ahead of the denial beats it. The managed file loads
+right after the global config files, and `OPENCODE_CONFIG_CONTENT` after every
+file. `isPluginDenialOverridden` applies that order to the files OpenChamber can
+read: the row reports `overridden`, and switching it off is refused with
+`SWITCH_OVERRIDDEN` and writes nothing. Turning a stored switch back on stays
+allowed. System and Console policies are outside those files; the page catches
+them through `/api/config` (`packages/ui/src/components/sections/DOCUMENTATION.md`).
+
+The switch is disabled until the policy read succeeds, and stays disabled when
+the read fails: from the client, a denied plugin and an enabled one look the
+same. Listing reads every config file OpenCode reads (both global files,
+`OPENCODE_CONFIG`, and the folder configs above the project) and never creates
+`.opencode`, so opening Settings in a project without a config, or in a
+read-only checkout, still lists every plugin.
+
+The VS Code extension applies the same rule from its own store and managed layer
+in extension storage, through the same `plugin-switches.js` helpers; an external
+OpenCode server (`openchamber.apiUrl`) reports every switch as unavailable.
 
 #### Why rewrite a plain `https://` repository address and not refuse it
 

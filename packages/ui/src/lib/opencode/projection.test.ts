@@ -402,12 +402,23 @@ describe("integration policies", () => {
     expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
   })
 
-  test("ignores an integration.use statement without an mcp: or skill: prefix, which decides providers and accounts", () => {
+  test("ignores an integration.use statement without an mcp:, skill: or plugin: prefix, which decides providers and accounts", () => {
     const policies = readIntegrationPolicies([
       { type: "document", path: "/repo/opencode.json", info: { policies: [{ action: "integration.use", resource: "*", effect: "deny" }] } },
     ])
     expect(policies).toEqual([])
     expect(isIntegrationDenied(policies, "skill:deploy")).toBe(false)
+  })
+
+  test("reads plugin statements in both spellings", () => {
+    const policies = readIntegrationPolicies([
+      { type: "document", path: "/repo/opencode.json", info: { policies: [
+        { action: "plugin.use", resource: "leakshield", effect: "deny" },
+        { action: "integration.use", resource: "plugin:other", effect: "allow" },
+      ] } },
+    ])
+    expect(isIntegrationDenied(policies, "plugin:leakshield")).toBe(true)
+    expect(findIntegrationPolicy(policies, "plugin:other")).toEqual({ resource: "plugin:other", effect: "allow", path: "/repo/opencode.json" })
   })
 })
 
