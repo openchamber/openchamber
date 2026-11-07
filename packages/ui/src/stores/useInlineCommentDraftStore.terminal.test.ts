@@ -14,7 +14,7 @@ const selection = {
 const target = { directory: '/repo', sessionKey: 'session-1' };
 
 describe('terminal context drafts', () => {
-  afterEach(() => { useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} }); });
+  afterEach(() => { useInlineCommentDraftStore.setState({ drafts: {} }); });
 
   test('persists snapshots by chat session and deduplicates identical selections', () => {
     useInlineCommentDraftStore.getState().addDraft(target, selection);
@@ -65,7 +65,7 @@ describe('terminal context drafts', () => {
     const originalStringify = JSON.stringify;
     let envelopeSerializations = 0;
     JSON.stringify = ((value: unknown, ...rest: unknown[]) => {
-      if (value && typeof value === 'object' && 'drafts' in value && 'touchedAt' in value) {
+      if (value && typeof value === 'object' && 'drafts' in value) {
         envelopeSerializations += 1;
       }
       return originalStringify(value, ...(rest as [Parameters<typeof JSON.stringify>[1], Parameters<typeof JSON.stringify>[2]]));
@@ -111,33 +111,29 @@ describe('persisted draft migration', () => {
   test('moves the terminal id out of the language field', () => {
     const migrated = migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse({
       drafts: { key: [v2Draft({ source: 'terminal', language: 'term-9' })] },
-      touchedAt: { key: 1000 },
     }), 2);
     expect(migrated.drafts.key[0].terminalId).toBe('term-9');
     expect(migrated.drafts.key[0].language).toBe('');
-    expect(migrated.touchedAt.key).toBe(1000);
   });
 
   test('drops preview-console drafts but keeps the rest of the bucket', () => {
     const migrated = migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse({
       drafts: { key: [v2Draft({ source: 'preview-console' }), v2Draft({ id: 'icd-2' })] },
-      touchedAt: { key: 1000 },
     }), 2);
     expect(migrated.drafts.key.map((draft) => draft.id)).toEqual(['icd-2']);
   });
 
   test('malformed entries and unknown payload shapes reset safely', () => {
-    expect(migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse(null), 2)).toEqual({ drafts: {}, touchedAt: {} });
-    expect(migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse({ drafts: 'nope' }), 2)).toEqual({ drafts: {}, touchedAt: {} });
+    expect(migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse(null), 2)).toEqual({ drafts: {} });
+    expect(migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse({ drafts: 'nope' }), 2)).toEqual({ drafts: {} });
     const migrated = migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse({
       drafts: { key: [{ id: 42 }, v2Draft()] },
-      touchedAt: {},
     }), 2);
     expect(migrated.drafts.key).toHaveLength(1);
   });
 
   test('pre-v2 payloads reset entirely', () => {
-    expect(migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse({ drafts: { key: [v2Draft()] }, touchedAt: {} }), 1))
-      .toEqual({ drafts: {}, touchedAt: {} });
+    expect(migratePersistedDrafts(persistedDraftEnvelopeSchema.safeParse({ drafts: { key: [v2Draft()] } }), 1))
+      .toEqual({ drafts: {} });
   });
 });

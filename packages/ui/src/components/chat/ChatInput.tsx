@@ -1953,7 +1953,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             } else {
                 const draft = draftFromContextPayload(payload);
                 if (draft && inlineDraftTarget) {
-                    useInlineCommentDraftStore.getState().addDraft(inlineDraftTarget, draft);
+                    useInlineCommentDraftStore.getState().addDraft(inlineDraftTarget, draft, { written: true });
                 }
             }
         }

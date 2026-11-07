@@ -182,7 +182,7 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
                     return;
                 }
                 const lines = thread.line === null ? '' : `:${thread.line}`;
-                useInlineCommentDraftStore.getState().addDraft(into, {
+                const draftId = useInlineCommentDraftStore.getState().addDraft(into, {
                     source: 'pr-comment',
                     fileLabel: `${label} · ${thread.path}${lines}`,
                     startLine: 0,
@@ -192,6 +192,7 @@ export function useChangeRequestReview(target: ChangeRequestReviewTarget | null)
                     text: '',
                     provider: target?.provider,
                 });
+                if (!draftId) toast.error(t('inlineComment.toast.noRoom'));
             },
             submit: (submission) => write(
                 async () => {

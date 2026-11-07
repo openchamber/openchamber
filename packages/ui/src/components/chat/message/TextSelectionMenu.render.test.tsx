@@ -109,7 +109,7 @@ describe('TextSelectionMenu render subscriptions', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
-    useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+    useInlineCommentDraftStore.setState({ drafts: {} });
     useInputStore.getState().setPendingInputText(null);
     useInputStore.setState({ composerAddress: null, attachedFiles: [], attachmentDrafts: new Map(), attachmentDraftKey: null });
     dom.restore();

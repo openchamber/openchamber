@@ -35,7 +35,7 @@ const openDraft = () => {
 };
 
 afterEach(() => {
-    useInlineCommentDraftStore.setState({ drafts: {}, touchedAt: {} });
+    useInlineCommentDraftStore.setState({ drafts: {} });
 });
 
 describe('mobileCommentQuotePreview', () => {

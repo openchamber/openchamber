@@ -785,7 +785,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       },
     );
     if (!draftId) {
-      toast.error(t('chat.textSelection.comment.attachFailed'));
+      toast.error(t('inlineComment.toast.noRoom'));
       return;
     }
     hideMenu();

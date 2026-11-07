@@ -318,8 +318,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
     if (rangeOverride) {
       setLineSelection(rangeOverride);
     }
-    saveComment(textToSave, rangeOverride ?? lineSelection ?? undefined);
-    setLineSelection(null);
+    const saved = saveComment(textToSave, rangeOverride ?? lineSelection ?? undefined);
+    if (saved) setLineSelection(null);
+    return saved;
   }, [lineSelection, saveComment]);
 
   React.useEffect(() => {
