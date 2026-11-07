@@ -462,6 +462,7 @@ and small notes about its cells. These must stay true:
 - The grid draws only the columns near the view from `COLUMN_WINDOW_MIN` columns
   up. All `<col>`s stay and a spanning cell stands for what is not drawn, so widths
   stay exact. A frozen column and the one being edited are always drawn.
+- Each spanning gap is split into cells of at most 1,000 columns. Browsers clamp larger `colspan` values, which would place the drawn cells in the wrong columns and make the far end unreachable.
 - Reading a column's values for the filter menu takes every row, so it happens
   when the submenu mounts and never in render.
 
@@ -471,6 +472,14 @@ keeps the office limit. Past `DEFAULT_TABLE_ROW_CAP` rows the grid holds the fir
 ones, and a capped SQLite result sorts in the database (`onSort`) because the
 grid does not hold the rows that would come first. Filters and search see only
 the rows the grid holds.
+
+### Why CSV change traces retain parsed rows
+
+The parser produces immutable row arrays, which the trace keeps directly. Creating a map entry and coordinate string for every cell blocked the main thread for seconds on a wide sparse CSV. First loads and own edits adopt the rows without scanning them; outside changes compare values and field presence, so a missing field and a present empty field remain distinct. Workbook traces keep cell maps because their edits arrive as individual cell patches.
+
+### Why long column gaps use several cells
+
+HTML clamps `colspan` to 1,000. Splitting a larger virtual gap keeps the drawn cells at their logical columns, with the same widths as the column definitions. One large spanning cell would shift those cells toward the start and leave the far end of a wide table blank.
 
 ### Data files, archives, notebooks
 
