@@ -245,11 +245,12 @@ export type InputState = {
    */
   pendingDraftSubmit: { draftId: number; text: string } | null
   /**
-   * Files a native share left for one new-session draft (the iOS share extension).
-   * Bound to the draft's id like `pendingDraftSubmit`, so they never attach to a
-   * session or to another draft the user happened to open.
+   * What a native share left for one new-session draft (the iOS share extension and the
+   * Android share intent): files to attach and, for a shared link or paragraph, text to put
+   * in the composer. Bound to the draft's id like `pendingDraftSubmit`, so it never lands on
+   * a session or on another draft the user happened to open.
    */
-  pendingDraftAttachments: { draftId: number; files: File[] } | null
+  pendingDraftContent: { draftId: number; files: File[]; text: string | null } | null
   /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
@@ -278,9 +279,9 @@ export type InputState = {
   requestDraftSubmit: (draftId: number, text: string) => void
   /** Takes the pending text when it belongs to this draft; any other pending request is dropped. */
   consumePendingDraftSubmit: (draftId: number | null) => string | null
-  requestDraftAttachments: (draftId: number, files: File[]) => void
-  /** Takes the pending files when they belong to this draft; any other pending request is dropped. */
-  consumePendingDraftAttachments: (draftId: number | null) => File[] | null
+  requestDraftContent: (draftId: number, content: { files: File[]; text?: string | null }) => void
+  /** Takes the pending content when it belongs to this draft; another draft's request is left alone. */
+  consumePendingDraftContent: (draftId: number | null) => { files: File[]; text: string | null } | null
   setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
   consumePendingGuestIssue: () => AttachIssueRequest | null
   requestBtwComposer: (request: PendingBtwComposerRequest) => void
@@ -328,7 +329,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pinnedSyntheticParts: new Map(),
   pendingPresetSubmit: null,
   pendingDraftSubmit: null,
-  pendingDraftAttachments: null,
+  pendingDraftContent: null,
   pendingGuestIssue: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
@@ -404,16 +405,18 @@ export const useInputStore = create<InputState>()((set, get) => ({
     return pendingDraftSubmit.draftId === draftId ? pendingDraftSubmit.text : null
   },
 
-  requestDraftAttachments: (draftId, files) => set({ pendingDraftAttachments: { draftId, files } }),
+  requestDraftContent: (draftId, content) => set({
+    pendingDraftContent: { draftId, files: content.files, text: content.text?.trim() || null },
+  }),
 
-  consumePendingDraftAttachments: (draftId) => {
-    const { pendingDraftAttachments } = get()
-    if (pendingDraftAttachments === null || draftId === null) return null
-    // Another composer asking must not take the files from the draft they were requested
-    // for: it can mount a beat before that draft does.
-    if (pendingDraftAttachments.draftId !== draftId) return null
-    set({ pendingDraftAttachments: null })
-    return pendingDraftAttachments.files
+  consumePendingDraftContent: (draftId) => {
+    const { pendingDraftContent } = get()
+    if (pendingDraftContent === null || draftId === null) return null
+    // Another composer asking must not take what was requested for the draft it belongs to:
+    // it can mount a beat before that draft does.
+    if (pendingDraftContent.draftId !== draftId) return null
+    set({ pendingDraftContent: null })
+    return { files: pendingDraftContent.files, text: pendingDraftContent.text }
   },
 
   setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),

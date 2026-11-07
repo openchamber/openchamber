@@ -14,6 +14,7 @@ describe('shared files payload', () => {
     });
 
     expect(payload?.rejected).toEqual([]);
+    expect(payload?.text).toBeNull();
     expect(payload?.files).toHaveLength(1);
     const [file] = payload!.files;
     expect(file.name).toBe('report.pdf');
@@ -42,6 +43,31 @@ describe('shared files payload', () => {
 
   test('rejects a shape the plugin never promised', () => {
     expect(parseSharedFiles({ files: [{ name: 'note.txt' }] })).toBeNull();
+    expect(parseSharedFiles({ text: 42 })).toBeNull();
     expect(parseSharedFiles(undefined)).toBeNull();
+  });
+
+  test('keeps a shared link or paragraph as text with no files', () => {
+    const payload = parseSharedFiles({ text: '  https://openchamber.dev/session/abc\n' });
+
+    expect(payload?.text).toBe('https://openchamber.dev/session/abc');
+    expect(payload?.files).toEqual([]);
+    expect(payload?.rejected).toEqual([]);
+  });
+
+  test('carries both when the share had text and a file', () => {
+    const payload = parseSharedFiles({
+      text: 'Screenshot from the failing run',
+      files: [{ name: 'shot.png', mimeType: 'image/png', data: FILE_BASE64 }],
+    });
+
+    expect(payload?.text).toBe('Screenshot from the failing run');
+    expect(payload?.files).toHaveLength(1);
+  });
+
+  test('treats blank text as no text', () => {
+    const payload = parseSharedFiles({ text: '   \n ', files: [] });
+
+    expect(payload?.text).toBeNull();
   });
 });

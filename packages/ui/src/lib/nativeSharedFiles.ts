@@ -1,8 +1,10 @@
-// A file the iOS share extension staged for the app (OpenChamberShare). It reaches the
-// page through the app-local `SharedFiles` plugin (SharedFiles.swift), never through the
-// `openchamber://` link the extension also opens: any app can open a link, but only the
-// extension can write the inbox, so the link alone attaches nothing. Every other runtime
-// has no share extension, so subscribing is a no-op there.
+// What a native share staged for the app: files the iOS share extension wrote into its App
+// Group inbox, or what the Android share intent read, plus the text or link the user shared
+// instead of (or along with) files. It reaches the page through the app-local `SharedFiles`
+// plugin (README: packages/mobile), never through the `openchamber://` link the iOS extension
+// also opens: any app can open a link, but only the extension can write the inbox, so the link
+// alone attaches nothing. Every other runtime has no share intake, so subscribing is a no-op
+// there.
 
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import { z } from 'zod';
@@ -21,6 +23,7 @@ const rejectedFileSchema = z.object({
 });
 
 const takePendingResultSchema = z.object({
+  text: z.string().nullish(),
   files: z.array(sharedFileSchema).nullish(),
   rejected: z.array(rejectedFileSchema).nullish(),
 });
@@ -29,6 +32,8 @@ export type RejectedSharedFile = z.infer<typeof rejectedFileSchema>;
 
 export type SharedFilesPayload = {
   files: File[];
+  /** A shared link or paragraph; null when the share carried files only. */
+  text: string | null;
   rejected: RejectedSharedFile[];
 };
 
@@ -59,7 +64,7 @@ export const parseSharedFiles = (raw: unknown): SharedFilesPayload | null => {
       rejected.push({ name: entry.name, reason: 'unreadable' });
     }
   }
-  return { files, rejected };
+  return { files, text: parsed.data.text?.trim() || null, rejected };
 };
 
 // What SharedFilesPlugin.takePending resolves with.
@@ -83,7 +88,8 @@ const takePending = async (): Promise<SharedFilesPayload | null> => {
  * new one as the plugin announces it. Unsubscribe, and a no-op outside the iOS app.
  */
 export const subscribeToNativeSharedFiles = (handler: (payload: SharedFilesPayload) => void): (() => void) => {
-  if (getClientPlatform() !== 'ios') {
+  const platform = getClientPlatform();
+  if (platform !== 'ios' && platform !== 'android') {
     return () => {};
   }
 
@@ -94,7 +100,7 @@ export const subscribeToNativeSharedFiles = (handler: (payload: SharedFilesPaylo
   // (React StrictMode subscribes, unsubscribes and subscribes again on mount).
   const deliverPending = (): void => {
     void takePending().then((payload) => {
-      if (payload && (payload.files.length > 0 || payload.rejected.length > 0)) handler(payload);
+      if (payload && (payload.files.length > 0 || payload.rejected.length > 0 || payload.text !== null)) handler(payload);
     });
   };
 

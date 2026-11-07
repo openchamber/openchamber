@@ -44,11 +44,12 @@ interface DeepLinkHandlers {
 type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string };
 
 /**
- * Files shared to the app from the system share sheet (the iOS share extension). Like a
- * Shortcuts request it never comes from a URL: the extension writes an App Group inbox and
- * the plugin hands the page what it staged.
+ * Text, links and files shared to the app from the system share sheet, on either platform.
+ * Like a Shortcuts request it never comes from a URL: the iOS extension writes an App Group
+ * inbox, the Android share intent is read off the launch intent, and the plugin hands the page
+ * what it staged.
  */
-type SharedFilesIntent = { type: 'shared-files'; files: File[]; rejected: RejectedSharedFile[] };
+type SharedFilesIntent = { type: 'shared-files'; files: File[]; text: string | null; rejected: RejectedSharedFile[] };
 
 type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent | SharedFilesIntent;
 
@@ -86,9 +87,10 @@ const REJECTED_FILE_REASONS: Record<string, string> = {
 };
 
 /**
- * Opens a draft and leaves the files for its composer: they attach once that draft is on
- * screen, so nothing lands on the session the user happened to leave open. Rejected names
- * are reported instead of dropped silently — the same report the file picker gives.
+ * Opens a draft and leaves what was shared for its composer: files attach and a shared link
+ * or paragraph is typed in, once that draft is on screen, so nothing lands on the session the
+ * user happened to leave open. Rejected names are reported instead of dropped silently — the
+ * same report the file picker gives.
  */
 const openSharedFilesSession = (intent: SharedFilesIntent): void => {
   if (intent.rejected.length > 0) {
@@ -100,11 +102,11 @@ const openSharedFilesSession = (intent: SharedFilesIntent): void => {
       .join('\n');
     toast.error(t('chat.chatInput.toast.someFilesSkipped', { summary }));
   }
-  if (intent.files.length === 0) return;
+  if (intent.files.length === 0 && !intent.text) return;
 
   useSessionUIStore.getState().openNewSessionDraft();
   const draftId = useSessionUIStore.getState().newSessionDraft.draftId;
-  useInputStore.getState().requestDraftAttachments(draftId, intent.files);
+  useInputStore.getState().requestDraftContent(draftId, { files: intent.files, text: intent.text });
 };
 
 const execute = (intent: NavigationIntent): boolean => {
@@ -250,7 +252,7 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
     }));
 
     cleanup.push(subscribeToNativeSharedFiles((payload) => {
-      applyDeepLinkIntent({ type: 'shared-files', files: payload.files, rejected: payload.rejected });
+      applyDeepLinkIntent({ type: 'shared-files', files: payload.files, text: payload.text, rejected: payload.rejected });
     }));
 
     void import('@capacitor/push-notifications')
