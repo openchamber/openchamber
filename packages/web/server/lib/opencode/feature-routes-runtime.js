@@ -17,6 +17,8 @@ import { createTrackerOAuth } from '../trackers/extension-oauth.js';
 import { registerGuestRoutes, settleGuestDeactivationListeners } from '../guests/routes.js';
 import { listInstalledGuests, registerBuiltInGuests } from '../guests/catalog.js';
 import { setHostCallbackRoute } from '../guests/host-callback.js';
+import { createGuestOpenCodeProvider } from '../guests/opencode-provider/index.js';
+import { configureGuestOpenCodeProvider } from '../guests/service.js';
 import { registerNotificationChannelRoutes } from '../notifications/channel-routes.js';
 import { createOutboundHandles } from '../source-control/outbound-handles.js';
 import { createExtensionProviders } from '../source-control/extension-providers.js';
@@ -808,6 +810,12 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       persistPath: extensionsPersistPath(openchamberDataDir),
       emitChanged: () => announceChange('openchamber:quota-providers-changed'),
     });
+    configureGuestOpenCodeProvider(createGuestOpenCodeProvider({
+      currentGuest: async (guestId) => (await listInstalledGuests({ persistPath: extensionsPersistPath(openchamberDataDir) }))
+        .find((guest) => guest.id === guestId) ?? null,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+    }));
     stopGuestPackageWatch();
     ({ stopPackageWatch: stopGuestPackageWatch } = registerGuestRoutes(app, {
       openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService,

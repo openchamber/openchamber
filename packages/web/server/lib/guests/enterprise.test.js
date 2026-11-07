@@ -123,6 +123,11 @@ describe('extensions in enterprise mode', () => {
 });
 
 describe('session content in enterprise mode', () => {
+  test('OpenCode reads are gated with the service that would receive them', () => {
+    const guest = { service: { entry: 's.js', runtime: 'host', provides: ['opencode'] } };
+    expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service', 'opencode']);
+  });
+
   test('transcript is gated with the service that would receive it', () => {
     const guest = { service: { entry: 'service/main.js', runtime: 'host' }, sessionEvents: { events: ['turn-finished'], content: true } };
     expect(enterpriseBlockedCapabilities(guest, { source: 'zip' }, enterprise())).toEqual(['service', 'transcript']);

@@ -69,9 +69,10 @@ import { z } from 'zod';
  *   (`../index.js`); the desktop shell binds loopback (`packages/electron`).
  *   Pairing a device then goes through a pinned relay only.
  * - Extensions that could send what they see elsewhere (`network`, `origins`,
- *   `service`, and `transcript`, session content posted to such a service)
- *   install and run only from a Git repository the administrator
- *   listed (`allowedExtensions` / `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
+ *   `service`, `transcript`, session content posted to such a service, and
+ *   `opencode`, sessions such a service reads from OpenCode) install and run
+ *   only from a Git repository the administrator listed (`allowedExtensions` /
+ *   `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
  *   A package that starts sessions, adds to agents' instructions or ships

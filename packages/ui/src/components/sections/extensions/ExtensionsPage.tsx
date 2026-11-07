@@ -530,6 +530,9 @@ const ExtensionDetail: React.FC<ExtensionHandlers & { guest: InstalledGuest; onB
                 : t('settings.extensions.service.providesQuota.none')}
             </p>
           ) : null}
+          {guest.capabilities.requested.includes('opencode') ? (
+            <p className="typography-meta text-foreground">{t('settings.extensions.capability.opencode.detail')}</p>
+          ) : null}
           {guest.service ? (
             // A security warning: stays visible.
             <p className="typography-meta text-[var(--status-warning)]">{t('settings.extensions.service.warning')}</p>
