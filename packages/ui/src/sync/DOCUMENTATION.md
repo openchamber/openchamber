@@ -1018,6 +1018,13 @@ sends the request header only to a server that lists
 `api.message-part-shells.v1` among its `/api/version` capabilities, learned
 once per runtime when the sync provider starts; an older server on another
 origin would refuse the unknown header at CORS preflight and fail the page.
+A page asked before the answer arrives waits for it, because a restored
+session's first page is asked during the first render and would otherwise
+download every finished result in full. The wait ends at most 5 s after the
+check started, once for all pages: a check that hangs past that lets pages go
+out whole until it answers, and a check that fails leaves the answer unknown,
+so that page goes out whole and the next one starts a new check. A runtime
+switch during the wait drops the page before it is sent.
 Rows that need the result (an expanded tool, an extension header that reads
 `{output}`) complete the message by id through `tool-content-completion.ts`;
 a failed or empty completion shows a retry, never an empty result. A page's
