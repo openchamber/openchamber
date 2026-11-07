@@ -76,7 +76,7 @@ import {
     resolveToolQuickOpenTarget,
     type DiffPatchEntry,
 } from './toolDiffUtils';
-import { useChatColumnActions } from '@/components/chat/chatColumnSession';
+import { useChatColumnActions, useChatTranscriptDirectory } from '@/components/chat/chatColumnSession';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
@@ -1902,9 +1902,11 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     const iconStyle = isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
     const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
+    const storeDirectory = useChatTranscriptDirectory();
     const contentCompletion = useToolContentCompletion(
         part,
         shouldRenderExpandedContent || (presentation !== null && guestToolHeaderReadsOutput(presentation)),
+        storeDirectory ?? undefined,
     );
     // Shell and subagent rows carry their duration: live while they run, final once settled.
     // Image generation takes tens of seconds; the ticking time shows it is still at work.
