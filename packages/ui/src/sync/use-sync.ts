@@ -1,8 +1,11 @@
 import { useCallback, useMemo } from "react"
 import type { Message, Part } from "@/lib/opencode/model"
 import { opencodeClient } from "@/lib/opencode/client"
+import { normalizePath } from "@/lib/pathNormalization"
 import { Binary } from "./binary"
 import { upsertSessionRecord } from "./session-records"
+import { adoptSessionMove } from "./session-actions"
+import { resolveRecoveryDirectory } from "./form-recovery"
 import { retry } from "./retry"
 import {
   useChildStoreManager,
@@ -60,8 +63,19 @@ export function useSync() {
 
   const recoverPendingQuestions = useCallback(
     async (sessionID: string, directoryOverride?: string): Promise<boolean> => {
-      const targetDirectory = directoryOverride || directory
+      let targetDirectory = directoryOverride || directory
       if (!sessionID || !targetDirectory || getRuntimeKey() !== runtimeKey) return false
+      // The selected directory can be a stale copy left by a move. Read the
+      // session unscoped: its own directory is authoritative, and the form
+      // lives there. Adopting it carries the chat and the store with it.
+      const authoritative = await opencodeClient.getSessionUnscoped(sessionID).catch(() => null)
+      const resolvedDirectory = resolveRecoveryDirectory(authoritative, targetDirectory)
+      if (!resolvedDirectory) return false
+      const currentDirectory = normalizePath(targetDirectory)
+      if (currentDirectory && currentDirectory !== resolvedDirectory) {
+        adoptSessionMove(sessionID, currentDirectory, resolvedDirectory)
+      }
+      targetDirectory = resolvedDirectory
       const targetStore = childStores.ensureChild(targetDirectory, {
         priority: "selected",
         reason: "selected-session",

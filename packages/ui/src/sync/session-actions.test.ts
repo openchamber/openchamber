@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
+import type { WorktreeMetadata } from "@/types/worktree"
 import type { FormRequest } from "@/lib/opencode/model"
 import type { InputState } from "./input-store"
 
@@ -60,6 +61,8 @@ let activeStatusSnapshot: Record<string, SessionStatus> | null = {}
 let readActiveStatusSnapshot: (directory?: string | null) => Promise<Record<string, SessionStatus> | null> = async () => activeStatusSnapshot
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
 const movedSessionDirectories: Array<{ sessionID: string; directory: string }> = []
+const worktreeMetadataCalls: Array<{ sessionID: string; metadata: WorktreeMetadata | null; cwd?: string }> = []
+let availableWorktreesByProject = new Map<string, WorktreeMetadata[]>()
 const globalArchivedSessions: Session[] = []
 let runtimeKey = "default-runtime"
 let runtimeGeneration = 0
@@ -256,7 +259,10 @@ mock.module("./session-ui-store", () => ({
         selectedSessions.push({ sessionId, directoryHint })
       },
       markSessionAsOpenChamberCreated: () => {},
-      setWorktreeMetadata: () => {},
+      availableWorktreesByProject,
+      setWorktreeMetadata: (sessionID: string, metadata: WorktreeMetadata | null, cwd?: string) => {
+        worktreeMetadataCalls.push({ sessionID, metadata, cwd })
+      },
       setSessionDirectory: (sessionID: string, directory: string) => {
         movedSessionDirectories.push({ sessionID, directory })
       },
@@ -596,6 +602,8 @@ describe("moveSessionToDirectory", () => {
     replyCalls.length = 0
     registeredSessionDirectories.length = 0
     movedSessionDirectories.length = 0
+    worktreeMetadataCalls.length = 0
+    availableWorktreesByProject = new Map()
     globalUpsertedSessions.length = 0
   })
 
@@ -683,6 +691,63 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().sessionTotal).toBe(1)
     expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
     expect((globalUpsertedSessions.at(-1) as Session).title).toBe("Renamed")
+  })
+
+  test("an event-applied move updates the global directory and the worktree attachment", async () => {
+    // SAFETY: test fixture; only the worktree path and branch are read.
+    const worktree = {
+      path: "/destination",
+      projectDirectory: "/repo",
+      branch: "feature",
+      label: "feature",
+    } as WorktreeMetadata
+    availableWorktreesByProject = new Map([["/repo", [worktree]]])
+    const source = createStore({}, {
+      // SAFETY: test fixture; the action reads id, title and directory.
+      session: [{ id: "session-a", title: "Renamed", directory: "/destination" } as Session],
+      sessionTotal: 1,
+    })
+    const destination = createStore({})
+    const childStores = createChildStores([["/source", source], ["/destination", destination]])
+    const { adoptSessionMove, setActionRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/source")
+
+    adoptSessionMove("session-a", "/source", "/destination")
+
+    expect(globalUpsertedSessions.at(-1)).toMatchObject({
+      id: "session-a",
+      title: "Renamed",
+      directory: "/destination",
+    })
+    expect(worktreeMetadataCalls.at(-1)).toMatchObject({
+      sessionID: "session-a",
+      cwd: "/destination",
+    })
+    expect(worktreeMetadataCalls.at(-1)?.metadata?.path).toBe("/destination")
+  })
+
+  test("an event-applied move out of a worktree clears the attachment", async () => {
+    const source = createStore({}, {
+      // SAFETY: test fixture; the action reads id, title and directory.
+      session: [{ id: "session-a", title: "Renamed", directory: "/elsewhere" } as Session],
+      sessionTotal: 1,
+    })
+    const destination = createStore({})
+    const childStores = createChildStores([["/source", source], ["/elsewhere", destination]])
+    const { adoptSessionMove, setActionRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/source")
+
+    adoptSessionMove("session-a", "/source", "/elsewhere")
+
+    expect(globalUpsertedSessions.at(-1)).toMatchObject({
+      id: "session-a",
+      directory: "/elsewhere",
+    })
+    expect(worktreeMetadataCalls.at(-1)).toMatchObject({
+      sessionID: "session-a",
+      metadata: null,
+      cwd: "/elsewhere",
+    })
   })
 })
 

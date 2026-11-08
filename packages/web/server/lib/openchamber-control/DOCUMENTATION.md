@@ -370,8 +370,11 @@ other.
   `session.messages`) resolve `projectId` through the session service's
   `resolveDirectory`, the lookup create/send/fork use: an unknown project is a
   404 and a missing project folder a 400, never a read of the current or every
-  directory. Every `session.*` action refuses `projectId` and `directory`
-  together with a 400, so neither silently wins.
+  directory. An action that names a session ID resolves its directory by
+  reading that session by ID (unscoped) first: a moved session can leave a
+  stale copy under the directory the call came from, which the global list can
+  return first. The list is the fallback. Every `session.*` action refuses
+  `projectId` and `directory` together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not

@@ -440,6 +440,28 @@ repeating registration; a later listing still admits the session, and a parked
 viewed session comes back then. The sidebar stays the only owner of the
 worktree list: admission never publishes topology itself.
 
+### Following a move
+
+`adoptSessionMove` in `session-actions.ts` owns a directory change that the
+client did not initiate: an agent's `session_move`, another client, or this
+client's move whose event beat the response. It moves the transcript, live
+state and pending requests to the destination store, registers the routing
+directory, and updates the selected directory. It also updates the two
+sidebar-facing copies in the same step: the worktree attachment becomes the
+worktree holding the destination (or clears when none does), and the moved
+record is upserted into the global sessions store with its new directory. The
+sidebar and the session switcher read the global store and the attachment, so
+neither may wait for the next poll; the attachment outranks the session record
+in grouping, so leaving it behind keeps a session under the worktree it left.
+The global upsert also protects the correct directory from a poll response
+that predates the move.
+
+A form or permission that is missing after a move is recovered from the
+session's own directory: `recoverPendingQuestions` reads the session through
+the unscoped client first, adopts that directory when it differs from the
+selected one, and only then resyncs pending forms. The selected directory can
+be a stale copy, and resyncing it would find nothing.
+
 ### Why admission reacts to moves and not to the session list
 
 The first version scanned the whole global session list and registered every

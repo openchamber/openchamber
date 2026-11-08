@@ -1,5 +1,6 @@
-import type { Message, Part } from "@/lib/opencode/model"
+import type { Message, Part, Session } from "@/lib/opencode/model"
 import { isQuestionTool } from "@/lib/opencode/tools"
+import { normalizePath } from "@/lib/pathNormalization"
 
 type MessageRecord = {
   info: Message
@@ -7,6 +8,16 @@ type MessageRecord = {
 }
 
 const RECOVERY_DELAYS_MS = [0, 500, 1500] as const
+
+/**
+ * A pending form is read from the session's real directory. The directory the
+ * chat has selected can be a stale copy left by an earlier move, so the
+ * authoritative session read wins; the selected directory is only a fallback.
+ */
+export const resolveRecoveryDirectory = (
+  session: Pick<Session, "directory"> | null,
+  fallback: string | null,
+): string | null => normalizePath(session?.directory ?? null) ?? normalizePath(fallback)
 
 /**
  * v2 has no `form` tool: a form is raised by the tool that blocks on it, which
