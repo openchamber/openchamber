@@ -59,18 +59,36 @@ function findEnvKey(env, key) {
 
 function resolveSherpaLibDir(platform = process.platform, arch = process.arch) {
   const packageName = sherpaPlatformPackageName(platform, arch);
+  // The platform package is an optional dependency of sherpa-onnx-node, so it
+  // lives in sherpa-onnx-node's own dependency tree. In a hoisted npm install
+  // it is also reachable from this module, but an isolated install (bun's
+  // default layout, pnpm) keeps it nested inside sherpa-onnx-node's
+  // node_modules, where resolving from here fails. Resolve from the wrapper's
+  // own location first so the fallback below can actually find the addon.
+  const resolvers = [];
   try {
-    const pkgJson = require.resolve(`${packageName}/package.json`);
-    // Electron packages node_modules inside app.asar, but native addons and
-    // their shared libraries are extracted to app.asar.unpacked. The dynamic
-    // loader (dlopen/DYLD/LD) cannot read from the asar archive, so point the
-    // search path at the unpacked copy.
-    const dir = path.dirname(pkgJson);
-    const unpacked = dir.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
-    return existsSync(unpacked) ? unpacked : dir;
+    resolvers.push(createRequire(require.resolve('sherpa-onnx-node')));
   } catch {
-    return null;
+    // The wrapper itself may be missing; the fallback below still resolves
+    // from this module's own tree.
   }
+  resolvers.push(require);
+
+  for (const resolver of resolvers) {
+    try {
+      const pkgJson = resolver.resolve(`${packageName}/package.json`);
+      // Electron packages node_modules inside app.asar, but native addons and
+      // their shared libraries are extracted to app.asar.unpacked. The dynamic
+      // loader (dlopen/DYLD/LD) cannot read from the asar archive, so point the
+      // search path at the unpacked copy.
+      const dir = path.dirname(pkgJson);
+      const unpacked = dir.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+      return existsSync(unpacked) ? unpacked : dir;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 /**
