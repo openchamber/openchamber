@@ -930,6 +930,7 @@ export const ProvidersPage: React.FC = () => {
         <SettingsSection
           title={t('settings.providers.page.logo.title')}
           info={t('settings.providers.page.logo.info')}
+          settingsItem="providers.logo"
         >
           <ProviderLogoImageControl
             preview={customProviderLogos[selectedProvider.id]

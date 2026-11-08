@@ -117,6 +117,19 @@ describe('settings search', () => {
       expect(results.find((result) => result.id === 'appearance.scrollbars')?.page).toBe('appearance');
     }
   });
+
+  test('finds the provider logo wherever it can be uploaded', () => {
+    for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isMobile: true }, { ...runtimeCtx, isVSCode: true }]) {
+      const results = buildSettingsSearchResults({
+        query: 'logo',
+        runtimeCtx: context,
+        t,
+        getPageTitle: (page) => page,
+      });
+      expect(results.find((result) => result.id === 'providers.logo')?.page).toBe(context.isVSCode ? undefined : 'providers');
+    }
+  });
+
   test('finds Linear connect on the integrations page when the server serves Linear', () => {
     const results = buildSettingsSearchResults({
       query: 'linear',

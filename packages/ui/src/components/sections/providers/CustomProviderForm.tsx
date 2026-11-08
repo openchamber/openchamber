@@ -369,6 +369,7 @@ export const CustomProviderForm: React.FC<CustomProviderFormProps> = ({
           <SettingsStackedField
             label={t('settings.providers.page.logo.title')}
             info={t('settings.providers.page.logo.info')}
+            settingsItem="providers.logo"
           >
             <ProviderLogoImageControl
               preview={pickedLogoUrl

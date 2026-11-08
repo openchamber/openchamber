@@ -1409,6 +1409,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['api key', 'oauth', 'credentials', 'accounts', 'switch account', 'disconnect'],
   },
   {
+    id: 'providers.logo',
+    page: 'providers',
+    titleKey: 'settings.providers.page.logo.title',
+    keywords: ['logo', 'image', 'upload', 'icon', 'picture', 'svg', 'png'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'providers.models',
     page: 'providers',
     titleKey: 'settings.providers.page.models.title',
