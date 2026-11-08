@@ -334,7 +334,7 @@ Gdy Twoja wtyczka OpenCode rejestruje dostawcę modeli, selektory modeli i Ustaw
 }
 ```
 
-Klucz to ID dostawcy w postaci, w jakiej podaje je OpenCode. Wartość to plik `.svg` lub `.png` z pakietu, do 1 MB. Brakujący, pusty lub większy plik powoduje niepowodzenie instalacji. Pakiet wskazuje do 8 dostawców. Logo zachowuje własne kolory, a `currentColor` w SVG podąża za jasnym lub ciemnym motywem. Zastępuje logo dołączone do aplikacji dla tego ID. To, co użytkownik ustawił dla tego dostawcy, ma pierwszeństwo, a przy remisie wygrywa rozszerzenie zainstalowane jako pierwsze. Nie jest potrzebne żadne uprawnienie. VS Code i telefon nie ładują rozszerzeń, więc nie pokazują tych logo.
+Klucz to ID dostawcy w postaci, w jakiej podaje je OpenCode. Wartość to plik `.svg` lub `.png` z pakietu, do 1 MB. Brakujący, pusty lub większy plik powoduje niepowodzenie instalacji. Pakiet wskazuje do 256 dostawców, a dwa ID mogą wskazywać ten sam plik. Logo zachowuje własne kolory, a `currentColor` w SVG podąża za jasnym lub ciemnym motywem. Zastępuje logo dołączone do aplikacji dla tego ID. To, co użytkownik ustawił dla tego dostawcy, ma pierwszeństwo, a przy remisie wygrywa rozszerzenie zainstalowane jako pierwsze. Nie jest potrzebne żadne uprawnienie. VS Code i telefon nie ładują rozszerzeń, więc nie pokazują tych logo.
 
 ## Pierwsze linie w panelu
 

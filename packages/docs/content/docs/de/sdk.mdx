@@ -334,7 +334,7 @@ Wenn dein OpenCode-Plugin einen Modellanbieter registriert, zeigen die Modellaus
 }
 ```
 
-Der Schlüssel ist die Anbieter-ID, wie OpenCode sie meldet. Der Wert ist eine `.svg`- oder `.png`-Datei in deinem Paket, bis zu 1 MB. Fehlt die Datei, ist sie leer oder größer, schlägt die Installation fehl. Ein Paket nennt bis zu 8 Anbieter. Das Logo behält seine eigenen Farben, und `currentColor` in einer SVG folgt dem hellen oder dunklen Design. Es ersetzt ein Logo, das die App für diese ID mitbringt. Alles, was der Nutzer für diesen Anbieter festgelegt hat, geht vor. Bei einem Gleichstand gewinnt die zuerst installierte Erweiterung. Es ist keine Berechtigung nötig. VS Code und das Smartphone laden keine Erweiterungen und zeigen diese Logos daher nicht.
+Der Schlüssel ist die Anbieter-ID, wie OpenCode sie meldet. Der Wert ist eine `.svg`- oder `.png`-Datei in deinem Paket, bis zu 1 MB. Fehlt die Datei, ist sie leer oder größer, schlägt die Installation fehl. Ein Paket nennt bis zu 256 Anbieter, und zwei IDs können auf dieselbe Datei zeigen. Das Logo behält seine eigenen Farben, und `currentColor` in einer SVG folgt dem hellen oder dunklen Design. Es ersetzt ein Logo, das die App für diese ID mitbringt. Alles, was der Nutzer für diesen Anbieter festgelegt hat, geht vor. Bei einem Gleichstand gewinnt die zuerst installierte Erweiterung. Es ist keine Berechtigung nötig. VS Code und das Smartphone laden keine Erweiterungen und zeigen diese Logos daher nicht.
 
 ## Die ersten Zeilen im Panel
 

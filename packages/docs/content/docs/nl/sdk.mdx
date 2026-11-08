@@ -334,7 +334,7 @@ Als uw OpenCode-plug-in een modelprovider registreert, tonen de modelkiezers en 
 }
 ```
 
-De sleutel is de provider-ID zoals OpenCode die meldt. De waarde is een `.svg` of `.png` in uw pakket, tot 1 MB. Een ontbrekend, leeg of groter bestand laat de installatie mislukken. Een pakket noemt maximaal 8 providers. Het logo houdt zijn eigen kleuren, en `currentColor` in een SVG volgt het lichte of donkere thema. Het vervangt een logo dat de app voor die ID meelevert. Wat de gebruiker voor die provider heeft ingesteld gaat voor, en bij een gelijke stand wint de eerst geïnstalleerde extensie. Er is geen toestemming nodig. VS Code en de telefoon laden geen extensies en tonen deze logo's dus niet.
+De sleutel is de provider-ID zoals OpenCode die meldt. De waarde is een `.svg` of `.png` in uw pakket, tot 1 MB. Een ontbrekend, leeg of groter bestand laat de installatie mislukken. Een pakket noemt maximaal 256 providers, en twee ID's kunnen naar hetzelfde bestand verwijzen. Het logo houdt zijn eigen kleuren, en `currentColor` in een SVG volgt het lichte of donkere thema. Het vervangt een logo dat de app voor die ID meelevert. Wat de gebruiker voor die provider heeft ingesteld gaat voor, en bij een gelijke stand wint de eerst geïnstalleerde extensie. Er is geen toestemming nodig. VS Code en de telefoon laden geen extensies en tonen deze logo's dus niet.
 
 ## De eerste regels van het paneel
 

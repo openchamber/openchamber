@@ -131,8 +131,8 @@ export type GuestCommandContribution = {
   description?: string;
 };
 
-/** How many `contributes.providerLogos` entries a package may declare. */
-export const GUEST_PROVIDER_LOGOS_MAX = 8;
+/** How many `contributes.providerLogos` entries a package may declare: room for an icon pack, with aliases as more entries. */
+export const GUEST_PROVIDER_LOGOS_MAX = 256;
 /** Bytes of one `contributes.providerLogos` file; a larger one fails the install. */
 export const GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
 

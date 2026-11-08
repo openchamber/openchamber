@@ -340,7 +340,7 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   }
   const providerLogos = parsed.manifest.contributes.providerLogos;
   if (providerLogos) {
-    for (const logo of Object.values(providerLogos)) {
+    for (const logo of new Set(Object.values(providerLogos))) {
       if (!await isDrawableProviderLogo(packageRoot, logo)) {
         return { ok: false, code: 'invalid-manifest' };
       }

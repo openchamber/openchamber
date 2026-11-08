@@ -56,6 +56,9 @@ describe('openchamber-guest-check', () => {
     expect(tooLarge.text).toContain('acme.png must be');
 
     expect(check(await packageWith({ panel: logoPanel, providerLogos: { acme: 'acme.svg' } }, { 'acme.svg': '<svg/>' })).code).toBe(0);
+
+    const alias = check(await packageWith({ panel: logoPanel, providerLogos: { acme: 'gone.svg', 'acme-cloud': 'gone.svg' } }, {}));
+    expect(alias.text.split('gone.svg is missing').length - 1).toBe(1);
   });
 
   test('names a service that was not bundled', async () => {

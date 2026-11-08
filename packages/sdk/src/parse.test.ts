@@ -956,6 +956,14 @@ describe('page-less extensions', () => {
     expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual([]);
   });
 
+  test('provider logos hold an icon pack, with an alias as another key for the same file', () => {
+    const pack = Object.fromEntries(new Array(GUEST_PROVIDER_LOGOS_MAX).fill(null).map((_, index) => [`p${index}`, index % 2 === 0 ? 'a.svg' : 'b.png']));
+    const result = withContributes({ providerLogos: pack });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(Object.keys(result.manifest.contributes.providerLogos ?? {})).toHaveLength(GUEST_PROVIDER_LOGOS_MAX);
+  });
+
   test('rejects malformed provider logos as invalid-provider-logos', () => {
     const tooMany = Object.fromEntries(new Array(GUEST_PROVIDER_LOGOS_MAX + 1).fill(null).map((_, index) => [`p${index}`, 'logo.svg']));
     const cases: Record<string, string>[] = [

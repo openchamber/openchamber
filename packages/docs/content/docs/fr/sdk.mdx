@@ -334,7 +334,7 @@ Quand votre plugin OpenCode enregistre un fournisseur de modèles, les sélecteu
 }
 ```
 
-La clé est l'ID du fournisseur tel qu'OpenCode le rapporte. La valeur est un `.svg` ou un `.png` de votre paquet, jusqu'à 1 Mo. Un fichier absent, vide ou plus lourd fait échouer l'installation. Un paquet nomme jusqu'à 8 fournisseurs. Le logo garde ses couleurs, et `currentColor` dans un SVG suit le thème clair ou sombre. Il remplace un logo que l'application fournit pour cet ID. Ce que l'utilisateur a défini pour ce fournisseur passe d'abord, et en cas d'égalité la première extension installée l'emporte. Aucune permission n'est nécessaire. VS Code et le téléphone ne chargent aucune extension et n'affichent donc pas ces logos.
+La clé est l'ID du fournisseur tel qu'OpenCode le rapporte. La valeur est un `.svg` ou un `.png` de votre paquet, jusqu'à 1 Mo. Un fichier absent, vide ou plus lourd fait échouer l'installation. Un paquet nomme jusqu'à 256 fournisseurs, et deux ID peuvent pointer vers le même fichier. Le logo garde ses couleurs, et `currentColor` dans un SVG suit le thème clair ou sombre. Il remplace un logo que l'application fournit pour cet ID. Ce que l'utilisateur a défini pour ce fournisseur passe d'abord, et en cas d'égalité la première extension installée l'emporte. Aucune permission n'est nécessaire. VS Code et le téléphone ne chargent aucune extension et n'affichent donc pas ces logos.
 
 ## Premières lignes dans le panneau
 

@@ -336,7 +336,7 @@ When your OpenCode plugin registers a model provider, the model pickers and Sett
 }
 ```
 
-The key is the provider ID as OpenCode reports it. The value is a `.svg` or `.png` in your package, up to 1 MB, and a missing, empty or larger file fails the install. A package names up to 8 providers. The logo keeps its own colours, and `currentColor` in an SVG follows the light or dark theme. It replaces a logo the app ships for that ID. Anything the user set for that provider comes first, and the first installed extension wins a tie. No permission is needed. VS Code and the phone load no extensions, so they do not show these logos.
+The key is the provider ID as OpenCode reports it. The value is a `.svg` or `.png` in your package, up to 1 MB, and a missing, empty or larger file fails the install. A package names up to 256 providers, and two IDs can point at the same file. The logo keeps its own colours, and `currentColor` in an SVG follows the light or dark theme. It replaces a logo the app ships for that ID. Anything the user set for that provider comes first, and the first installed extension wins a tie. No permission is needed. VS Code and the phone load no extensions, so they do not show these logos.
 
 ## First lines in the panel
 

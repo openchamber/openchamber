@@ -64,7 +64,7 @@ if (!parsed.ok) {
 const { contributes } = parsed.manifest;
 await Promise.all(pagesIn(JSON.stringify(contributes)).map(checkPage));
 if (contributes.service) await checkService(contributes.service.entry);
-await Promise.all(Object.values(contributes.providerLogos ?? {}).map(checkProviderLogo));
+await Promise.all([...new Set(Object.values(contributes.providerLogos ?? {}))].map(checkProviderLogo));
 if (problems.length > 0) {
   for (const problem of problems) console.error(problem);
   process.exit(1);

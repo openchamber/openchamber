@@ -334,7 +334,7 @@ Quando seu plugin do OpenCode registra um provedor de modelos, os seletores de m
 }
 ```
 
-A chave é o ID do provedor como o OpenCode o informa. O valor é um `.svg` ou `.png` do seu pacote, de até 1 MB. Um arquivo ausente, vazio ou maior faz a instalação falhar. Um pacote indica até 8 provedores. O logo mantém as próprias cores, e `currentColor` em um SVG acompanha o tema claro ou escuro. Ele substitui o logo que o app já traz para esse ID. O que o usuário definiu para esse provedor vem primeiro, e em um empate vence a extensão instalada primeiro. Nenhuma permissão é necessária. O VS Code e o celular não carregam extensões, então não mostram esses logos.
+A chave é o ID do provedor como o OpenCode o informa. O valor é um `.svg` ou `.png` do seu pacote, de até 1 MB. Um arquivo ausente, vazio ou maior faz a instalação falhar. Um pacote indica até 256 provedores, e dois IDs podem apontar para o mesmo arquivo. O logo mantém as próprias cores, e `currentColor` em um SVG acompanha o tema claro ou escuro. Ele substitui o logo que o app já traz para esse ID. O que o usuário definiu para esse provedor vem primeiro, e em um empate vence a extensão instalada primeiro. Nenhuma permissão é necessária. O VS Code e o celular não carregam extensões, então não mostram esses logos.
 
 ## Primeiras linhas no painel
 
