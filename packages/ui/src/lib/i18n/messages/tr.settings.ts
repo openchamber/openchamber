@@ -1937,7 +1937,7 @@ export const settingsDict = {
   'settings.openchamber.defaults.field.defaultAgent': 'Varsayılan Agent',
   'settings.openchamber.defaults.field.showDeletionDialogAria': 'Silme iletişim kutusunu göster',
   'settings.openchamber.defaults.field.sessionWarming': 'Boştaki oturumları sıcak tut',
-  'settings.openchamber.defaults.field.sessionWarmingInfo': 'Bazı sağlayıcılar birkaç dakikalık sessizlikten sonra konuşmanın önbelleğe alınmış bağlamını unutur; bir sonraki mesaj daha yavaş ve daha pahalı olur. Bu açıkken OpenCode, oturum boşta kaldığı sürece her 4 dakikada bir küçük bir "OK" isteği gönderir; son mesajınızdan sonra en fazla 30 dakika. Her ping küçük bir istek olarak ücretlendirilir. Tüm projelere uygulanır.',
+  'settings.openchamber.defaults.field.sessionWarmingInfo': 'Bazı sağlayıcılar birkaç dakikalık sessizlikten sonra konuşmanın önbellekteki bağlamını unutur; sonraki mesaj daha yavaş ve pahalı olur. Bu açıkken OpenCode, oturum boşta kaldığı sürece her 4 dakikada bir kısa bir istem gönderir; son mesajınızdan sonra en fazla 30 dakika. Her istek oturumun tüm bağlamını modele gönderir ve ücret doğurabilir veya abonelik kotanızı tüketebilir. Tüm projelere uygulanır.',
   'settings.openchamber.defaults.field.showDeletionDialog': 'Silme İletişim Kutusunu Göster',
   'settings.openchamber.defaults.smallModel.title': 'Küçük Model',
   'settings.openchamber.defaults.smallModel.description': 'Kısa özet ve hatırlatmalar gibi hızlı yardımcı görevler için ucuz bir model.',
