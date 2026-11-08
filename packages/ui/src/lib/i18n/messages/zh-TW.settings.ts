@@ -2072,6 +2072,7 @@ export const settingsDict = {
   'settings.voice.page.field.followTextLanguageInfo': '當回覆使用其他語言時，會使用該語言的語音：相符的 macOS 語音，或首次使用時下載的本機模型。',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2（英文）',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3（25 種歐洲語言）',
+  'settings.voice.page.stt.model.parakeetUltra': 'Parakeet Ultra（25 種歐洲語言）',
   'settings.voice.page.stt.model.whisperTurbo': 'Whisper large-v3 turbo（99 種語言）',
   'settings.voice.page.stt.model.qwen3Asr': 'Qwen3-ASR 0.6B（30 種語言）',
   'settings.voice.page.stt.model.whisperTiny': 'Whisper tiny（多語言）',

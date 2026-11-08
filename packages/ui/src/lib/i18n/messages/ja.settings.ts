@@ -2227,6 +2227,7 @@ export const settingsDict = {
   'settings.voice.page.field.followTextLanguageInfo': '返答が別の言語の場合、その言語の音声を使います。対応する macOS の音声、または初回使用時にダウンロードされるローカルモデルです。',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2（英語）',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3（ヨーロッパ25言語）',
+  'settings.voice.page.stt.model.parakeetUltra': 'Parakeet Ultra（ヨーロッパ25言語）',
   'settings.voice.page.stt.model.whisperTurbo': 'Whisper large-v3 turbo（99言語）',
   'settings.voice.page.stt.model.qwen3Asr': 'Qwen3-ASR 0.6B（30言語）',
   'settings.voice.page.stt.model.whisperTiny': 'Whisper tiny（多言語）',

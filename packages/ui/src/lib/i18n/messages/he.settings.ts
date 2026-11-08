@@ -2215,6 +2215,7 @@ export const settingsDict = {
   'settings.voice.page.field.followTextLanguageInfo': 'כשתגובה כתובה בשפה אחרת, נעשה שימוש בקול של אותה שפה: קול macOS מתאים, או מודל מקומי שיורד בשימוש הראשון.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (אנגלית)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 שפות אירופיות)',
+  'settings.voice.page.stt.model.parakeetUltra': 'Parakeet Ultra (25 שפות אירופיות)',
   'settings.voice.page.stt.model.whisperTurbo': 'Whisper large-v3 turbo (99 שפות)',
   'settings.voice.page.stt.model.qwen3Asr': 'Qwen3-ASR 0.6B (30 שפות)',
   'settings.voice.page.stt.model.whisperTiny': 'Whisper tiny (רב-לשוני)',

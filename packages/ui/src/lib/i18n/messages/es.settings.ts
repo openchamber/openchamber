@@ -2194,6 +2194,7 @@ export const settingsDict = {
   "settings.voice.page.field.followTextLanguageInfo": "Si una respuesta está en otro idioma, se usa una voz para ese idioma: una voz de macOS adecuada o un modelo local que se descarga en el primer uso.",
   "settings.voice.page.stt.model.parakeetV2": "Parakeet v2 (inglés)",
   "settings.voice.page.stt.model.parakeetV3": "Parakeet v3 (25 idiomas europeos)",
+  "settings.voice.page.stt.model.parakeetUltra": "Parakeet Ultra (25 idiomas europeos)",
   "settings.voice.page.stt.model.whisperTurbo": "Whisper large-v3 turbo (99 idiomas)",
   "settings.voice.page.stt.model.qwen3Asr": "Qwen3-ASR 0.6B (30 idiomas)",
   "settings.voice.page.stt.model.whisperTiny": "Whisper tiny (multilingüe)",

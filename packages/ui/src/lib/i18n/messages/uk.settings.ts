@@ -2194,6 +2194,7 @@ export const settingsDict = {
   "settings.voice.page.field.followTextLanguageInfo": "Якщо відповідь іншою мовою, використовується голос цієї мови: відповідний голос macOS або локальна модель, яка завантажується при першому використанні.",
   "settings.voice.page.stt.model.parakeetV2": "Parakeet v2 (англійська)",
   "settings.voice.page.stt.model.parakeetV3": "Parakeet v3 (25 європейських мов)",
+  "settings.voice.page.stt.model.parakeetUltra": "Parakeet Ultra (25 європейських мов)",
   "settings.voice.page.stt.model.whisperTurbo": "Whisper large-v3 turbo (99 мов)",
   "settings.voice.page.stt.model.qwen3Asr": "Qwen3-ASR 0.6B (30 мов)",
   "settings.voice.page.stt.model.whisperTiny": "Whisper tiny (мультимовна)",

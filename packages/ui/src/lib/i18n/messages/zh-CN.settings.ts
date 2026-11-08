@@ -2194,6 +2194,7 @@ export const settingsDict = {
   'settings.voice.page.field.followTextLanguageInfo': '当回复使用其他语言时，将使用该语言的语音：匹配的 macOS 语音，或首次使用时下载的本地模型。',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2（英语）',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3（25 种欧洲语言）',
+  'settings.voice.page.stt.model.parakeetUltra': 'Parakeet Ultra（25 种欧洲语言）',
   'settings.voice.page.stt.model.whisperTurbo': 'Whisper large-v3 turbo（99 种语言）',
   'settings.voice.page.stt.model.qwen3Asr': 'Qwen3-ASR 0.6B（30 种语言）',
   'settings.voice.page.stt.model.whisperTiny': 'Whisper tiny（多语言）',
