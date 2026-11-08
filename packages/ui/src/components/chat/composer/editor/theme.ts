@@ -84,6 +84,7 @@ export const COMPOSER_EDITOR_THEME_SPEC = {
     '& .cm-content.cm-composer-empty .cm-line::before': {
         content: 'var(--composer-placeholder)',
         color: 'var(--surface-muted-foreground)',
+        opacity: '0.6',
         position: 'absolute',
         insetInlineStart: '0',
         top: '0',
