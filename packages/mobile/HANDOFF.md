@@ -12,6 +12,12 @@ bundled copy of the web build; native capabilities are added via Capacitor plugi
 extensions.
 
 - App id / package: `com.openchamber.app`; app name `OpenChamber`.
+- Android widgets and the Quick Settings tile read the same `widgetSnapshot` the iOS widgets use,
+  stored in `SharedPreferences("openchamber_widget")` instead of the App Group. `WidgetBridge`
+  pulls it from the page on `onResume`/`onPause`; the push service updates the count and the unread
+  mark between runs. A widget layout that uses a plain `View` throws `InflateException` only when
+  the launcher inflates it, so keep widget layouts to the RemoteViews class list and cover them with
+  `WidgetRendererTest`, which inflates the real layouts on a device.
 - Capacitor config: `capacitor.config.json`. It is JSON because the Capacitor CLI reads a
   `capacitor.config.ts` through the TypeScript JS API (`transpileModule`), which TypeScript 7 no
   longer ships. Why its values are what they are:
