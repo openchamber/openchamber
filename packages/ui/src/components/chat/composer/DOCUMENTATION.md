@@ -1,5 +1,32 @@
 # Composer
 
+## Attachment recovery
+
+The draft's text and explicitly attached files are the editable source of truth.
+`handleSubmit` captures the original attachments consumed by the submission: the
+messages actually taken from the queue, then the current draft's files only when
+its text participates in the send. The same participation condition is used for
+`buildOutgoingMessage`'s `composerText` input.
+
+`buildOutgoingMessage` only constructs outgoing content. It has no recovery fields
+or recovery policy. `submit/attachmentRecovery.ts` selects original attachments
+whose IDs survived send-time filtering, applies the existing sanitizer supplied by
+the submitter, and retains additional-part attachments as before. It does not parse
+text, access stores, send requests, or depend on `OutgoingMessage`.
+
+Ordinary-send error branches share the resulting recovery list. Text-derived files,
+including converted document and image mentions, are rebuilt from restored text on
+retry and never promoted into independent draft attachments. The store still owns
+draft targeting and merging by ID, preserving files added during the send. Prompt
+commands and BTW paths that restore their original inputs keep their behavior.
+
+### Why the submitter owns recovery
+
+Recovery restores consumed inputs, while outgoing content flattens originals and
+derived context for transport. Keeping the snapshot and recovery selection in the
+submission layer prevents transport-derived data from becoming editable draft state
+without adding recovery responsibilities to the message builder.
+
 The chat composer: the prompt language, the editor that renders it, and
 everything between typing and sending.
 

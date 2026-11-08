@@ -237,6 +237,7 @@ import {
     isMentionAlreadyAttached,
 } from './composer/attachments/inlineMentionAttachments';
 import { buildComposerContext, buildOutgoingMessage, expandCommentSnippets, selectComposerQueue } from './composer/submit/buildOutgoingMessage';
+import { getAttachmentsToRestore } from './composer/submit/attachmentRecovery';
 import {
     buildCommandVariables,
     canRunCommand,
@@ -2445,9 +2446,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // below skips, so their own words expand here.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
 
+        const composerTextToSend = !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null;
+        const originalAttachments = [
+            ...queuedMessagesToSend.flatMap((queued) => queued.attachments ?? []),
+            ...(composerTextToSend !== null ? attachedFiles : []),
+        ];
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
-            composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
+            composerText: composerTextToSend,
             composerAttachments: attachedFiles,
             inlineComments: expandedDrafts,
             syntheticTexts: [
@@ -2579,11 +2585,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const ownsPendingBtwSend = () => Boolean(pendingBtwSend && currentSessionId
             && useBtwStore.getState().byParent[currentSessionId]?.pendingSend === pendingBtwSend);
 
-        // Collect all attachments for error recovery
-        const allAttachments = [
-            ...sendableAttachments,
-            ...additionalParts.flatMap(p => p.attachments ?? []),
-        ];
+        // Restore original attachments only; restored text rebuilds inline mentions on retry.
+        const attachmentsToRestore = getAttachmentsToRestore(
+            originalAttachments,
+            sendableAttachments,
+            additionalParts.flatMap((part) => part.attachments ?? []),
+            sanitizeAttachmentsForSend,
+        );
 
         // Arm the timeline anchor BEFORE the optimistic user row can commit;
         // arming after (or a frame later) races the commit and the anchor
@@ -2750,30 +2758,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error(t('chat.chatInput.toast.attachmentsTooLarge'));
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
+                if (attachmentsToRestore.length > 0) {
+                    useInputStore.getState().restoreAttachedFiles(attachmentsToRestore, restoreTarget);
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
+                if (attachmentsToRestore.length > 0) {
+                    useInputStore.getState().restoreAttachedFiles(attachmentsToRestore, restoreTarget);
                     toast.error(t('chat.chatInput.toast.sendAttachmentsFailed'));
                 }
                 return;
             }
 
             if (normalized.includes('runtime changed')) {
-                if (allAttachments.length > 0) {
-                    useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
+                if (attachmentsToRestore.length > 0) {
+                    useInputStore.getState().restoreAttachedFiles(attachmentsToRestore, restoreTarget);
                 }
                 toast.error(t('chat.chatInput.toast.messageSendFailed'));
                 return;
             }
 
-            if (allAttachments.length > 0) {
-                useInputStore.getState().restoreAttachedFiles(allAttachments, restoreTarget);
+            if (attachmentsToRestore.length > 0) {
+                useInputStore.getState().restoreAttachedFiles(attachmentsToRestore, restoreTarget);
             }
 
             if (normalized.includes('returned a web page instead of an api response') || normalized.includes('runtime_unavailable')) {
