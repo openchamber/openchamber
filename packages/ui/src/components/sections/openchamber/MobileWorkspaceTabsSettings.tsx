@@ -1,8 +1,16 @@
 import React from 'react';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { SettingsSortableVisibilityList } from '@/components/sections/shared/SettingsSortableVisibilityList';
+import { useGuestPanelTabs } from '@/hooks/useGuestSurfaces';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import {
+  guestMobileWorkspaceTabId,
+  isBuiltInMobileWorkspaceTab,
+  isMobileWorkspaceTab,
+  orderMobileWorkspaceTabs,
+  shownMobileWorkspaceTabs,
+  type BuiltInMobileWorkspaceTab,
+} from '@/lib/mobileWorkspaceTabs';
 import { useUIStore } from '@/stores/useUIStore';
 
 const TAB_LABEL_KEYS = {
@@ -11,12 +19,12 @@ const TAB_LABEL_KEYS = {
   files: 'mobile.menu.files',
   terminal: 'mobile.menu.terminal',
   notes: 'contextRail.surface.notes',
-} satisfies Record<MobileWorkspaceTab, I18nKey>;
+} satisfies Record<BuiltInMobileWorkspaceTab, I18nKey>;
 
 /**
- * Order and visibility of the phone's workspace panel tabs. Stored per
- * device: a phone and a laptop are set up apart. The last tab shown cannot be
- * hidden.
+ * Order and visibility of the phone's workspace panel tabs, including the tabs
+ * installed extensions add. Stored per device: a phone and a laptop are set up
+ * apart. The last tab shown cannot be hidden.
  */
 export const MobileWorkspaceTabsSettings: React.FC = () => {
   const { t } = useI18n();
@@ -24,16 +32,25 @@ export const MobileWorkspaceTabsSettings: React.FC = () => {
   const hidden = useUIStore((state) => state.mobileWorkspaceHiddenTabs);
   const setOrder = useUIStore((state) => state.setMobileWorkspaceTabOrder);
   const setVisible = useUIStore((state) => state.setMobileWorkspaceTabVisible);
+  const guestTabs = useGuestPanelTabs();
+  const guestTabIds = React.useMemo(
+    () => guestTabs.map((guest) => guestMobileWorkspaceTabId(guest.id)),
+    [guestTabs],
+  );
+  const guestLabels = React.useMemo(
+    () => new Map(guestTabs.map((guest) => [guestMobileWorkspaceTabId(guest.id), guest.name])),
+    [guestTabs],
+  );
 
   const items = React.useMemo(() => {
-    const shown = shownMobileWorkspaceTabs(order, hidden);
-    return orderMobileWorkspaceTabs(order).map((id) => ({
+    const shown = shownMobileWorkspaceTabs(order, hidden, guestTabIds);
+    return orderMobileWorkspaceTabs(order, guestTabIds).map((id) => ({
       id,
-      label: t(TAB_LABEL_KEYS[id]),
+      label: isBuiltInMobileWorkspaceTab(id) ? t(TAB_LABEL_KEYS[id]) : guestLabels.get(id) ?? id,
       visible: shown.includes(id),
       locked: shown.length === 1 && shown.includes(id),
     }));
-  }, [hidden, order, t]);
+  }, [guestLabels, guestTabIds, hidden, order, t]);
 
   return (
     <SettingsSection
@@ -44,8 +61,7 @@ export const MobileWorkspaceTabsSettings: React.FC = () => {
       <SettingsSortableVisibilityList
         items={items}
         onVisibleChange={(id, visible) => {
-          const tab = items.find((item) => item.id === id)?.id;
-          if (tab) setVisible(tab, visible);
+          if (isMobileWorkspaceTab(id)) setVisible(id, visible);
         }}
         onReorder={setOrder}
         settingsItemPrefix="layout.mobile-workspace-tabs."

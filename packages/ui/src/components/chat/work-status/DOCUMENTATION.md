@@ -582,10 +582,9 @@ The section sits among the app's own sections and follows the theme, light and d
 `createGuestStatusViewReader` returns the previous view untouched when the answer's body is byte-identical, and otherwise reuses each row object, and the header controls, whose JSON did not change. Rows are memoized by identity and the header binding follows the controls' identity, so a sample that moves one number redraws one row instead of the section and its header.
 
 `useWorkStatusExtensionSections` lists active guests with a `statusEntry` or `statusSource` from
-the catalog store (`useGuestStatusSections`). It is empty on VS Code and
-mobile, which load no guests; the panel is hidden there anyway, but the empty
-list is explicit rather than an accident of visibility. The rail owns loading
-the catalog.
+the catalog store (`useGuestStatusSections`). It is empty on VS Code, which loads no guests. The
+mobile shell loads the catalog and renders these sections in its Status tab. On desktop the rail
+owns loading the catalog; the mobile shell's `useGuestCatalogSync` owns it there.
 
 Section ids are `ext:<extension id>` and share the persisted order and hidden
 lists with built-in ids. Sanitizing keeps well-formed `ext:` ids even when that

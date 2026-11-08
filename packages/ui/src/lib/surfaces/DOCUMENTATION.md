@@ -66,7 +66,8 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   `ContextRailSurfacesDialog` edits this same order with drag handles beside
   the visibility checkboxes (`SettingsSortableVisibilityList`, which the phone's
   workspace tab settings also use; those tabs keep their own per-device order
-  and hidden set, `lib/mobileWorkspaceTabs.ts`), including hidden panels. Mouse, touch and keyboard
+  and hidden set, `lib/mobileWorkspaceTabs.ts`, including one `guest:<id>` tab
+  per installed extension panel), including hidden panels. Mouse, touch and keyboard
   drops update the rail immediately; visibility changes and "Show all" preserve
   the order. Dialog reorders retain saved ids of unavailable extensions at the
   end of the preference. Escape cancels a drag before closing the dialog.
@@ -293,7 +294,10 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   field, the editor, the terminal), and a stray press while dismissing one of
   those used to take the whole panel with it.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
-  mobile shell have their own layouts and do not consume this registry.
+  mobile shell have their own layouts and do not consume this registry. The
+  mobile workspace drawer builds its extension tabs from the catalog directly
+  (`lib/guests/surfaces.ts`, `guestPanelTabIds`) and renders the same panel
+  composition through `components/layout/GuestSurfacePanel.tsx`.
   Trackers have no rail surface: their items list on the issues and PRs board
   (`components/sourceBoard`). A Linear tab persisted by an older version is
   dropped on load, like any unknown mode.

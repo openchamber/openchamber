@@ -8,7 +8,7 @@ import { guestActionEntries, type GuestActionEntry } from '@/lib/guests/actions'
 import { isGuestActive } from '@/lib/guests/capabilities';
 import { guestCommandEntries, type GuestCommandEntry } from '@/lib/guests/commands';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
-import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
+import { enabledGuestSurfaces, guestPanelGuests } from '@/lib/guests/surfaces';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
@@ -64,25 +64,41 @@ export const useGuestPages = () => {
 const EMPTY_STATUS_SECTIONS: InstalledGuest[] = [];
 
 /**
- * Active guests that contribute a Work Status section. Empty on VS Code and
- * mobile, which never mount guests (the panel itself is web/desktop only).
- * Reads the store only; the rail owns loading the catalog.
+ * Active guests that contribute a Work Status section. Empty on VS Code, which
+ * never mounts guests. The phone's Status tab renders these sections too, so
+ * the mobile shell loads the catalog (its catalog sync) even though it has no
+ * rail. Reads the store only.
  */
 export const useGuestStatusSections = (): InstalledGuest[] => {
   const guests = useGuestsStore((state) => state.guests);
   return React.useMemo(() => {
-    if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return EMPTY_STATUS_SECTIONS;
+    if (isVSCodeRuntime()) return EMPTY_STATUS_SECTIONS;
     const sections = guests.filter((guest) => (guest.statusEntry || guest.statusSource) && isGuestActive(guest));
     return sections.length > 0 ? sections : EMPTY_STATUS_SECTIONS;
   }, [guests]);
 };
 
+const EMPTY_PANEL_GUESTS: InstalledGuest[] = [];
+
+/**
+ * Active guests whose own panel the phone's workspace drawer shows as a tab.
+ * Reads the store only; the mobile shell's catalog sync loads it.
+ */
+export const useGuestPanelTabs = (): InstalledGuest[] => {
+  const guests = useGuestsStore((state) => state.guests);
+  return React.useMemo(() => {
+    const panels = guestPanelGuests(guests);
+    return panels.length > 0 ? panels : EMPTY_PANEL_GUESTS;
+  }, [guests]);
+};
+
 /**
  * Message and session menu entries from active guests. Empty on VS Code and
- * mobile, which never mount guests. Reads the store only: every transcript
- * row and sidebar row calls this, and the rail (`useGuestSurfaces`) already
- * owns loading the catalog and following runtime switches. The store is
- * emptied on a switch, so a memo on `guests` alone stays current.
+ * mobile, which render no guest entries in their sidebars. Reads the store
+ * only: every transcript row and sidebar row calls this, and the rail
+ * (`useGuestSurfaces`) already owns loading the catalog and following runtime
+ * switches. The store is emptied on a switch, so a memo on `guests` alone
+ * stays current.
  */
 export const useGuestActions = (): GuestActionEntry[] => {
   const guests = useGuestsStore((state) => state.guests);
@@ -97,7 +113,8 @@ export const useGuestActions = (): GuestActionEntry[] => {
 /**
  * Slash commands from active guests, minus any name in `reservedNames` (the
  * composer's own commands, OpenCode commands, skills). Empty on VS Code and
- * mobile. Store read only, like `useGuestActions`.
+ * mobile, which offer no guest slash commands. Store read only, like
+ * `useGuestActions`.
  */
 export const useGuestCommands = (reservedNames: ReadonlySet<string>): GuestCommandEntry[] => {
   const guests = useGuestsStore((state) => state.guests);

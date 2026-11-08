@@ -81,6 +81,9 @@ import { OverviewPage } from '@/components/overview/OverviewView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
 import { MobileWorkspaceDrawer } from './MobileWorkspaceDrawer';
 import { shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { guestPanelTabIds } from '@/lib/guests/surfaces';
+import { useGuestsStore } from '@/lib/guests/store';
+import { useGuestCatalogSync } from '@/hooks/useGuestCatalogSync';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useMobileWebBackButton, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
@@ -117,6 +120,7 @@ const MOBILE_SETTINGS_PAGES = [
   'commands',
   'mcp',
   'plugins',
+  'extensions',
   'skills.installed',
   'skills.catalog',
   'providers',
@@ -145,6 +149,9 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // keepalive: without it, background PTYs (running project actions included)
   // are idle-reaped by the server while the workspace drawer is closed.
   useTerminalSessionKeepalive();
+  // No rail on the phone: this loads the extension catalog its Status sections
+  // and workspace tabs read, and keeps it current.
+  useGuestCatalogSync();
   const [sessionsSheetOpen, setSessionsSheetOpen] = React.useState(false);
   // The run overview covers the chat; selecting any session returns to it.
   React.useEffect(() => useSessionUIStore.subscribe((state, prev) => {
@@ -162,14 +169,22 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [workspaceTab, setWorkspaceTab] = React.useState<MobileWorkspaceTab>(() => {
     const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
-    return shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs)[0];
+    return shownMobileWorkspaceTabs(
+      mobileWorkspaceTabOrder,
+      mobileWorkspaceHiddenTabs,
+      guestPanelTabIds(useGuestsStore.getState().guests),
+    )[0];
   });
   // Opening the drawer itself lands on the last tab, unless the user has since
   // hidden it in Settings; then on their first tab. A trigger that asks for a
   // tab (a changed file in the chat) sets it on its own and opens it hidden or not.
   const openWorkspace = React.useCallback(() => {
     const { mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs } = useUIStore.getState();
-    const shown = shownMobileWorkspaceTabs(mobileWorkspaceTabOrder, mobileWorkspaceHiddenTabs);
+    const shown = shownMobileWorkspaceTabs(
+      mobileWorkspaceTabOrder,
+      mobileWorkspaceHiddenTabs,
+      guestPanelTabIds(useGuestsStore.getState().guests),
+    );
     setWorkspaceTab((current) => (shown.includes(current) ? current : shown[0]));
     setWorkspaceOpen(true);
   }, []);

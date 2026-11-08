@@ -1,6 +1,7 @@
 import { GUEST_SURFACE_DOCK_DEFAULT, GUEST_SURFACE_DOCK_SIZE_DEFAULT, hasGuestPage, type GuestSurfaceDock } from '@openchamber/sdk';
 
 import type { ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
+import { guestMobileWorkspaceTabId } from '@/lib/mobileWorkspaceTabs';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 
 import { isGuestActive } from './capabilities.ts';
@@ -24,16 +25,23 @@ export const guestSurfaceDocking = (guest: Pick<InstalledGuest, 'service' | 'ent
 };
 
 /**
- * Rail surfaces for the enabled guests with a page or a shared surface, in
- * catalog order. The rail and the digit shortcuts must agree on this list.
- * Background-only and tools-only extensions have no visible panel and get
- * no surface.
+ * Active guests whose panel exists: their own page, or a shared surface. The
+ * rail, the phone's workspace drawer and the digit shortcuts must agree on
+ * this list. Background-only and tools-only extensions have no visible panel
+ * and get no surface.
  */
+export const guestPanelGuests = (guests: readonly InstalledGuest[]): InstalledGuest[] => guests
+  .filter((guest) => isGuestActive(guest) && (hasGuestPage({ panel: guest }) || guestHasSharedSurface(guest)));
+
+/** The workspace-drawer tab ids the phone offers for these guests. */
+export const guestPanelTabIds = (guests: readonly InstalledGuest[]): string[] =>
+  guestPanelGuests(guests).map((guest) => guestMobileWorkspaceTabId(guest.id));
+
+/** Rail surfaces for the enabled guests with a page or a shared surface, in catalog order. */
 export const enabledGuestSurfaces = (
   guests: readonly InstalledGuest[],
   authenticatedAsset: (path: string) => string,
-): ContextSurfaceDescriptor[] => guests
-  .filter((guest) => isGuestActive(guest) && (hasGuestPage({ panel: guest }) || guestHasSharedSurface(guest)))
+): ContextSurfaceDescriptor[] => guestPanelGuests(guests)
   .map((guest) => guestSurfaceFromInstalled(guest, authenticatedAsset));
 
 const guestSurfaceFromInstalled = (

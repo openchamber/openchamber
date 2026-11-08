@@ -19,7 +19,9 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { clampLiveBrowserTabs, LIVE_BROWSER_TABS_DEFAULT } from '@/lib/browser/liveTabs';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
-import { orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { isGuestMobileWorkspaceTab, orderMobileWorkspaceTabs, shownMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { guestPanelTabIds } from '@/lib/guests/surfaces';
+import { useGuestsStore } from '@/lib/guests/store';
 import {
   carrySurfaceToZone,
   getZoneView,
@@ -2461,7 +2463,12 @@ export const useUIStore = create<UIStore>()(
         },
 
         setMobileWorkspaceTabOrder: (order) => {
-          set({ mobileWorkspaceTabOrder: orderMobileWorkspaceTabs(order) });
+          set({
+            mobileWorkspaceTabOrder: orderMobileWorkspaceTabs(
+              order,
+              order.filter(isGuestMobileWorkspaceTab),
+            ),
+          });
         },
 
         setMobileWorkspaceTabVisible: (tab, visible) => {
@@ -2472,7 +2479,8 @@ export const useUIStore = create<UIStore>()(
             }
             if (hidden.includes(tab)) return state;
             // The last tab the user keeps stays: the drawer would have nothing to show.
-            const shown = shownMobileWorkspaceTabs(state.mobileWorkspaceTabOrder, hidden);
+            const guestTabIds = guestPanelTabIds(useGuestsStore.getState().guests);
+            const shown = shownMobileWorkspaceTabs(state.mobileWorkspaceTabOrder, hidden, guestTabIds);
             if (shown.length <= 1) return state;
             return { mobileWorkspaceHiddenTabs: [...hidden, tab] };
           });

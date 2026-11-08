@@ -4,13 +4,25 @@ import { arrayMove } from '@dnd-kit/sortable';
 import { isIMECompositionEvent } from '@/lib/ime';
 
 import { Icon } from '@/components/icon/Icon';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { ProjectContextPanel } from '@/components/layout/RightSidebarTabs';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
-import { useI18n } from '@/lib/i18n';
-import { orderMobileWorkspaceTabs, stripMobileWorkspaceTabs, type MobileWorkspaceTab } from '@/lib/mobileWorkspaceTabs';
+import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
+import { useGuestPanelTabs } from '@/hooks/useGuestSurfaces';
+import { useI18n, type I18nKey } from '@/lib/i18n';
+import {
+  guestMobileWorkspaceTabId,
+  isBuiltInMobileWorkspaceTab,
+  orderMobileWorkspaceTabs,
+  stripMobileWorkspaceTabs,
+  type BuiltInMobileWorkspaceTab,
+  type MobileWorkspaceTab,
+} from '@/lib/mobileWorkspaceTabs';
 import type { ProjectRef } from '@/lib/projectContextApi';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 
@@ -28,7 +40,17 @@ const ENTER_DELAY_MS = 16;
 const ENTER_DURATION_MS = 320;
 const DRAWER_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
-/** The workspace surfaces as tabs (Status / Changes / Files / Terminal / Notes).
+const GuestSurfacePanel = React.lazy(() => import('@/components/layout/GuestSurfacePanel').then((module) => ({ default: module.GuestSurfacePanel })));
+
+const BUILT_IN_TAB_DEFINITIONS = {
+  status: { id: 'status', labelKey: 'chat.workStatus.ariaLabel', icon: <Icon name="list-indefinite" className="h-3.5 w-3.5" /> },
+  changes: { id: 'changes', labelKey: 'mobile.menu.git', icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
+  files: { id: 'files', labelKey: 'mobile.menu.files', icon: <Icon name="file-text" className="h-3.5 w-3.5" /> },
+  terminal: { id: 'terminal', labelKey: 'mobile.menu.terminal', icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
+  notes: { id: 'notes', labelKey: 'contextRail.surface.notes', icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
+} as const satisfies Record<BuiltInMobileWorkspaceTab, { id: BuiltInMobileWorkspaceTab; labelKey: I18nKey; icon: React.ReactNode }>;
+
+/** The workspace surfaces as tabs (Status / Changes / Files / Terminal / Notes, plus one per installed extension panel).
 
     Two hosts, same content and same state:
      - `drawer` (default) covers the app and slides in from the right edge —
@@ -65,12 +87,27 @@ export const MobileWorkspaceDrawer: React.FC<{
   const tabOrder = useUIStore((state) => state.mobileWorkspaceTabOrder);
   const hiddenTabs = useUIStore((state) => state.mobileWorkspaceHiddenTabs);
   const setTabOrder = useUIStore((state) => state.setMobileWorkspaceTabOrder);
+  const guestTabs = useGuestPanelTabs();
+  const guestTabIds = React.useMemo(
+    () => guestTabs.map((guest) => guestMobileWorkspaceTabId(guest.id)),
+    [guestTabs],
+  );
+  const guestTabsById = React.useMemo(
+    () => new Map(guestTabs.map((guest) => [guestMobileWorkspaceTabId(guest.id), guest])),
+    [guestTabs],
+  );
+  // The user's tabs in their order (Settings > General), plus a hidden one
+  // while something opened it. An extension tab whose package is gone (a
+  // catalog change while the drawer is open) falls back to the first tab the
+  // drawer still offers; the stored tab is normalized on the next open.
+  const stripTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, tab, guestTabIds);
+  const shownTab = stripTabs.includes(tab) ? tab : stripTabs[0];
   // The Status tab's section picker opens from the tab row, beside the close button.
   const [statusSectionsOpen, setStatusSectionsOpen] = React.useState(false);
-  const tabRef = React.useRef(tab);
+  const tabRef = React.useRef(shownTab);
   React.useEffect(() => {
-    tabRef.current = tab;
-  }, [tab]);
+    tabRef.current = shownTab;
+  }, [shownTab]);
 
   // Swipe from the drawer's start edge back toward its end = close, the
   // reverse of the end-edge swipe that opened it from the chat. Only the
@@ -87,12 +124,12 @@ export const MobileWorkspaceDrawer: React.FC<{
   React.useEffect(() => {
     if (!open) return;
     setVisitedTabs((current) => {
-      if (current.has(tab)) return current;
+      if (current.has(shownTab)) return current;
       const next = new Set(current);
-      next.add(tab);
+      next.add(shownTab);
       return next;
     });
-  }, [open, tab]);
+  }, [open, shownTab]);
 
   if (typeof document !== 'undefined' && !rootRef.current) {
     let root = document.getElementById(DRAWER_ROOT_ID);
@@ -140,21 +177,26 @@ export const MobileWorkspaceDrawer: React.FC<{
 
   if (variant === 'drawer' && !rootRef.current) return null;
 
-  const tabDefinitions = {
-    status: { id: 'status', label: t('chat.workStatus.ariaLabel'), icon: <Icon name="list-indefinite" className="h-3.5 w-3.5" /> },
-    changes: { id: 'changes', label: t('mobile.menu.git'), icon: <Icon name="git-branch" className="h-3.5 w-3.5" /> },
-    files: { id: 'files', label: t('mobile.menu.files'), icon: <Icon name="file-text" className="h-3.5 w-3.5" /> },
-    terminal: { id: 'terminal', label: t('mobile.menu.terminal'), icon: <Icon name="terminal" className="h-3.5 w-3.5" /> },
-    notes: { id: 'notes', label: t('contextRail.surface.notes'), icon: <Icon name="sticky-note" className="h-3.5 w-3.5" /> },
-  } satisfies Record<MobileWorkspaceTab, SortableTabsStripItem>;
-  // The user's tabs in their order (Settings > General), plus a hidden one
-  // while something opened it.
-  const stripTabs = stripMobileWorkspaceTabs(tabOrder, hiddenTabs, tab);
-  const tabItems = stripTabs.map((id) => tabDefinitions[id]);
-  const soleTab = tabItems.length === 1 ? tabItems[0] : null;
+  const tabDefinitions = stripTabs.map((id): SortableTabsStripItem => {
+    if (isBuiltInMobileWorkspaceTab(id)) {
+      const definition = BUILT_IN_TAB_DEFINITIONS[id];
+      return { id, label: t(definition.labelKey), icon: definition.icon };
+    }
+    const guest = guestTabsById.get(id);
+    // stripTabs carries only guest ids the catalog offered, so it is there.
+    const authenticatedAsset = getRuntimeUrlResolver().authenticatedAsset;
+    return {
+      id,
+      label: guest?.name ?? '',
+      icon: guest
+        ? <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, authenticatedAsset)} className="h-3.5 w-3.5" />
+        : undefined,
+    };
+  });
+  const soleTab = tabDefinitions.length === 1 ? tabDefinitions[0] : null;
   // A long press on a tab drags it; the new order covers hidden tabs too.
   const reorderTabs = (activeId: string, overId: string) => {
-    const all = orderMobileWorkspaceTabs(tabOrder);
+    const all = orderMobileWorkspaceTabs(tabOrder, guestTabIds);
     const from = all.findIndex((id) => id === activeId);
     const to = all.findIndex((id) => id === overId);
     if (from < 0 || to < 0) return;
@@ -176,8 +218,8 @@ export const MobileWorkspaceDrawer: React.FC<{
             </h2>
           ) : visible ? (
             <SortableTabsStrip
-              items={tabItems}
-              activeId={tab}
+              items={tabDefinitions}
+              activeId={shownTab}
               onSelect={(id) => {
                 const next = stripTabs.find((entry) => entry === id);
                 if (next) onTabChange(next);
@@ -188,12 +230,12 @@ export const MobileWorkspaceDrawer: React.FC<{
               nonCompositedIndicator
               // More than three tabs don't fit with labels: the active tab
               // keeps icon + label, the rest collapse to icons.
-              inactiveTabsIconOnly={tabItems.length > 3}
+              inactiveTabsIconOnly={tabDefinitions.length > 3}
               className="h-full"
             />
           ) : null}
         </div>
-        {tab === 'status' ? (
+        {shownTab === 'status' ? (
           <button
             type="button"
             className={MOBILE_HEADER_BUTTON_CLASS}
@@ -219,10 +261,10 @@ export const MobileWorkspaceDrawer: React.FC<{
             reopening the drawer lands exactly where the user left off — an
             open diff, an edited file, an attached terminal. */}
         {visitedTabs.has('status') ? (
-          <div className={cn('h-full', tab !== 'status' && 'hidden')}>
+          <div className={cn('h-full', shownTab !== 'status' && 'hidden')}>
             <ErrorBoundary>
               <MobileStatusPane
-                visible={open && tab === 'status'}
+                visible={open && shownTab === 'status'}
                 onLeave={onClose}
                 sectionsDialogOpen={statusSectionsOpen}
                 onSectionsDialogOpenChange={setStatusSectionsOpen}
@@ -235,11 +277,11 @@ export const MobileWorkspaceDrawer: React.FC<{
             // A newly requested per-file diff remounts the pane so
             // initialDiff applies; plain reopens keep the state.
             key={pendingChangesDiff ? `changes:${pendingChangesDiff.path}:${pendingChangesDiff.staged}` : 'changes'}
-            className={cn('h-full', tab !== 'changes' && 'hidden')}
+            className={cn('h-full', shownTab !== 'changes' && 'hidden')}
           >
             <ErrorBoundary>
               <MobileChangesSurface
-                visible={open && tab === 'changes'}
+                visible={open && shownTab === 'changes'}
                 initialDiff={pendingChangesDiff}
                 onNavigatedToChat={onClose}
               />
@@ -247,26 +289,45 @@ export const MobileWorkspaceDrawer: React.FC<{
           </div>
         ) : null}
         {visitedTabs.has('files') ? (
-          <div className={cn('h-full', tab !== 'files' && 'hidden')}>
+          <div className={cn('h-full', shownTab !== 'files' && 'hidden')}>
             <ErrorBoundary>
-              <MobileFilesSurface visible={open && tab === 'files'} />
+              <MobileFilesSurface visible={open && shownTab === 'files'} />
             </ErrorBoundary>
           </div>
         ) : null}
         {visitedTabs.has('terminal') ? (
-          <div className={cn('h-full', tab !== 'terminal' && 'hidden')}>
+          <div className={cn('h-full', shownTab !== 'terminal' && 'hidden')}>
             <ErrorBoundary>
-              <TerminalView visible={open && tab === 'terminal'} />
+              <TerminalView visible={open && shownTab === 'terminal'} />
             </ErrorBoundary>
           </div>
         ) : null}
         {visitedTabs.has('notes') ? (
-          <div className={cn('h-full', tab !== 'notes' && 'hidden')}>
+          <div className={cn('h-full', shownTab !== 'notes' && 'hidden')}>
             <ErrorBoundary>
-              <ProjectContextPanel visible={open && tab === 'notes'} onActionComplete={onClose} onOpenPlan={onOpenPlan} />
+              <ProjectContextPanel visible={open && shownTab === 'notes'} onActionComplete={onClose} onOpenPlan={onOpenPlan} />
             </ErrorBoundary>
           </div>
         ) : null}
+        {/* One pane per installed extension panel, the same slot the desktop
+            rail gives it. A shared surface's picture mounts only while its tab
+            is on screen; its own page stays mounted once visited. */}
+        {guestTabs.map((guest) => {
+          const id = guestMobileWorkspaceTabId(guest.id);
+          if (!visitedTabs.has(id)) return null;
+          return (
+            <div key={id} className={cn('h-full', shownTab !== id && 'hidden')}>
+              <ErrorBoundary>
+                <React.Suspense fallback={null}>
+                  <GuestSurfacePanel
+                    mode={pluginModeFromId(guest.id)}
+                    surfaceMounted={open && shownTab === id}
+                  />
+                </React.Suspense>
+              </ErrorBoundary>
+            </div>
+          );
+        })}
       </div>
     </>
   );

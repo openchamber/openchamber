@@ -1,7 +1,7 @@
 /**
  * Keeps the extension catalog current while the app runs.
  *
- * The rail reads the catalog on mount and on a runtime switch, but another
+ * The rail loads the catalog on mount and on a runtime switch, but another
  * window, another device, or an author rebuilding a folder install can change
  * it at any time. The server announces each change on the control stream; this
  * hook reads the catalog again then, and when the stream reconnects, since a
@@ -15,8 +15,13 @@ import { loadGuestCatalog, reloadGuestCatalog } from '@/lib/guests/load-catalog'
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 
 export const useGuestCatalogSync = (): void => {
-  React.useEffect(() => subscribeOpenchamberEvents((event) => {
-    if (event.type === 'guests-changed') void reloadGuestCatalog();
-    else if (event.type === 'event-stream-ready') void loadGuestCatalog();
-  }), []);
+  React.useEffect(() => {
+    // The rail loads on mount on desktop; the phone has no rail, so this is
+    // where its catalog comes from before anything asks for a guest tab.
+    void loadGuestCatalog();
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type === 'guests-changed') void reloadGuestCatalog();
+      else if (event.type === 'event-stream-ready') void loadGuestCatalog();
+    });
+  }, []);
 };

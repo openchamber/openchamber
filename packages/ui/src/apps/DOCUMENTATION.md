@@ -26,6 +26,7 @@
 - Every route entry written while a layer is open goes through `pushRouteEntry` or `updateBrowserURL`, so it lands under the back guard. A direct `pushState` would bury the guard between two routes. A replacement keeps the guard and changes its URL; the route under it normalizes to the same place when Back reaches it.
 - Inside the mobile shell the Settings stages write no history. A `SettingsView` given `registerBackHandler` steps through its stages in state only.
 - Settings uses the existing persistence and broadcast protocol. Moving its host changes no stored format, registry key or runtime availability.
+- The mobile shell loads the extension catalog itself (`useGuestCatalogSync`) because it has no rail: the phone's Status tab renders extension status sections and the workspace drawer offers one tab per installed extension panel (`guest:<id>`). Extension message/session menu entries, slash commands, attach items and guest pages remain desktop-only.
 - Notification commands and initial session tabs in VS Code use the shared session opener, so a `/btw` fork opens its parent and expands the panel mounted in the shared composer. Notification commands also reveal the chat view.
 
 ## Decisions

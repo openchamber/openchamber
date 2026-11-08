@@ -23,4 +23,9 @@ describe('useUIStore mobile workspace tabs', () => {
     useUIStore.getState().setMobileWorkspaceTabOrder(['notes', 'unknown', 'notes', 'mcp', 'files']);
     expect(useUIStore.getState().mobileWorkspaceTabOrder).toEqual(['status', 'changes', 'terminal', 'notes', 'files']);
   });
+
+  test('keeps extension tabs in the stored order', () => {
+    useUIStore.getState().setMobileWorkspaceTabOrder(['notes', 'guest:spark', 'files']);
+    expect(useUIStore.getState().mobileWorkspaceTabOrder).toEqual(['status', 'changes', 'terminal', 'notes', 'guest:spark', 'files']);
+  });
 });

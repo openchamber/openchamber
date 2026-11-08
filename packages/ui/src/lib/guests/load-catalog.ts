@@ -1,6 +1,5 @@
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { useGuestBadgeStore } from './badge-store.ts';
@@ -50,7 +49,7 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
   alignCatalogRuntime(runtimeKey);
 
   const store = useGuestsStore.getState();
-  if (isVSCodeRuntime() || isMobileSurfaceRuntime()) {
+  if (isVSCodeRuntime()) {
     store.markUnsupported(runtimeKey);
     return;
   }
