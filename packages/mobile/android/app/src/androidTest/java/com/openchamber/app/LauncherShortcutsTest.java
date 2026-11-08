@@ -4,8 +4,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 
+import android.content.ComponentName;
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
@@ -35,8 +36,10 @@ public class LauncherShortcutsTest {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         PackageManager packageManager = context.getPackageManager();
 
-        ApplicationInfo info = packageManager.getApplicationInfo(
-            context.getPackageName(), PackageManager.GET_META_DATA);
+        // The launcher activity carries the metadata; the shortcut service does not read an
+        // application-level copy.
+        ComponentName launcher = new ComponentName(context.getPackageName(), MainActivity.class.getName());
+        ActivityInfo info = packageManager.getActivityInfo(launcher, PackageManager.GET_META_DATA);
         Bundle metadata = info.metaData;
         assertNotNull(metadata);
         int shortcutsResource = metadata.getInt("android.app.shortcuts");
