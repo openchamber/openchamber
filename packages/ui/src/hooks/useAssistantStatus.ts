@@ -247,6 +247,15 @@ const OPENCODE_NAMESPACE_STATUS = new Map(Object.entries<I18nKey>({
     models: 'chat.agentStatus.sessions.models',
     list_mcp_resources: 'chat.agentStatus.mcp.listResources',
     read_mcp_resource: 'chat.agentStatus.mcp.readResource',
+    schedule_create: 'chat.agentStatus.opencode.schedules',
+    schedule_list: 'chat.agentStatus.opencode.schedules',
+    schedule_pause: 'chat.agentStatus.opencode.schedules',
+    schedule_resume: 'chat.agentStatus.opencode.schedules',
+    schedule_delete: 'chat.agentStatus.opencode.schedules',
+    artifact_create: 'chat.agentStatus.opencode.artifacts',
+    artifact_read: 'chat.agentStatus.opencode.artifacts',
+    artifact_update: 'chat.agentStatus.opencode.artifacts',
+    artifact_delete: 'chat.agentStatus.opencode.artifacts',
 }));
 
 const asWords = (name: string): string => name.replace(/[_-]+/g, ' ').trim();

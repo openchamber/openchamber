@@ -26,6 +26,7 @@ import { consoleBudgetsI18n } from './console-budgets.i18n';
 import { imageToolI18n } from './image-tool.i18n';
 import { usageToolI18n } from './usage-tool.i18n';
 import { openchamberToolOutputI18n } from './openchamber-tool-output.i18n';
+import { opencodeToolOutputI18n } from './opencode-tool-output.i18n';
 import { agentStatusI18n } from './agent-status.i18n';
 import { selectionApprovalI18n } from './selection-approval.i18n';
 import { snippetsI18n } from './snippets.i18n';
@@ -203,6 +204,7 @@ export const dict = {
   ...imageToolI18n.de,
   ...usageToolI18n.de,
   ...openchamberToolOutputI18n.de,
+  ...opencodeToolOutputI18n.de,
   ...agentStatusI18n.de,
   ...snippetsI18n.de,
   ...sidebarWorkI18n.de,

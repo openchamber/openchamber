@@ -143,8 +143,13 @@ const inputSchema = z
     agent: optionalText,
     name: optionalText,
     // `skill` names the skill by `id`; `session_rename` carries `title`,
-    // `session_move` a `directory`, `models` a `search` and a `provider`.
+    // `session_move` a `directory`, `models` a `query` (`search` in older
+    // OpenCode) and a `provider`, the MCP resource tools a `server` and `uri`,
+    // `schedule_create` a `prompt`.
     id: optionalText,
+    server: optionalText,
+    uri: optionalText,
+    prompt: optionalText,
     title: optionalText,
     directory: optionalText,
     search: optionalText,
@@ -193,7 +198,7 @@ const fileDiffSchema = z.object({
 const executeToolCallSchema = z.object({
   tool: optionalText,
   status: optionalText,
-  input: z.unknown().optional().catch(undefined),
+  input: z.json().optional().catch(undefined),
 })
 
 /** A call's raw arguments before serialization: free-form JSON the script passed. */
@@ -271,6 +276,8 @@ export function toolFileDiffs(metadata: Metadata | undefined): ToolFileDiff[] {
 /** A tool an `execute` script called, as the row and the expanded body show it. */
 export type ExecuteToolCall = {
   tool: string
+  /** The action of an OpenChamber tool call (`browser.open`). */
+  action?: string
   /** `completed`, `error`, or whatever else the runtime reported. */
   status?: string
   /** The call arguments as compact one-line JSON, absent when there were none. */
@@ -300,6 +307,8 @@ export function executeToolCalls(metadata: Metadata | undefined): ExecuteToolCal
   for (const call of calls) {
     if (!call?.tool) continue
     const entry: ExecuteToolCall = { tool: call.tool }
+    const action = openChamberToolCall(call.tool, call.input)?.action
+    if (action) entry.action = action
     if (call.status) entry.status = call.status
     const json = stringifyOrUndefined(call.input)
     // JSON.stringify never emits a raw newline, so the arguments are already
@@ -318,7 +327,7 @@ export function executeToolCalls(metadata: Metadata | undefined): ExecuteToolCal
 const executeRawCallSchema = z
   .object({
     toolCalls: z
-      .array(z.object({ tool: optionalText, input: z.json().optional().catch(undefined) }).nullable().catch(null))
+      .array(z.object({ tool: optionalText, status: optionalText, input: z.json().optional().catch(undefined) }).nullable().catch(null))
       .optional()
       .catch(undefined),
   })
@@ -335,19 +344,40 @@ export function lastExecuteToolCall(metadata: Metadata | undefined): { tool: str
 }
 
 /**
- * The one OpenChamber tool call an `execute` script made, or `undefined` when
- * it made none, several, or called anything else. Most of OpenChamber's tools
- * sit behind Code Mode (`agent-tool/runtime.js`), and a script almost always
- * makes exactly this one call; the chat then shows the row as that tool's own,
- * with its action, detail and icon.
+ * The one call an `execute` script made to OpenChamber's own tools or to
+ * OpenCode's `opencode` namespace, or `undefined` when it made none, several,
+ * or called anything else. Both sit behind Code Mode, and a script almost
+ * always makes exactly this one call; the chat then shows the row as that
+ * tool's own, with its action, detail and icon. `status` is the call's own:
+ * a script can catch a failed call and still finish.
  */
-export function soleOpenChamberCall(metadata: Metadata | undefined): { tool: string; input: { [key: string]: JsonValue } } | undefined {
+export function soleNamedCall(metadata: Metadata | undefined): { tool: string; input: { [key: string]: JsonValue }; status: string | undefined } | undefined {
   const calls = executeRawCallSchema.parse(metadata ?? {}).toolCalls ?? []
   if (calls.length !== 1 || !calls[0]?.tool) return undefined
-  const { tool, input } = calls[0]
-  const call = openChamberToolCall(tool, input)
-  if (!call) return undefined
-  return { tool: call.tool, input: input && typeof input === "object" && !Array.isArray(input) ? input : {} }
+  const { tool: called, input, status } = calls[0]
+  const opencodeTool = opencodeNamespaceTool(called)
+  const tool = openChamberToolCall(called, input)?.tool ?? (opencodeTool ? `opencode.${opencodeTool}` : undefined)
+  if (!tool) return undefined
+  return { tool, input: input && typeof input === "object" && !Array.isArray(input) ? input : {}, status }
+}
+
+/**
+ * The one namespace every call of an `execute` script went to, or `undefined`
+ * when the calls mix namespaces or name none. OpenCode's namespace is
+ * `opencode`, each OpenChamber tool is a namespace of its own
+ * (`openchamber_web`), and any other call names its namespace before the dot
+ * (`linear.list_issues`). The row then carries that namespace's name in place
+ * of "Script".
+ */
+export function executeNamespace(metadata: Metadata | undefined): string | undefined {
+  const spaces = new Set(executeToolCalls(metadata).map(({ tool }) => {
+    if (opencodeNamespaceTool(tool)) return "opencode"
+    if (OPENCHAMBER_TOOLS.has(normalizeToolName(tool))) return normalizeToolName(tool)
+    const dot = tool.indexOf(".")
+    return dot > 0 ? tool.slice(0, dot).toLowerCase() : ""
+  }))
+  const [space] = spaces
+  return spaces.size === 1 && space ? space : undefined
 }
 
 /** `JSON.stringify` that answers `undefined` for anything it cannot serialize. */
@@ -536,7 +566,11 @@ export type ToolDescription =
   /** Several files in one call; `files` are the raw paths, `count` their number. */
   | { kind: "files"; count: number; files: string[] }
   /** An `execute` script, described by the tools it called. */
-  | { kind: "tools"; calls: Array<{ name: string; count: number }>; overflow: number }
+  /**
+   * `completed`: every call of that tool reported completed. `actions`: the
+   * actions its OpenChamber calls ran, in first-seen order with a count.
+   */
+  | { kind: "tools"; calls: Array<{ name: string; count: number; completed: boolean; actions: Array<{ action: string; count: number }> }>; overflow: number }
 
 const MAX_COMMAND_LENGTH = 100
 /** How many distinct tools an `execute` row names before it counts the rest. */
@@ -638,6 +672,15 @@ const OPENCODE_NAMESPACE_TOOLS = new Set([
   "models",
   "list_mcp_resources",
   "read_mcp_resource",
+  "schedule_create",
+  "schedule_list",
+  "schedule_pause",
+  "schedule_resume",
+  "schedule_delete",
+  "artifact_create",
+  "artifact_read",
+  "artifact_update",
+  "artifact_delete",
 ])
 const OPENCODE_NAMESPACE_PREFIX = "opencode_"
 
@@ -697,6 +740,21 @@ function openChamberDetail(parsed: ParsedInput): string | undefined {
     || parameters?.body?.split("\n")[0]
     || parsed.title
   return detail || undefined
+}
+
+/**
+ * The detail of a call in OpenCode's `opencode` namespace beyond the ones
+ * `toolDescription` names itself: the worktree, resource, schedule or artifact
+ * it worked on.
+ */
+function describeOpencodeNamespaceTool(parsed: ParsedInput): ToolDescription | null {
+  const resource = parsed.uri ?? parsed.server
+  return text(parsed.name)
+    ?? text(parsed.title)
+    ?? text(parsed.prompt?.split("\n")[0])
+    ?? text(resource)
+    ?? asPath(parsed.directory)
+    ?? text(parsed.id)
 }
 
 /**
@@ -808,14 +866,22 @@ export function toolListingChanges(
  * runs — or when it called nothing — the row falls back to its first line.
  */
 function describeExecute(calls: ExecuteToolCall[], code: string | undefined): ToolDescription | null {
-  const counts = new Map<string, number>()
+  const counts = new Map<string, { name: string; count: number; completed: boolean; actions: Array<{ action: string; count: number }> }>()
   for (const call of calls) {
-    counts.set(call.tool, (counts.get(call.tool) ?? 0) + 1)
+    const entry = counts.get(call.tool) ?? { name: call.tool, count: 0, completed: true, actions: [] }
+    entry.count += 1
+    entry.completed &&= call.status === "completed"
+    if (call.action) {
+      const seen = entry.actions.find(({ action }) => action === call.action)
+      if (seen) seen.count += 1
+      else entry.actions.push({ action: call.action, count: 1 })
+    }
+    counts.set(call.tool, entry)
   }
   if (counts.size === 0) {
     return code ? { kind: "text", value: code.split("\n")[0].slice(0, MAX_COMMAND_LENGTH) } : null
   }
-  const named = [...counts].slice(0, MAX_DESCRIBED_TOOL_CALLS).map(([name, count]) => ({ name, count }))
+  const named = [...counts.values()].slice(0, MAX_DESCRIBED_TOOL_CALLS)
   return { kind: "tools", calls: named, overflow: counts.size - named.length }
 }
 
@@ -875,7 +941,7 @@ export function toolDescription(
       return asPath(parsed.directory)
 
     case OPENCODE_TOOLS.models:
-      return text(parsed.search) ?? text(parsed.provider)
+      return text(parsed.query) ?? text(parsed.search) ?? text(parsed.provider)
 
     case OPENCODE_TOOLS.question: {
       const count = parsed.questions?.length ?? 0
@@ -885,6 +951,7 @@ export function toolDescription(
     // MCP and plugin tools: anything they call a description, then a path.
     default:
       if (OPENCHAMBER_TOOLS.has(name)) return describeOpenChamberTool(parsed)
+      if (opencodeNamespaceTool(toolName)) return describeOpencodeNamespaceTool(parsed)
       return text(parsed.description) ?? asPath(parsed.path ?? parsed.filePath ?? parsed.file_path)
   }
 }
