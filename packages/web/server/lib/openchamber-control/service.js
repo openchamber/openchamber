@@ -1109,6 +1109,18 @@ export const createOpenChamberControlService = (dependencies) => {
           signal: options.signal,
         });
       }
+      if (action === 'secret.run') {
+        return await secretRequests.run(input, {
+          sessionId: asNonEmptyString(options.contextSessionId),
+          callId: asNonEmptyString(options.contextCallId),
+          directory: asNonEmptyString(contextDirectory),
+          signal: options.signal,
+          authorized: options.secretRunAuthorized === true,
+        });
+      }
+      if (action === 'secret.forget') {
+        return await secretRequests.forget(asNonEmptyString(options.contextSessionId));
+      }
       if (action === 'file.open') {
         if (!fileOpen) {
           throw new OpenChamberControlError('The file viewer is not available on this server', 503);
@@ -1318,6 +1330,7 @@ export const createOpenChamberControlService = (dependencies) => {
     resolveSessionDirectory,
     answerPage: pageAnswers.answer,
     answerSecret: secretRequests.answer,
+    secretFields: secretRequests.fields,
     releaseAnswerWaits,
     stopSession,
     answerPermission,

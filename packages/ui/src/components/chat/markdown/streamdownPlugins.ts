@@ -92,6 +92,18 @@ function remarkSessionLinks() {
   };
 }
 
+/**
+ * Text a person typed reads as typed: `<b>` and `&amp;` stay those characters
+ * instead of becoming HTML or `&`. The parser never sees them as HTML or
+ * character references, so inline code and formulas keep their characters
+ * too, which escaping the source cannot give: an entity there is shown
+ * literally (`a&lt;b` in code, a broken formula).
+ */
+export function remarkLiteralText(this: Processor) {
+  const data = this.data();
+  (data.micromarkExtensions ??= []).push({ disable: { null: ['htmlFlow', 'htmlText', 'characterReference'] } });
+}
+
 // Static mode parses the whole document without the streaming BlockComponent.
 // Match the original top-level source policy without stripping inline joiners.
 function remarkVisibleBlocks() {

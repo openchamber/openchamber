@@ -2218,6 +2218,7 @@ export const settingsDict = {
   'settings.voice.page.field.followTextLanguageInfo': 'Als een antwoord in een andere taal is, wordt een stem voor die taal gebruikt: een passende macOS-stem of een lokaal model dat bij het eerste gebruik wordt gedownload.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (Engels)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 Europese talen)',
+  'settings.voice.page.stt.model.parakeetUltra': 'Parakeet Ultra (25 Europese talen)',
   'settings.voice.page.stt.model.whisperTurbo': 'Whisper large-v3 turbo (99 talen)',
   'settings.voice.page.stt.model.qwen3Asr': 'Qwen3-ASR 0.6B (30 talen)',
   'settings.voice.page.stt.model.whisperTiny': 'Whisper tiny (meertalig)',

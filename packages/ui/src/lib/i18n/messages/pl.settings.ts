@@ -2593,6 +2593,7 @@ export const settingsDict = {
   'settings.voice.page.field.followTextLanguageInfo': 'Gdy odpowiedź jest w innym języku, używany jest głos dla tego języka: pasujący głos macOS albo lokalny model pobierany przy pierwszym użyciu.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (angielski)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (25 języków europejskich)',
+  'settings.voice.page.stt.model.parakeetUltra': 'Parakeet Ultra (25 języków europejskich)',
   'settings.voice.page.stt.model.whisperTurbo': 'Whisper large-v3 turbo (99 języków)',
   'settings.voice.page.stt.model.qwen3Asr': 'Qwen3-ASR 0.6B (30 języków)',
   'settings.voice.page.stt.model.whisperTiny': 'Whisper tiny (wielojęzyczny)',

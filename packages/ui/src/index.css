@@ -269,6 +269,15 @@ button,
   text-align: start;
 }
 
+/* A text field takes the direction of what is typed into it, line by line in a
+   textarea, so Persian in an English interface runs from the right. An empty
+   field keeps the interface's direction: with plaintext on a field showing its
+   placeholder, Gecko draws the placeholder outside the box in a right-to-left
+   interface. A field that sets dir keeps it. */
+:where(input, textarea):not([dir]):not(:placeholder-shown) {
+  unicode-bidi: plaintext;
+}
+
 /* Markdown's explicit column alignment still wins over automatic alignment. */
 .markdown-content :where(td[align], th[align]) {
   unicode-bidi: plaintext;

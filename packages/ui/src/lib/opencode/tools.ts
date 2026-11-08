@@ -491,43 +491,100 @@ const secretRequestInputSchema = secretRequestFields
   .extend({ parameters: secretRequestFields.optional().catch(undefined) })
   .catch({})
 
-/** Where a secret request stands. `not-given`: the user wrote in the chat, or the turn ended first. */
-export type SecretRequestState = "waiting" | "saved" | "declined" | "not-given"
+export type RequestedSecret = { label: string; reason: string; placeholder: string | undefined }
 
-// How a secret request ended, as the plugin records it in the call's metadata:
-// the server's status, or the plugin's own answer when the user wrote in the
-// chat. The file path the agent got is not needed here.
-const secretResultSchema = z
-  .object({
-    openchamber: z.object({
-      ok: z.boolean().optional().catch(undefined),
-      answer: z.union([
-        z.object({ status: z.enum(["saved", "declined"]) }).transform(({ status }): SecretRequestState => status),
-        z.object({ answered: z.literal(false) }).transform((): SecretRequestState => "not-given"),
-      ]).optional().catch(undefined),
-    }).optional().catch(undefined),
-  })
+const secretRunField = z.object({ env: z.string().trim().min(1), label: z.string().trim().min(1), placeholder: optionalText })
+
+const secretRunFields = z.object({
+  program: optionalText,
+  args: z.array(z.string()).optional().catch(undefined),
+  reason: optionalText,
+  inputs: z.array(secretRunField).min(1).optional().catch(undefined),
+})
+
+// Read like the other actions' input: inside `parameters` or beside `action`.
+const secretRunInputSchema = secretRunFields
+  .extend({ action: z.string().optional().catch(undefined), parameters: secretRunFields.optional().catch(undefined) })
   .catch({})
 
-export type RequestedSecret = { label: string; reason: string; placeholder: string | undefined; state: SecretRequestState }
+const isSecretRun = (action: string | undefined) => action === "secret.run" || action === "run"
+const isSecretForget = (action: string | undefined) => action === "secret.forget" || action === "forget"
+
+export type RequestedSecretRun = {
+  reason: string
+  command: string
+  program: string
+  fields: { env: string; label: string; placeholder: string | undefined }[]
+}
 
 /**
- * The card an `openchamber_secret` call asks on. A call the server refused
- * keeps its tool row, so the refusal stays readable.
+ * The command line as the user approved it, the same line the plugin shows in
+ * the permission request (`secretRunCommandLine` in
+ * packages/web/server/lib/openchamber-control/secret-run.js): change both together.
+ */
+export function secretRunCommandLine(program: string, args: readonly string[]): string {
+  // C0 and C1 controls, the Arabic letter mark, zero-width and direction marks,
+  // line and paragraph separators, embeddings and overrides, isolates, BOM.
+  const hidden = (code: number) => code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x61c
+    || (code >= 0x200b && code <= 0x200f) || (code >= 0x2028 && code <= 0x202e)
+    || (code >= 0x2060 && code <= 0x2069) || code === 0xfeff
+  const visible = (value: string) => Array.from(value, (char) => {
+    const code = char.codePointAt(0) ?? 0
+    return hidden(code) ? `\\u{${code.toString(16).toUpperCase().padStart(4, "0")}}` : char
+  }).join("")
+  const word = (value: string) => (/^[A-Za-z0-9_/.,:=@%+-]+$/.test(value) ? value : `'${visible(value).replaceAll("'", "'\\''")}'`)
+  return [program, ...args].map(word).join(" ")
+}
+
+/** The detail of a secret tool row: the command line a `secret.run` ran, the label a `secret.request` asked for. */
+function secretDetail(action: string | undefined, input: ToolInput | undefined): string | undefined {
+  if (action === "secret.run" || action === "run") {
+    const parsed = secretRunInputSchema.parse(input ?? {})
+    const program = parsed.parameters?.program ?? parsed.program
+    return program ? secretRunCommandLine(program, parsed.parameters?.args ?? parsed.args ?? []) : undefined
+  }
+  if (action === "secret.request" || action === "request") {
+    const parsed = secretRequestInputSchema.parse(input ?? {})
+    return parsed.parameters?.label ?? parsed.label
+  }
+  return undefined
+}
+
+/**
+ * The card a running `secret.run` call asks on, or `null` otherwise. A
+ * finished run is an ordinary tool row: the command line, then what it
+ * printed (`ToolPart`, `secretRunView`).
+ */
+export function requestedSecretRun(toolName: ToolName, state: ToolState): RequestedSecretRun | null {
+  if (toolName !== OPENCHAMBER_SECRET_TOOL || state.status !== "running") return null
+  const parsed = secretRunInputSchema.parse(state.input ?? {})
+  if (!isSecretRun(parsed.action)) return null
+  const program = parsed.parameters?.program ?? parsed.program
+  const reason = parsed.parameters?.reason ?? parsed.reason
+  const inputs = parsed.parameters?.inputs ?? parsed.inputs
+  if (!program || !reason || !inputs) return null
+  const args = parsed.parameters?.args ?? parsed.args ?? []
+  return {
+    reason,
+    program,
+    command: secretRunCommandLine(program, args),
+    fields: inputs.map((field) => ({ env: field.env, label: field.label, placeholder: field.placeholder })),
+  }
+}
+
+/**
+ * The card a running `secret.request` call asks on, or `null` otherwise. An
+ * answered request is an ordinary tool row (`ToolPart`, `secretRowView`).
  */
 export function requestedSecret(toolName: ToolName, state: ToolState): RequestedSecret | null {
-  if (toolName !== OPENCHAMBER_SECRET_TOOL) return null
+  if (toolName !== OPENCHAMBER_SECRET_TOOL || state.status !== "running") return null
+  const action = secretRunInputSchema.parse(state.input ?? {}).action
+  if (isSecretRun(action) || isSecretForget(action)) return null
   const parsed = secretRequestInputSchema.parse(state.input ?? {})
   const label = parsed.parameters?.label ?? parsed.label
   const reason = parsed.parameters?.reason ?? parsed.reason
   if (!label || !reason) return null
-  const request = { label, reason, placeholder: parsed.parameters?.placeholder ?? parsed.placeholder }
-  if (state.status === "running") return { ...request, state: "waiting" }
-  if (state.status === "error") return { ...request, state: "not-given" }
-  if (state.status !== "completed") return null
-  const result = secretResultSchema.parse(state.metadata ?? {}).openchamber
-  if (result?.ok !== true || !result.answer) return null
-  return { ...request, state: result.answer }
+  return { label, reason, placeholder: parsed.parameters?.placeholder ?? parsed.placeholder }
 }
 
 export function subagentAgent(input: ToolInput | undefined): string | undefined {
@@ -645,6 +702,7 @@ export const isShownInPlace = (toolName: ToolName, state: ToolState): boolean =>
   || proposedWorkflowRunId(toolName, state) !== null
   || generatedImagePaths(toolName, state).length > 0
   || requestedSecret(toolName, state) !== null
+  || requestedSecretRun(toolName, state) !== null
 )
 
 const openChamberCallSchema = z
@@ -714,7 +772,7 @@ export function openChamberToolCall(toolName: ToolName, input: JsonValue | undef
   const tool = normalizeToolName(toolName)
   if (!OPENCHAMBER_TOOLS.has(tool)) return null
   const parsed = openChamberCallSchema.parse(input ?? {})
-  const awaitsAnswer = tool === OPENCHAMBER_SECRET_TOOL || (parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true
+  const awaitsAnswer = (tool === OPENCHAMBER_SECRET_TOOL && !isSecretForget(parsed.action)) || (parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true
   return { tool, action: parsed.action, awaitsAnswer }
 }
 
@@ -761,8 +819,8 @@ function describeOpencodeNamespaceTool(parsed: ParsedInput): ToolDescription | n
  * The action an OpenChamber tool call ran and its detail. Notifications have
  * no action, so their title stands alone.
  */
-function describeOpenChamberTool(parsed: ParsedInput): ToolDescription | null {
-  const label = [parsed.action, openChamberDetail(parsed)].filter(Boolean).join(" · ")
+function describeOpenChamberTool(parsed: ParsedInput, input: ToolInput | undefined): ToolDescription | null {
+  const label = [parsed.action, secretDetail(parsed.action, input) ?? openChamberDetail(parsed)].filter(Boolean).join(" · ")
   return label ? { kind: "text", value: label.slice(0, MAX_COMMAND_LENGTH) } : null
 }
 
@@ -792,7 +850,7 @@ export function openChamberCallSummary(toolName: ToolName, input: ToolInput | un
   const prefix = ACTION_PREFIX_BY_TOOL.get(tool)
   const raw = parsed.action ?? (tool === "openchamber_notify" ? "send" : undefined)
   const action = raw && prefix && !raw.includes(".") ? `${prefix}.${raw}` : raw
-  return { action, detail: openChamberDetail(parsed) }
+  return { action, detail: secretDetail(action, input) ?? openChamberDetail(parsed) }
 }
 
 const text = (value: string | undefined): ToolDescription | null =>
@@ -950,7 +1008,7 @@ export function toolDescription(
 
     // MCP and plugin tools: anything they call a description, then a path.
     default:
-      if (OPENCHAMBER_TOOLS.has(name)) return describeOpenChamberTool(parsed)
+      if (OPENCHAMBER_TOOLS.has(name)) return describeOpenChamberTool(parsed, input)
       if (opencodeNamespaceTool(toolName)) return describeOpencodeNamespaceTool(parsed)
       return text(parsed.description) ?? asPath(parsed.path ?? parsed.filePath ?? parsed.file_path)
   }

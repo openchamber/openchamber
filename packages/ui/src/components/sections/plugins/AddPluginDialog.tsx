@@ -194,6 +194,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 </label>
                 <Textarea
                   id="plugin-options"
+                  dir="ltr"
                   value={optionsJson}
                   onChange={(e) => setOptionsJson(e.target.value)}
                   rows={5}
@@ -237,6 +238,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
                 </label>
                 <Textarea
                   id="plugin-content"
+                  dir="ltr"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   rows={16}

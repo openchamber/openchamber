@@ -2194,6 +2194,7 @@ export const settingsDict = {
   'settings.voice.page.field.followTextLanguageInfo': '응답이 다른 언어이면 해당 언어의 음성을 사용합니다. 일치하는 macOS 음성 또는 처음 사용할 때 다운로드되는 로컬 모델입니다.',
   'settings.voice.page.stt.model.parakeetV2': 'Parakeet v2 (영어)',
   'settings.voice.page.stt.model.parakeetV3': 'Parakeet v3 (유럽 25개 언어)',
+  'settings.voice.page.stt.model.parakeetUltra': 'Parakeet Ultra (유럽 25개 언어)',
   'settings.voice.page.stt.model.whisperTurbo': 'Whisper large-v3 turbo (99개 언어)',
   'settings.voice.page.stt.model.qwen3Asr': 'Qwen3-ASR 0.6B (30개 언어)',
   'settings.voice.page.stt.model.whisperTiny': 'Whisper tiny (다국어)',

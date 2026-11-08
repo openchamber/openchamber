@@ -362,7 +362,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           <Slots.SubContent className="min-w-[160px]">
             {projectFolders.map((folder) => (
               <Slots.Item key={folder.id} onClick={() => moveToFolder(folder.id)} className="flex items-center justify-between">
-                <span className="min-w-0 truncate">{folder.name}</span>
+                <span dir="auto" className="min-w-0 truncate">{folder.name}</span>
                 {folder.id === currentFolderId ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
               </Slots.Item>
             ))}

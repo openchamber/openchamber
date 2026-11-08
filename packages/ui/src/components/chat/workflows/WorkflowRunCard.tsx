@@ -86,13 +86,13 @@ const WorkflowRunCardBody: React.FC<{ run: WorkflowRun }> = ({ run }) => {
           {t(look.labelKey)}
         </span>
       </div>
-      <p className="mt-1 text-sm text-muted-foreground">{run.description}</p>
+      <p dir="auto" className="mt-1 text-sm text-muted-foreground">{run.description}</p>
 
       {phases.length > 0 ? (
         <ol className="mt-2 flex flex-col gap-0.5">
           {phases.map((phase) => (
             <li key={phase.title ?? ''} className="flex min-w-0 items-center gap-2 text-[0.8125rem]">
-              <span className="min-w-0 flex-1 truncate text-foreground">{phase.title ?? t('chat.workflow.phase.unphased')}</span>
+              <span dir={phase.title ? 'auto' : undefined} className="min-w-0 flex-1 truncate oc-ui-start-align text-foreground">{phase.title ?? t('chat.workflow.phase.unphased')}</span>
               {phase.agents.length > 0 ? (
                 <span className="shrink-0 tabular-nums text-muted-foreground" dir="auto">
                   {phase.done}/{phase.agents.length}
@@ -104,7 +104,7 @@ const WorkflowRunCardBody: React.FC<{ run: WorkflowRun }> = ({ run }) => {
       ) : null}
 
       {run.error && (run.state === 'failed' || run.state === 'stopped') ? (
-        <p className="mt-2 text-[0.8125rem]" style={{ color: run.state === 'failed' ? 'var(--status-error)' : undefined }}>
+        <p dir="auto" className="mt-2 text-[0.8125rem]" style={{ color: run.state === 'failed' ? 'var(--status-error)' : undefined }}>
           {run.error}
         </p>
       ) : null}

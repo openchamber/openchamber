@@ -101,6 +101,7 @@ function LaunchSettingsDialog({
             <SettingsColumnBlock title={t('chat.parallel.settings.setupTitle')}>
               <p className="typography-micro text-muted-foreground">{t('chat.parallel.setup.dialogDescription')}</p>
               <Textarea
+                dir="ltr"
                 value={setupDraft}
                 onChange={(event) => setSetupDraft(event.target.value)}
                 disabled={!state.isolate}

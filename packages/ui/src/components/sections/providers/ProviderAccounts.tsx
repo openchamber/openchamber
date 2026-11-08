@@ -179,7 +179,7 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
               <>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate typography-ui-label font-medium text-foreground">{connection.label}</span>
+                    <span dir="auto" className="truncate typography-ui-label font-medium text-foreground">{connection.label}</span>
                     {showActive && active ? (
                       <span className="shrink-0 rounded-full bg-[var(--interactive-selection)] px-2 py-px text-[0.625rem] font-medium text-[var(--interactive-selection-foreground)]">
                         {t('settings.providers.accounts.active')}

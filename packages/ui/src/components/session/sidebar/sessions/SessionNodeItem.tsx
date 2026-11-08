@@ -1479,7 +1479,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                         }
                         addSessionToFolder(scope, folder.id, session.id);
                       }}>
-                        <span className="flex-1 truncate">{folder.name}</span>
+                        <span dir="auto" className="oc-ui-start-align flex-1 truncate">{folder.name}</span>
                         {isCurrent ? <Icon name="check" className="ms-2 h-3.5 w-3.5 text-primary flex-shrink-0" /> : null}
                       </Item>
                     );

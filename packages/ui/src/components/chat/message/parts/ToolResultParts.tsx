@@ -27,14 +27,14 @@ export const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ 
 );
 
 
-type OpenAction = { label: string; icon: IconName; onOpen: () => void };
+export type OpenActionInput = { label: string; icon: IconName; onOpen: () => void };
 
 /**
  * The quiet actions under a view: where to open what the call made, then the
  * raw answer. Text that brightens on hover, the way the raw switch looks,
  * in one row.
  */
-export const Actions: React.FC<{ open?: OpenAction | null }> = ({ open }) => {
+export const Actions: React.FC<{ open?: OpenActionInput | null }> = ({ open }) => {
     const rawToggle = React.useContext(RawToggleContext);
     return (
         <div className="-ms-2 flex flex-wrap items-center gap-x-1">

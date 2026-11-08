@@ -120,6 +120,7 @@ const FilesAndEditorSection: React.FC<{ divider: boolean }> = ({ divider }) => {
             className="pt-1 pb-2"
           >
             <Textarea
+              dir="ltr"
               value={fileEditorVimMappings}
               onChange={(event) => setFileEditorVimMappings(event.target.value)}
               placeholder="inoremap jk <Esc>"

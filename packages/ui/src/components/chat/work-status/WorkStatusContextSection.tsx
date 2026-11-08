@@ -382,7 +382,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
         <span className={cn('tabular-nums', look && 'oc-ref-tint')} style={look ? refTintStyle(look.color) : undefined}>
           <LinkedReference reference={look?.reference ?? identifier} status={look?.status} url={entry.url} directory={directory} />
         </span>
-        {entry.title ? <> · {entry.title}</> : null}
+        {entry.title ? <> · <span dir="auto">{entry.title}</span></> : null}
       </>
     );
   };

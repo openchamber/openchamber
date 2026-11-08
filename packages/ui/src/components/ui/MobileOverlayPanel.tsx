@@ -230,7 +230,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
 
           return (
             <div className="flex items-center justify-between ps-4 pe-3 py-2 border-b border-edge-muted">
-              <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
+              <h2 dir="auto" className="typography-ui-label font-semibold text-foreground">{title}</h2>
               {closeButton}
             </div>
           );

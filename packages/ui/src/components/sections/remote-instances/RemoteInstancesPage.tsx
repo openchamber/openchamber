@@ -1679,7 +1679,7 @@ export const RemoteInstancesPage: React.FC = () => {
                   </>
                 )}
               </div>
-              {remoteClientError ? <p className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
+              {remoteClientError ? <p dir="auto" className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
           </SettingsSection>
         ) : null}
 
@@ -1948,7 +1948,7 @@ export const RemoteInstancesPage: React.FC = () => {
                     </label>
                   ) : null}
                 </div>
-                {remoteClientError ? <p className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
+                {remoteClientError ? <p dir="auto" className="typography-meta text-[var(--status-error)]">{remoteClientError}</p> : null}
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setAddDeviceOpen(false)} disabled={addDeviceCreating}>{t('settings.common.actions.cancel')}</Button>
                   <Button type="submit" size="xs" className="!font-normal" disabled={addDeviceCreating || !transportOptions}>{t('settings.remoteInstances.clientAuth.addDevice.create')}</Button>
@@ -1963,7 +1963,7 @@ export const RemoteInstancesPage: React.FC = () => {
                 ) : null}
                 {pairingUrl ? (
                   <div className="oc-tile-inset flex items-center gap-2 rounded-md p-2">
-                    <code className="min-w-0 flex-1 truncate typography-code text-muted-foreground">{pairingUrl}</code>
+                    <code dir="ltr" className="min-w-0 flex-1 truncate typography-code text-muted-foreground">{pairingUrl}</code>
                     <Button type="button" variant="outline" size="xs" className="!font-normal shrink-0" onClick={handleCopyPairing}>
                       <Icon name={pairingCopied ? 'check' : 'file-copy'} className={cn('h-3.5 w-3.5', pairingCopied && 'text-[var(--status-success)]')} />
                       {pairingCopied ? t('settings.remoteInstances.clientAuth.actions.copied') : t('settings.common.actions.copyAll')}
@@ -2053,7 +2053,7 @@ export const RemoteInstancesPage: React.FC = () => {
                     </div>
                   </div>
                   {failureDetail ? (
-                    <p className="typography-micro text-[var(--status-error)] break-words">{failureDetail}</p>
+                    <p dir="auto" className="typography-micro text-[var(--status-error)] break-words">{failureDetail}</p>
                   ) : null}
                 </div>
               );
@@ -2182,7 +2182,7 @@ export const RemoteInstancesPage: React.FC = () => {
     <Dialog open={Boolean(draft)} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
       <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-auto">
       <div className="mb-6 px-1">
-        <h1 className={`${SETTINGS_PAGE_TITLE_CLASS} truncate`}>{instanceTitle}</h1>
+        <h1 dir="auto" className={`${SETTINGS_PAGE_TITLE_CLASS} truncate`}>{instanceTitle}</h1>
         <div className="mt-1 flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
           <StatusDot className={phaseDotClass(statusPhase)} waiting={isConnectingPhase(statusPhase)} />
           <span className="text-foreground">{t(instanceStateLabelKey(currentState))}</span>
@@ -2259,7 +2259,7 @@ export const RemoteInstancesPage: React.FC = () => {
           </div>
           {currentState === 'error' && status?.detail ? (
             <div className="space-y-2 rounded-md bg-[var(--status-error-background)] p-3">
-              <p className="typography-meta text-[var(--status-error)] break-words">{status.detail}</p>
+              <p dir="auto" className="typography-meta text-[var(--status-error)] break-words">{status.detail}</p>
               {currentRemedyHintKey ? (
                 <p className="typography-micro text-muted-foreground">{t(currentRemedyHintKey)}</p>
               ) : null}
@@ -2283,7 +2283,7 @@ export const RemoteInstancesPage: React.FC = () => {
           {status?.localUrl ? (
             <div className="flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
               <span>{t('settings.remoteInstances.page.status.currentLocalUrl')}</span>
-              <span className="font-mono text-foreground/90">{status.localUrl}</span>
+              <span dir="ltr" className="font-mono text-foreground/90">{status.localUrl}</span>
             </div>
           ) : null}
       </SettingsSection>
@@ -2620,7 +2620,7 @@ export const RemoteInstancesPage: React.FC = () => {
 
           <div className="space-y-1 pt-1">
             <p className="typography-micro text-muted-foreground">{t('settings.remoteInstances.page.tunnelPreview.caption')}</p>
-            <p className="typography-micro font-mono text-foreground/80 break-all">
+            <p dir="ltr" className="typography-micro font-mono text-foreground/80 break-all">
               {`${draft.localForward.bindHost}:${draft.localForward.preferredLocalPort || 'auto'} → ${draft.sshParsed?.destination || draft.nickname || 'remote'}:${draft.remoteOpenchamber.preferredPort || 'auto'}`}
             </p>
           </div>

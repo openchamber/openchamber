@@ -218,7 +218,7 @@ const GenericFormCard: React.FC<FormCardProps> = ({ form, recovered }) => {
                     <div className="px-2 py-1.5 border-b border-edge-muted">
                         <div className="flex items-center gap-2">
                             <Icon name="question" className="h-3.5 w-3.5 text-primary" />
-                            <span className="typography-meta font-medium text-foreground">
+                            <span dir="auto" className="typography-meta font-medium text-foreground">
                                 {form.title?.trim() || t('chat.formCard.inputNeeded')}
                             </span>
                             {isFromSubagent ? (
