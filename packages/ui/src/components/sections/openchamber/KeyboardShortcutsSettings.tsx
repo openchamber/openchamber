@@ -29,13 +29,53 @@ import { ShortcutRecordingDialog, updateShortcutRecordingState } from './Shortcu
 
 const CATEGORIES = ['session', 'models', 'panels', 'navigation', 'application'] as const;
 
+const persistShortcutOverrides = (nextOverrides: Record<string, ShortcutCombo>) => {
+  void updateDesktopSettings({ shortcutOverrides: nextOverrides });
+};
+
+/**
+ * Shows only while some shortcut differs from its default, since there is
+ * nothing to reset otherwise.
+ */
+const ResetAllShortcutsButton: React.FC = () => {
+  const { t } = useI18n();
+  const hasOverrides = useUIStore((state) => Object.keys(state.shortcutOverrides).length > 0);
+  const resetAllShortcutOverrides = useUIStore((state) => state.resetAllShortcutOverrides);
+  const { confirm, dialog } = useConfirmDialog();
+  // The dialog keeps its place in the tree, so the button vanishing after a
+  // confirmed reset does not remount it mid-close.
+  return (
+    <>
+      {hasOverrides ? <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="shrink-0"
+        onClick={() => {
+          void confirm({
+            title: t('settings.openchamber.keyboardShortcuts.resetAllDialog.title'),
+            message: t('settings.openchamber.keyboardShortcuts.resetAllDialog.message'),
+            action: t('settings.openchamber.keyboardShortcuts.resetAllDialog.action'),
+            destructive: true,
+          }).then((confirmed) => {
+            if (!confirmed) return;
+            resetAllShortcutOverrides();
+            persistShortcutOverrides({});
+          });
+        }}
+      >
+        {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
+      </Button> : null}
+      {dialog}
+    </>
+  );
+};
+
 export const KeyboardShortcutsSettings: React.FC = () => {
   const { t } = useI18n();
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const setShortcutOverride = useUIStore((state) => state.setShortcutOverride);
   const clearShortcutOverride = useUIStore((state) => state.clearShortcutOverride);
-  const resetAllShortcutOverrides = useUIStore((state) => state.resetAllShortcutOverrides);
-  const { confirm: confirmResetAll, dialog: confirmResetAllDialog } = useConfirmDialog();
   const [editingAction, setEditingAction] = React.useState<CustomizableShortcutAction | null>(null);
   const [query, setQuery] = React.useState('');
   const [assignmentFilter, setAssignmentFilter] = React.useState<'all' | 'assigned' | 'unassigned'>('all');
@@ -74,9 +114,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   }, [refreshGlobalQuakeCombo]);
 
   const actions = React.useMemo(() => getCustomizableShortcutActions().filter(isShortcutAvailable), []);
-  const persist = (nextOverrides: Record<string, ShortcutCombo>) => {
-    void updateDesktopSettings({ shortcutOverrides: nextOverrides });
-  };
+  const persist = persistShortcutOverrides;
   const save = (
     actionId: ShortcutActionId,
     combo: ShortcutCombo,
@@ -158,8 +196,10 @@ export const KeyboardShortcutsSettings: React.FC = () => {
 
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-52 flex-1">
+      {/* Capped where a row's Clear button ends (label column, gap, key tile,
+          Edit, Clear), so the search lines up with the list under it. */}
+      <div className="mb-6 flex flex-col items-start gap-3 @xl:max-w-[30.25rem]">
+        <div className="relative w-full">
           <Icon
             name="search"
             className="pointer-events-none absolute inset-s-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -218,7 +258,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             }}
             placeholder={keyFilter ? '' : t('settings.common.sidebar.searchPlaceholder')}
             aria-label={t('settings.common.sidebar.searchPlaceholder')}
-            className={cn('h-8 typography-meta', keyFilter ? 'ps-24' : 'ps-7', recordingKey ? 'pe-40' : 'pe-16')}
+            className={cn(keyFilter ? 'ps-24' : 'ps-7', recordingKey ? 'pe-40' : 'pe-16')}
           />
           <div className="absolute inset-e-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
             {recordingKey ? (
@@ -263,31 +303,19 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             </Button>
           </div>
         </div>
-        <SettingsChipGroup
-          value={assignmentFilter}
-          aria-label={t('settings.openchamber.keyboardShortcuts.title')}
-          onChange={setAssignmentFilter}
-          options={[
-            { value: 'all', label: t('settings.openchamber.keyboardShortcuts.filter.all') },
-            { value: 'assigned', label: t('settings.openchamber.keyboardShortcuts.filter.assigned') },
-            { value: 'unassigned', label: t('settings.openchamber.keyboardShortcuts.filter.unassigned') },
-          ]}
-        />
-        <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => {
-          void confirmResetAll({
-            title: t('settings.openchamber.keyboardShortcuts.resetAllDialog.title'),
-            message: t('settings.openchamber.keyboardShortcuts.resetAllDialog.message'),
-            action: t('settings.openchamber.keyboardShortcuts.resetAllDialog.action'),
-            destructive: true,
-          }).then((confirmed) => {
-            if (!confirmed) return;
-            resetAllShortcutOverrides();
-            persist({});
-          });
-        }}>
-          {t('settings.openchamber.keyboardShortcuts.actions.resetAll')}
-        </Button>
-        {confirmResetAllDialog}
+        <div className="flex w-full items-center justify-between gap-3">
+          <SettingsChipGroup
+            value={assignmentFilter}
+            aria-label={t('settings.openchamber.keyboardShortcuts.title')}
+            onChange={setAssignmentFilter}
+            options={[
+              { value: 'all', label: t('settings.openchamber.keyboardShortcuts.filter.all') },
+              { value: 'assigned', label: t('settings.openchamber.keyboardShortcuts.filter.assigned') },
+              { value: 'unassigned', label: t('settings.openchamber.keyboardShortcuts.filter.unassigned') },
+            ]}
+          />
+          <ResetAllShortcutsButton />
+        </div>
       </div>
       {!hasVisibleActions ? (
         <p className="px-2 py-6 text-center typography-meta text-muted-foreground">
@@ -303,7 +331,6 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             settingsItem={isFirstVisible ? 'shortcuts.keyboard-shortcuts' : undefined}
             title={t(`settings.openchamber.keyboardShortcuts.category.${category}`)}
             divider={!isFirstVisible}
-            info={isFirstVisible ? t('settings.openchamber.keyboardShortcuts.tooltip') : undefined}
           >
             <div>
               {categoryActions.map((action) => (
@@ -326,16 +353,8 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                   >
                     {t('settings.openchamber.keyboardShortcuts.actions.edit')}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    className="!font-normal"
-                    disabled={shortcutOverrides[action.id] === UNASSIGNED_SHORTCUT}
-                    onClick={() => save(action.id, UNASSIGNED_SHORTCUT)}
-                  >
-                    {t('settings.openchamber.keyboardShortcuts.actions.clear')}
-                  </Button>
+                  {/* A changed shortcut offers Reset in Clear's place, so the
+                      row keeps one trailing action and its width. */}
                   {action.id in shortcutOverrides ? (
                     <Button
                       type="button"
@@ -346,7 +365,18 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                     >
                       {t('settings.common.actions.reset')}
                     </Button>
-                  ) : null}
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      className="!font-normal"
+                      disabled={!isAssigned(action)}
+                      onClick={() => save(action.id, UNASSIGNED_SHORTCUT)}
+                    >
+                      {t('settings.openchamber.keyboardShortcuts.actions.clear')}
+                    </Button>
+                  )}
                 </SettingsFieldRow>
               ))}
             </div>
